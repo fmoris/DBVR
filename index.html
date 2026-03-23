@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VR KI Combat</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            width: 100%;
+            height: 100vh;
+            overflow: hidden;
+            background: #000;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        }
+        
+        #canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        
+        #ui {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+        
+        .hud {
+            position: absolute;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 60px;
+            pointer-events: auto;
+        }
+        
+        .ki-bar {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .bar-container {
+            width: 200px;
+            height: 30px;
+            background: rgba(0, 0, 0, 0.7);
+            border: 2px solid;
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        .bar-fill {
+            height: 100%;
+            width: 100%;
+            background: linear-gradient(90deg, #00ff00, #00aa00);
+            transition: width 0.1s ease;
+            box-shadow: 0 0 10px rgba(0, 255, 0, 0.6);
+        }
+        
+        .player-bar .bar-container {
+            border-color: #00ff00;
+        }
+        
+        .enemy-bar .bar-container {
+            border-color: #ff0000;
+        }
+        
+        .enemy-bar .bar-fill {
+            background: linear-gradient(90deg, #ff0000, #aa0000);
+            box-shadow: 0 0 10px rgba(255, 0, 0, 0.6);
+        }
+        
+        .bar-label {
+            color: #fff;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .debug-info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px;
+            border: 1px solid #00ff00;
+            max-width: 400px;
+            pointer-events: auto;
+        }
+        
+        .debug-info div {
+            margin: 2px 0;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="ui">
+        <div class="hud">
+            <div class="ki-bar player-bar">
+                <span class="bar-label">Tu KI</span>
+                <div class="bar-container">
+                    <div class="bar-fill" id="playerKiBar" style="width: 100%;"></div>
+                </div>
+            </div>
+            <div class="ki-bar enemy-bar">
+                <span class="bar-label">KI Enemigo</span>
+                <div class="bar-container">
+                    <div class="bar-fill" id="enemyKiBar" style="width: 100%;"></div>
+                </div>
+            </div>
+        </div>
+        <div class="debug-info" id="debugInfo"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
