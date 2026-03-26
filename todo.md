@@ -380,3 +380,13 @@
 - [x] Loop hand tracking reescrito con onHandAddedObservable + fallback cache cada 120 frames
 - [x] extractHandJoints mejorado: 4 métodos de acceso (getJointMesh, _jointMeshes Map, jointMeshes array, joints objeto)
 - [x] Debug overlay muestra estado en tiempo real: L/R detectadas, API usada, joints, gesto
+
+---
+
+## Bug: HUD invisible en VR (gestos funcionan, HUD no)
+- [x] HUD container: cambiado a position:fixed con width/height 100% explícitos
+- [x] GestureDebugOverlay: cambiado a position:fixed
+- [x] ResultScreen: cambiado a position:fixed
+- [x] xrOverlay: pointer-events:auto + background:transparent (requerido por spec dom-overlay)
+- [x] Debug overlay: activación automática via onStateChangedObservable (no sessiongranted)
+- [x] Debug overlay: show() llamado desde Game.ts al entrar en VR (state === 2)

@@ -5,6 +5,35 @@ Las versiones corresponden a los checkpoints del proyecto.
 
 ---
 
+## [v1.2.0] — 2026-03-26 · Fix HUD visible en VR
+
+### Corregido
+- **HUD invisible en VR**: contenedor del HUD cambiado de `position:absolute` a `position:fixed` con `width/height:100%` explícitos — requerido por la spec dom-overlay de WebXR en Quest.
+- **Debug overlay invisible en VR**: `GestureDebugOverlay` cambiado a `position:fixed`; activación automática via `onStateChangedObservable` (no `sessiongranted`, que no dispara en Oculus Browser).
+- **ResultScreen invisible en VR**: cambiado a `position:fixed` con `z-index:200`.
+- **xrOverlay bloqueando eventos**: cambiado de `pointer-events:none` a `pointer-events:auto` con `background:transparent` — la spec dom-overlay requiere que el elemento raíz tenga pointer-events activos para que Quest lo procese.
+- **Debug overlay**: se activa automáticamente al entrar en VR via `onStateChangedObservable` (state === 2) en lugar del evento `sessiongranted` que no dispara en Quest.
+
+### Archivos modificados
+`main.ts` · `HUD.ts` · `GestureDebugOverlay.ts` · `ResultScreen.ts` · `Game.ts`
+
+---
+
+## [v1.1.0] — 2026-03-26 · Paneles de acción laterales + Fix botones ResultScreen
+
+### Agregado
+- **Panel ATAQUE** (centro-derecho): botones Atacar, Cargar, Kamehameha, Final Flash con estilo tech-azul.
+- **Panel DEFENSA** (centro-izquierdo): botones Bloquear, Esquivar, Recargar con estilo tech-verde.
+- Botones de sistema Menú y DBG en esquina inferior central.
+
+### Corregido
+- **Botones ResultScreen no respondían**: `onAction` se registraba después del render; movido antes de `show()`. `pointer-events:none` heredado corregido. `z-index` subido a 50.
+
+### Archivos modificados
+`HUD.ts` · `ResultScreen.ts` · `Game.ts`
+
+---
+
 ## [v1.0.0] — 2026-03-26 · Tipografía body Rajdhani
 
 ### Agregado

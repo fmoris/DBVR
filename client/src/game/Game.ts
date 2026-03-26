@@ -463,9 +463,14 @@ export class Game {
       }
 
       // Ocultar manos estáticas cuando XR está activo
+      // Y activar automáticamente el debug overlay al entrar en VR
       this.xr.baseExperience.onStateChangedObservable.add((state: number) => {
-        // state 2 = IN_XR
+        // state 2 = IN_XR, state 0 = NOT_IN_XR
         const inXR = state === 2;
+        // Activar debug overlay automáticamente al entrar en VR
+        if (inXR) {
+          this.debugOverlay?.show();
+        }
         const leftMesh = this.scene.getMeshByName("leftHand");
         const rightMesh = this.scene.getMeshByName("rightHand");
         if (leftMesh)  leftMesh.isVisible  = !inXR;

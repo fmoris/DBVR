@@ -15,12 +15,18 @@ app.appendChild(canvas);
 // NO puede ser hijo de un div anidado.
 const xrOverlay = document.createElement("div");
 xrOverlay.id = "xr-overlay";
+// La spec dom-overlay de WebXR requiere:
+// 1. El elemento sea hijo directo de <body> ✓
+// 2. pointer-events:auto en el elemento raiz (no none) para que Quest lo procese
+// 3. background con algun valor (aunque sea transparente) para que sea renderizado
+// Los hijos pueden tener pointer-events:none individualmente
 xrOverlay.style.cssText = `
   position: fixed;
   inset: 0;
-  pointer-events: none;
+  pointer-events: auto;
   z-index: 9999;
   overflow: hidden;
+  background: transparent;
 `;
 document.body.appendChild(xrOverlay);
 

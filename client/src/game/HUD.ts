@@ -48,9 +48,17 @@ export class HUD {
 
   constructor(private parent: HTMLElement, private combat: CombatSystem) {
     this.container = document.createElement("div");
+    // position:fixed con width/height explícitos para que dom-overlay de Quest
+    // lo renderice correctamente. position:absolute puede quedar fuera del viewport XR.
     this.container.style.cssText = `
-      position:absolute; inset:0; pointer-events:none;
-      font-family:var(--font-body); user-select:none; display:none;
+      position:fixed;
+      top:0; left:0;
+      width:100%; height:100%;
+      pointer-events:none;
+      font-family:var(--font-body, sans-serif);
+      user-select:none;
+      display:none;
+      z-index:100;
     `;
     this.parent.appendChild(this.container);
     this.buildDOM();

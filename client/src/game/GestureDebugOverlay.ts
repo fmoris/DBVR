@@ -40,34 +40,34 @@ export class GestureDebugOverlay {
 
   constructor(private parent: HTMLElement) {
     this.panel = document.createElement("div");
+    // position:fixed para que sea visible dentro del dom-overlay de Quest
     this.panel.style.cssText = `
-      position: absolute;
+      position: fixed;
       top: 60px;
       left: 50%;
       transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.88);
-      border: 1.5px solid rgba(0, 200, 255, 0.6);
+      background: rgba(0, 0, 0, 0.92);
+      border: 2px solid rgba(0, 200, 255, 0.8);
       border-radius: 8px;
-      padding: 10px 16px;
+      padding: 12px 18px;
       font-family: var(--font-body, monospace);
-      font-size: 12px;
+      font-size: 13px;
       color: #00ccff;
-      min-width: 360px;
+      min-width: 340px;
       max-width: 460px;
       pointer-events: none;
       z-index: 9999;
       display: none;
-      line-height: 1.7;
+      line-height: 1.8;
     `;
     this.parent.appendChild(this.panel);
 
-    // Toggle con tecla G
+    // Toggle con tecla G (desktop)
     window.addEventListener("keydown", (e) => {
       if (e.key.toLowerCase() === "g") this.toggle();
     });
-
-    // Activarse automáticamente cuando se entra en modo XR
-    document.addEventListener("sessiongranted", () => this.show());
+    // Nota: la activación automática en VR se hace desde Game.ts
+    // via onStateChangedObservable (no sessiongranted, que no dispara en Quest)
   }
 
   toggle(): void {
