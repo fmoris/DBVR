@@ -390,3 +390,9 @@
 - [x] xrOverlay: pointer-events:auto + background:transparent (requerido por spec dom-overlay)
 - [x] Debug overlay: activación automática via onStateChangedObservable (no sessiongranted)
 - [x] Debug overlay: show() llamado desde Game.ts al entrar en VR (state === 2)
+
+---
+
+## Bug: botones StartScreen no funcionan
+- [x] Causa raíz: xrOverlay (z-index:9999, pointer-events:auto) cubría toda la pantalla e interceptaba los clics
+- [x] Solución: pointer-events:none por defecto en xrOverlay; se activa solo en startGame() y se desactiva en goToMenu()

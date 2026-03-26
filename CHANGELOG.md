@@ -5,6 +5,17 @@ Las versiones corresponden a los checkpoints del proyecto.
 
 ---
 
+## [v1.3.0] — 2026-03-26 · Fix botones StartScreen bloqueados por xrOverlay
+
+### Corregido
+- **Botones de StartScreen no respondían**: el `xrOverlay` (z-index:9999, pointer-events:auto, position:fixed) cubría toda la pantalla e interceptaba todos los clics antes de que llegaran al StartScreen (z-index:20).
+- **Solución**: `pointer-events:none` por defecto en el xrOverlay. Se activa a `auto` solo al iniciar el juego (`startGame()`) y vuelve a `none` al regresar al menú (`goToMenu()`). La spec dom-overlay de WebXR solo requiere `pointer-events:auto` durante la sesión XR activa, no en todo momento.
+
+### Archivos modificados
+`main.ts`
+
+---
+
 ## [v1.2.0] — 2026-03-26 · Fix HUD visible en VR
 
 ### Corregido
