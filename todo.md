@@ -321,6 +321,9 @@
 
 ## Debug gestos + bullet time mejorado
 
+- [x] Changelog en juego (StartScreen) actualizado a v0.9.0 con historial completo (8 versiones)
+- [x] Badge de version en pantalla principal actualizado de v0.3.0 a v0.9.0
+- [x] CHANGELOG.md creado en raiz del proyecto con formato Keep a Changelog
 - [x] Overlay de debug (GestureDebugOverlay.ts): joints L/R, gesto, historial de cambios
 - [x] Overlay muestra gesto detectado con color segun tipo
 - [x] Overlay muestra si hand tracking esta activo (verde) o sin datos (rojo)

@@ -5,14 +5,71 @@
 
 const CHANGELOG = [
   {
+    version: "0.9.0",
+    date: "26 Mar 2026",
+    changes: [
+      "[DBG] Overlay de debug de gestos en tiempo real (tecla G o boton DBG)",
+      "Overlay muestra coordenadas de munecas/indices, gesto activo y estado de hand tracking",
+      "Historial de los ultimos 5 cambios de gesto con timestamp",
+      "Bullet time Kamehameha: 3500ms a 0.18x (antes 1500ms a 0.25x)",
+      "Bullet time Final Flash: 4500ms a 0.12x (antes 2000ms a 0.20x)",
+      "Transicion suave de entrada (300ms) y salida (500ms) del bullet time",
+      "Efecto visual: vineta purpura intensa, aberracion cromatica y etiqueta BULLET TIME",
+    ],
+  },
+  {
+    version: "0.8.0",
+    date: "26 Mar 2026",
+    changes: [
+      "Correccion critica: joints accedidos por nombre W3C (no por indice numerico)",
+      "GestureRecognizer v2 con umbrales calibrados para local-floor de Quest 3",
+      "Cooldown por gesto: 600ms ataque, 200ms carga, 150ms bloqueo",
+      "Boton Menu [M] en HUD para volver al StartScreen sin recargar pagina",
+      "disposeAndExit(): sale de XR, detiene voz y libera motor de Babylon",
+      "main.ts refactorizado: multiples partidas sin window.location.reload()",
+    ],
+  },
+  {
+    version: "0.7.0",
+    date: "26 Mar 2026",
+    changes: [
+      "Fix carga infinita VR en Meta Quest 3",
+      "optionalFeatures corregido a array [hand-tracking] (era true, invalido en Oculus Browser)",
+      "enableFeature(HAND_TRACKING) ahora pasa xrInput correctamente",
+      "Verificacion previa con navigator.xr.isSessionSupported()",
+      "Timeout de 12s como fallback si WebXR no responde",
+      "Manos 3D estaticas se ocultan al entrar en sesion XR",
+    ],
+  },
+  {
+    version: "0.6.0",
+    date: "26 Mar 2026",
+    changes: [
+      "Rediseno visual inspirado en Dragon Ball VR (referencia ejemplo_ui)",
+      "HUD: paneles tech-azul en esquinas inferiores (jugador izq, enemigo der)",
+      "Entorno de canon: suelo rojizo, formaciones rocosas, nubes en horizonte",
+      "Iluminacion de atardecer: sol dorado-naranja + relleno azulado de cielo",
+      "Manos del jugador mas grandes con 4 dedos, pulgar y aura KI azul",
+    ],
+  },
+  {
+    version: "0.5.0",
+    date: "26 Mar 2026",
+    changes: [
+      "Fuente Saiyan Sans aplicada globalmente (titulos, HUD, botones)",
+      "IA del enemigo: ataques automaticos cada 3-6s segun NP y KI",
+      "VoiceRecognizer: grita Kamehameha o Final Flash para +5 NP de bonus",
+      "ResultScreen: victoria/derrota con rango, estadisticas y botones reiniciar/menu",
+      "Indicador de ataque enemigo en HUD (alerta roja)",
+    ],
+  },
+  {
     version: "0.3.0",
     date: "Mar 2026",
     changes: [
       "Sistema de Nivel de Poder (NP) reemplaza HP",
-      "Cinco rangos de poder: Debilitado, Normal, Elevado, Dominante, Trascendente",
-      "Sistema de Comeback con Transformacion y Ataque Desesperado",
-      "Fluctuacion organica del NP durante el combate",
-      "GestureRecognizer con 6 tipos de gestos para WebXR",
+      "Cinco rangos: Debilitado, Normal, Elevado, Dominante, Trascendente",
+      "GestureRecognizer v1 con 6 tipos de gestos para WebXR",
       "WebXRManager con soporte para hand tracking Meta Quest",
     ],
   },
@@ -21,11 +78,10 @@ const CHANGELOG = [
     date: "Mar 2026",
     changes: [
       "Ataque de KI cargado (puno cerrado -> abrir para lanzar)",
-      "Ataques especiales: Kamehameha y Final Flash con secuencias de movimiento",
-      "Defensas: bloqueo, desvio, choque y esquive",
+      "Ataques especiales: Kamehameha y Final Flash con niveles de carga",
+      "Defensas: bloqueo, esquive",
       "Camara lenta al recibir ataques especiales",
-      "HUD con barras de KI y Nivel de Poder dinamicas",
-      "Eliminacion de React, frontend en TypeScript puro con BabylonJS",
+      "HUD con barras de KI y NP dinamicas",
     ],
   },
   {
@@ -36,7 +92,6 @@ const CHANGELOG = [
       "Escena 3D en primera persona con enemigo y aura de particulas",
       "Sistema de KI con regeneracion pasiva",
       "Ataque basico de KI (proyectil azul)",
-      "Bloqueo basico y recarga de KI",
       "Controles de teclado para testing sin VR",
       "Integracion WebXR inicial para Meta Quest",
     ],
@@ -230,7 +285,7 @@ export class StartScreen {
           display:inline-block; margin-top:20px; padding:4px 16px;
           border:1px solid #0044aa; border-radius:4px;
           font-size:11px; letter-spacing:3px; color:#0066cc;
-        ">v0.3.0 — MVP</div>
+        }>v0.9.0 — Debug + Bullet Time</div>
       </div>
 
       <div style="display:flex;gap:16px;flex-wrap:wrap;justify-content:center;">
