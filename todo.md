@@ -134,6 +134,76 @@
 
 ---
 
+## SISTEMA DE NIVEL DE PODER (reemplaza HP)
+
+### Concepto central
+- [ ] Eliminar completamente el concepto de HP/vida
+- [ ] Cada luchador tiene un **Nivel de Poder** (NP) que fluctua durante toda la batalla
+- [ ] El NP determina la fuerza, resistencia e inmunidad a ciertos ataques
+- [ ] La condicion de victoria NO es reducir el NP a 0, sino lograr una diferencia de NP suficiente para que el rival no pueda continuar (rendicion narrativa, como en el anime)
+
+### Escala y rangos del Nivel de Poder
+- [ ] Rango 1 — Debilitado (NP 0-20%): vulnerable a todo, sin inmunidades, ataques basicos hacen dano real
+- [ ] Rango 2 — Normal (NP 21-50%): estado base de combate
+- [ ] Rango 3 — Elevado (NP 51-75%): inmune a ataques basicos de KI (los absorbe o ignora)
+- [ ] Rango 4 — Dominante (NP 76-90%): inmune a ataques basicos Y a ataques especiales lanzados con menos del 50% de carga
+- [ ] Rango 5 — Trascendente (NP 91-100%): solo los ataques especiales a maxima carga pueden afectarlo
+
+### Como sube el Nivel de Poder
+- [ ] Ataques conectados exitosamente: +5 a +20 NP segun tipo de ataque
+- [ ] Defensas perfectas: +10 NP (recompensa la habilidad)
+- [ ] Recibir un golpe fuerte: +8 NP (la presion aumenta el poder, como en el anime)
+- [ ] Tiempo en combate activo: +1 NP cada 3 segundos (escalada natural)
+- [ ] Gritar el nombre del ataque especial: +5 NP bonus al lanzar
+- [ ] Encadenar acciones sin recibir dano: +3 NP por accion encadenada
+
+### Como baja el Nivel de Poder
+- [ ] Recibir un ataque especial a maxima carga: -20 a -40 NP
+- [ ] Ser expulsado en melee: -10 NP
+- [ ] Fallar un ataque especial (rival lo esquiva o desvía): -8 NP (frustracion)
+- [ ] Inactividad prolongada (mas de 5s sin accion): -2 NP por segundo
+- [ ] Ser bloqueado repetidamente sin variar ataques: -3 NP por bloqueo consecutivo
+
+### Fluctuacion natural del NP
+- [ ] El NP nunca es completamente estable: oscila +/- 3 pts de forma organica
+- [ ] Durante momentos de alta intensidad (ambos atacando): la oscilacion aumenta a +/- 8 pts
+- [ ] Esto simula la tension dramatica del anime (el poder "vibra" con la emocion del combate)
+- [ ] Visualmente: el aura del personaje pulsa al ritmo de la fluctuacion
+
+### Condicion de victoria
+- [ ] Victoria cuando la diferencia de NP entre ambos luchadores supera 50 puntos
+- [ ] El luchador con NP mas bajo entra en estado de "rendicion inminente"
+- [ ] El luchador dominante tiene una ventana de 5s para ejecutar el golpe final
+- [ ] Si no ejecuta el golpe final en ese tiempo, el rival puede iniciar un COMEBACK
+
+### Sistema de Comeback (luchador en desventaja)
+- [ ] Se activa cuando el NP del jugador cae por debajo del 25% Y el rival supera el 75%
+- [ ] El jugador en desventaja recibe una notificacion visual/haptica de "momento critico"
+- [ ] Opciones de comeback disponibles (cada una con requisito de gesto + grito):
+  - [ ] **Transformacion**: gesto de explosion de energia (brazos al cielo) + grito
+    - [ ] Multiplica el NP actual por 2.5 instantaneamente
+    - [ ] Cambia el aura visual del personaje (color diferente)
+    - [ ] Consume todo el KI disponible
+    - [ ] Solo disponible una vez por combate
+  - [ ] **Ataque Desesperado**: lanzar un ataque especial sin tener el KI suficiente
+    - [ ] Se activa con NP por debajo de 20%
+    - [ ] El personaje usa su propia energia vital (NP) como combustible
+    - [ ] Si conecta: +40 NP instantaneo y el rival pierde -30 NP
+    - [ ] Si falla: el luchador queda en NP 5% (al borde de la derrota)
+  - [ ] **Momento de Determinacion**: gesto de meditacion rapida (5 segundos completamente quieto)
+    - [ ] Requiere que el rival no ataque durante esos 5 segundos (lectura psicologica)
+    - [ ] Si se completa: NP sube a 40% instantaneamente
+    - [ ] VFX: aura explosiva que empuja al rival hacia atras
+
+### Representacion visual del NP
+- [ ] Barra de NP con color dinamico: azul (bajo) → verde (normal) → amarillo (elevado) → naranja (dominante) → blanco brillante (trascendente)
+- [ ] Aura del personaje escala en tamano e intensidad con el NP
+- [ ] Particulas de energia aumentan en cantidad y velocidad con el NP alto
+- [ ] Efecto de distorsion de calor alrededor del personaje en rangos 4 y 5
+- [ ] Numero flotante de NP visible brevemente cuando cambia significativamente (+/- 10 pts)
+
+---
+
 ## Sistemas transversales
 
 ### Regeneracion de KI

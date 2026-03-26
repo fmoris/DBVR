@@ -14,10 +14,12 @@ import {
   Animation,
   ActionManager,
   ExecuteCodeAction,
+  WebXRFeatureName,
 } from "@babylonjs/core";
 import { HUD } from "./HUD";
 import { CombatSystem } from "./CombatSystem";
 import { VFXManager } from "./VFXManager";
+import { GestureRecognizer } from "./GestureRecognizer";
 
 export class Game {
   private engine: Engine;
@@ -26,6 +28,8 @@ export class Game {
   private hud!: HUD;
   private combat!: CombatSystem;
   private vfx!: VFXManager;
+  private gestureRecognizer!: GestureRecognizer;
+  private xr: any = null;
   private started = false;
 
   constructor(private canvas: HTMLCanvasElement) {
@@ -44,9 +48,11 @@ export class Game {
 
     this.vfx = new VFXManager(this.scene);
     this.combat = new CombatSystem(this.scene, this.vfx);
+    this.gestureRecognizer = new GestureRecognizer(this.scene);
     this.hud = new HUD(this.canvas.parentElement!, this.combat);
 
     this.setupKeyboard();
+    this.initWebXR();
     this.showStartScreen();
 
     this.engine.runRenderLoop(() => {
@@ -142,14 +148,120 @@ export class Game {
   }
 
   private setupKeyboard(): void {
+    // Controles de teclado (para testing sin VR)
     window.addEventListener("keydown", (e) => {
       if (!this.started) return;
       switch (e.key.toLowerCase()) {
-        case "a": this.combat.launchAttack(); break;
+        case "a": this.combat.launchBasicAttack(); break;
+        case "w": 
+          if (this.combat.isInChargingState()) {
+            this.combat.releaseChargedAttack();
+          } else {
+            this.combat.startChargedAttack();
+          }
+          break;
         case "s": this.combat.activateBlock(); break;
+        case "d": this.combat.activateDodge(); break;
         case "r": this.combat.rechargeKi(); break;
+        case "1": this.combat.kamehamehaStep(1); break;
+        case "2": this.combat.finalFlashStep(1); break;
+        case "v": this.enterVR(); break;
       }
     });
+  }
+
+  private async enterVR(): Promise<void> {
+    if (this.xr) {
+      await this.xr.baseExperience.enterXRAsync(
+        'immersive-vr',
+        'local'
+      );
+    }
+  }
+
+  private async initWebXR(): Promise<void> {
+    try {
+      const featureManager = this.scene.createDefaultXRExperienceAsync({
+        uiOptions: {
+          sessionMode: 'immersive-vr',
+          referenceSpaceType: 'local-floor',
+        },
+        optionalFeatures: true,
+      });
+
+      this.xr = await featureManager;
+      
+      // Habilitar hand tracking
+      const handTracking = this.xr.baseExperience.featuresManager.enableFeature(
+        WebXRFeatureName.HAND_TRACKING,
+        'latest'
+      );
+
+      // Loop de actualización de hand tracking
+      this.scene.registerBeforeRender(() => {
+        if (handTracking && handTracking.hands) {
+          const leftHand = handTracking.hands.get('left');
+          const rightHand = handTracking.hands.get('right');
+          
+          if (leftHand) {
+            this.gestureRecognizer.updateHandJoints('left', this.extractJoints(leftHand));
+          }
+          if (rightHand) {
+            this.gestureRecognizer.updateHandJoints('right', this.extractJoints(rightHand));
+          }
+
+          // Ejecutar acciones basadas en gestos
+          this.processGestures();
+        }
+      });
+
+      console.log("✅ WebXR + Hand Tracking inicializado");
+    } catch (e) {
+      console.log("ℹ️ WebXR no disponible:", e);
+    }
+  }
+
+  private extractJoints(hand: any): any {
+    const joints: any = {};
+    try {
+      if (hand.joints) {
+        joints.wrist = this.getJointPos(hand.joints[0]);
+        joints.indexTip = this.getJointPos(hand.joints[8]);
+        joints.middleTip = this.getJointPos(hand.joints[12]);
+        joints.ringTip = this.getJointPos(hand.joints[16]);
+        joints.littleTip = this.getJointPos(hand.joints[20]);
+        joints.thumbTip = this.getJointPos(hand.joints[4]);
+      }
+    } catch (e) {}
+    return joints;
+  }
+
+  private getJointPos(joint: any): { x: number; y: number; z: number } {
+    if (joint && joint.position) {
+      return { x: joint.position.x, y: joint.position.y, z: joint.position.z };
+    }
+    return { x: 0, y: 0, z: 0 };
+  }
+
+  private processGestures(): void {
+    const gesture = this.gestureRecognizer.getCurrentGesture();
+    
+    switch (gesture) {
+      case 'ATTACKING':
+        if (!this.combat.isInChargingState()) {
+          this.combat.launchBasicAttack();
+        }
+        break;
+      case 'CHARGING':
+        this.combat.startChargedAttack();
+        break;
+      case 'BLOCKING':
+        this.combat.activateBlock();
+        break;
+      case 'RECHARGING':
+        this.combat.rechargeKi();
+        break;
+    }
   }
 
   private showStartScreen(): void {

@@ -2,25 +2,46 @@ import { CombatSystem, GameStats, CombatState } from "./CombatSystem";
 
 const STATE_LABELS: Record<CombatState, string> = {
   neutral: "Neutral",
-  charging: "Cargando KI...",
+  charging: "Cargando...",
+  charging_special: "Carga Especial",
   attacking: "Atacando",
-  defending: "Bloqueando",
-  slowMotion: "Camara Lenta",
-  hit: "Impacto",
+  defending: "Defendiendo",
+  slowMotion: "Cámara Lenta",
+  hit: "¡Impacto!",
+  melee: "Combate Cercano",
 };
 
 const STATE_COLORS: Record<CombatState, string> = {
   neutral: "#00ff88",
   charging: "#ffcc00",
+  charging_special: "#ff8800",
   attacking: "#ff6600",
   defending: "#00aaff",
   slowMotion: "#cc44ff",
   hit: "#ff2222",
+  melee: "#ff0066",
 };
+
+function getNPColor(np: number): string {
+  if (np >= 91) return "#ffffff";  // Trascendente - blanco brillante
+  if (np >= 76) return "#ff8800";  // Dominante - naranja
+  if (np >= 51) return "#ffcc00";  // Elevado - amarillo
+  if (np >= 21) return "#00ff88";  // Normal - verde
+  return "#0088ff";                 // Debilitado - azul
+}
+
+function getNPRange(np: number): string {
+  if (np >= 91) return "TRASCENDENTE";
+  if (np >= 76) return "DOMINANTE";
+  if (np >= 51) return "ELEVADO";
+  if (np >= 21) return "NORMAL";
+  return "DEBILITADO";
+}
 
 export class HUD {
   private container: HTMLDivElement;
   private elements: Record<string, HTMLElement> = {};
+  private npPopupTimeout: number | null = null;
 
   constructor(private parent: HTMLElement, private combat: CombatSystem) {
     this.container = document.createElement("div");
@@ -39,7 +60,7 @@ export class HUD {
   }
 
   private buildDOM(): void {
-    // Borde de camara lenta
+    // Borde de cámara lenta
     const slowBorder = document.createElement("div");
     slowBorder.id = "slow-border";
     slowBorder.style.cssText = `
@@ -71,6 +92,30 @@ export class HUD {
     this.container.appendChild(debug);
     this.elements["debug"] = debug;
 
+    // Indicador de carga
+    const chargeIndicator = document.createElement("div");
+    chargeIndicator.id = "charge-indicator";
+    chargeIndicator.style.cssText = `
+      position:absolute; top:60px; left:50%; transform:translateX(-50%);
+      font-size:12px; font-weight:bold; letter-spacing:2px;
+      background:rgba(0,0,0,0.7); padding:6px 16px; border-radius:4px;
+      display:none;
+    `;
+    this.container.appendChild(chargeIndicator);
+    this.elements["chargeIndicator"] = chargeIndicator;
+
+    // Popup de NP
+    const npPopup = document.createElement("div");
+    npPopup.id = "np-popup";
+    npPopup.style.cssText = `
+      position:absolute; top:50%; left:50%; transform:translate(-50%, -50%);
+      font-size:28px; font-weight:bold; letter-spacing:4px;
+      opacity:0; pointer-events:none; transition:opacity 0.3s, transform 0.3s;
+      text-shadow:0 0 20px currentColor;
+    `;
+    this.container.appendChild(npPopup);
+    this.elements["npPopup"] = npPopup;
+
     // HUD inferior
     const bottom = document.createElement("div");
     bottom.style.cssText = `
@@ -80,7 +125,7 @@ export class HUD {
     this.container.appendChild(bottom);
 
     // Barras del jugador
-    bottom.appendChild(this.buildBars("player", "Tu KI", "#00ff88", "Salud", "#ff4444"));
+    bottom.appendChild(this.buildPlayerBars());
 
     // Controles
     const controls = document.createElement("div");
@@ -92,79 +137,204 @@ export class HUD {
         cursor:pointer;text-transform:uppercase;box-shadow:0 0 10px rgba(0,150,255,0.4);">
         [A] Atacar
       </button>
+      <button id="btn-charged" style="padding:8px 20px;background:linear-gradient(135deg,#663300,#cc6600);
+        border:1px solid #ff9900;border-radius:4px;color:#ff9900;font-size:11px;
+        font-family:'Courier New',monospace;font-weight:bold;letter-spacing:2px;
+        cursor:pointer;text-transform:uppercase;box-shadow:0 0 10px rgba(255,150,0,0.4);">
+        [W] Cargar
+      </button>
+      <button id="btn-kamehameha" style="padding:6px 16px;background:linear-gradient(135deg,#001133,#003366);
+        border:1px solid #00aaff;border-radius:4px;color:#00aaff;font-size:10px;
+        font-family:'Courier New',monospace;font-weight:bold;letter-spacing:1px;
+        cursor:pointer;text-transform:uppercase;">
+        [1] Kamehameha
+      </button>
+      <button id="btn-finalflash" style="padding:6px 16px;background:linear-gradient(135deg,#332200,#664400);
+        border:1px solid #ffaa00;border-radius:4px;color:#ffaa00;font-size:10px;
+        font-family:'Courier New',monospace;font-weight:bold;letter-spacing:1px;
+        cursor:pointer;text-transform:uppercase;">
+        [2] Final Flash
+      </button>
       <button id="btn-block" style="padding:8px 20px;background:linear-gradient(135deg,#003322,#006644);
         border:1px solid #00ff88;border-radius:4px;color:#00ff88;font-size:11px;
         font-family:'Courier New',monospace;font-weight:bold;letter-spacing:2px;
         cursor:pointer;text-transform:uppercase;">
         [S] Bloquear
       </button>
+      <button id="btn-dodge" style="padding:6px 16px;background:linear-gradient(135deg,#002233,#004466);
+        border:1px solid #66ccff;border-radius:4px;color:#66ccff;font-size:10px;
+        font-family:'Courier New',monospace;font-weight:bold;letter-spacing:1px;
+        cursor:pointer;text-transform:uppercase;">
+        [D] Esquivar
+      </button>
       <button id="btn-recharge" style="padding:8px 20px;background:linear-gradient(135deg,#330033,#660066);
         border:1px solid #cc44ff;border-radius:4px;color:#cc44ff;font-size:11px;
         font-family:'Courier New',monospace;font-weight:bold;letter-spacing:2px;
         cursor:pointer;text-transform:uppercase;box-shadow:0 0 8px rgba(180,60,255,0.3);">
-        [R] Recargar KI
+        [R] Recargar
       </button>
     `;
     bottom.appendChild(controls);
 
     // Barras del enemigo
-    bottom.appendChild(this.buildBars("enemy", "KI Enemigo", "#ff4444", "Salud", "#ff8800"));
+    bottom.appendChild(this.buildEnemyBars());
 
     // Eventos de botones
-    controls.querySelector("#btn-attack")!.addEventListener("click", () => this.combat.launchAttack());
-    controls.querySelector("#btn-block")!.addEventListener("click", () => this.combat.activateBlock());
-    controls.querySelector("#btn-recharge")!.addEventListener("click", () => this.combat.rechargeKi());
+    const combat = this.combat;
+    controls.querySelector("#btn-attack")!.addEventListener("click", () => combat.launchBasicAttack());
+    controls.querySelector("#btn-charged")!.addEventListener("click", () => {
+      if (combat.isInChargingState()) {
+        combat.releaseChargedAttack();
+      } else {
+        combat.startChargedAttack();
+      }
+    });
+    controls.querySelector("#btn-kamehameha")!.addEventListener("click", () => combat.kamehamehaStep(1));
+    controls.querySelector("#btn-finalflash")!.addEventListener("click", () => combat.finalFlashStep(1));
+    controls.querySelector("#btn-block")!.addEventListener("click", () => combat.activateBlock());
+    controls.querySelector("#btn-dodge")!.addEventListener("click", () => combat.activateDodge());
+    controls.querySelector("#btn-recharge")!.addEventListener("click", () => combat.rechargeKi());
   }
 
-  private buildBars(prefix: string, label1: string, color1: string, label2: string, color2: string): HTMLDivElement {
+  private buildPlayerBars(): HTMLDivElement {
     const wrap = document.createElement("div");
-    wrap.style.cssText = `display:flex; flex-direction:column; gap:8px; align-items:center;`;
+    wrap.style.cssText = `display:flex; flex-direction:column; gap:8px; align-items:center; min-width:180px;`;
     wrap.innerHTML = `
-      <span style="color:#aaa;font-size:10px;letter-spacing:2px;text-transform:uppercase;">${label1}</span>
-      <div style="width:180px;height:12px;background:rgba(0,0,0,0.7);border:1px solid ${color1};
-        border-radius:3px;overflow:hidden;box-shadow:0 0 8px ${color1}44;">
-        <div id="${prefix}-ki-bar" style="height:100%;width:100%;
-          background:linear-gradient(90deg,${color1}88,${color1});
-          transition:width 0.15s ease;box-shadow:0 0 6px ${color1};"></div>
+      <span style="color:#aaa;font-size:10px;letter-spacing:2px;text-transform:uppercase;">Tu Nivel de Poder</span>
+      <div style="width:180px;height:18px;background:rgba(0,0,0,0.7);border:1px solid #00ff88;
+        border-radius:3px;overflow:hidden;box-shadow:0 0 8px #00ff8844;">
+        <div id="player-np-bar" style="height:100%;width:50%;
+          background:linear-gradient(90deg,#00ff8888,#00ff88);
+          transition:width 0.15s ease;box-shadow:0 0 6px #00ff88;"></div>
       </div>
-      <span style="color:#aaa;font-size:10px;letter-spacing:2px;text-transform:uppercase;">${label2}</span>
-      <div style="width:180px;height:8px;background:rgba(0,0,0,0.7);border:1px solid ${color2};
-        border-radius:3px;overflow:hidden;">
-        <div id="${prefix}-hp-bar" style="height:100%;width:100%;
-          background:linear-gradient(90deg,${color2}88,${color2});
-          transition:width 0.15s ease;"></div>
+      <span id="player-np-label" style="color:#00ff88;font-size:11px;font-weight:bold;">NORMAL (50%)</span>
+      <span style="color:#aaa;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-top:8px;">Tu KI</span>
+      <div style="width:180px;height:12px;background:rgba(0,0,0,0.7);border:1px solid #00ccff;
+        border-radius:3px;overflow:hidden;box-shadow:0 0 8px #00ccff44;">
+        <div id="player-ki-bar" style="height:100%;width:100%;
+          background:linear-gradient(90deg,#00ccff88,#00ccff);
+          transition:width 0.15s ease;box-shadow:0 0 6px #00ccff;"></div>
       </div>
     `;
-    this.container.appendChild(wrap); // temporal, se mueve al bottom
     return wrap;
+  }
+
+  private buildEnemyBars(): HTMLDivElement {
+    const wrap = document.createElement("div");
+    wrap.style.cssText = `display:flex; flex-direction:column; gap:8px; align-items:center; min-width:180px;`;
+    wrap.innerHTML = `
+      <span style="color:#aaa;font-size:10px;letter-spacing:2px;text-transform:uppercase;">Enemigo</span>
+      <div style="width:180px;height:18px;background:rgba(0,0,0,0.7);border:1px solid #ff4444;
+        border-radius:3px;overflow:hidden;box-shadow:0 0 8px #ff444444;">
+        <div id="enemy-np-bar" style="height:100%;width:50%;
+          background:linear-gradient(90deg,#ff444488,#ff4444);
+          transition:width 0.15s ease;box-shadow:0 0 6px #ff4444;"></div>
+      </div>
+      <span id="enemy-np-label" style="color:#ff4444;font-size:11px;font-weight:bold;">NORMAL (50%)</span>
+      <span style="color:#aaa;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-top:8px;">KI Enemigo</span>
+      <div style="width:180px;height:12px;background:rgba(0,0,0,0.7);border:1px solid #ff8800;
+        border-radius:3px;overflow:hidden;box-shadow:0 0 8px #ff880044;">
+        <div id="enemy-ki-bar" style="height:100%;width:100%;
+          background:linear-gradient(90deg,#ff880088,#ff8800);
+          transition:width 0.15s ease;box-shadow:0 0 6px #ff8800;"></div>
+      </div>
+    `;
+    return wrap;
+  }
+
+  private showNPPopup(amount: number, isPlayer: boolean): void {
+    const popup = this.elements["npPopup"] as HTMLElement;
+    const sign = amount >= 0 ? "+" : "";
+    const color = amount >= 0 ? (isPlayer ? "#00ff88" : "#ff4444") : (isPlayer ? "#ff4444" : "#00ff88");
+    
+    popup.textContent = `${sign}${Math.abs(amount)} NP`;
+    popup.style.color = color;
+    popup.style.opacity = "1";
+    popup.style.transform = "translate(-50%, -50%) scale(1.2)";
+    
+    if (this.npPopupTimeout) clearTimeout(this.npPopupTimeout);
+    
+    this.npPopupTimeout = window.setTimeout(() => {
+      popup.style.opacity = "0";
+      popup.style.transform = "translate(-50%, -70%) scale(1)";
+    }, 1000);
   }
 
   private update(stats: GameStats): void {
     const color = STATE_COLORS[stats.combatState];
     const label = this.elements["stateLabel"];
-    label.textContent = STATE_LABELS[stats.combatState] + (stats.isSlowMotion ? " · CAMARA LENTA" : "");
+    label.textContent = STATE_LABELS[stats.combatState];
+    if (stats.isSlowMotion) label.textContent += " · CAMARA LENTA";
+    if (stats.chargeTime > 0) label.textContent += ` (${stats.chargeTime.toFixed(1)}s)`;
+    
     label.style.color = color;
     label.style.textShadow = `0 0 12px ${color}`;
     label.style.border = `1px solid ${color}44`;
 
+    // Indicador de carga
+    const chargeIndicator = this.elements["chargeIndicator"] as HTMLElement;
+    if (stats.combatState === "charging" || stats.combatState === "charging_special") {
+      chargeIndicator.style.display = "block";
+      chargeIndicator.style.color = "#ffcc00";
+      chargeIndicator.innerHTML = `⏳ CARGANDO: ${stats.chargeTime.toFixed(1)}s`;
+    } else if (stats.combatState === "attacking" && stats.currentAttack) {
+      chargeIndicator.style.display = "block";
+      chargeIndicator.style.color = "#ff6600";
+      const attackName = stats.currentAttack.toUpperCase();
+      chargeIndicator.innerHTML = `🔥 ${attackName}`;
+    } else {
+      chargeIndicator.style.display = "none";
+    }
+
     this.elements["slowBorder"].style.display = stats.isSlowMotion ? "block" : "none";
 
+    // Debug
     const debug = this.elements["debug"];
     debug.innerHTML = `
-      KI: ${stats.playerKi.toFixed(0)}/100<br>
-      Salud: ${stats.playerHealth.toFixed(0)}/100<br>
+      Tu NP: ${stats.playerNP.toFixed(0)}% | KI: ${stats.playerKi.toFixed(0)}<br>
+      Enemigo NP: ${stats.enemyNP.toFixed(0)}% | KI: ${stats.enemyKi.toFixed(0)}<br>
       Estado: ${stats.combatState}<br>
-      <span style="margin-top:6px;display:block;font-size:10px;color:#00aa55;">A=Ataque · S=Bloqueo · R=Recarga</span>
+      <span style="margin-top:4px;display:block;font-size:9px;color:#888;">
+        A=W+A=atacar | S=bloquear | D=esquivar | R=recargar | 1=Kamehameha | 2=Final Flash
+      </span>
     `;
 
+    // Barras de NP
+    const playerNPBar = this.container.querySelector("#player-np-bar") as HTMLElement;
+    const playerNPLabel = this.container.querySelector("#player-np-label") as HTMLElement;
+    const enemyNPBar = this.container.querySelector("#enemy-np-bar") as HTMLElement;
+    const enemyNPLabel = this.container.querySelector("#enemy-np-label") as HTMLElement;
+    
+    // KI bars
     const playerKiBar = this.container.querySelector("#player-ki-bar") as HTMLElement;
-    const playerHpBar = this.container.querySelector("#player-hp-bar") as HTMLElement;
     const enemyKiBar = this.container.querySelector("#enemy-ki-bar") as HTMLElement;
-    const enemyHpBar = this.container.querySelector("#enemy-hp-bar") as HTMLElement;
+
+    if (playerNPBar) {
+      const npColor = getNPColor(stats.playerNP);
+      playerNPBar.style.width = `${stats.playerNP}%`;
+      playerNPBar.style.background = `linear-gradient(90deg,${npColor}88,${npColor})`;
+      playerNPBar.style.boxShadow = `0 0 6px ${npColor}`;
+    }
+    if (playerNPLabel) {
+      const npColor = getNPColor(stats.playerNP);
+      playerNPLabel.textContent = `${getNPRange(stats.playerNP)} (${stats.playerNP.toFixed(0)}%)`;
+      playerNPLabel.style.color = npColor;
+      if (stats.playerNP >= 91) playerNPLabel.style.textShadow = `0 0 10px ${npColor}`;
+    }
+    if (enemyNPBar) {
+      const npColor = getNPColor(stats.enemyNP);
+      enemyNPBar.style.width = `${stats.enemyNP}%`;
+      enemyNPBar.style.background = `linear-gradient(90deg,${npColor}88,${npColor})`;
+      enemyNPBar.style.boxShadow = `0 0 6px ${npColor}`;
+    }
+    if (enemyNPLabel) {
+      const npColor = getNPColor(stats.enemyNP);
+      enemyNPLabel.textContent = `${getNPRange(stats.enemyNP)} (${stats.enemyNP.toFixed(0)}%)`;
+      enemyNPLabel.style.color = npColor;
+      if (stats.enemyNP >= 91) enemyNPLabel.style.textShadow = `0 0 10px ${npColor}`;
+    }
 
     if (playerKiBar) playerKiBar.style.width = `${stats.playerKi}%`;
-    if (playerHpBar) playerHpBar.style.width = `${stats.playerHealth}%`;
     if (enemyKiBar) enemyKiBar.style.width = `${stats.enemyKi}%`;
-    if (enemyHpBar) enemyHpBar.style.width = `${stats.enemyHealth}%`;
   }
 }

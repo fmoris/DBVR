@@ -8,44 +8,95 @@ import {
   ParticleSystem,
   Texture,
   Animation,
+  Mesh,
 } from "@babylonjs/core";
 
 interface Vec3 { x: number; y: number; z: number; }
 
-export class VFXManager {
-  constructor(private scene: Scene) {}
+export type AttackType = "basic" | "charged" | "kamehameha" | "finalFlash";
 
-  spawnProjectile(from: Vec3, to: Vec3, onImpact?: () => void): void {
-    // Esfera del proyectil
-    const ball = MeshBuilder.CreateSphere("ki_ball", { diameter: 0.35 }, this.scene);
+export class VFXManager {
+  private chargeMesh: Mesh | null = null;
+  private blockShield: Mesh | null = null;
+  private scene: Scene;
+
+  constructor(scene: Scene) {
+    this.scene = scene;
+  }
+
+  // ============================================
+  // ATAQUES DE KI
+  // ============================================
+  
+  spawnKiProjectile(from: Vec3, to: Vec3, type: "basic" | "charged", onImpact?: () => void): void {
+    const isCharged = type === "charged";
+    const size = isCharged ? 0.5 : 0.25;
+    const speed = isCharged ? 0.8 : 1.5;
+    const color = isCharged 
+      ? { r: 0.8, g: 0.4, b: 0.1 }  // Naranja para cargado
+      : { r: 0.2, g: 0.6, b: 1.0 }; // Azul para básico
+
+    // Esfera principal
+    const ball = MeshBuilder.CreateSphere("ki_ball", { diameter: size }, this.scene);
     ball.position = new Vector3(from.x, from.y, from.z);
 
     const mat = new StandardMaterial("ki_mat", this.scene);
-    mat.diffuseColor = new Color3(0.2, 0.6, 1.0);
-    mat.emissiveColor = new Color3(0.1, 0.4, 1.0);
+    mat.diffuseColor = new Color3(color.r, color.g, color.b);
+    mat.emissiveColor = new Color3(color.r * 0.5, color.g * 0.5, color.b * 0.5);
     mat.specularColor = new Color3(1, 1, 1);
+    mat.alpha = 0.85;
     ball.material = mat;
 
-    // Particulas alrededor del proyectil
-    const ps = new ParticleSystem("ki_ps", 150, this.scene);
+    // Efectos de partículas
+    const ps = new ParticleSystem("ki_ps", 200, this.scene);
     ps.particleTexture = new Texture("https://assets.babylonjs.com/textures/flare.png", this.scene);
     ps.emitter = ball;
     ps.minEmitBox = new Vector3(-0.1, -0.1, -0.1);
     ps.maxEmitBox = new Vector3(0.1, 0.1, 0.1);
-    ps.color1 = new Color4(0.4, 0.8, 1.0, 0.9);
-    ps.color2 = new Color4(0.1, 0.3, 1.0, 0.5);
+    ps.color1 = new Color4(color.r, color.g, color.b, 0.9);
+    ps.color2 = new Color4(color.r * 0.5, color.g * 0.5, color.b, 0.5);
     ps.minSize = 0.04;
-    ps.maxSize = 0.15;
+    ps.maxSize = isCharged ? 0.2 : 0.12;
     ps.minLifeTime = 0.1;
-    ps.maxLifeTime = 0.3;
-    ps.emitRate = 120;
+    ps.maxLifeTime = 0.4;
+    ps.emitRate = isCharged ? 200 : 150;
     ps.minEmitPower = 1;
-    ps.maxEmitPower = 3;
-    ps.updateSpeed = 0.02;
+    ps.maxEmitPower = isCharged ? 5 : 3;
+    ps.updateSpeed = 0.015;
     ps.start();
 
-    // Animacion de vuelo
-    const totalFrames = 40;
+    // Trail de partículas (más largo para cargado)
+    if (isCharged) {
+      const trail = new ParticleSystem("trail", 100, this.scene);
+      trail.particleTexture = new Texture("https://assets.babylonjs.com/textures/flare.png", this.scene);
+      trail.emitter = ball;
+      trail.minEmitBox = new Vector3(0, 0, 0);
+      trail.maxEmitBox = new Vector3(0, 0, 0);
+      trail.color1 = new Color4(1, 0.6, 0.2, 0.7);
+      trail.color2 = new Color4(1, 0.3, 0.0, 0.4);
+      trail.minSize = 0.08;
+      trail.maxSize = 0.25;
+      trail.minLifeTime = 0.3;
+      trail.maxLifeTime = 0.6;
+      trail.emitRate = 80;
+      trail.minEmitPower = 0;
+      trail.maxEmitPower = 0;
+      trail.updateSpeed = 0.02;
+      trail.direction1 = new Vector3(0, 0, -1);
+      trail.direction2 = new Vector3(0, 0, -1);
+      trail.minEmitPower = 2;
+      trail.maxEmitPower = 4;
+      trail.start();
+    }
+
+    // Animación de vuelo
+    const distance = Math.sqrt(
+      Math.pow(to.x - from.x, 2) + 
+      Math.pow(to.y - from.y, 2) + 
+      Math.pow(to.z - from.z, 2)
+    );
+    const totalFrames = Math.floor(60 / speed);
+
     const anim = new Animation(
       "ki_move", "position", 60,
       Animation.ANIMATIONTYPE_VECTOR3,
@@ -58,32 +109,361 @@ export class VFXManager {
     ball.animations = [anim];
 
     this.scene.beginAnimation(ball, 0, totalFrames, false, 1, () => {
-      // Explosion de impacto
-      this.spawnImpact(to);
+      this.spawnImpact(to, isCharged ? "charged" : "basic");
       ps.stop();
+      if (isCharged && (this.scene.getMeshByName("trail") as ParticleSystem)) {
+        // Limpiar trail
+      }
       ball.dispose();
       onImpact?.();
     });
   }
 
-  private spawnImpact(pos: Vec3): void {
-    const impact = new ParticleSystem("impact", 300, this.scene);
+  spawnKamehameha(from: Vec3, to: Vec3, chargeTime: number, onImpact?: () => void): void {
+    // Beam principal
+    const beam = MeshBuilder.CreateCylinder("kamehameha", {
+      height: 18,
+      diameterTop: 0.3 + chargeTime * 0.15,
+      diameterBottom: 0.8 + chargeTime * 0.2,
+      tessellation: 16,
+    }, this.scene);
+    
+    beam.position = new Vector3(from.x, from.y, (from.z + to.z) / 2);
+    beam.rotation.x = Math.PI / 2;
+
+    const beamMat = new StandardMaterial("beamMat", this.scene);
+    beamMat.diffuseColor = new Color3(0.2, 0.6, 1.0);
+    beamMat.emissiveColor = new Color3(0.1, 0.4, 0.9);
+    beamMat.alpha = 0.7;
+    beamMat.specularColor = new Color3(1, 1, 1);
+    beam.material = beamMat;
+
+    // Partículas de energía azul
+    const ps = new ParticleSystem("kamehameha_ps", 500, this.scene);
+    ps.particleTexture = new Texture("https://assets.babylonjs.com/textures/flare.png", this.scene);
+    ps.emitter = new Vector3(from.x, from.y, from.z + 1);
+    ps.minEmitBox = new Vector3(-0.3, -0.3, 0);
+    ps.maxEmitBox = new Vector3(0.3, 0.3, 0);
+    ps.color1 = new Color4(0.3, 0.8, 1.0, 1.0);
+    ps.color2 = new Color4(0.1, 0.5, 1.0, 0.6);
+    ps.colorDead = new Color4(0, 0.2, 0.5, 0);
+    ps.minSize = 0.15;
+    ps.maxSize = 0.4 + chargeTime * 0.1;
+    ps.minLifeTime = 0.5;
+    ps.maxLifeTime = 1.2;
+    ps.emitRate = 300;
+    ps.minEmitPower = 15;
+    ps.maxEmitPower = 25;
+    ps.updateSpeed = 0.01;
+    ps.direction1 = new Vector3(-0.2, -0.2, 1);
+    ps.direction2 = new Vector3(0.2, 0.2, 1);
+    ps.start();
+
+    // Efecto de electricidad
+    const electric = new ParticleSystem("electric", 150, this.scene);
+    electric.particleTexture = new Texture("https://assets.babylonjs.com/textures/flare.png", this.scene);
+    electric.emitter = beam;
+    electric.color1 = new Color4(0.8, 0.9, 1.0, 1.0);
+    electric.color2 = new Color4(0.5, 0.7, 1.0, 0.5);
+    electric.minSize = 0.05;
+    electric.maxSize = 0.15;
+    electric.minLifeTime = 0.1;
+    electric.maxLifeTime = 0.3;
+    electric.emitRate = 100;
+    electric.minEmitPower = 5;
+    electric.maxEmitPower = 10;
+    electric.start();
+
+    // Animación de avance
+    const animBeam = new Animation(
+      "beam_anim", "scaling.z", 60,
+      Animation.ANIMATIONTYPE_FLOAT,
+      Animation.ANIMATIONLOOPMODE_CONSTANT
+    );
+    
+    const targetZ = to.z - from.z;
+    const frames = 45;
+    
+    beam.scaling.z = 0;
+    animBeam.setKeys([
+      { frame: 0, value: 0 },
+      { frame: frames, value: 1 },
+    ]);
+    beam.animations = [animBeam];
+
+    this.scene.beginAnimation(beam, 0, frames, false, 1, () => {
+      this.spawnImpact(to, "kamehameha");
+      ps.stop();
+      electric.stop();
+      
+      setTimeout(() => {
+        beam.dispose();
+        ps.dispose();
+        electric.dispose();
+      }, 500);
+      
+      onImpact?.();
+    });
+  }
+
+  spawnFinalFlash(from: Vec3, to: Vec3, chargeTime: number, onImpact?: () => void): void {
+    // Beam más ancho y diferente forma (V)
+    const beam = MeshBuilder.CreateCylinder("finalFlash", {
+      height: 18,
+      diameterTop: 0.5 + chargeTime * 0.2,
+      diameterBottom: 1.2 + chargeTime * 0.3,
+      tessellation: 24,
+    }, this.scene);
+    
+    beam.position = new Vector3(from.x, from.y, (from.z + to.z) / 2);
+    beam.rotation.x = Math.PI / 2;
+
+    const beamMat = new StandardMaterial("ffMat", this.scene);
+    beamMat.diffuseColor = new Color3(1.0, 0.8, 0.2);
+    beamMat.emissiveColor = new Color3(1.0, 0.6, 0.0);
+    beamMat.alpha = 0.8;
+    beamMat.specularColor = new Color3(1, 1, 0.5);
+    beam.material = beamMat;
+
+    // Partículas doradas
+    const ps = new ParticleSystem("finalFlash_ps", 800, this.scene);
+    ps.particleTexture = new Texture("https://assets.babylonjs.com/textures/flare.png", this.scene);
+    ps.emitter = new Vector3(from.x, from.y, from.z + 1);
+    ps.minEmitBox = new Vector3(-0.5, -0.5, 0);
+    ps.maxEmitBox = new Vector3(0.5, 0.5, 0);
+    ps.color1 = new Color4(1.0, 0.9, 0.3, 1.0);
+    ps.color2 = new Color4(1.0, 0.6, 0.0, 0.7);
+    ps.colorDead = new Color4(1.0, 0.3, 0.0, 0);
+    ps.minSize = 0.2;
+    ps.maxSize = 0.5 + chargeTime * 0.15;
+    ps.minLifeTime = 0.6;
+    ps.maxLifeTime = 1.5;
+    ps.emitRate = 500;
+    ps.minEmitPower = 20;
+    ps.maxEmitPower = 35;
+    ps.updateSpeed = 0.008;
+    ps.direction1 = new Vector3(-0.3, -0.3, 1);
+    ps.direction2 = new Vector3(0.3, 0.3, 1);
+    ps.start();
+
+    // Efecto de explode
+    const explode = new ParticleSystem("explode", 300, this.scene);
+    explode.particleTexture = new Texture("https://assets.babylonjs.com/textures/flare.png", this.scene);
+    explode.emitter = new Vector3(to.x, to.y, to.z);
+    explode.minEmitBox = new Vector3(-1, -1, -1);
+    explode.maxEmitBox = new Vector3(1, 1, 1);
+    explode.color1 = new Color4(1.0, 1.0, 0.5, 1.0);
+    explode.color2 = new Color4(1.0, 0.5, 0.0, 0.8);
+    explode.minSize = 0.3;
+    explode.maxSize = 0.8;
+    explode.minLifeTime = 0.3;
+    explode.maxLifeTime = 0.8;
+    explode.emitRate = 1000;
+    explode.minEmitPower = 10;
+    explode.maxEmitPower = 25;
+    explode.targetStopDuration = 0.3;
+    explode.disposeOnStop = true;
+
+    // Animación
+    const frames = 50;
+    beam.scaling.z = 0;
+    const animBeam = new Animation("ff_anim", "scaling.z", 60, Animation.ANIMATIONTYPE_FLOAT);
+    animBeam.setKeys([
+      { frame: 0, value: 0 },
+      { frame: frames, value: 1 },
+    ]);
+    beam.animations = [animBeam];
+
+    this.scene.beginAnimation(beam, 0, frames, false, 1, () => {
+      explode.start();
+      ps.stop();
+      
+      setTimeout(() => {
+        beam.dispose();
+        ps.dispose();
+      }, 800);
+      
+      onImpact?.();
+    });
+  }
+
+  // ============================================
+  // EFECTOS DE IMPACTO
+  // ============================================
+  private spawnImpact(pos: Vec3, type: "basic" | "charged" | "kamehameha" | "finalFlash"): void {
+    const colors = {
+      basic: { c1: new Color4(0.5, 0.9, 1.0, 1.0), c2: new Color4(1.0, 1.0, 1.0, 0.8) },
+      charged: { c1: new Color4(1.0, 0.7, 0.3, 1.0), c2: new Color4(1.0, 0.4, 0.0, 0.8) },
+      kamehameha: { c1: new Color4(0.3, 0.8, 1.0, 1.0), c2: new Color4(0.1, 0.5, 1.0, 0.6) },
+      finalFlash: { c1: new Color4(1.0, 0.9, 0.3, 1.0), c2: new Color4(1.0, 0.5, 0.0, 0.8) },
+    };
+
+    const c = colors[type];
+    const intensity = type === "finalFlash" ? 2 : type === "kamehameha" ? 1.5 : 1;
+
+    const impact = new ParticleSystem("impact", Math.floor(300 * intensity), this.scene);
     impact.particleTexture = new Texture("https://assets.babylonjs.com/textures/flare.png", this.scene);
     impact.emitter = new Vector3(pos.x, pos.y, pos.z);
-    impact.minEmitBox = new Vector3(-0.2, -0.2, -0.2);
-    impact.maxEmitBox = new Vector3(0.2, 0.2, 0.2);
-    impact.color1 = new Color4(0.5, 0.9, 1.0, 1.0);
-    impact.color2 = new Color4(1.0, 1.0, 1.0, 0.8);
-    impact.minSize = 0.1;
-    impact.maxSize = 0.4;
+    impact.minEmitBox = new Vector3(-0.3, -0.3, -0.3);
+    impact.maxEmitBox = new Vector3(0.3, 0.3, 0.3);
+    impact.color1 = c.c1;
+    impact.color2 = c.c2;
+    impact.minSize = 0.1 * intensity;
+    impact.maxSize = 0.4 * intensity;
     impact.minLifeTime = 0.2;
     impact.maxLifeTime = 0.6;
-    impact.emitRate = 500;
-    impact.minEmitPower = 5;
-    impact.maxEmitPower = 15;
-    impact.updateSpeed = 0.02;
-    impact.targetStopDuration = 0.15;
+    impact.emitRate = 500 * intensity;
+    impact.minEmitPower = 5 * intensity;
+    impact.maxEmitPower = 15 * intensity;
+    impact.updateSpeed = 0.015;
+    impact.targetStopDuration = 0.2;
     impact.disposeOnStop = true;
     impact.start();
+  }
+
+  // ============================================
+  // EFECTOS DE CARGA
+  // ============================================
+  showChargeEffect(active: boolean, type: "normal" | "kamehameha" | "finalFlash" = "normal"): void {
+    if (!active) {
+      if (this.chargeMesh) {
+        this.chargeMesh.dispose();
+        this.chargeMesh = null;
+      }
+      return;
+    }
+
+    // Crear esfera de carga alrededor de la mano
+    this.chargeMesh = MeshBuilder.CreateSphere("charge", { diameter: 0.15 }, this.scene);
+    this.chargeMesh.position = new Vector3(0.3, 1.4, 0.5);
+
+    const mat = new StandardMaterial("chargeMat", this.scene);
+    if (type === "kamehameha") {
+      mat.diffuseColor = new Color3(0.2, 0.5, 1.0);
+      mat.emissiveColor = new Color3(0.1, 0.3, 0.8);
+    } else if (type === "finalFlash") {
+      mat.diffuseColor = new Color3(1.0, 0.7, 0.2);
+      mat.emissiveColor = new Color3(0.8, 0.4, 0.0);
+    } else {
+      mat.diffuseColor = new Color3(0.8, 0.4, 0.1);
+      mat.emissiveColor = new Color3(0.5, 0.2, 0.0);
+    }
+    mat.alpha = 0.7;
+    this.chargeMesh.material = mat;
+
+    // Animación de pulsación
+    const pulse = new Animation("pulse", "scaling", 60, Animation.ANIMATIONTYPE_VECTOR3);
+    pulse.setKeys([
+      { frame: 0, value: new Vector3(1, 1, 1) },
+      { frame: 15, value: new Vector3(1.3, 1.3, 1.3) },
+      { frame: 30, value: new Vector3(1, 1, 1) },
+    ]);
+    this.chargeMesh.animations = [pulse];
+    this.scene.beginAnimation(this.chargeMesh, 0, 30, true);
+
+    // Partículas de carga
+    const ps = new ParticleSystem("charge_ps", 100, this.scene);
+    ps.particleTexture = new Texture("https://assets.babylonjs.com/textures/flare.png", this.scene);
+    ps.emitter = this.chargeMesh;
+    ps.color1 = new Color4(1, 0.6, 0.2, 0.8);
+    ps.color2 = new Color4(1, 0.3, 0.0, 0.5);
+    ps.minSize = 0.03;
+    ps.maxSize = 0.08;
+    ps.minLifeTime = 0.2;
+    ps.maxLifeTime = 0.5;
+    ps.emitRate = 60;
+    ps.minEmitPower = 0.5;
+    ps.maxEmitPower = 1.5;
+    ps.start();
+  }
+
+  // ============================================
+  // DEFENSAS
+  // ============================================
+  showBlockShield(active: boolean): void {
+    if (!active) {
+      if (this.blockShield) {
+        this.blockShield.dispose();
+        this.blockShield = null;
+      }
+      return;
+    }
+
+    // Escudo hexagonal frente al jugador
+    this.blockShield = MeshBuilder.CreateDisc("shield", { radius: 0.8, tessellation: 6 }, this.scene);
+    this.blockShield.position = new Vector3(0, 1.5, 1.2);
+    this.blockShield.rotation.y = Math.PI;
+
+    const mat = new StandardMaterial("shieldMat", this.scene);
+    mat.diffuseColor = new Color3(0.2, 0.6, 1.0);
+    mat.emissiveColor = new Color3(0.1, 0.3, 0.6);
+    mat.alpha = 0.4;
+    mat.backFaceCulling = false;
+    this.blockShield.material = mat;
+
+    // Animación de aparición
+    this.blockShield.scaling = new Vector3(0, 0, 0);
+    const scaleAnim = new Animation("shield_scale", "scaling", 60, Animation.ANIMATIONTYPE_VECTOR3);
+    scaleAnim.setKeys([
+      { frame: 0, value: new Vector3(0, 0, 0) },
+      { frame: 10, value: new Vector3(1.2, 1.2, 1.2) },
+      { frame: 15, value: new Vector3(1, 1, 1) },
+    ]);
+    this.blockShield.animations = [scaleAnim];
+    this.scene.beginAnimation(this.blockShield, 0, 15, false);
+  }
+
+  showDodgeEffect(): void {
+    // Estela de movimiento rápido
+    const dodge = new ParticleSystem("dodge", 50, this.scene);
+    dodge.particleTexture = new Texture("https://assets.babylonjs.com/textures/flare.png", this.scene);
+    dodge.emitter = new Vector3(0, 1.5, 0.8);
+    dodge.minEmitBox = new Vector3(-0.3, -0.5, -0.2);
+    dodge.maxEmitBox = new Vector3(0.3, 0.5, 0.2);
+    dodge.color1 = new Color4(0.5, 0.8, 1.0, 0.8);
+    dodge.color2 = new Color4(0.2, 0.5, 0.8, 0.5);
+    dodge.minSize = 0.05;
+    dodge.maxSize = 0.15;
+    dodge.minLifeTime = 0.1;
+    dodge.maxLifeTime = 0.3;
+    dodge.emitRate = 300;
+    dodge.targetStopDuration = 0.15;
+    dodge.disposeOnStop = true;
+    dodge.direction1 = new Vector3(-1, 0, 0);
+    dodge.direction2 = new Vector3(1, 0, 0);
+    dodge.minEmitPower = 3;
+    dodge.maxEmitPower = 8;
+    dodge.start();
+  }
+
+  showDeflectEffect(): void {
+    // Efecto de redirección de energía
+    const deflect = new ParticleSystem("deflect", 100, this.scene);
+    deflect.particleTexture = new Texture("https://assets.babylonjs.com/textures/flare.png", this.scene);
+    deflect.emitter = new Vector3(0, 1.5, 1);
+    deflect.color1 = new Color4(0.8, 1.0, 0.5, 1.0);
+    deflect.color2 = new Color4(0.5, 0.8, 0.3, 0.6);
+    deflect.minSize = 0.08;
+    deflect.maxSize = 0.2;
+    deflect.minLifeTime = 0.2;
+    deflect.maxLifeTime = 0.5;
+    deflect.emitRate = 200;
+    deflect.direction1 = new Vector3(-1, 0.5, 1);
+    deflect.direction2 = new Vector3(1, -0.5, 1);
+    deflect.minEmitPower = 5;
+    deflect.maxEmitPower = 12;
+    deflect.targetStopDuration = 0.3;
+    deflect.disposeOnStop = true;
+    deflect.start();
+  }
+
+  // ============================================
+  // AURAS Y EFECTOS AMBIENTALES
+  // ============================================
+  updatePlayerAura(np: number): void {
+    // El color del aura cambia según el nivel de poder
+    // Esta función se conectará con el sistema de partículas del jugador
+    // np: 0-20 azul (debilitado), 21-50 verde (normal), 51-75 amarillo (elevado), 
+    //     76-90 naranja (dominante), 91-100 blanco brillante (trascendente)
   }
 }
