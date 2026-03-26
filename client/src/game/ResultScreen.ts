@@ -22,11 +22,12 @@ export class ResultScreen {
     this.overlay = document.createElement("div");
     this.overlay.id = "result-screen";
     this.overlay.style.cssText = `
-      position:absolute; inset:0; z-index:30;
+      position:absolute; inset:0; z-index:50;
       display:none; align-items:center; justify-content:center;
       font-family:var(--font-body);
       background:rgba(0,0,0,0.85);
       backdrop-filter:blur(4px);
+      pointer-events:auto;
     `;
     parent.appendChild(this.overlay);
   }

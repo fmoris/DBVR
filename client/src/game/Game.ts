@@ -316,6 +316,22 @@ export class Game {
   }
 
   private setupGameOverHandler(): void {
+    // Registrar el callback UNA SOLA VEZ antes de que ocurra el game over
+    // (no dentro de onGameOver, donde se acumulan por cada partida)
+    this.resultScreen.onAction((action) => {
+      if (action === "restart") {
+        window.location.reload();
+      } else if (action === "menu") {
+        // Usar el flujo limpio de retorno al menú si está disponible
+        if (this.menuCallback) {
+          this.resultScreen.hide();
+          this.menuCallback();
+        } else {
+          window.location.reload();
+        }
+      }
+    });
+
     this.combat.onGameOver((winner) => {
       const stats = this.combat.getStats();
       const durationSeconds = (Date.now() - this.combatStartTime) / 1000;
@@ -326,15 +342,6 @@ export class Game {
         playerKi: stats.playerKi,
         winner,
         combatDurationSeconds: durationSeconds,
-      });
-
-      this.resultScreen.onAction((action) => {
-        if (action === "restart") {
-          // Recargar la pagina para reiniciar el combate
-          window.location.reload();
-        } else if (action === "menu") {
-          window.location.reload();
-        }
       });
     });
   }

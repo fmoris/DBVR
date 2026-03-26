@@ -363,3 +363,11 @@
 - [x] Panel ATAQUE (Atacar, Cargar, Kamehameha, Final Flash) al centro-derecho
 - [x] Panel DEFENSA (Bloquear, Esquivar, Recargar) al centro-izquierdo
 - [x] Botones de sistema (Menu, DBG) en esquina inferior central
+
+---
+
+## Bug: botones ResultScreen no funcionan
+- [x] Bug 1: onAction se registraba dentro de onGameOver (después de render) — movido antes de show()
+- [x] Bug 2: pointer-events:none heredado bloqueaba los clics — agregado pointer-events:auto en overlay
+- [x] Bug 3: z-index del overlay subido de 30 a 50 para estar sobre el HUD
+- [x] Botón Menú ahora usa menuCallback limpio en lugar de window.location.reload()
