@@ -332,3 +332,15 @@
 - [x] Bullet time Final Flash: 4500ms a 0.12x (antes 2000ms a 0.2x)
 - [x] Transicion suave de entrada (300ms ramp-in) y salida (500ms ramp-out)
 - [x] Efecto visual: viñeta purpura mas intensa, aberracion cromatica, etiqueta BULLET TIME
+
+---
+
+## Tipografia body
+- [x] Fuente Rajdhani (Google Fonts, 400/500/600/700) agregada en index.html
+- [x] Variable CSS --font-body definida en :root de index.html
+- [x] HUD: contenedor principal cambiado a --font-body (labels, barras, botones secundarios)
+- [x] StartScreen: contenedor cambiado a --font-body; botones de navegacion y textos descriptivos
+- [x] StartScreen: --font-saiyan mantenido en boton Iniciar Combate (titulo principal)
+- [x] ResultScreen: contenedor cambiado a --font-body; botones Reiniciar y Menu
+- [x] ResultScreen: --font-saiyan mantenido solo en el titulo VICTORIA/DERROTA
+- [x] GestureDebugOverlay: cambiado de Courier New a --font-body

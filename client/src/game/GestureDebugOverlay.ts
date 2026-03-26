@@ -46,7 +46,7 @@ export class GestureDebugOverlay {
       border: 1.5px solid rgba(0, 200, 255, 0.5);
       border-radius: 8px;
       padding: 10px 16px;
-      font-family: 'Courier New', monospace;
+      font-family: var(--font-body);
       font-size: 11px;
       color: #00ccff;
       min-width: 340px;

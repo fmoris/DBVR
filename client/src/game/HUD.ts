@@ -50,7 +50,7 @@ export class HUD {
     this.container = document.createElement("div");
     this.container.style.cssText = `
       position:absolute; inset:0; pointer-events:none;
-      font-family:var(--font-saiyan); user-select:none; display:none;
+      font-family:var(--font-body); user-select:none; display:none;
     `;
     this.parent.appendChild(this.container);
     this.buildDOM();

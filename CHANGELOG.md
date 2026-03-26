@@ -5,6 +5,23 @@ Las versiones corresponden a los checkpoints del proyecto.
 
 ---
 
+## [v1.0.0] — 2026-03-26 · Tipografía body Rajdhani
+
+### Agregado
+- Fuente **Rajdhani** (Google Fonts, pesos 400/500/600/700) como tipografía de cuerpo legible.
+- Variable CSS `--font-body: 'Rajdhani', 'Segoe UI', Arial, sans-serif` en `:root` de `index.html`.
+
+### Modificado
+- `HUD.ts`: contenedor principal cambiado de `--font-saiyan` a `--font-body`. Todos los labels, barras y botones secundarios usan Rajdhani.
+- `StartScreen.ts`: contenedor cambiado a `--font-body`. Textos descriptivos, tutorial, changelog y botones de navegación usan Rajdhani. `--font-saiyan` se mantiene solo en el botón principal "Iniciar Combate".
+- `ResultScreen.ts`: contenedor cambiado a `--font-body`. Estadísticas, rangos y botones usan Rajdhani. `--font-saiyan` se mantiene solo en el título VICTORIA/DERROTA.
+- `GestureDebugOverlay.ts`: cambiado de `'Courier New', monospace` a `--font-body`.
+
+### Archivos modificados
+`index.html` · `HUD.ts` · `StartScreen.ts` · `ResultScreen.ts` · `GestureDebugOverlay.ts`
+
+---
+
 ## [9ec4cd13] — 2026-03-26 · Debug overlay de gestos + Bullet time mejorado
 
 ### Agregado

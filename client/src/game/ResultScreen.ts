@@ -24,7 +24,7 @@ export class ResultScreen {
     this.overlay.style.cssText = `
       position:absolute; inset:0; z-index:30;
       display:none; align-items:center; justify-content:center;
-      font-family:var(--font-saiyan);
+      font-family:var(--font-body);
       background:rgba(0,0,0,0.85);
       backdrop-filter:blur(4px);
     `;
@@ -83,6 +83,7 @@ export class ResultScreen {
         <!-- Titulo principal -->
         <div style="
           font-size:52px; font-weight:bold; letter-spacing:8px;
+          font-family:var(--font-saiyan);
           color:${titleColor}; text-shadow:0 0 30px ${titleGlow};
           margin-bottom:8px; animation:pulse 1.5s ease-in-out infinite;
         ">${titleText}</div>
@@ -135,7 +136,7 @@ export class ResultScreen {
             padding:14px 40px;
             background:linear-gradient(135deg,#003366,#0055cc);
             border:2px solid #0099ff; border-radius:6px; color:#00ccff;
-            font-size:14px; font-family:var(--font-saiyan); font-weight:bold;
+            font-size:14px; font-family:var(--font-body); font-weight:700;
             letter-spacing:3px; cursor:pointer; text-transform:uppercase;
             box-shadow:0 0 20px rgba(0,150,255,0.4);
             transition:all 0.2s;
@@ -143,7 +144,7 @@ export class ResultScreen {
           <button id="btn-menu" style="
             padding:14px 40px; background:transparent;
             border:1px solid #334455; border-radius:6px; color:#556677;
-            font-size:14px; font-family:var(--font-saiyan);
+            font-size:14px; font-family:var(--font-body);
             letter-spacing:3px; cursor:pointer; text-transform:uppercase;
             transition:all 0.2s;
           ">Menu</button>
