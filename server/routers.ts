@@ -98,7 +98,7 @@ export const appRouter = router({
     getDownloadUrl: protectedProcedure
       .input(z.object({ fileKey: z.string() }))
       .query(async ({ input }) => {
-        const { url } = await storageGet(input.fileKey, 3600);
+        const { url } = await storageGet(input.fileKey);
         return { url };
       }),
 

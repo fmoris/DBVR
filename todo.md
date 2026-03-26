@@ -292,3 +292,15 @@
 - [x] Manos: mas grandes y prominentes (palma + 4 dedos + pulgar)
 - [x] Manos: aura de KI azul alrededor de las manos (particulas)
 - [x] Manos: posicion mas baja y separada (como en la imagen)
+
+---
+
+## Bug: carga infinita al entrar VR en Meta Quest 3
+
+- [x] Reemplazar initWebXR() en Game.ts con patron correcto (xrInput, optionalFeatures array)
+- [x] Corregir mismatch local-floor (init) vs local (enterXRAsync) — ahora consistente
+- [x] Agregar timeout de 12s con fallback si WebXR no responde
+- [x] Agregar verificacion previa navigator.xr.isSessionSupported antes de init
+- [x] Ocultar manos estaticas 3D cuando hand tracking esta activo en VR (onStateChangedObservable)
+- [x] GestureRecognizer.ts ya existe — error de Vite era stale cache
+- [x] Corregir error TS2554 en routers.ts (storageGet con argumento extra)

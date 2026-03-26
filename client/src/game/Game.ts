@@ -379,44 +379,93 @@ export class Game {
   }
 
   private async initWebXR(): Promise<void> {
+    // Verificar soporte WebXR antes de intentar inicializar
+    if (!navigator.xr) {
+      console.log("[XR] navigator.xr no disponible — modo desktop");
+      return;
+    }
+
+    const supported = await navigator.xr.isSessionSupported("immersive-vr").catch(() => false);
+    if (!supported) {
+      console.log("[XR] immersive-vr no soportado en este dispositivo");
+      return;
+    }
+
     try {
-      const featureManager = this.scene.createDefaultXRExperienceAsync({
+      // Timeout de seguridad: si createDefaultXRExperienceAsync tarda más de 12s, abortar
+      const xrPromise = this.scene.createDefaultXRExperienceAsync({
         uiOptions: {
-          sessionMode: 'immersive-vr',
-          referenceSpaceType: 'local-floor',
+          sessionMode: "immersive-vr",
+          referenceSpaceType: "local-floor",
         },
-        optionalFeatures: true,
+        optionalFeatures: ["hand-tracking"],
       });
 
-      this.xr = await featureManager;
-      
-      // Habilitar hand tracking
-      const handTracking = this.xr.baseExperience.featuresManager.enableFeature(
-        WebXRFeatureName.HAND_TRACKING,
-        'latest'
+      const timeoutPromise = new Promise<null>((_, reject) =>
+        setTimeout(() => reject(new Error("XR init timeout")), 12000)
       );
 
-      // Loop de actualización de hand tracking
-      this.scene.registerBeforeRender(() => {
-        if (handTracking && handTracking.hands) {
-          const leftHand = handTracking.hands.get('left');
-          const rightHand = handTracking.hands.get('right');
-          
-          if (leftHand) {
-            this.gestureRecognizer.updateHandJoints('left', this.extractJoints(leftHand));
-          }
-          if (rightHand) {
-            this.gestureRecognizer.updateHandJoints('right', this.extractJoints(rightHand));
-          }
+      this.xr = await Promise.race([xrPromise, timeoutPromise]);
 
-          // Ejecutar acciones basadas en gestos
-          this.processGestures();
+      if (!this.xr) {
+        console.warn("[XR] xrHelper es null después de init");
+        return;
+      }
+
+      // Habilitar hand tracking con xrInput (requerido por Meta Quest)
+      let handTracking: any = null;
+      try {
+        handTracking = this.xr.baseExperience.featuresManager.enableFeature(
+          WebXRFeatureName.HAND_TRACKING,
+          "latest",
+          {
+            xrInput: this.xr.input,
+            jointMeshes: {
+              disableDefaultHandMesh: true,
+              invisible: true,
+            },
+          }
+        );
+      } catch (htErr) {
+        console.warn("[XR] Hand tracking no disponible:", htErr);
+      }
+
+      // Ocultar manos estáticas cuando XR está activo
+      this.xr.baseExperience.onStateChangedObservable.add((state: number) => {
+        // state 2 = IN_XR
+        const inXR = state === 2;
+        const leftMesh = this.scene.getMeshByName("leftHand");
+        const rightMesh = this.scene.getMeshByName("rightHand");
+        if (leftMesh)  leftMesh.isVisible  = !inXR;
+        if (rightMesh) rightMesh.isVisible = !inXR;
+        // También ocultar dedos
+        for (let i = 0; i < 4; i++) {
+          const lf = this.scene.getMeshByName(`lFinger${i}`);
+          const rf = this.scene.getMeshByName(`rFinger${i}`);
+          if (lf) lf.isVisible = !inXR;
+          if (rf) rf.isVisible = !inXR;
         }
+        ["lThumb", "rThumb"].forEach(n => {
+          const m = this.scene.getMeshByName(n);
+          if (m) m.isVisible = !inXR;
+        });
       });
 
-      console.log("✅ WebXR + Hand Tracking inicializado");
+      // Loop de hand tracking
+      if (handTracking) {
+        this.scene.registerBeforeRender(() => {
+          if (!handTracking.hands) return;
+          const lh = handTracking.hands.get("left");
+          const rh = handTracking.hands.get("right");
+          if (lh) this.gestureRecognizer.updateHandJoints("left",  this.extractJoints(lh));
+          if (rh) this.gestureRecognizer.updateHandJoints("right", this.extractJoints(rh));
+          this.processGestures();
+        });
+      }
+
+      console.log("[XR] WebXR inicializado correctamente");
     } catch (e) {
-      console.log("ℹ️ WebXR no disponible:", e);
+      console.warn("[XR] Error al inicializar WebXR:", e);
     }
   }
 
