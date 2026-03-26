@@ -271,23 +271,55 @@ export class HUD {
     label.style.textShadow = `0 0 12px ${color}`;
     label.style.border = `1px solid ${color}44`;
 
-    // Indicador de carga
+    // Indicador de carga con niveles MINIMO / MEDIO / MAXIMO
     const chargeIndicator = this.elements["chargeIndicator"] as HTMLElement;
-    if (stats.combatState === "charging" || stats.combatState === "charging_special") {
+    if (stats.combatState === "charging_special" && stats.specialType) {
+      chargeIndicator.style.display = "block";
+      const specialName = stats.specialType === "kamehameha" ? "KAMEHAMEHA" : "FINAL FLASH";
+      const t = stats.chargeTime;
+
+      // Determinar nivel actual y siguiente
+      const levels = stats.specialType === "kamehameha"
+        ? [{ label: "MINIMO", timeMin: 2 }, { label: "MEDIO", timeMin: 5 }, { label: "MAXIMO", timeMin: 8 }]
+        : [{ label: "MINIMO", timeMin: 3 }, { label: "MEDIO", timeMin: 6 }, { label: "MAXIMO", timeMin: 10 }];
+      const damages = stats.specialType === "kamehameha" ? [40, 70, 100] : [60, 110, 150];
+
+      let currentLevelIdx = -1;
+      for (let i = 0; i < levels.length; i++) {
+        if (t >= levels[i].timeMin) currentLevelIdx = i;
+      }
+
+      const nextLevel = levels[currentLevelIdx + 1];
+      const timeToNext = nextLevel ? (nextLevel.timeMin - t).toFixed(1) : null;
+      const currentLabel = currentLevelIdx >= 0 ? levels[currentLevelIdx].label : "CARGANDO";
+      const currentDmg = currentLevelIdx >= 0 ? damages[currentLevelIdx] : 0;
+
+      // Color segun nivel
+      const levelColor = currentLevelIdx === 2 ? "#ff4444" : currentLevelIdx === 1 ? "#ff8800" : currentLevelIdx === 0 ? "#ffcc00" : "#888";
+      chargeIndicator.style.color = levelColor;
+
+      const levelBar = currentLevelIdx >= 0
+        ? `<span style="color:${levelColor};font-weight:bold;">▶ ${currentLabel}</span>`
+        : `<span style="color:#888;">▶ CARGANDO...</span>`;
+
+      const nextInfo = timeToNext
+        ? `<span style="color:#aaa;font-size:11px;"> → ${levels[currentLevelIdx + 1].label} en ${timeToNext}s</span>`
+        : `<span style="color:#ff4444;font-size:11px;"> ★ MAXIMO ALCANZADO</span>`;
+
+      const dmgInfo = currentLevelIdx >= 0
+        ? `<span style="color:#fff;font-size:11px;"> | Daño: ~${currentDmg}</span>`
+        : "";
+
+      chargeIndicator.innerHTML = `⚡ ${specialName} ${t.toFixed(1)}s<br>${levelBar}${nextInfo}${dmgInfo}`;
+
+    } else if (stats.combatState === "charging") {
       chargeIndicator.style.display = "block";
       chargeIndicator.style.color = "#ffcc00";
-      const specialName = stats.specialType === "kamehameha" ? "KAMEHAMEHA" : stats.specialType === "finalFlash" ? "FINAL FLASH" : "";
-      const minTime = stats.specialType === "kamehameha" ? 2 : stats.specialType === "finalFlash" ? 3 : 0;
-      const ready = stats.chargeTime >= minTime;
-      chargeIndicator.style.color = ready ? "#00ff88" : "#ffcc00";
-      chargeIndicator.innerHTML = specialName
-        ? `${ready ? "✅" : "⏳"} ${specialName}: ${stats.chargeTime.toFixed(1)}s ${ready ? "— LISTO! Presiona de nuevo" : `(min ${minTime}s)`}`
-        : `⏳ CARGANDO: ${stats.chargeTime.toFixed(1)}s`;
+      chargeIndicator.innerHTML = `⏳ CARGANDO: ${stats.chargeTime.toFixed(1)}s`;
     } else if (stats.combatState === "attacking" && stats.currentAttack) {
       chargeIndicator.style.display = "block";
       chargeIndicator.style.color = "#ff6600";
-      const attackName = stats.currentAttack.toUpperCase();
-      chargeIndicator.innerHTML = `🔥 ${attackName}`;
+      chargeIndicator.innerHTML = `🔥 ${stats.currentAttack.toUpperCase()}`;
     } else {
       chargeIndicator.style.display = "none";
     }

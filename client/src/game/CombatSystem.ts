@@ -31,24 +31,58 @@ export interface GameStats {
 
 type StatsListener = (stats: GameStats) => void;
 
-// Costos de KI
+// Costos de KI generales
 const KI_COSTS = {
   basicAttack: 8,
   chargedAttack: { base: 20, perSecond: 5 },
-  kamehameha: { base: 40, perSecond: 5, minTime: 2 },
-  finalFlash: { base: 60, perSecond: 8, minTime: 3 },
   block: 15,
   dodge: 5,
   deflect: 10,
 };
 
-// Danos base
+// Danos base generales
 const DAMAGE = {
   basicAttack: 10,
   chargedAttack: { base: 20, perSecond: 10 },
-  kamehameha: { base: 40, perSecond: 10 },
-  finalFlash: { base: 60, perSecond: 15 },
 };
+
+// Niveles de carga para ataques especiales
+// Cada nivel define: tiempo minimo para alcanzarlo, KI consumido total y daño base
+const SPECIAL_LEVELS = {
+  kamehameha: [
+    { label: "MINIMO",  timeMin: 2,  timeMax: 4.9, ki: 40,  damage: 40  },
+    { label: "MEDIO",   timeMin: 5,  timeMax: 7.9, ki: 60,  damage: 70  },
+    { label: "MAXIMO",  timeMin: 8,  timeMax: 99,  ki: 80,  damage: 100 },
+  ],
+  finalFlash: [
+    { label: "MINIMO",  timeMin: 3,  timeMax: 5.9, ki: 60,  damage: 60  },
+    { label: "MEDIO",   timeMin: 6,  timeMax: 9.9, ki: 90,  damage: 110 },
+    { label: "MAXIMO",  timeMin: 10, timeMax: 99,  ki: 120, damage: 150 },
+  ],
+} as const;
+
+// Factor de daño segun NP del atacante (mas NP = mas daño)
+function npDamageFactor(np: number): number {
+  if (np >= 91) return 1.8;
+  if (np >= 76) return 1.5;
+  if (np >= 51) return 1.2;
+  if (np >= 21) return 1.0;
+  return 0.7;
+}
+
+// Obtener el nivel de carga actual segun el tiempo transcurrido
+function getChargeLevel(
+  type: "kamehameha" | "finalFlash",
+  elapsed: number
+): (typeof SPECIAL_LEVELS)["kamehameha"][number] | null {
+  const levels = SPECIAL_LEVELS[type];
+  // Buscar el nivel mas alto alcanzado
+  let reached: (typeof SPECIAL_LEVELS)["kamehameha"][number] | null = null;
+  for (const level of levels) {
+    if (elapsed >= level.timeMin) reached = level;
+  }
+  return reached;
+}
 
 export class CombatSystem {
   private stats: GameStats = {
@@ -264,8 +298,9 @@ export class CombatSystem {
   }
 
   private beginSpecialCharge(type: SpecialAttackType): void {
-    const cost = type === "kamehameha" ? KI_COSTS.kamehameha : KI_COSTS.finalFlash;
-    if (this.stats.playerKi < cost.base) return;
+    // Verificar KI minimo para el primer nivel
+    const firstLevel = SPECIAL_LEVELS[type][0];
+    if (this.stats.playerKi < firstLevel.ki) return;
 
     this.activeSpecial = type;
     this.specialChargeStart = Date.now();
@@ -274,21 +309,35 @@ export class CombatSystem {
     this.setState("charging_special");
     this.vfx.showChargeEffect(true, type);
 
+    // KI se consume de forma gradual: el costo total del nivel maximo repartido en su tiempo
+    // Kamehameha max: 80 KI en 8s = 1 KI/100ms
+    // Final Flash max: 120 KI en 10s = 1.2 KI/100ms
+    const maxLevel = SPECIAL_LEVELS[type][2];
+    const maxTime = maxLevel.timeMin; // tiempo para llegar al maximo
+    const kiPerTick = (maxLevel.ki / maxTime) * 0.1; // KI por cada 100ms
+
     this.stopChargeInterval();
     this.chargeInterval = setInterval(() => {
       const elapsed = (Date.now() - this.specialChargeStart) / 1000;
       this.stats.chargeTime = elapsed;
 
-      // Consumir KI progresivamente durante la carga
-      const kiDrain = cost.perSecond * 0.1; // por cada 100ms
-      this.stats.playerKi = Math.max(0, this.stats.playerKi - kiDrain);
+      // Consumir KI progresivamente
+      this.stats.playerKi = Math.max(0, this.stats.playerKi - kiPerTick);
+
+      // Auto-cancelar si se queda sin KI antes del nivel minimo
+      const minLevel = SPECIAL_LEVELS[type][0];
+      if (this.stats.playerKi <= 0 && elapsed < minLevel.timeMin) {
+        this.cancelCharge();
+        return;
+      }
+
+      // Auto-lanzar al llegar al tiempo maximo
+      if (elapsed >= maxLevel.timeMin) {
+        this.launchSpecial(type);
+        return;
+      }
 
       this.emit();
-
-      // Auto-cancelar si se queda sin KI
-      if (this.stats.playerKi <= 0) {
-        this.cancelCharge();
-      }
     }, 100);
   }
 
@@ -296,24 +345,20 @@ export class CombatSystem {
     if (this.activeSpecial !== type) return;
     this.stopChargeInterval();
 
-    const cost = type === "kamehameha" ? KI_COSTS.kamehameha : KI_COSTS.finalFlash;
-    const dmgTable = type === "kamehameha" ? DAMAGE.kamehameha : DAMAGE.finalFlash;
     const elapsed = (Date.now() - this.specialChargeStart) / 1000;
 
-    // Carga minima requerida
-    if (elapsed < cost.minTime) {
-      // Aun no cumple el minimo — continuar cargando, no lanzar
-      return;
-    }
-
-    const chargeTime = Math.min(elapsed, 10);
-    const damage = dmgTable.base + Math.max(0, chargeTime - cost.minTime) * dmgTable.perSecond;
-
-    // El KI ya se fue consumiendo durante la carga — solo verificar que queda algo
-    if (this.stats.playerKi < 5) {
+    // Determinar nivel de carga alcanzado
+    const level = getChargeLevel(type, elapsed);
+    if (!level) {
+      // No alcanzo ni el nivel minimo — cancelar sin lanzar
       this.cancelCharge();
       return;
     }
+
+    // Calcular daño final con factor de NP
+    const damage = level.damage * npDamageFactor(this.stats.playerNP);
+
+    // El KI ya se consumio durante la carga — no se descuenta extra al lanzar
 
     this.activeSpecial = null;
     this.stats.chargeTime = 0;
@@ -327,7 +372,7 @@ export class CombatSystem {
       this.vfx.spawnKamehameha(
         { x: 0, y: 1.4, z: 0.3 },
         { x: 0, y: 1.7, z: 20 },
-        chargeTime,
+        elapsed,
         () => {
           this.onAttackImpact(damage);
           this.activateSlowMotion(1500, 0.25);
@@ -337,7 +382,7 @@ export class CombatSystem {
       this.vfx.spawnFinalFlash(
         { x: 0, y: 1.5, z: 0.3 },
         { x: 0, y: 1.7, z: 20 },
-        chargeTime,
+        elapsed,
         () => {
           this.onAttackImpact(damage);
           this.activateSlowMotion(2000, 0.2);

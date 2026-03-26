@@ -239,3 +239,15 @@
 - [x] Seccion Changelog: historial de versiones del juego
 - [x] Animacion de fondo con particulas de KI en la pantalla de inicio
 - [x] Navegacion con botones entre secciones
+
+## Ataques Especiales — Niveles de Carga
+
+- [x] Kamehameha nivel minimo (2s, 40 KI, daño base 40)
+- [x] Kamehameha nivel medio (5s, 60 KI, daño base 70)
+- [x] Kamehameha nivel maximo (8s, 80 KI, daño base 100)
+- [x] Final Flash nivel minimo (3s, 60 KI, daño base 60)
+- [x] Final Flash nivel medio (6s, 90 KI, daño base 110)
+- [x] Final Flash nivel maximo (10s, 120 KI, daño base 150)
+- [x] Calculo de daño final: daño base * factor NP del jugador
+- [x] HUD muestra nivel de carga actual (MINIMO / MEDIO / MAXIMO) durante la carga
+- [x] HUD muestra daño estimado en tiempo real segun carga acumulada
