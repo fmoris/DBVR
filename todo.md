@@ -316,3 +316,16 @@
 - [x] Botón Menú [M] agregado en la barra de controles del HUD (rojo diferenciado)
 - [x] disposeAndExit() en Game.ts: sale de XR, detiene voz, libera motor
 - [x] main.ts refactorizado: goToMenu() recrea StartScreen sin window.location.reload()
+
+---
+
+## Debug gestos + bullet time mejorado
+
+- [x] Overlay de debug (GestureDebugOverlay.ts): joints L/R, gesto, historial de cambios
+- [x] Overlay muestra gesto detectado con color segun tipo
+- [x] Overlay muestra si hand tracking esta activo (verde) o sin datos (rojo)
+- [x] Toggle con tecla G (desktop) y boton [DBG] en HUD
+- [x] Bullet time Kamehameha: 3500ms a 0.18x (antes 1500ms a 0.25x)
+- [x] Bullet time Final Flash: 4500ms a 0.12x (antes 2000ms a 0.2x)
+- [x] Transicion suave de entrada (300ms ramp-in) y salida (500ms ramp-out)
+- [x] Efecto visual: viñeta purpura mas intensa, aberracion cromatica, etiqueta BULLET TIME

@@ -20,6 +20,7 @@ import { HUD } from "./HUD";
 import { CombatSystem } from "./CombatSystem";
 import { VFXManager } from "./VFXManager";
 import { GestureRecognizer, extractHandJoints } from "./GestureRecognizer";
+import { GestureDebugOverlay } from "./GestureDebugOverlay";
 import { VoiceRecognizer } from "./VoiceRecognizer";
 import { ResultScreen } from "./ResultScreen";
 
@@ -37,6 +38,8 @@ export class Game {
   private xr: any = null;
   private started = false;
   private menuCallback: (() => void) | null = null;
+  private debugOverlay!: GestureDebugOverlay;
+  private handTrackingActive = false;
 
   constructor(private canvas: HTMLCanvasElement) {
     this.engine = new Engine(canvas, true, {
@@ -63,11 +66,15 @@ export class Game {
     this.hud = new HUD(this.canvas.parentElement!, this.combat);
     this.voiceRecognizer = new VoiceRecognizer();
     this.resultScreen = new ResultScreen(this.canvas.parentElement!);
+    this.debugOverlay = new GestureDebugOverlay(this.canvas.parentElement!);
 
     // Conectar botón Menú del HUD
     this.hud.onMenu(() => {
       if (this.menuCallback) this.menuCallback();
     });
+
+    // Conectar botón DBG del HUD al overlay de debug
+    this.hud.onDebugToggle(() => this.debugOverlay.toggle());
 
     this.setupKeyboard();
     this.setupVoiceRecognition();
@@ -470,9 +477,35 @@ export class Game {
           const rh = handTracking.hands.get("right");
           const lJoints = lh ? extractHandJoints(lh) : null;
           const rJoints = rh ? extractHandJoints(rh) : null;
+
+          // Actualizar estado de hand tracking
+          this.handTrackingActive = !!(lJoints || rJoints);
+
           if (lJoints) this.gestureRecognizer.updateHandJoints("left",  lJoints);
           if (rJoints) this.gestureRecognizer.updateHandJoints("right", rJoints);
           if (lJoints && rJoints) this.processGestures();
+
+          // Alimentar el overlay de debug (solo si está visible para no desperdiciar CPU)
+          if (this.debugOverlay?.isVisible()) {
+            this.debugOverlay.update({
+              handTrackingActive: this.handTrackingActive,
+              leftJoints:  lJoints,
+              rightJoints: rJoints,
+              gesture: this.gestureRecognizer.getCurrentGesture(),
+            });
+          }
+        });
+      } else {
+        // Sin hand tracking: actualizar overlay con estado vacío para mostrar el error
+        this.scene.registerBeforeRender(() => {
+          if (this.debugOverlay?.isVisible()) {
+            this.debugOverlay.update({
+              handTrackingActive: false,
+              leftJoints:  this.gestureRecognizer.getLeftHandJoints(),
+              rightJoints: this.gestureRecognizer.getRightHandJoints(),
+              gesture: this.gestureRecognizer.getCurrentGesture(),
+            });
+          }
         });
       }
 

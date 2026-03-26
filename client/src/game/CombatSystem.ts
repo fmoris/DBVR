@@ -530,34 +530,39 @@ export class CombatSystem {
     this.emit();
 
     if (type === "kamehameha") {
+      // Bullet time al LANZAR: 300ms de ramp-in + 3500ms en slow + 500ms ramp-out
+      this.activateSlowMotion(3500, 0.18);
       this.vfx.spawnKamehameha(
         { x: 0, y: 1.4, z: 0.3 },
         { x: 0, y: 1.7, z: 20 },
         elapsed,
         () => {
           this.onAttackImpact(damage);
-          this.activateSlowMotion(1500, 0.25);
         }
       );
     } else {
+      // Final Flash: más largo y más lento
+      this.activateSlowMotion(4500, 0.12);
       this.vfx.spawnFinalFlash(
         { x: 0, y: 1.5, z: 0.3 },
         { x: 0, y: 1.7, z: 20 },
         elapsed,
         () => {
           this.onAttackImpact(damage);
-          this.activateSlowMotion(2000, 0.2);
         }
       );
     }
 
+    // El estado "attacking" dura hasta que termina el bullet time (slow motion)
+    // activateSlowMotion ya llama setState("neutral") al expirar
+    // Solo hacemos fallback por si el slow motion no se activó
     setTimeout(() => {
       if (this.stats.combatState === "attacking") {
         this.setState("neutral");
         this.stats.currentAttack = null;
         this.emit();
       }
-    }, type === "kamehameha" ? 1200 : 1500);
+    }, type === "kamehameha" ? 4500 : 5500);
   }
 
   // ============================================
@@ -677,13 +682,38 @@ export class CombatSystem {
   private activateSlowMotion(durationMs: number, timeScale: number = 0.3): void {
     this.stats.isSlowMotion = true;
     this.setState("slowMotion");
-    (this.scene as any).animationTimeScale = timeScale;
+
+    // Transición suave de entrada: ir de 1 → timeScale en 300ms
+    const startTime = Date.now();
+    const rampInMs = 300;
+    const rampOutMs = 500; // salida más suave
+    let rampInterval: ReturnType<typeof setInterval> | null = setInterval(() => {
+      const elapsed = Date.now() - startTime;
+      if (elapsed >= rampInMs) {
+        (this.scene as any).animationTimeScale = timeScale;
+        if (rampInterval) { clearInterval(rampInterval); rampInterval = null; }
+        return;
+      }
+      const t = elapsed / rampInMs;
+      (this.scene as any).animationTimeScale = 1 - (1 - timeScale) * t;
+    }, 16);
 
     if (this.slowMotionTimeout) clearTimeout(this.slowMotionTimeout);
     this.slowMotionTimeout = setTimeout(() => {
-      this.stats.isSlowMotion = false;
-      (this.scene as any).animationTimeScale = 1;
-      this.setState("neutral");
+      // Transición suave de salida: ir de timeScale → 1 en rampOutMs
+      const exitStart = Date.now();
+      const exitInterval = setInterval(() => {
+        const elapsed = Date.now() - exitStart;
+        if (elapsed >= rampOutMs) {
+          (this.scene as any).animationTimeScale = 1;
+          this.stats.isSlowMotion = false;
+          this.setState("neutral");
+          clearInterval(exitInterval);
+          return;
+        }
+        const t = elapsed / rampOutMs;
+        (this.scene as any).animationTimeScale = timeScale + (1 - timeScale) * t;
+      }, 16);
     }, durationMs);
   }
 

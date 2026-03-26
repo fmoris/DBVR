@@ -44,6 +44,7 @@ export class HUD {
   private npPopupTimeout: number | null = null;
   private voiceTimeout: number | null = null;
   private menuCallback: (() => void) | null = null;
+  private debugCallback: (() => void) | null = null;
 
   constructor(private parent: HTMLElement, private combat: CombatSystem) {
     this.container = document.createElement("div");
@@ -65,6 +66,10 @@ export class HUD {
     this.menuCallback = cb;
   }
 
+  onDebugToggle(cb: () => void): void {
+    this.debugCallback = cb;
+  }
+
   showVoiceTranscript(transcript: string): void {
     const el = this.elements["voiceIndicator"];
     if (!el) return;
@@ -77,16 +82,47 @@ export class HUD {
   }
 
   private buildDOM(): void {
-    // ─── Borde de camara lenta ───────────────────────────────────────────
+    // ─── Borde de camara lenta (viñeta + aberracion cromatica) ─────────────
     const slowBorder = document.createElement("div");
     slowBorder.style.cssText = `
       position:absolute; inset:0;
-      border:3px solid rgba(180,60,255,0.5);
-      box-shadow:inset 0 0 80px rgba(180,60,255,0.2);
+      border:4px solid rgba(180,60,255,0.7);
+      box-shadow:
+        inset 0 0 120px rgba(180,60,255,0.35),
+        inset 0 0 60px rgba(0,200,255,0.15),
+        0 0 40px rgba(180,60,255,0.4);
       pointer-events:none; display:none;
+      animation:none;
     `;
     this.container.appendChild(slowBorder);
     this.elements["slowBorder"] = slowBorder;
+
+    // ─── Overlay de aberracion cromatica (solo durante bullet time) ──────
+    const chromaOverlay = document.createElement("div");
+    chromaOverlay.style.cssText = `
+      position:absolute; inset:0;
+      pointer-events:none; display:none;
+      mix-blend-mode:screen;
+      background:
+        radial-gradient(ellipse at 30% 50%, rgba(255,0,80,0.06) 0%, transparent 60%),
+        radial-gradient(ellipse at 70% 50%, rgba(0,100,255,0.06) 0%, transparent 60%);
+    `;
+    this.container.appendChild(chromaOverlay);
+    this.elements["chromaOverlay"] = chromaOverlay;
+
+    // ─── Etiqueta BULLET TIME ────────────────────────────────────────────
+    const bulletLabel = document.createElement("div");
+    bulletLabel.style.cssText = `
+      position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+      font-size:28px; font-weight:bold; letter-spacing:8px; color:#cc44ff;
+      text-shadow:0 0 30px #cc44ff, 0 0 60px #8800ff;
+      opacity:0; pointer-events:none;
+      transition:opacity 0.3s;
+      text-transform:uppercase;
+    `;
+    bulletLabel.textContent = "BULLET TIME";
+    this.container.appendChild(bulletLabel);
+    this.elements["bulletLabel"] = bulletLabel;
 
     // ─── Indicador de estado (centro-arriba) ─────────────────────────────
     const stateLabel = document.createElement("div");
@@ -390,6 +426,7 @@ export class HUD {
       { id: "btn-kamehameha",  key: "1", label: "Kame",       color: "#00aaff", bg: "rgba(0,20,50,0.85)" },
       { id: "btn-finalflash",  key: "2", label: "F.Flash",    color: "#ffaa00", bg: "rgba(40,20,0,0.85)" },
       { id: "btn-menu",        key: "M", label: "Menú",       color: "#ff4444", bg: "rgba(50,0,0,0.85)" },
+      { id: "btn-debug",       key: "G", label: "DBG",        color: "#ffff00", bg: "rgba(30,30,0,0.85)" },
     ];
 
     btns.forEach(({ id, key, label, color, bg }) => {
@@ -439,6 +476,9 @@ export class HUD {
     bar.querySelector("#btn-menu")!.addEventListener("click", () => {
       if (this.menuCallback) this.menuCallback();
     });
+    bar.querySelector("#btn-debug")!.addEventListener("click", () => {
+      if (this.debugCallback) this.debugCallback();
+    });
 
     return bar;
   }
@@ -486,7 +526,12 @@ export class HUD {
       chargeEl.style.display = "none";
     }
 
-    this.elements["slowBorder"].style.display = stats.isSlowMotion ? "block" : "none";
+    const inSlow = stats.isSlowMotion;
+    this.elements["slowBorder"].style.display    = inSlow ? "block" : "none";
+    this.elements["chromaOverlay"].style.display = inSlow ? "block" : "none";
+    // Mostrar etiqueta BULLET TIME solo al inicio (fade in/out)
+    const bl = this.elements["bulletLabel"];
+    if (bl) bl.style.opacity = inSlow ? "1" : "0";
 
     // Barras jugador
     const pNPBar = this.container.querySelector("#player-np-bar") as HTMLElement;
