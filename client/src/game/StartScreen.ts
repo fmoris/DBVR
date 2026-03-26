@@ -5,6 +5,17 @@
 
 const CHANGELOG = [
   {
+    version: "1.4.0",
+    date: "26 Mar 2026",
+    changes: [
+      "Botón VR (🥽) agregado en StartScreen junto a Iniciar Combate",
+      "Botón VR inicia el juego y entra automáticamente en modo inmersivo",
+      "enterVR() expuesto como método público en Game.ts",
+      "Fallback: espera hasta 8s a que WebXR esté listo antes de entrar",
+      "startGameVR() en main.ts: inicia juego + llama enterVR con delay de 1.5s",
+    ],
+  },
+  {
     version: "1.0.0",
     date: "26 Mar 2026",
     changes: [
@@ -191,9 +202,11 @@ export class StartScreen {
   private currentScreen: Screen = "main";
   private tutorialStep = 0;
   private onStart: () => void;
+  private onStartVR: (() => void) | null = null;
 
-  constructor(parent: HTMLElement, onStart: () => void) {
+  constructor(parent: HTMLElement, onStart: () => void, onStartVR?: () => void) {
     this.onStart = onStart;
+    this.onStartVR = onStartVR ?? null;
     this.overlay = document.createElement("div");
     this.overlay.id = "start-screen";
     this.overlay.style.cssText = `
@@ -295,10 +308,10 @@ export class StartScreen {
           display:inline-block; margin-top:20px; padding:4px 16px;
           border:1px solid #0044aa; border-radius:4px;
           font-size:11px; letter-spacing:3px; color:#0066cc;
-        }>v1.0.0 — Rajdhani + Debug + Bullet Time</div>
+        }>v1.4.0 — Botón VR en StartScreen</div>
       </div>
 
-      <div style="display:flex;gap:16px;flex-wrap:wrap;justify-content:center;">
+      <div style="display:flex;gap:16px;flex-wrap:wrap;justify-content:center;align-items:center;">
         <button id="btn-start" style="
           padding:16px 56px; background:linear-gradient(135deg,#003366,#0055cc);
           border:2px solid #0099ff; border-radius:6px; color:#00ccff;
@@ -307,6 +320,14 @@ export class StartScreen {
           box-shadow:0 0 30px rgba(0,150,255,0.6);
           transition:all 0.2s;
         ">Iniciar Combate</button>
+        <button id="btn-vr" style="
+          padding:16px 28px; background:linear-gradient(135deg,#1a0033,#440088);
+          border:2px solid #aa44ff; border-radius:6px; color:#cc88ff;
+          font-size:16px; font-family:var(--font-saiyan); font-weight:bold;
+          letter-spacing:3px; cursor:pointer; text-transform:uppercase;
+          box-shadow:0 0 30px rgba(150,50,255,0.6);
+          transition:all 0.2s;
+        ">🥽 VR</button>
       </div>
 
       <div style="display:flex;gap:16px;flex-wrap:wrap;justify-content:center;">
@@ -353,6 +374,14 @@ export class StartScreen {
     content.querySelector("#btn-start")!.addEventListener("click", () => {
       this.overlay.remove();
       this.onStart();
+    });
+    content.querySelector("#btn-vr")?.addEventListener("click", () => {
+      this.overlay.remove();
+      if (this.onStartVR) {
+        this.onStartVR();
+      } else {
+        this.onStart();
+      }
     });
     content.querySelector("#btn-tutorial")!.addEventListener("click", () => {
       this.tutorialStep = 0;

@@ -40,7 +40,7 @@ function goToMenu(): void {
   }
   // Desactivar pointer-events del overlay para que el StartScreen sea clickeable
   xrOverlay.style.pointerEvents = "none";
-  new StartScreen(app, startGame);
+  new StartScreen(app, startGame, startGameVR);
 }
 
 function startGame(): void {
@@ -50,6 +50,16 @@ function startGame(): void {
   currentGame = new Game(canvas, xrOverlay);
   currentGame.setMenuCallback(goToMenu);
   currentGame.start();
+}
+
+function startGameVR(): void {
+  startGame();
+  // Pequeño delay para que Babylon inicialice WebXR antes de intentar entrar
+  setTimeout(() => {
+    currentGame?.enterVR().catch((err) => {
+      console.warn('[VR] No se pudo entrar en modo VR:', err);
+    });
+  }, 1500);
 }
 
 // Arranque inicial

@@ -397,12 +397,26 @@ export class Game {
     });
   }
 
-  private async enterVR(): Promise<void> {
+  /** Entrar en modo VR (llamable desde fuera, ej. botón VR del StartScreen) */
+  async enterVR(): Promise<void> {
     if (this.xr) {
       await this.xr.baseExperience.enterXRAsync(
         'immersive-vr',
-        'local'
+        'local-floor'
       );
+    } else {
+      // Si XR no está listo aún, esperar hasta 8s
+      let waited = 0;
+      const interval = setInterval(async () => {
+        waited += 200;
+        if (this.xr) {
+          clearInterval(interval);
+          await this.xr.baseExperience.enterXRAsync('immersive-vr', 'local-floor');
+        } else if (waited >= 8000) {
+          clearInterval(interval);
+          console.warn('[XR] enterVR: timeout esperando xrHelper');
+        }
+      }, 200);
     }
   }
 

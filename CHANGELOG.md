@@ -5,6 +5,20 @@ Las versiones corresponden a los checkpoints del proyecto.
 
 ---
 
+## [v1.4.0] — 2026-03-26 · Botón VR en StartScreen
+
+### Agregado
+- **Botón VR** (🥽) en la pantalla de inicio, en la misma fila que "Iniciar Combate".
+- El botón VR inicia el juego y entra automáticamente en modo inmersivo (`immersive-vr`).
+- `enterVR()` expuesto como método público en `Game.ts` con fallback de espera de 8s.
+- `startGameVR()` en `main.ts`: inicia el juego y llama `enterVR()` con delay de 1.5s.
+- Botón VR con estilo púrpura diferenciado del botón de combate normal.
+
+### Archivos modificados
+`StartScreen.ts` · `Game.ts` · `main.ts`
+
+---
+
 ## [v1.3.0] — 2026-03-26 · Fix botones StartScreen bloqueados por xrOverlay
 
 ### Corregido

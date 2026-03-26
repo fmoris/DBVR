@@ -396,3 +396,16 @@
 ## Bug: botones StartScreen no funcionan
 - [x] Causa raíz: xrOverlay (z-index:9999, pointer-events:auto) cubría toda la pantalla e interceptaba los clics
 - [x] Solución: pointer-events:none por defecto en xrOverlay; se activa solo en startGame() y se desactiva en goToMenu()
+
+---
+
+## UX: botón VR reposicionado
+- [ ] Mover botón "Entrar en VR" al centro superior de la pantalla (visible, no tapado por HUD)
+
+---
+
+## v1.4.0 — Botón VR en StartScreen
+- [x] Botón VR (🥽) en StartScreen en la misma fila que "Iniciar Combate"
+- [x] enterVR() expuesto como método público en Game.ts
+- [x] startGameVR() en main.ts: inicia juego + entra en VR con delay de 1.5s
+- [x] Fallback: espera hasta 8s a que WebXR esté listo
