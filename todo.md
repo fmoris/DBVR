@@ -154,7 +154,7 @@
 - [ ] Defensas perfectas: +10 NP (recompensa la habilidad)
 - [ ] Recibir un golpe fuerte: +8 NP (la presion aumenta el poder, como en el anime)
 - [ ] Tiempo en combate activo: +1 NP cada 3 segundos (escalada natural)
-- [ ] Gritar el nombre del ataque especial: +5 NP bonus al lanzar
+- [x] Gritar el nombre del ataque especial: +5 NP bonus al lanzar (Web Speech API)
 - [ ] Encadenar acciones sin recibir dano: +3 NP por accion encadenada
 
 ### Como baja el Nivel de Poder
@@ -171,7 +171,7 @@
 - [ ] Visualmente: el aura del personaje pulsa al ritmo de la fluctuacion
 
 ### Condicion de victoria
-- [ ] Victoria cuando la diferencia de NP entre ambos luchadores supera 50 puntos
+- [x] Victoria cuando la diferencia de NP entre ambos luchadores supera 50 puntos
 - [ ] El luchador con NP mas bajo entra en estado de "rendicion inminente"
 - [ ] El luchador dominante tiene una ventana de 5s para ejecutar el golpe final
 - [ ] Si no ejecuta el golpe final en ese tiempo, el rival puede iniciar un COMEBACK
@@ -212,8 +212,8 @@
 - [ ] Recibir dano genera KI (5 pts por impacto)
 
 ### IA del enemigo
-- [ ] Ataques basicos automaticos con intervalos aleatorios
-- [ ] Logica de decision para ataques especiales (segun KI disponible)
+- [x] Ataques basicos automaticos con intervalos aleatorios (3-6s)
+- [x] Logica de decision para ataques especiales (segun KI disponible y NP)
 - [ ] Respuesta a ataques del jugador (defensa, esquive)
 - [ ] Activacion de melee cuando el jugador tiene KI bajo
 
@@ -251,3 +251,27 @@
 - [x] Calculo de daño final: daño base * factor NP del jugador
 - [x] HUD muestra nivel de carga actual (MINIMO / MEDIO / MAXIMO) durante la carga
 - [x] HUD muestra daño estimado en tiempo real segun carga acumulada
+
+---
+
+## Sesion 26/03/2026 — Completado
+
+- [x] Fuente Saiyan Sans aplicada en StartScreen.ts (todos los botones y titulos)
+- [x] Fuente Saiyan Sans aplicada en HUD.ts (todos los botones de control)
+- [x] Fuente Saiyan Sans como fuente global en index.html (body)
+- [x] IA del enemigo: ataques automaticos cada 3-6s (basico, Kamehameha, Final Flash)
+- [x] IA del enemigo: regeneracion de KI propia
+- [x] IA del enemigo: logica de decision segun NP y KI disponible
+- [x] Indicador visual de ataque del enemigo en el HUD
+- [x] VoiceRecognizer.ts: reconocimiento de voz con Web Speech API
+- [x] Comandos de voz: "Kamehameha" y "Final Flash" activan ataques especiales
+- [x] Bonus de +5 NP al gritar el nombre del ataque
+- [x] Indicador de transcripcion de voz en el HUD
+- [x] ResultScreen.ts: pantalla de victoria/derrota con estadisticas
+- [x] Pantalla de resultado: rango de combate (Novato/Luchador/Guerrero/Elite/Legendario)
+- [x] Pantalla de resultado: duracion del combate, NP final, KI restante
+- [x] Pantalla de resultado: botones Reiniciar y Menu
+- [x] CombatSystem: gameOver y winner en GameStats
+- [x] CombatSystem: onGameOver callback para notificar fin del combate
+- [x] CombatSystem: enemyAttacking y enemyAttackName en GameStats
+- [x] Correccion de errores TypeScript criticos en archivos del juego

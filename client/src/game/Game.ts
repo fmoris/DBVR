@@ -20,6 +20,8 @@ import { HUD } from "./HUD";
 import { CombatSystem } from "./CombatSystem";
 import { VFXManager } from "./VFXManager";
 import { GestureRecognizer } from "./GestureRecognizer";
+import { VoiceRecognizer } from "./VoiceRecognizer";
+import { ResultScreen } from "./ResultScreen";
 
 export class Game {
   private engine: Engine;
@@ -29,6 +31,9 @@ export class Game {
   private combat!: CombatSystem;
   private vfx!: VFXManager;
   private gestureRecognizer!: GestureRecognizer;
+  private voiceRecognizer!: VoiceRecognizer;
+  private resultScreen!: ResultScreen;
+  private combatStartTime = 0;
   private xr: any = null;
   private started = false;
 
@@ -50,10 +55,15 @@ export class Game {
     this.combat = new CombatSystem(this.scene, this.vfx);
     this.gestureRecognizer = new GestureRecognizer(this.scene);
     this.hud = new HUD(this.canvas.parentElement!, this.combat);
+    this.voiceRecognizer = new VoiceRecognizer();
+    this.resultScreen = new ResultScreen(this.canvas.parentElement!);
 
     this.setupKeyboard();
+    this.setupVoiceRecognition();
+    this.setupGameOverHandler();
     this.initWebXR();
     this.started = true;
+    this.combatStartTime = Date.now();
     this.hud.show();
     this.canvas.focus();
 
@@ -147,6 +157,58 @@ export class Game {
     rightHand.animations = [breathAnim];
     this.scene.beginAnimation(leftHand, 0, 90, true);
     this.scene.beginAnimation(rightHand, 0, 90, true);
+  }
+
+  private setupGameOverHandler(): void {
+    this.combat.onGameOver((winner) => {
+      const stats = this.combat.getStats();
+      const durationSeconds = (Date.now() - this.combatStartTime) / 1000;
+
+      this.resultScreen.show({
+        playerNP: stats.playerNP,
+        enemyNP: stats.enemyNP,
+        playerKi: stats.playerKi,
+        winner,
+        combatDurationSeconds: durationSeconds,
+      });
+
+      this.resultScreen.onAction((action) => {
+        if (action === "restart") {
+          // Recargar la pagina para reiniciar el combate
+          window.location.reload();
+        } else if (action === "menu") {
+          window.location.reload();
+        }
+      });
+    });
+  }
+
+  private setupVoiceRecognition(): void {
+    if (!this.voiceRecognizer.isAvailable()) {
+      console.log("[Voice] Web Speech API no disponible - comandos de voz desactivados");
+      return;
+    }
+
+    this.voiceRecognizer.onCommand((command, transcript) => {
+      if (!this.started) return;
+      console.log(`[Voice] Comando detectado: ${command} ("${transcript}")`);
+      if (command === "kamehameha") {
+        this.combat.kamehamehaStep(1);
+        // Bonus de NP por gritar el ataque
+        this.combat.applyVoiceBonus("kamehameha");
+      } else if (command === "finalFlash") {
+        this.combat.finalFlashStep(1);
+        this.combat.applyVoiceBonus("finalFlash");
+      }
+    });
+
+    this.voiceRecognizer.onStatus((_active, transcript) => {
+      this.hud.showVoiceTranscript(transcript);
+    });
+
+    // Iniciar escucha automaticamente
+    this.voiceRecognizer.start();
+    console.log("[Voice] Reconocimiento de voz activo. Di 'Kamehameha' o 'Final Flash'!");
   }
 
   private setupKeyboard(): void {

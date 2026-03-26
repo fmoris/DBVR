@@ -111,7 +111,7 @@ export class VFXManager {
     this.scene.beginAnimation(ball, 0, totalFrames, false, 1, () => {
       this.spawnImpact(to, isCharged ? "charged" : "basic");
       ps.stop();
-      if (isCharged && (this.scene.getMeshByName("trail") as ParticleSystem)) {
+      if (isCharged && this.scene.getMeshByName("trail")) {
         // Limpiar trail
       }
       ball.dispose();

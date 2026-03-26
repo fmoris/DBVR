@@ -47,7 +47,7 @@ export class HUD {
     this.container = document.createElement("div");
     this.container.style.cssText = `
       position:absolute; inset:0; pointer-events:none;
-      font-family:'Courier New',monospace; user-select:none; display:none;
+      font-family:var(--font-saiyan); user-select:none; display:none;
     `;
     this.parent.appendChild(this.container);
     this.buildDOM();
@@ -57,6 +57,19 @@ export class HUD {
   show(): void {
     this.container.style.display = "block";
     this.update(this.combat.getStats());
+  }
+
+  private voiceTimeout: number | null = null;
+
+  showVoiceTranscript(transcript: string): void {
+    const el = this.elements["voiceIndicator"];
+    if (!el) return;
+    el.textContent = `🎤 ${transcript}`;
+    el.style.opacity = "1";
+    if (this.voiceTimeout) clearTimeout(this.voiceTimeout);
+    this.voiceTimeout = window.setTimeout(() => {
+      el.style.opacity = "0";
+    }, 2000);
   }
 
   private buildDOM(): void {
@@ -116,6 +129,34 @@ export class HUD {
     this.container.appendChild(npPopup);
     this.elements["npPopup"] = npPopup;
 
+    // Indicador de ataque del enemigo
+    const enemyAttack = document.createElement("div");
+    enemyAttack.id = "enemy-attack";
+    enemyAttack.style.cssText = `
+      position:absolute; top:120px; left:50%; transform:translate(-50%, 0);
+      font-size:16px; font-weight:bold; letter-spacing:3px; color:#ff4444;
+      background:rgba(40,0,0,0.8); padding:6px 20px; border-radius:4px;
+      border:1px solid #ff444466; opacity:0;
+      transition:opacity 0.2s, transform 0.2s;
+      text-shadow:0 0 10px #ff4444;
+    `;
+    this.container.appendChild(enemyAttack);
+    this.elements["enemyAttack"] = enemyAttack;
+
+    // Indicador de voz
+    const voiceIndicator = document.createElement("div");
+    voiceIndicator.id = "voice-indicator";
+    voiceIndicator.style.cssText = `
+      position:absolute; bottom:20px; left:50%; transform:translateX(-50%);
+      font-size:11px; letter-spacing:2px; color:#aa88ff;
+      background:rgba(20,0,40,0.7); padding:4px 14px; border-radius:4px;
+      border:1px solid #aa88ff44; opacity:0;
+      transition:opacity 0.3s;
+      max-width:400px; text-align:center;
+    `;
+    this.container.appendChild(voiceIndicator);
+    this.elements["voiceIndicator"] = voiceIndicator;
+
     // HUD inferior
     const bottom = document.createElement("div");
     bottom.style.cssText = `
@@ -133,43 +174,43 @@ export class HUD {
     controls.innerHTML = `
       <button id="btn-attack" style="padding:8px 20px;background:linear-gradient(135deg,#003366,#0066cc);
         border:1px solid #0099ff;border-radius:4px;color:#00ccff;font-size:11px;
-        font-family:'Courier New',monospace;font-weight:bold;letter-spacing:2px;
+        font-family:var(--font-saiyan);font-weight:bold;letter-spacing:2px;
         cursor:pointer;text-transform:uppercase;box-shadow:0 0 10px rgba(0,150,255,0.4);">
         [A] Atacar
       </button>
       <button id="btn-charged" style="padding:8px 20px;background:linear-gradient(135deg,#663300,#cc6600);
         border:1px solid #ff9900;border-radius:4px;color:#ff9900;font-size:11px;
-        font-family:'Courier New',monospace;font-weight:bold;letter-spacing:2px;
+        font-family:var(--font-saiyan);font-weight:bold;letter-spacing:2px;
         cursor:pointer;text-transform:uppercase;box-shadow:0 0 10px rgba(255,150,0,0.4);">
         [W] Cargar
       </button>
       <button id="btn-kamehameha" style="padding:6px 16px;background:linear-gradient(135deg,#001133,#003366);
         border:1px solid #00aaff;border-radius:4px;color:#00aaff;font-size:10px;
-        font-family:'Courier New',monospace;font-weight:bold;letter-spacing:1px;
+        font-family:var(--font-saiyan);font-weight:bold;letter-spacing:1px;
         cursor:pointer;text-transform:uppercase;">
         [1] Kamehameha
       </button>
       <button id="btn-finalflash" style="padding:6px 16px;background:linear-gradient(135deg,#332200,#664400);
         border:1px solid #ffaa00;border-radius:4px;color:#ffaa00;font-size:10px;
-        font-family:'Courier New',monospace;font-weight:bold;letter-spacing:1px;
+        font-family:var(--font-saiyan);font-weight:bold;letter-spacing:1px;
         cursor:pointer;text-transform:uppercase;">
         [2] Final Flash
       </button>
       <button id="btn-block" style="padding:8px 20px;background:linear-gradient(135deg,#003322,#006644);
         border:1px solid #00ff88;border-radius:4px;color:#00ff88;font-size:11px;
-        font-family:'Courier New',monospace;font-weight:bold;letter-spacing:2px;
+        font-family:var(--font-saiyan);font-weight:bold;letter-spacing:2px;
         cursor:pointer;text-transform:uppercase;">
         [S] Bloquear
       </button>
       <button id="btn-dodge" style="padding:6px 16px;background:linear-gradient(135deg,#002233,#004466);
         border:1px solid #66ccff;border-radius:4px;color:#66ccff;font-size:10px;
-        font-family:'Courier New',monospace;font-weight:bold;letter-spacing:1px;
+        font-family:var(--font-saiyan);font-weight:bold;letter-spacing:1px;
         cursor:pointer;text-transform:uppercase;">
         [D] Esquivar
       </button>
       <button id="btn-recharge" style="padding:8px 20px;background:linear-gradient(135deg,#330033,#660066);
         border:1px solid #cc44ff;border-radius:4px;color:#cc44ff;font-size:11px;
-        font-family:'Courier New',monospace;font-weight:bold;letter-spacing:2px;
+        font-family:var(--font-saiyan);font-weight:bold;letter-spacing:2px;
         cursor:pointer;text-transform:uppercase;box-shadow:0 0 8px rgba(180,60,255,0.3);">
         [R] Recargar
       </button>
@@ -374,5 +415,18 @@ export class HUD {
 
     if (playerKiBar) playerKiBar.style.width = `${stats.playerKi}%`;
     if (enemyKiBar) enemyKiBar.style.width = `${stats.enemyKi}%`;
+
+    // Indicador de ataque del enemigo
+    const enemyAttackEl = this.elements["enemyAttack"];
+    if (enemyAttackEl) {
+      if (stats.enemyAttacking && stats.enemyAttackName) {
+        enemyAttackEl.textContent = `⚡ ENEMIGO: ${stats.enemyAttackName.toUpperCase()}`;
+        enemyAttackEl.style.opacity = "1";
+        enemyAttackEl.style.transform = "translate(-50%, 0) scale(1.05)";
+      } else {
+        enemyAttackEl.style.opacity = "0";
+        enemyAttackEl.style.transform = "translate(-50%, 0) scale(1)";
+      }
+    }
   }
 }

@@ -5,6 +5,23 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>VR KI Combat</title>
     <style>
+      @font-face {
+        font-family: 'Saiyan Sans';
+        src: url('https://d2xsxph8kpxj0f.cloudfront.net/310519663078378599/YrsnnwBaH2B26rKKFurfw2/Saiyan-Sans_8b3811af.ttf') format('truetype');
+        font-weight: normal;
+        font-style: normal;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'Saiyan Sans';
+        src: url('https://d2xsxph8kpxj0f.cloudfront.net/310519663078378599/YrsnnwBaH2B26rKKFurfw2/Saiyan-Sans%20Right%20Oblique_a0ede031.ttf') format('truetype');
+        font-weight: normal;
+        font-style: italic;
+        font-display: swap;
+      }
+      :root {
+        --font-saiyan: 'Saiyan Sans', 'Courier New', monospace;
+      }
       * {
         margin: 0;
         padding: 0;
@@ -15,7 +32,7 @@
         height: 100%;
         overflow: hidden;
         background: #050510;
-        font-family: 'Courier New', monospace;
+        font-family: var(--font-saiyan);
       }
       #app {
         width: 100vw;

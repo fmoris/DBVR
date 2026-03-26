@@ -27,6 +27,10 @@ export interface GameStats {
   currentAttack: AttackType | null;
   chargeTime: number;
   specialType: SpecialAttackType | null;
+  gameOver: boolean;
+  winner: "player" | "enemy" | null;
+  enemyAttacking: boolean;
+  enemyAttackName: string;
 }
 
 type StatsListener = (stats: GameStats) => void;
@@ -71,13 +75,21 @@ function npDamageFactor(np: number): number {
 }
 
 // Obtener el nivel de carga actual segun el tiempo transcurrido
+interface ChargeLevel {
+  label: string;
+  timeMin: number;
+  timeMax: number;
+  ki: number;
+  damage: number;
+}
+
 function getChargeLevel(
   type: "kamehameha" | "finalFlash",
   elapsed: number
-): (typeof SPECIAL_LEVELS)["kamehameha"][number] | null {
-  const levels = SPECIAL_LEVELS[type];
+): ChargeLevel | null {
+  const levels = SPECIAL_LEVELS[type] as readonly ChargeLevel[];
   // Buscar el nivel mas alto alcanzado
-  let reached: (typeof SPECIAL_LEVELS)["kamehameha"][number] | null = null;
+  let reached: ChargeLevel | null = null;
   for (const level of levels) {
     if (elapsed >= level.timeMin) reached = level;
   }
@@ -97,12 +109,19 @@ export class CombatSystem {
     currentAttack: null,
     chargeTime: 0,
     specialType: null,
+    gameOver: false,
+    winner: null,
+    enemyAttacking: false,
+    enemyAttackName: "",
   };
 
   private listeners: StatsListener[] = [];
   private regenInterval: ReturnType<typeof setInterval> | null = null;
   private slowMotionTimeout: ReturnType<typeof setTimeout> | null = null;
   private chargeInterval: ReturnType<typeof setInterval> | null = null;
+  private enemyAIInterval: ReturnType<typeof setTimeout> | null = null;
+  private enemyRegenInterval: ReturnType<typeof setInterval> | null = null;
+  private gameOverCallbacks: Array<(winner: "player" | "enemy") => void> = [];
 
   // Estado de carga especial
   private activeSpecial: SpecialAttackType | null = null;
@@ -114,6 +133,12 @@ export class CombatSystem {
   constructor(private scene: Scene, private vfx: VFXManager) {
     this.startKiRegen();
     this.startNPFluctuation();
+    this.startEnemyAI();
+    this.startEnemyKiRegen();
+  }
+
+  onGameOver(callback: (winner: "player" | "enemy") => void): void {
+    this.gameOverCallbacks.push(callback);
   }
 
   onStatsChange(listener: StatsListener): void {
@@ -147,15 +172,151 @@ export class CombatSystem {
 
   private startNPFluctuation(): void {
     setInterval(() => {
+      if (this.stats.gameOver) return;
       const fluctuation =
         this.stats.combatState === "attacking" || this.stats.combatState === "defending"
           ? 8
           : 3;
       const change = (Math.random() - 0.5) * fluctuation;
       this.stats.playerNP = Math.max(0, Math.min(100, this.stats.playerNP + change));
-      this.stats.enemyNP = Math.max(0, Math.min(100, this.stats.enemyNP + change));
       this.emit();
     }, 1000);
+  }
+
+  // ============================================
+  // IA DEL ENEMIGO
+  // ============================================
+  private startEnemyKiRegen(): void {
+    this.enemyRegenInterval = setInterval(() => {
+      if (this.stats.gameOver) return;
+      this.stats.enemyKi = Math.min(this.stats.enemyMaxKi, this.stats.enemyKi + 3);
+      this.emit();
+    }, 400);
+  }
+
+  private startEnemyAI(): void {
+    const scheduleNextAttack = () => {
+      if (this.stats.gameOver) return;
+      // Intervalo aleatorio entre 3 y 6 segundos
+      const delay = 3000 + Math.random() * 3000;
+      this.enemyAIInterval = setTimeout(() => {
+        this.enemyDoAttack();
+        scheduleNextAttack();
+      }, delay);
+    };
+    // Primera accion despues de 2 segundos
+    setTimeout(() => scheduleNextAttack(), 2000);
+  }
+
+  private enemyDoAttack(): void {
+    if (this.stats.gameOver) return;
+    if (this.stats.isSlowMotion) return;
+
+    // Elegir ataque segun KI disponible y nivel de NP del enemigo
+    const roll = Math.random();
+    const enemyNP = this.stats.enemyNP;
+
+    // Enemigo fuerte usa ataques especiales con mas frecuencia
+    if (enemyNP >= 60 && this.stats.enemyKi >= 60 && roll < 0.25) {
+      this.enemyLaunchSpecial("kamehameha");
+    } else if (enemyNP >= 70 && this.stats.enemyKi >= 90 && roll < 0.15) {
+      this.enemyLaunchSpecial("finalFlash");
+    } else if (this.stats.enemyKi >= 20 && roll < 0.7) {
+      this.enemyLaunchBasic();
+    } else {
+      // Recarga de KI del enemigo (accion visible)
+      this.stats.enemyAttacking = true;
+      this.stats.enemyAttackName = "Recargando KI";
+      this.emit();
+      setTimeout(() => {
+        this.stats.enemyAttacking = false;
+        this.stats.enemyAttackName = "";
+        this.emit();
+      }, 800);
+    }
+  }
+
+  private enemyLaunchBasic(): void {
+    const kiCost = 20;
+    if (this.stats.enemyKi < kiCost) return;
+    this.stats.enemyKi -= kiCost;
+    this.stats.enemyAttacking = true;
+    this.stats.enemyAttackName = "Ataque KI";
+    this.emit();
+
+    // Calcular dano del enemigo
+    const baseDamage = 8 + Math.random() * 12; // 8-20
+    const factor = npDamageFactor(this.stats.enemyNP);
+    const damage = baseDamage * factor;
+
+    // Proyectil del enemigo (viene desde el frente)
+    this.vfx.spawnKiProjectile(
+      { x: 0, y: 1.7, z: 15 },
+      { x: 0, y: 1.5, z: 0 },
+      "basic",
+      () => { this.onEnemyAttackImpact(damage); }
+    );
+
+    setTimeout(() => {
+      this.stats.enemyAttacking = false;
+      this.stats.enemyAttackName = "";
+      this.emit();
+    }, 700);
+  }
+
+  private enemyLaunchSpecial(type: "kamehameha" | "finalFlash"): void {
+    const kiCost = type === "kamehameha" ? 60 : 90;
+    if (this.stats.enemyKi < kiCost) return;
+    this.stats.enemyKi -= kiCost;
+
+    const attackName = type === "kamehameha" ? "Kamehameha!" : "Final Flash!";
+    this.stats.enemyAttacking = true;
+    this.stats.enemyAttackName = attackName;
+    this.emit();
+
+    const baseDamage = type === "kamehameha" ? 35 : 55;
+    const factor = npDamageFactor(this.stats.enemyNP);
+    const damage = baseDamage * factor;
+
+    if (type === "kamehameha") {
+      this.vfx.spawnKamehameha(
+        { x: 0, y: 1.7, z: 15 },
+        { x: 0, y: 1.5, z: 0 },
+        4,
+        () => {
+          this.onEnemyAttackImpact(damage);
+          this.activateSlowMotion(1200, 0.3);
+        }
+      );
+    } else {
+      this.vfx.spawnFinalFlash(
+        { x: 0, y: 1.7, z: 15 },
+        { x: 0, y: 1.5, z: 0 },
+        6,
+        () => {
+          this.onEnemyAttackImpact(damage);
+          this.activateSlowMotion(1500, 0.25);
+        }
+      );
+    }
+
+    setTimeout(() => {
+      this.stats.enemyAttacking = false;
+      this.stats.enemyAttackName = "";
+      this.emit();
+    }, 1200);
+  }
+
+  private onEnemyAttackImpact(damage: number): void {
+    if (this.stats.gameOver) return;
+    const isDefending = this.stats.combatState === "defending";
+    const damageReduction = this.getPowerLevelDamageReduction(this.stats.playerNP);
+    const finalDamage = isDefending ? damage * 0.3 : damage * (1 - damageReduction);
+
+    this.stats.playerNP = Math.max(0, this.stats.playerNP - finalDamage * 0.5);
+    this.stats.enemyNP = Math.min(100, this.stats.enemyNP + damage * 0.15);
+    this.emit();
+    this.checkVictoryCondition();
   }
 
   // ============================================
@@ -468,6 +629,7 @@ export class CombatSystem {
   // IMPACTO Y DANO
   // ============================================
   private onAttackImpact(damage: number): void {
+    if (this.stats.gameOver) return;
     const isDefending = this.stats.combatState === "defending";
     const damageReduction = this.getPowerLevelDamageReduction(this.stats.enemyNP);
     const finalDamage = isDefending ? damage * 0.4 : damage * (1 - damageReduction);
@@ -487,14 +649,26 @@ export class CombatSystem {
   }
 
   private checkVictoryCondition(): void {
-    const npDiff = Math.abs(this.stats.playerNP - this.stats.enemyNP);
-    if (npDiff > 50) {
-      if (this.stats.playerNP > this.stats.enemyNP) {
-        console.log("Victoria! El enemigo no puede continuar...");
-      } else {
-        console.log("Derrota... Tu poder era insuficiente.");
-      }
+    if (this.stats.gameOver) return;
+    // Victoria si el NP del enemigo cae a 0 o la diferencia supera 50
+    if (this.stats.enemyNP <= 0 || (this.stats.playerNP - this.stats.enemyNP) > 50) {
+      this.triggerGameOver("player");
+    } else if (this.stats.playerNP <= 0 || (this.stats.enemyNP - this.stats.playerNP) > 50) {
+      this.triggerGameOver("enemy");
     }
+  }
+
+  private triggerGameOver(winner: "player" | "enemy"): void {
+    if (this.stats.gameOver) return;
+    this.stats.gameOver = true;
+    this.stats.winner = winner;
+    // Detener IA del enemigo
+    if (this.enemyAIInterval) {
+      clearTimeout(this.enemyAIInterval);
+      this.enemyAIInterval = null;
+    }
+    this.emit();
+    this.gameOverCallbacks.forEach((cb) => cb(winner));
   }
 
   // ============================================
@@ -511,6 +685,18 @@ export class CombatSystem {
       (this.scene as any).animationTimeScale = 1;
       this.setState("neutral");
     }, durationMs);
+  }
+
+  // ============================================
+  // BONUS DE VOZ
+  // ============================================
+  applyVoiceBonus(attackType: "kamehameha" | "finalFlash"): void {
+    if (this.stats.gameOver) return;
+    // +5 NP por gritar el nombre del ataque
+    const bonus = 5;
+    this.stats.playerNP = Math.min(100, this.stats.playerNP + bonus);
+    console.log(`[Voice Bonus] +${bonus} NP por gritar ${attackType}!`);
+    this.emit();
   }
 
   // ============================================
@@ -541,7 +727,9 @@ export class CombatSystem {
 
   dispose(): void {
     if (this.regenInterval) clearInterval(this.regenInterval);
+    if (this.enemyRegenInterval) clearInterval(this.enemyRegenInterval);
     if (this.slowMotionTimeout) clearTimeout(this.slowMotionTimeout);
+    if (this.enemyAIInterval) clearTimeout(this.enemyAIInterval);
     this.stopChargeInterval();
   }
 }

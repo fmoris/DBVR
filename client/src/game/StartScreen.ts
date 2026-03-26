@@ -134,7 +134,7 @@ export class StartScreen {
     this.overlay.style.cssText = `
       position:absolute; inset:0;
       background:linear-gradient(180deg,#020210 0%,#05051a 50%,#020210 100%);
-      z-index:20; overflow:hidden; font-family:'Courier New',monospace;
+      z-index:20; overflow:hidden; font-family:var(--font-saiyan);
     `;
     parent.appendChild(this.overlay);
     this.createParticles();
@@ -237,7 +237,7 @@ export class StartScreen {
         <button id="btn-start" style="
           padding:16px 56px; background:linear-gradient(135deg,#003366,#0055cc);
           border:2px solid #0099ff; border-radius:6px; color:#00ccff;
-          font-size:16px; font-family:'Courier New',monospace; font-weight:bold;
+          font-size:16px; font-family:var(--font-saiyan); font-weight:bold;
           letter-spacing:4px; cursor:pointer; text-transform:uppercase;
           box-shadow:0 0 30px rgba(0,150,255,0.6);
           transition:all 0.2s;
@@ -248,14 +248,14 @@ export class StartScreen {
         <button id="btn-tutorial" style="
           padding:10px 32px; background:transparent;
           border:1px solid #0066aa; border-radius:6px; color:#0099cc;
-          font-size:13px; font-family:'Courier New',monospace;
+          font-size:13px; font-family:var(--font-saiyan);
           letter-spacing:3px; cursor:pointer; text-transform:uppercase;
           transition:all 0.2s;
         ">Tutorial</button>
         <button id="btn-changelog" style="
           padding:10px 32px; background:transparent;
           border:1px solid #334455; border-radius:6px; color:#556677;
-          font-size:13px; font-family:'Courier New',monospace;
+          font-size:13px; font-family:var(--font-saiyan);
           letter-spacing:3px; cursor:pointer; text-transform:uppercase;
           transition:all 0.2s;
         ">Changelog</button>
@@ -371,7 +371,7 @@ export class StartScreen {
           padding:10px 28px; background:transparent;
           border:1px solid ${isFirst ? "#0a1a2a" : "#0066aa"};
           border-radius:6px; color:${isFirst ? "#0a1a2a" : "#0099cc"};
-          font-size:13px; font-family:'Courier New',monospace;
+          font-size:13px; font-family:var(--font-saiyan);
           letter-spacing:2px; cursor:${isFirst ? "default" : "pointer"};
           text-transform:uppercase;
         ">← Atras</button>
@@ -385,7 +385,7 @@ export class StartScreen {
             padding:10px 28px;
             background:linear-gradient(135deg,#003366,#0055cc);
             border:2px solid #0099ff; border-radius:6px; color:#00ccff;
-            font-size:13px; font-family:'Courier New',monospace; font-weight:bold;
+            font-size:13px; font-family:var(--font-saiyan); font-weight:bold;
             letter-spacing:2px; cursor:pointer; text-transform:uppercase;
             box-shadow:0 0 20px rgba(0,150,255,0.4);
           ">Iniciar →</button>
@@ -393,7 +393,7 @@ export class StartScreen {
           <button id="btn-next" style="
             padding:10px 28px; background:transparent;
             border:1px solid #0066aa; border-radius:6px; color:#0099cc;
-            font-size:13px; font-family:'Courier New',monospace;
+            font-size:13px; font-family:var(--font-saiyan);
             letter-spacing:2px; cursor:pointer; text-transform:uppercase;
           ">Siguiente →</button>
         `}
@@ -401,7 +401,7 @@ export class StartScreen {
 
       <button id="btn-menu" style="
         padding:6px 20px; background:transparent; border:none;
-        color:#223344; font-size:11px; font-family:'Courier New',monospace;
+        color:#223344; font-size:11px; font-family:var(--font-saiyan);
         letter-spacing:2px; cursor:pointer; text-transform:uppercase;
       ">Volver al menu</button>
     `;
@@ -501,7 +501,7 @@ export class StartScreen {
       <button id="btn-menu" style="
         margin-top:16px; padding:10px 32px; background:transparent;
         border:1px solid #0066aa; border-radius:6px; color:#0099cc;
-        font-size:13px; font-family:'Courier New',monospace;
+        font-size:13px; font-family:var(--font-saiyan);
         letter-spacing:3px; cursor:pointer; text-transform:uppercase;
       ">← Volver al menu</button>
     `;
