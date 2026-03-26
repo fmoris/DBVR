@@ -356,3 +356,10 @@
 - [x] Debug overlay muestra qué API se usó para acceder a las manos
 - [x] Debug overlay se actualiza siempre (no solo cuando está visible)
 - [x] main.ts: xrOverlay creado antes del Game y pasado como parámetro al constructor
+
+---
+
+## Rediseño botones HUD
+- [x] Panel ATAQUE (Atacar, Cargar, Kamehameha, Final Flash) al centro-derecho
+- [x] Panel DEFENSA (Bloquear, Esquivar, Recargar) al centro-izquierdo
+- [x] Botones de sistema (Menu, DBG) en esquina inferior central

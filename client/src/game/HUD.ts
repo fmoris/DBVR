@@ -408,79 +408,151 @@ export class HUD {
   }
 
   // =========================================================================
-  // BARRA DE CONTROLES — fila inferior central, compacta
+  // PANELES DE ACCION — derecha: ataque | izquierda: defensa
   // =========================================================================
   private buildControlsBar(): HTMLDivElement {
-    const bar = document.createElement("div");
-    bar.style.cssText = `
-      position:absolute; bottom:24px; left:50%; transform:translateX(-50%);
-      display:flex; gap:6px; align-items:center; pointer-events:auto;
-    `;
+    // Contenedor fantasma que agrupa ambos paneles (no ocupa espacio)
+    const wrapper = document.createElement("div");
+    wrapper.style.cssText = `position:absolute; inset:0; pointer-events:none;`;
 
-    const btns = [
-      { id: "btn-attack",      key: "A", label: "Atacar",     color: "#00ccff", bg: "rgba(0,40,80,0.85)" },
-      { id: "btn-charged",     key: "W", label: "Cargar",     color: "#ffcc00", bg: "rgba(40,30,0,0.85)" },
-      { id: "btn-block",       key: "S", label: "Bloquear",   color: "#00ff88", bg: "rgba(0,40,20,0.85)" },
-      { id: "btn-dodge",       key: "D", label: "Esquivar",   color: "#66ccff", bg: "rgba(0,20,40,0.85)" },
-      { id: "btn-recharge",    key: "R", label: "Recargar",   color: "#cc44ff", bg: "rgba(30,0,50,0.85)" },
-      { id: "btn-kamehameha",  key: "1", label: "Kame",       color: "#00aaff", bg: "rgba(0,20,50,0.85)" },
-      { id: "btn-finalflash",  key: "2", label: "F.Flash",    color: "#ffaa00", bg: "rgba(40,20,0,0.85)" },
-      { id: "btn-menu",        key: "M", label: "Menú",       color: "#ff4444", bg: "rgba(50,0,0,0.85)" },
-      { id: "btn-debug",       key: "G", label: "DBG",        color: "#ffff00", bg: "rgba(30,30,0,0.85)" },
-    ];
-
-    btns.forEach(({ id, key, label, color, bg }) => {
+    // ── Estilos comunes ──────────────────────────────────────────────────────
+    const makeBtn = (
+      id: string, key: string, label: string,
+      color: string, bg: string, wide = false
+    ): HTMLButtonElement => {
       const btn = document.createElement("button");
       btn.id = id;
       btn.style.cssText = `
-        padding:6px 10px;
+        padding:${wide ? "10px 14px" : "8px 12px"};
         background:${bg};
-        border:1px solid ${color}66;
-        border-radius:4px;
+        border:1.5px solid ${color}66;
+        border-radius:6px;
         color:${color};
-        font-size:9px;
-        font-family:var(--font-saiyan);
-        font-weight:bold;
+        font-size:10px;
+        font-family:var(--font-body);
+        font-weight:700;
         letter-spacing:1px;
         cursor:pointer;
         text-transform:uppercase;
-        line-height:1.3;
+        line-height:1.4;
         text-align:center;
-        box-shadow:0 0 8px ${color}22;
-        transition:box-shadow 0.15s, border-color 0.15s;
+        box-shadow:0 0 10px ${color}22, inset 0 0 6px ${color}11;
+        transition:box-shadow 0.15s, border-color 0.15s, transform 0.1s;
+        pointer-events:auto;
+        width:${wide ? "100%" : "auto"};
       `;
-      btn.innerHTML = `<span style="font-size:8px;opacity:0.6;">[${key}]</span><br>${label}`;
+      btn.innerHTML = `${label}<br><span style="font-size:8px;opacity:0.45;">[${key}]</span>`;
       btn.addEventListener("mouseenter", () => {
-        btn.style.boxShadow = `0 0 14px ${color}55`;
-        btn.style.borderColor = `${color}aa`;
+        btn.style.boxShadow = `0 0 18px ${color}66, inset 0 0 8px ${color}22`;
+        btn.style.borderColor = `${color}cc`;
+        btn.style.transform = "scale(1.05)";
       });
       btn.addEventListener("mouseleave", () => {
-        btn.style.boxShadow = `0 0 8px ${color}22`;
+        btn.style.boxShadow = `0 0 10px ${color}22, inset 0 0 6px ${color}11`;
         btn.style.borderColor = `${color}66`;
+        btn.style.transform = "scale(1)";
       });
-      bar.appendChild(btn);
-    });
+      return btn;
+    };
 
-    // Eventos
+    const makePanelLabel = (text: string, color: string): HTMLDivElement => {
+      const lbl = document.createElement("div");
+      lbl.style.cssText = `
+        font-size:8px; letter-spacing:3px; color:${color};
+        text-transform:uppercase; text-align:center;
+        margin-bottom:6px; opacity:0.7;
+      `;
+      lbl.textContent = text;
+      return lbl;
+    };
+
+    // ── PANEL DERECHO — ATAQUE ───────────────────────────────────────────────
+    const attackPanel = document.createElement("div");
+    attackPanel.style.cssText = `
+      position:absolute;
+      right:20px;
+      top:50%;
+      transform:translateY(-50%);
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      align-items:stretch;
+      pointer-events:auto;
+      background:linear-gradient(135deg,rgba(0,10,30,0.88) 0%,rgba(0,30,60,0.82) 100%);
+      border:1.5px solid rgba(0,180,255,0.35);
+      border-radius:12px;
+      padding:14px 12px;
+      min-width:100px;
+      box-shadow:0 0 28px rgba(0,150,255,0.18), inset 0 0 12px rgba(0,100,200,0.08);
+    `;
+    attackPanel.appendChild(makePanelLabel("ATAQUE", "#00ccff"));
+    attackPanel.appendChild(makeBtn("btn-attack",     "A", "Atacar",    "#00ccff", "rgba(0,40,80,0.85)",     true));
+    attackPanel.appendChild(makeBtn("btn-charged",    "W", "Cargar",    "#ffcc00", "rgba(40,30,0,0.85)",     true));
+    attackPanel.appendChild(makeBtn("btn-kamehameha", "1", "Kamehameha","#00aaff", "rgba(0,20,60,0.90)",     true));
+    attackPanel.appendChild(makeBtn("btn-finalflash", "2", "Final Flash","#ffaa00", "rgba(50,25,0,0.90)",    true));
+
+    // ── PANEL IZQUIERDO — DEFENSA ────────────────────────────────────────────
+    const defensePanel = document.createElement("div");
+    defensePanel.style.cssText = `
+      position:absolute;
+      left:20px;
+      top:50%;
+      transform:translateY(-50%);
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      align-items:stretch;
+      pointer-events:auto;
+      background:linear-gradient(135deg,rgba(0,20,10,0.88) 0%,rgba(0,40,20,0.82) 100%);
+      border:1.5px solid rgba(0,200,120,0.35);
+      border-radius:12px;
+      padding:14px 12px;
+      min-width:100px;
+      box-shadow:0 0 28px rgba(0,200,100,0.15), inset 0 0 12px rgba(0,150,80,0.08);
+    `;
+    defensePanel.appendChild(makePanelLabel("DEFENSA", "#00ff88"));
+    defensePanel.appendChild(makeBtn("btn-block",    "S", "Bloquear",  "#00ff88", "rgba(0,40,20,0.85)",  true));
+    defensePanel.appendChild(makeBtn("btn-dodge",    "D", "Esquivar",  "#66ccff", "rgba(0,20,40,0.85)",  true));
+    defensePanel.appendChild(makeBtn("btn-recharge", "R", "Recargar",  "#cc44ff", "rgba(30,0,50,0.85)",  true));
+
+    // ── BOTONES DE SISTEMA — esquina inferior central ────────────────────────
+    const sysBar = document.createElement("div");
+    sysBar.style.cssText = `
+      position:absolute;
+      bottom:20px;
+      left:50%;
+      transform:translateX(-50%);
+      display:flex;
+      gap:6px;
+      pointer-events:auto;
+    `;
+    sysBar.appendChild(makeBtn("btn-menu",  "M", "Menú",  "#ff4444", "rgba(50,0,0,0.85)"));
+    sysBar.appendChild(makeBtn("btn-debug", "G", "DBG",   "#ffff00", "rgba(30,30,0,0.85)"));
+
+    wrapper.appendChild(attackPanel);
+    wrapper.appendChild(defensePanel);
+    wrapper.appendChild(sysBar);
+
+    // ── Eventos ──────────────────────────────────────────────────────────────
     const c = this.combat;
-    bar.querySelector("#btn-attack")!.addEventListener("click", () => c.launchBasicAttack());
-    bar.querySelector("#btn-charged")!.addEventListener("click", () => {
+    wrapper.querySelector("#btn-attack")!.addEventListener("click", () => c.launchBasicAttack());
+    wrapper.querySelector("#btn-charged")!.addEventListener("click", () => {
       if (c.isInChargingState()) c.releaseChargedAttack();
       else c.startChargedAttack();
     });
-    bar.querySelector("#btn-block")!.addEventListener("click", () => c.activateBlock());
-    bar.querySelector("#btn-dodge")!.addEventListener("click", () => c.activateDodge());
-    bar.querySelector("#btn-recharge")!.addEventListener("click", () => c.rechargeKi());
-    bar.querySelector("#btn-kamehameha")!.addEventListener("click", () => c.kamehamehaStep(1));
-    bar.querySelector("#btn-finalflash")!.addEventListener("click", () => c.finalFlashStep(1));
-    bar.querySelector("#btn-menu")!.addEventListener("click", () => {
+    wrapper.querySelector("#btn-block")!.addEventListener("click", () => c.activateBlock());
+    wrapper.querySelector("#btn-dodge")!.addEventListener("click", () => c.activateDodge());
+    wrapper.querySelector("#btn-recharge")!.addEventListener("click", () => c.rechargeKi());
+    wrapper.querySelector("#btn-kamehameha")!.addEventListener("click", () => c.kamehamehaStep(1));
+    wrapper.querySelector("#btn-finalflash")!.addEventListener("click", () => c.finalFlashStep(1));
+    wrapper.querySelector("#btn-menu")!.addEventListener("click", () => {
       if (this.menuCallback) this.menuCallback();
     });
-    bar.querySelector("#btn-debug")!.addEventListener("click", () => {
+    wrapper.querySelector("#btn-debug")!.addEventListener("click", () => {
       if (this.debugCallback) this.debugCallback();
     });
 
-    return bar;
+    return wrapper as HTMLDivElement;
   }
 
   // =========================================================================
