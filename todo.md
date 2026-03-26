@@ -275,3 +275,20 @@
 - [x] CombatSystem: onGameOver callback para notificar fin del combate
 - [x] CombatSystem: enemyAttacking y enemyAttackName en GameStats
 - [x] Correccion de errores TypeScript criticos en archivos del juego
+
+---
+
+## Rediseno visual (referencia ejemplo_ui.jpeg)
+
+- [x] HUD: mover paneles a esquinas inferiores (izquierda: barras HP/KI, derecha: minimapa/KI)
+- [x] HUD: paneles con forma de escudo/tech redondeado estilo azul metalico
+- [x] HUD: barras de vida (verde/rojo) y KI (cyan) integradas en el panel
+- [x] HUD: botones de control compactos en fila inferior central
+- [x] Entorno: cielo dramatico naranja-dorado al atardecer (clearColor)
+- [x] Entorno: suelo de tierra rojiza de canon
+- [x] Entorno: formaciones rocosas de canon a los lados y fondo
+- [x] Entorno: nubes semitransparentes en el horizonte
+- [x] Entorno: iluminacion calida direccional (sol bajo, dorado-naranja)
+- [x] Manos: mas grandes y prominentes (palma + 4 dedos + pulgar)
+- [x] Manos: aura de KI azul alrededor de las manos (particulas)
+- [x] Manos: posicion mas baja y separada (como en la imagen)

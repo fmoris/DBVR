@@ -83,23 +83,40 @@ export class Game {
   }
 
   private setupLights(): void {
+    // Luz ambiental: tono calido de atardecer
     const ambient = new HemisphericLight("ambient", new Vector3(0, 1, 0), this.scene);
-    ambient.intensity = 0.4;
-    ambient.diffuse = new Color3(0.4, 0.5, 0.8);
-    ambient.groundColor = new Color3(0.1, 0.1, 0.2);
+    ambient.intensity = 0.55;
+    ambient.diffuse = new Color3(0.85, 0.65, 0.45);   // naranja calido
+    ambient.groundColor = new Color3(0.25, 0.15, 0.08); // tierra oscura
+    ambient.specular = new Color3(0.2, 0.15, 0.1);
 
-    const sun = new DirectionalLight("sun", new Vector3(-1, -2, 3), this.scene);
-    sun.intensity = 0.8;
-    sun.diffuse = new Color3(0.9, 0.85, 1.0);
+    // Sol bajo (atardecer lateral)
+    const sun = new DirectionalLight("sun", new Vector3(-0.6, -1.2, 1.0), this.scene);
+    sun.intensity = 1.1;
+    sun.diffuse = new Color3(1.0, 0.72, 0.38);  // dorado-naranja
+    sun.specular = new Color3(1.0, 0.6, 0.2);
+
+    // Luz de relleno azulada (cielo)
+    const fill = new HemisphericLight("fill", new Vector3(0, -1, 0), this.scene);
+    fill.intensity = 0.25;
+    fill.diffuse = new Color3(0.3, 0.45, 0.7);
+    fill.groundColor = new Color3(0.1, 0.08, 0.05);
   }
 
   private setupEnvironment(): void {
-    // Suelo
-    const ground = MeshBuilder.CreateGround("ground", { width: 200, height: 200 }, this.scene);
+    // Cielo: gradiente de atardecer (fondo de la escena)
+    this.scene.clearColor = new Color4(0.55, 0.38, 0.22, 1); // naranja-dorado
+
+    // Suelo: tierra/roca de canon
+    const ground = MeshBuilder.CreateGround("ground", { width: 300, height: 300, subdivisions: 8 }, this.scene);
     const groundMat = new StandardMaterial("groundMat", this.scene);
-    groundMat.diffuseColor = new Color3(0.05, 0.05, 0.12);
-    groundMat.specularColor = new Color3(0.1, 0.1, 0.2);
+    groundMat.diffuseColor = new Color3(0.32, 0.22, 0.14);  // tierra rojiza
+    groundMat.specularColor = new Color3(0.05, 0.04, 0.03);
+    groundMat.ambientColor = new Color3(0.15, 0.10, 0.06);
     ground.material = groundMat;
+
+    // Formaciones rocosas de fondo (canon)
+    this.createCanyonRocks();
 
     // Enemigo
     const enemy = MeshBuilder.CreateCapsule("enemy", { height: 1.8, radius: 0.3 }, this.scene);
@@ -131,32 +148,150 @@ export class Game {
     this.createPlayerHands();
   }
 
+  private createCanyonRocks(): void {
+    // Columnas de roca a los lados y fondo para dar sensacion de canon
+    const rockPositions = [
+      // Fondo izquierdo
+      { x: -30, y: 0, z: 60, w: 8, h: 28, d: 10 },
+      { x: -20, y: 0, z: 70, w: 6, h: 22, d: 8 },
+      { x: -40, y: 0, z: 50, w: 10, h: 35, d: 12 },
+      // Fondo derecho
+      { x: 30,  y: 0, z: 60, w: 8, h: 28, d: 10 },
+      { x: 20,  y: 0, z: 70, w: 6, h: 22, d: 8 },
+      { x: 40,  y: 0, z: 50, w: 10, h: 35, d: 12 },
+      // Fondo centro
+      { x: 0,   y: 0, z: 80, w: 20, h: 18, d: 15 },
+      { x: -10, y: 0, z: 90, w: 12, h: 25, d: 10 },
+      { x: 10,  y: 0, z: 90, w: 12, h: 25, d: 10 },
+      // Laterales cercanos
+      { x: -60, y: 0, z: 20, w: 15, h: 40, d: 20 },
+      { x: 60,  y: 0, z: 20, w: 15, h: 40, d: 20 },
+    ];
+
+    const rockMat = new StandardMaterial("rockMat", this.scene);
+    rockMat.diffuseColor = new Color3(0.38, 0.26, 0.16);
+    rockMat.specularColor = new Color3(0.04, 0.03, 0.02);
+    rockMat.ambientColor = new Color3(0.18, 0.12, 0.07);
+
+    const rockMat2 = new StandardMaterial("rockMat2", this.scene);
+    rockMat2.diffuseColor = new Color3(0.48, 0.32, 0.18);
+    rockMat2.specularColor = new Color3(0.05, 0.04, 0.02);
+
+    rockPositions.forEach((r, i) => {
+      const rock = MeshBuilder.CreateBox(`rock${i}`, { width: r.w, height: r.h, depth: r.d }, this.scene);
+      rock.position = new Vector3(r.x, r.h / 2 - 0.5, r.z);
+      // Ligera rotacion aleatoria para naturalidad
+      rock.rotation.y = (i * 0.37) % (Math.PI * 2);
+      rock.material = i % 2 === 0 ? rockMat : rockMat2;
+    });
+
+    // Nubes: esferas semitransparentes en el horizonte
+    const cloudMat = new StandardMaterial("cloudMat", this.scene);
+    cloudMat.diffuseColor = new Color3(0.95, 0.75, 0.55);
+    cloudMat.emissiveColor = new Color3(0.4, 0.25, 0.1);
+    cloudMat.alpha = 0.35;
+
+    const cloudPositions = [
+      { x: -25, y: 22, z: 65, r: 8 },
+      { x: -10, y: 26, z: 75, r: 10 },
+      { x: 15,  y: 20, z: 68, r: 7 },
+      { x: 30,  y: 24, z: 72, r: 9 },
+      { x: 0,   y: 30, z: 85, r: 12 },
+      { x: -35, y: 18, z: 55, r: 6 },
+      { x: 40,  y: 19, z: 58, r: 7 },
+    ];
+
+    cloudPositions.forEach((c, i) => {
+      const cloud = MeshBuilder.CreateSphere(`cloud${i}`, { diameter: c.r * 2, segments: 6 }, this.scene);
+      cloud.position = new Vector3(c.x, c.y, c.z);
+      cloud.scaling.y = 0.45; // aplanar para parecer nubes
+      cloud.material = cloudMat;
+    });
+  }
+
   private createPlayerHands(): void {
-    // Mano izquierda
-    const leftHand = MeshBuilder.CreateBox("leftHand", { width: 0.12, height: 0.08, depth: 0.18 }, this.scene);
-    leftHand.position = new Vector3(-0.35, 1.3, 0.6);
-    leftHand.rotation = new Vector3(0.3, 0.1, 0.1);
+    // Material de piel con tono calido
     const handMat = new StandardMaterial("handMat", this.scene);
-    handMat.diffuseColor = new Color3(0.85, 0.7, 0.6);
-    leftHand.material = handMat;
+    handMat.diffuseColor = new Color3(0.88, 0.72, 0.58);
+    handMat.specularColor = new Color3(0.15, 0.1, 0.08);
+    handMat.ambientColor = new Color3(0.3, 0.22, 0.15);
 
-    // Mano derecha
-    const rightHand = MeshBuilder.CreateBox("rightHand", { width: 0.12, height: 0.08, depth: 0.18 }, this.scene);
-    rightHand.position = new Vector3(0.35, 1.3, 0.6);
-    rightHand.rotation = new Vector3(0.3, -0.1, -0.1);
-    rightHand.material = handMat;
+    // Mano izquierda — palma + dedos
+    const leftPalm = MeshBuilder.CreateBox("leftHand", { width: 0.22, height: 0.06, depth: 0.28 }, this.scene);
+    leftPalm.position = new Vector3(-0.52, 1.12, 0.55);
+    leftPalm.rotation = new Vector3(-0.35, 0.12, 0.18);
+    leftPalm.material = handMat;
 
-    // Animacion sutil de respiracion
-    const breathAnim = new Animation("breath", "position.y", 30, Animation.ANIMATIONTYPE_FLOAT, Animation.ANIMATIONLOOPMODE_CYCLE);
+    // Dedos izquierda (4 cajas)
+    for (let i = 0; i < 4; i++) {
+      const finger = MeshBuilder.CreateBox(`lFinger${i}`, { width: 0.04, height: 0.04, depth: 0.14 }, this.scene);
+      finger.position = new Vector3(
+        leftPalm.position.x - 0.07 + i * 0.05,
+        leftPalm.position.y - 0.01,
+        leftPalm.position.z + 0.19
+      );
+      finger.rotation = leftPalm.rotation.clone();
+      finger.material = handMat;
+    }
+    // Pulgar izquierdo
+    const lThumb = MeshBuilder.CreateBox("lThumb", { width: 0.05, height: 0.04, depth: 0.10 }, this.scene);
+    lThumb.position = new Vector3(leftPalm.position.x + 0.14, leftPalm.position.y, leftPalm.position.z + 0.06);
+    lThumb.rotation = new Vector3(-0.2, 0.5, 0.3);
+    lThumb.material = handMat;
+
+    // Mano derecha — palma + dedos
+    const rightPalm = MeshBuilder.CreateBox("rightHand", { width: 0.22, height: 0.06, depth: 0.28 }, this.scene);
+    rightPalm.position = new Vector3(0.52, 1.12, 0.55);
+    rightPalm.rotation = new Vector3(-0.35, -0.12, -0.18);
+    rightPalm.material = handMat;
+
+    for (let i = 0; i < 4; i++) {
+      const finger = MeshBuilder.CreateBox(`rFinger${i}`, { width: 0.04, height: 0.04, depth: 0.14 }, this.scene);
+      finger.position = new Vector3(
+        rightPalm.position.x + 0.07 - i * 0.05,
+        rightPalm.position.y - 0.01,
+        rightPalm.position.z + 0.19
+      );
+      finger.rotation = rightPalm.rotation.clone();
+      finger.material = handMat;
+    }
+    const rThumb = MeshBuilder.CreateBox("rThumb", { width: 0.05, height: 0.04, depth: 0.10 }, this.scene);
+    rThumb.position = new Vector3(rightPalm.position.x - 0.14, rightPalm.position.y, rightPalm.position.z + 0.06);
+    rThumb.rotation = new Vector3(-0.2, -0.5, -0.3);
+    rThumb.material = handMat;
+
+    // Aura de KI azul alrededor de las manos
+    const kiAura = new ParticleSystem("handAura", 120, this.scene);
+    kiAura.particleTexture = new Texture("https://assets.babylonjs.com/textures/flare.png", this.scene);
+    kiAura.emitter = leftPalm;
+    kiAura.minEmitBox = new Vector3(-0.35, -0.05, -0.15);
+    kiAura.maxEmitBox = new Vector3(0.35, 0.05, 0.15);
+    kiAura.color1 = new Color4(0.2, 0.7, 1.0, 0.5);
+    kiAura.color2 = new Color4(0.4, 0.9, 1.0, 0.2);
+    kiAura.colorDead = new Color4(0.1, 0.3, 0.8, 0.0);
+    kiAura.minSize = 0.03;
+    kiAura.maxSize = 0.10;
+    kiAura.minLifeTime = 0.2;
+    kiAura.maxLifeTime = 0.5;
+    kiAura.emitRate = 40;
+    kiAura.minEmitPower = 0.1;
+    kiAura.maxEmitPower = 0.4;
+    kiAura.updateSpeed = 0.025;
+    kiAura.gravity = new Vector3(0, 0.2, 0);
+    kiAura.start();
+
+    // Animacion de respiracion — manos bajan ligeramente
+    const breathAnim = new Animation("breath", "position.y", 30,
+      Animation.ANIMATIONTYPE_FLOAT, Animation.ANIMATIONLOOPMODE_CYCLE);
     breathAnim.setKeys([
-      { frame: 0, value: 1.3 },
-      { frame: 45, value: 1.28 },
-      { frame: 90, value: 1.3 },
+      { frame: 0,  value: 1.12 },
+      { frame: 50, value: 1.09 },
+      { frame: 100, value: 1.12 },
     ]);
-    leftHand.animations = [breathAnim];
-    rightHand.animations = [breathAnim];
-    this.scene.beginAnimation(leftHand, 0, 90, true);
-    this.scene.beginAnimation(rightHand, 0, 90, true);
+    leftPalm.animations  = [breathAnim];
+    rightPalm.animations = [breathAnim];
+    this.scene.beginAnimation(leftPalm,  0, 100, true);
+    this.scene.beginAnimation(rightPalm, 0, 100, true);
   }
 
   private setupGameOverHandler(): void {
