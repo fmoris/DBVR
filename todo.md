@@ -230,3 +230,12 @@
 - [ ] Sistema de sonido y musica
 - [ ] Sistema de progresion y niveles
 - [ ] Modo multijugador en red
+
+## UI / Pantalla de Inicio
+
+- [x] Redisenar pantalla de inicio con layout de tres secciones navegables
+- [x] Seccion principal: titulo, logo, boton de inicio y accesos a Tutorial/Changelog
+- [x] Seccion Tutorial: guia paso a paso con controles de teclado y gestos VR
+- [x] Seccion Changelog: historial de versiones del juego
+- [x] Animacion de fondo con particulas de KI en la pantalla de inicio
+- [x] Navegacion con botones entre secciones
