@@ -53,7 +53,9 @@ export class Game {
 
     this.setupKeyboard();
     this.initWebXR();
-    this.showStartScreen();
+    this.started = true;
+    this.hud.show();
+    this.canvas.focus();
 
     this.engine.runRenderLoop(() => {
       this.scene.render();
@@ -262,57 +264,6 @@ export class Game {
         this.combat.rechargeKi();
         break;
     }
-  }
-
-  private showStartScreen(): void {
-    const overlay = document.createElement("div");
-    overlay.id = "start-screen";
-    overlay.style.cssText = `
-      position:absolute; inset:0; display:flex; flex-direction:column;
-      align-items:center; justify-content:center;
-      background:linear-gradient(180deg,#050510 0%,#0a0a2a 100%);
-      z-index:20; gap:32px;
-    `;
-
-    overlay.innerHTML = `
-      <div style="text-align:center">
-        <h1 style="color:#00ccff;font-size:48px;font-family:'Courier New',monospace;
-          font-weight:bold;letter-spacing:6px;
-          text-shadow:0 0 30px rgba(0,200,255,0.8),0 0 60px rgba(0,100,255,0.4);
-          margin:0;">VR KI COMBAT</h1>
-        <p style="color:#4488aa;font-size:13px;font-family:'Courier New',monospace;
-          letter-spacing:4px;margin-top:12px;text-transform:uppercase;">
-          Sistema de combate accion-reaccion
-        </p>
-      </div>
-      <div style="background:rgba(0,20,40,0.8);border:1px solid #0066aa;
-        border-radius:8px;padding:24px 40px;text-align:center;max-width:360px;">
-        <p style="color:#88bbcc;font-size:12px;font-family:'Courier New',monospace;
-          line-height:2;letter-spacing:1px;">
-          <span style="color:#00ff88">A</span> — Lanzar ataque de KI<br/>
-          <span style="color:#00ff88">S</span> — Activar bloqueo<br/>
-          <span style="color:#cc44ff">R</span> — Recargar energia KI
-        </p>
-      </div>
-      <button id="start-btn" style="padding:14px 48px;
-        background:linear-gradient(135deg,#003366,#0066cc);
-        border:2px solid #0099ff;border-radius:6px;color:#00ccff;
-        font-size:16px;font-family:'Courier New',monospace;font-weight:bold;
-        letter-spacing:4px;cursor:pointer;text-transform:uppercase;
-        box-shadow:0 0 20px rgba(0,150,255,0.5);">
-        Iniciar Combate
-      </button>
-    `;
-
-    this.canvas.parentElement!.appendChild(overlay);
-
-    const btn = overlay.querySelector("#start-btn") as HTMLButtonElement;
-    btn.addEventListener("click", () => {
-      overlay.remove();
-      this.started = true;
-      this.hud.show();
-      this.canvas.focus();
-    });
   }
 
   dispose(): void {
