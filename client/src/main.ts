@@ -10,25 +10,31 @@ canvas.style.cssText = "width:100%;height:100%;display:block;outline:none;touch-
 canvas.tabIndex = 0;
 app.appendChild(canvas);
 
+// Contenedor DOM Overlay — se proyecta sobre el visor XR cuando se activa dom-overlay
+// DEBE existir antes de que se cree el Game, y DEBE ser hijo directo del body o del app
+const xrOverlay = document.createElement("div");
+xrOverlay.id = "xr-overlay";
+xrOverlay.style.cssText = `
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 100;
+`;
+app.appendChild(xrOverlay);
+
 let currentGame: Game | null = null;
 
 function goToMenu(): void {
-  // Limpiar el juego actual si existe
   if (currentGame) {
     currentGame.disposeAndExit().catch(() => {});
     currentGame = null;
   }
-
-  // Mostrar de nuevo la pantalla de inicio
   new StartScreen(app, startGame);
 }
 
 function startGame(): void {
-  currentGame = new Game(canvas);
-
-  // Conectar el botón Menú del HUD al flujo de retorno
+  currentGame = new Game(canvas, xrOverlay);
   currentGame.setMenuCallback(goToMenu);
-
   currentGame.start();
 }
 

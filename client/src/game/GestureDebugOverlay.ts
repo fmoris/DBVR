@@ -35,6 +35,9 @@ export class GestureDebugOverlay {
   private prevRightZ = 0;
   private gestureLog: string[] = [];
 
+  // Fuente de datos de la API de manos (para debug)
+  private handApiSource = "desconocido";
+
   constructor(private parent: HTMLElement) {
     this.panel = document.createElement("div");
     this.panel.style.cssText = `
@@ -42,19 +45,19 @@ export class GestureDebugOverlay {
       top: 60px;
       left: 50%;
       transform: translateX(-50%);
-      background: rgba(0, 0, 0, 0.82);
-      border: 1.5px solid rgba(0, 200, 255, 0.5);
+      background: rgba(0, 0, 0, 0.88);
+      border: 1.5px solid rgba(0, 200, 255, 0.6);
       border-radius: 8px;
       padding: 10px 16px;
-      font-family: var(--font-body);
-      font-size: 11px;
+      font-family: var(--font-body, monospace);
+      font-size: 12px;
       color: #00ccff;
-      min-width: 340px;
-      max-width: 420px;
+      min-width: 360px;
+      max-width: 460px;
       pointer-events: none;
-      z-index: 100;
+      z-index: 9999;
       display: none;
-      line-height: 1.6;
+      line-height: 1.7;
     `;
     this.parent.appendChild(this.panel);
 
@@ -62,6 +65,9 @@ export class GestureDebugOverlay {
     window.addEventListener("keydown", (e) => {
       if (e.key.toLowerCase() === "g") this.toggle();
     });
+
+    // Activarse automáticamente cuando se entra en modo XR
+    document.addEventListener("sessiongranted", () => this.show());
   }
 
   toggle(): void {
@@ -90,7 +96,9 @@ export class GestureDebugOverlay {
     leftJoints: HandJoints | null;
     rightJoints: HandJoints | null;
     gesture: GestureType;
+    handApiSource?: string;
   }): void {
+    if (opts.handApiSource) this.handApiSource = opts.handApiSource;
     // Guardar Z anterior para calcular velocidad de empuje
     this.prevLeftZ  = this.leftJoints?.wrist.z  ?? opts.leftJoints?.wrist.z  ?? 0;
     this.prevRightZ = this.rightJoints?.wrist.z ?? opts.rightJoints?.wrist.z ?? 0;
@@ -164,6 +172,9 @@ export class GestureDebugOverlay {
 
       <div style="margin-bottom:4px">
         Hand Tracking: ${htStatus}
+      </div>
+      <div style="margin-bottom:4px;font-size:10px;color:#aaa">
+        API usada: <span style="color:#ffcc44">${this.handApiSource}</span>
       </div>
 
       <div style="margin-bottom:6px">

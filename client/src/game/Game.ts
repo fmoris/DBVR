@@ -12,8 +12,6 @@ import {
   ParticleSystem,
   Texture,
   Animation,
-  ActionManager,
-  ExecuteCodeAction,
   WebXRFeatureName,
 } from "@babylonjs/core";
 import { HUD } from "./HUD";
@@ -41,7 +39,10 @@ export class Game {
   private debugOverlay!: GestureDebugOverlay;
   private handTrackingActive = false;
 
-  constructor(private canvas: HTMLCanvasElement) {
+  constructor(
+    private canvas: HTMLCanvasElement,
+    private xrOverlay: HTMLElement = canvas.parentElement!
+  ) {
     this.engine = new Engine(canvas, true, {
       preserveDrawingBuffer: true,
       stencil: true,
@@ -63,10 +64,12 @@ export class Game {
     this.vfx = new VFXManager(this.scene);
     this.combat = new CombatSystem(this.scene, this.vfx);
     this.gestureRecognizer = new GestureRecognizer(this.scene);
-    this.hud = new HUD(this.canvas.parentElement!, this.combat);
+    // Montar HUD, ResultScreen y DebugOverlay en el xrOverlay
+    // para que sean visibles dentro del visor XR via dom-overlay
+    this.hud = new HUD(this.xrOverlay, this.combat);
     this.voiceRecognizer = new VoiceRecognizer();
-    this.resultScreen = new ResultScreen(this.canvas.parentElement!);
-    this.debugOverlay = new GestureDebugOverlay(this.canvas.parentElement!);
+    this.resultScreen = new ResultScreen(this.xrOverlay);
+    this.debugOverlay = new GestureDebugOverlay(this.xrOverlay);
 
     // Conectar botón Menú del HUD
     this.hud.onMenu(() => {
@@ -416,7 +419,11 @@ export class Game {
           sessionMode: "immersive-vr",
           referenceSpaceType: "local-floor",
         },
-        optionalFeatures: ["hand-tracking"],
+        // dom-overlay proyecta el div #xr-overlay sobre el visor XR
+        // hand-tracking habilita el hand tracking en Quest
+        optionalFeatures: ["hand-tracking", "dom-overlay"],
+        // dom-overlay no está en los tipos de Babylon pero sí es soportado en Quest
+        ...(({ domOverlay: { element: this.xrOverlay } }) as any),
       });
 
       const timeoutPromise = new Promise<null>((_, reject) =>
@@ -470,11 +477,33 @@ export class Game {
       });
 
       // Loop de hand tracking
+      // Babylon 6 expone las manos como handTracking.leftHand / handTracking.rightHand
+      // NO como un Map — el uso anterior de .get() siempre devolvía undefined
       if (handTracking) {
         this.scene.registerBeforeRender(() => {
-          if (!handTracking.hands) return;
-          const lh = handTracking.hands.get("left");
-          const rh = handTracking.hands.get("right");
+          // Detectar qué API usa Babylon para exponer las manos y reportarlo en el debug
+          let lh: any = null;
+          let rh: any = null;
+          let apiSource = "ninguna";
+
+          if ((handTracking as any).leftHand !== undefined) {
+            lh = (handTracking as any).leftHand;
+            rh = (handTracking as any).rightHand;
+            apiSource = "leftHand/rightHand";
+          } else if ((handTracking as any).hands instanceof Map) {
+            lh = (handTracking as any).hands.get("left");
+            rh = (handTracking as any).hands.get("right");
+            apiSource = "hands Map";
+          } else if (Array.isArray((handTracking as any).controllers)) {
+            lh = (handTracking as any).controllers.find((c: any) => c.inputSource?.handedness === "left");
+            rh = (handTracking as any).controllers.find((c: any) => c.inputSource?.handedness === "right");
+            apiSource = "controllers array";
+          } else {
+            // Último recurso: inspeccionar todas las propiedades del objeto
+            const keys = Object.keys(handTracking as any);
+            apiSource = `keys:[${keys.slice(0,6).join(",")}]`;
+          }
+
           const lJoints = lh ? extractHandJoints(lh) : null;
           const rJoints = rh ? extractHandJoints(rh) : null;
 
@@ -485,27 +514,25 @@ export class Game {
           if (rJoints) this.gestureRecognizer.updateHandJoints("right", rJoints);
           if (lJoints && rJoints) this.processGestures();
 
-          // Alimentar el overlay de debug (solo si está visible para no desperdiciar CPU)
-          if (this.debugOverlay?.isVisible()) {
-            this.debugOverlay.update({
-              handTrackingActive: this.handTrackingActive,
-              leftJoints:  lJoints,
-              rightJoints: rJoints,
-              gesture: this.gestureRecognizer.getCurrentGesture(),
-            });
-          }
+          // Alimentar el overlay de debug siempre (para que tenga datos al abrirse)
+          this.debugOverlay?.update({
+            handTrackingActive: this.handTrackingActive,
+            leftJoints:  lJoints,
+            rightJoints: rJoints,
+            gesture: this.gestureRecognizer.getCurrentGesture(),
+            handApiSource: apiSource,
+          });
         });
       } else {
         // Sin hand tracking: actualizar overlay con estado vacío para mostrar el error
         this.scene.registerBeforeRender(() => {
-          if (this.debugOverlay?.isVisible()) {
-            this.debugOverlay.update({
-              handTrackingActive: false,
-              leftJoints:  this.gestureRecognizer.getLeftHandJoints(),
-              rightJoints: this.gestureRecognizer.getRightHandJoints(),
-              gesture: this.gestureRecognizer.getCurrentGesture(),
-            });
-          }
+          this.debugOverlay?.update({
+            handTrackingActive: false,
+            leftJoints:  this.gestureRecognizer.getLeftHandJoints(),
+            rightJoints: this.gestureRecognizer.getRightHandJoints(),
+            gesture: this.gestureRecognizer.getCurrentGesture(),
+            handApiSource: "handTracking=null",
+          });
         });
       }
 

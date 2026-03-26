@@ -345,3 +345,14 @@
 - [x] ResultScreen: contenedor cambiado a --font-body; botones Reiniciar y Menu
 - [x] ResultScreen: --font-saiyan mantenido solo en el titulo VICTORIA/DERROTA
 - [x] GestureDebugOverlay: cambiado de Courier New a --font-body
+
+---
+
+## Bug: HUD y debug overlay invisibles en VR + gestos sin funcionar
+- [x] HUD invisible en VR — corregido con div #xr-overlay + feature dom-overlay en WebXR
+- [x] Debug overlay invisible en VR — montado en xrOverlay, se activa automáticamente al entrar en XR
+- [x] Gestos: bug raíz identificado — handTracking.hands.get() siempre retornaba undefined
+- [x] Corregido: loop detecta automáticamente la API correcta (leftHand, Map, controllers)
+- [x] Debug overlay muestra qué API se usó para acceder a las manos
+- [x] Debug overlay se actualiza siempre (no solo cuando está visible)
+- [x] main.ts: xrOverlay creado antes del Game y pasado como parámetro al constructor
