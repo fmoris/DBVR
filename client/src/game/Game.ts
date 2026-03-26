@@ -19,7 +19,7 @@ import {
 import { HUD } from "./HUD";
 import { CombatSystem } from "./CombatSystem";
 import { VFXManager } from "./VFXManager";
-import { GestureRecognizer } from "./GestureRecognizer";
+import { GestureRecognizer, extractHandJoints } from "./GestureRecognizer";
 import { VoiceRecognizer } from "./VoiceRecognizer";
 import { ResultScreen } from "./ResultScreen";
 
@@ -36,6 +36,7 @@ export class Game {
   private combatStartTime = 0;
   private xr: any = null;
   private started = false;
+  private menuCallback: (() => void) | null = null;
 
   constructor(private canvas: HTMLCanvasElement) {
     this.engine = new Engine(canvas, true, {
@@ -44,6 +45,11 @@ export class Game {
     });
     this.scene = new Scene(this.engine);
     this.scene.clearColor = new Color4(0.02, 0.02, 0.08, 1);
+  }
+
+  /** Registrar callback para volver al menú principal (llamado desde main.ts) */
+  setMenuCallback(cb: () => void): void {
+    this.menuCallback = cb;
   }
 
   start(): void {
@@ -57,6 +63,11 @@ export class Game {
     this.hud = new HUD(this.canvas.parentElement!, this.combat);
     this.voiceRecognizer = new VoiceRecognizer();
     this.resultScreen = new ResultScreen(this.canvas.parentElement!);
+
+    // Conectar botón Menú del HUD
+    this.hud.onMenu(() => {
+      if (this.menuCallback) this.menuCallback();
+    });
 
     this.setupKeyboard();
     this.setupVoiceRecognition();
@@ -457,9 +468,11 @@ export class Game {
           if (!handTracking.hands) return;
           const lh = handTracking.hands.get("left");
           const rh = handTracking.hands.get("right");
-          if (lh) this.gestureRecognizer.updateHandJoints("left",  this.extractJoints(lh));
-          if (rh) this.gestureRecognizer.updateHandJoints("right", this.extractJoints(rh));
-          this.processGestures();
+          const lJoints = lh ? extractHandJoints(lh) : null;
+          const rJoints = rh ? extractHandJoints(rh) : null;
+          if (lJoints) this.gestureRecognizer.updateHandJoints("left",  lJoints);
+          if (rJoints) this.gestureRecognizer.updateHandJoints("right", rJoints);
+          if (lJoints && rJoints) this.processGestures();
         });
       }
 
@@ -469,47 +482,37 @@ export class Game {
     }
   }
 
-  private extractJoints(hand: any): any {
-    const joints: any = {};
-    try {
-      if (hand.joints) {
-        joints.wrist = this.getJointPos(hand.joints[0]);
-        joints.indexTip = this.getJointPos(hand.joints[8]);
-        joints.middleTip = this.getJointPos(hand.joints[12]);
-        joints.ringTip = this.getJointPos(hand.joints[16]);
-        joints.littleTip = this.getJointPos(hand.joints[20]);
-        joints.thumbTip = this.getJointPos(hand.joints[4]);
-      }
-    } catch (e) {}
-    return joints;
-  }
-
-  private getJointPos(joint: any): { x: number; y: number; z: number } {
-    if (joint && joint.position) {
-      return { x: joint.position.x, y: joint.position.y, z: joint.position.z };
-    }
-    return { x: 0, y: 0, z: 0 };
-  }
-
   private processGestures(): void {
     const gesture = this.gestureRecognizer.getCurrentGesture();
-    
     switch (gesture) {
-      case 'ATTACKING':
-        if (!this.combat.isInChargingState()) {
-          this.combat.launchBasicAttack();
-        }
+      case "ATTACKING":
+        if (!this.combat.isInChargingState()) this.combat.launchBasicAttack();
         break;
-      case 'CHARGING':
+      case "CHARGING":
         this.combat.startChargedAttack();
         break;
-      case 'BLOCKING':
+      case "BLOCKING":
         this.combat.activateBlock();
         break;
-      case 'RECHARGING':
+      case "RECHARGING":
         this.combat.rechargeKi();
         break;
     }
+  }
+
+  /** Salir de la sesión XR si está activa y luego limpiar el motor */
+  async disposeAndExit(): Promise<void> {
+    try {
+      if (this.xr?.baseExperience) {
+        const state = this.xr.baseExperience.state;
+        // state 2 = IN_XR
+        if (state === 2) {
+          await this.xr.baseExperience.exitXRAsync();
+        }
+      }
+    } catch (_) { /* ignorar si ya no está en XR */ }
+    this.voiceRecognizer?.stop();
+    this.engine.dispose();
   }
 
   dispose(): void {

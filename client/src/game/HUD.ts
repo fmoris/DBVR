@@ -43,6 +43,7 @@ export class HUD {
   private elements: Record<string, HTMLElement> = {};
   private npPopupTimeout: number | null = null;
   private voiceTimeout: number | null = null;
+  private menuCallback: (() => void) | null = null;
 
   constructor(private parent: HTMLElement, private combat: CombatSystem) {
     this.container = document.createElement("div");
@@ -58,6 +59,10 @@ export class HUD {
   show(): void {
     this.container.style.display = "block";
     this.update(this.combat.getStats());
+  }
+
+  onMenu(cb: () => void): void {
+    this.menuCallback = cb;
   }
 
   showVoiceTranscript(transcript: string): void {
@@ -384,6 +389,7 @@ export class HUD {
       { id: "btn-recharge",    key: "R", label: "Recargar",   color: "#cc44ff", bg: "rgba(30,0,50,0.85)" },
       { id: "btn-kamehameha",  key: "1", label: "Kame",       color: "#00aaff", bg: "rgba(0,20,50,0.85)" },
       { id: "btn-finalflash",  key: "2", label: "F.Flash",    color: "#ffaa00", bg: "rgba(40,20,0,0.85)" },
+      { id: "btn-menu",        key: "M", label: "Menú",       color: "#ff4444", bg: "rgba(50,0,0,0.85)" },
     ];
 
     btns.forEach(({ id, key, label, color, bg }) => {
@@ -430,6 +436,9 @@ export class HUD {
     bar.querySelector("#btn-recharge")!.addEventListener("click", () => c.rechargeKi());
     bar.querySelector("#btn-kamehameha")!.addEventListener("click", () => c.kamehamehaStep(1));
     bar.querySelector("#btn-finalflash")!.addEventListener("click", () => c.finalFlashStep(1));
+    bar.querySelector("#btn-menu")!.addEventListener("click", () => {
+      if (this.menuCallback) this.menuCallback();
+    });
 
     return bar;
   }

@@ -304,3 +304,15 @@
 - [x] Ocultar manos estaticas 3D cuando hand tracking esta activo en VR (onStateChangedObservable)
 - [x] GestureRecognizer.ts ya existe — error de Vite era stale cache
 - [x] Corregir error TS2554 en routers.ts (storageGet con argumento extra)
+
+---
+
+## Bug: gestos no funcionan en VR + botón menú
+
+- [x] Diagnosticado: joints accedidos por índice numérico (incorrecto), umbrales invertidos en Z
+- [x] Reescrito GestureRecognizer v2 con acceso por nombre de joint (W3C), umbrales calibrados Quest 3
+- [x] Cooldown por gesto para evitar spam de acciones (600ms ataque, 200ms carga)
+- [x] extractHandJoints() exportada con fallback numérico para compatibilidad
+- [x] Botón Menú [M] agregado en la barra de controles del HUD (rojo diferenciado)
+- [x] disposeAndExit() en Game.ts: sale de XR, detiene voz, libera motor
+- [x] main.ts refactorizado: goToMenu() recrea StartScreen sin window.location.reload()
