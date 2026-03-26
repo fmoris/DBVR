@@ -1,22 +1,24 @@
 import { Scene } from "@babylonjs/core";
 import { VFXManager, AttackType } from "./VFXManager";
 
-export type CombatState = 
-  | "neutral" 
-  | "charging" 
+export type CombatState =
+  | "neutral"
+  | "charging"
   | "charging_special"
-  | "attacking" 
-  | "defending" 
-  | "slowMotion" 
+  | "attacking"
+  | "defending"
+  | "slowMotion"
   | "hit"
   | "melee";
+
+export type SpecialAttackType = "kamehameha" | "finalFlash";
 
 export type PowerLevel = 1 | 2 | 3 | 4 | 5;
 
 export interface GameStats {
   playerKi: number;
   maxKi: number;
-  playerNP: number; // Power Level (0-100)
+  playerNP: number;
   enemyNP: number;
   enemyKi: number;
   enemyMaxKi: number;
@@ -24,6 +26,7 @@ export interface GameStats {
   isSlowMotion: boolean;
   currentAttack: AttackType | null;
   chargeTime: number;
+  specialType: SpecialAttackType | null;
 }
 
 type StatsListener = (stats: GameStats) => void;
@@ -32,15 +35,14 @@ type StatsListener = (stats: GameStats) => void;
 const KI_COSTS = {
   basicAttack: 8,
   chargedAttack: { base: 20, perSecond: 5 },
-  kamehameha: { base: 40, perSecond: 5 },
-  finalFlash: { base: 60, perSecond: 8 },
+  kamehameha: { base: 40, perSecond: 5, minTime: 2 },
+  finalFlash: { base: 60, perSecond: 8, minTime: 3 },
   block: 15,
   dodge: 5,
   deflect: 10,
-  charge: 0,
 };
 
-// Daños base
+// Danos base
 const DAMAGE = {
   basicAttack: 10,
   chargedAttack: { base: 20, perSecond: 10 },
@@ -60,20 +62,20 @@ export class CombatSystem {
     isSlowMotion: false,
     currentAttack: null,
     chargeTime: 0,
+    specialType: null,
   };
 
   private listeners: StatsListener[] = [];
   private regenInterval: ReturnType<typeof setInterval> | null = null;
   private slowMotionTimeout: ReturnType<typeof setTimeout> | null = null;
   private chargeInterval: ReturnType<typeof setInterval> | null = null;
-  private isChargingSpecial = false;
+
+  // Estado de carga especial
+  private activeSpecial: SpecialAttackType | null = null;
   private specialChargeStart = 0;
 
-  // Para ataques especiales
-  private kamehamehaCurrentStep = 0;
-  private kamehamehaStepTime = 0;
-  private finalFlashCurrentStep = 0;
-  private finalFlashStepTime = 0;
+  // Estado de carga normal
+  private isChargingNormal = false;
 
   constructor(private scene: Scene, private vfx: VFXManager) {
     this.startKiRegen();
@@ -93,25 +95,29 @@ export class CombatSystem {
     this.emit();
   }
 
+  private stopChargeInterval(): void {
+    if (this.chargeInterval) {
+      clearInterval(this.chargeInterval);
+      this.chargeInterval = null;
+    }
+  }
+
   private startKiRegen(): void {
     this.regenInterval = setInterval(() => {
       if (this.stats.combatState === "neutral") {
-        this.stats.playerKi = Math.min(
-          this.stats.maxKi,
-          this.stats.playerKi + 2
-        );
+        this.stats.playerKi = Math.min(this.stats.maxKi, this.stats.playerKi + 2);
         this.emit();
       }
     }, 500);
   }
 
   private startNPFluctuation(): void {
-    // Fluctuación natural del NP
     setInterval(() => {
-      const fluctuation = this.stats.combatState === "attacking" || 
-                         this.stats.combatState === "defending" ? 8 : 3;
+      const fluctuation =
+        this.stats.combatState === "attacking" || this.stats.combatState === "defending"
+          ? 8
+          : 3;
       const change = (Math.random() - 0.5) * fluctuation;
-      
       this.stats.playerNP = Math.max(0, Math.min(100, this.stats.playerNP + change));
       this.stats.enemyNP = Math.max(0, Math.min(100, this.stats.enemyNP + change));
       this.emit();
@@ -119,7 +125,7 @@ export class CombatSystem {
   }
 
   // ============================================
-  // ATAQUE BÁSICO DE KI (Proyectil rápido)
+  // ATAQUE BASICO DE KI
   // ============================================
   launchBasicAttack(): void {
     if (this.stats.playerKi < KI_COSTS.basicAttack) return;
@@ -128,21 +134,20 @@ export class CombatSystem {
     this.stats.playerKi -= KI_COSTS.basicAttack;
     this.setState("attacking");
     this.stats.currentAttack = "basic";
+    this.emit();
 
-    // VFX: proyectil pequeño y rápido
     this.vfx.spawnKiProjectile(
       { x: -0.2, y: 1.4, z: 0.5 },
       { x: 0, y: 1.7, z: 18 },
       "basic",
-      () => {
-        this.onAttackImpact(DAMAGE.basicAttack);
-      }
+      () => { this.onAttackImpact(DAMAGE.basicAttack); }
     );
 
     setTimeout(() => {
       if (this.stats.combatState === "attacking") {
         this.setState("neutral");
         this.stats.currentAttack = null;
+        this.emit();
       }
     }, 600);
   }
@@ -152,120 +157,173 @@ export class CombatSystem {
   // ============================================
   startChargedAttack(): void {
     if (this.stats.playerKi < KI_COSTS.chargedAttack.base) return;
-    if (this.stats.combatState !== "neutral" && this.stats.combatState !== "charging") return;
+    if (this.stats.combatState !== "neutral") return;
 
-    if (this.stats.combatState !== "charging") {
-      this.setState("charging");
-      this.isChargingSpecial = false;
-      this.stats.chargeTime = 0;
+    this.isChargingNormal = true;
+    this.stats.chargeTime = 0;
+    this.setState("charging");
+    this.vfx.showChargeEffect(true);
 
-      // VFX de carga en el puño
-      this.vfx.showChargeEffect(true);
-
-      this.chargeInterval = setInterval(() => {
-        this.stats.chargeTime += 0.1;
-        
-        //KI adicional por tiempo de carga
-        if (this.stats.chargeTime > 1) {
-          const extraCost = Math.floor(this.stats.chargeTime - 1) * KI_COSTS.chargedAttack.perSecond;
-          // Consumir KI extra gradualmente
-        }
-        
-        this.emit();
-      }, 100);
-    }
+    this.stopChargeInterval();
+    this.chargeInterval = setInterval(() => {
+      this.stats.chargeTime += 0.1;
+      // Consumir KI extra gradualmente despues del primer segundo
+      if (this.stats.chargeTime > 1) {
+        this.stats.playerKi = Math.max(0, this.stats.playerKi - KI_COSTS.chargedAttack.perSecond * 0.1);
+      }
+      this.emit();
+      // Auto-cancelar si se queda sin KI
+      if (this.stats.playerKi <= 0) {
+        this.cancelCharge();
+      }
+    }, 100);
   }
 
   releaseChargedAttack(): void {
-    if (this.stats.combatState !== "charging" || this.isChargingSpecial) return;
-    if (this.chargeInterval) clearInterval(this.chargeInterval);
+    if (this.stats.combatState !== "charging" || !this.isChargingNormal) return;
+    this.stopChargeInterval();
 
-    const chargeTime = Math.max(1, Math.min(3, this.stats.chargeTime));
-    const damage = DAMAGE.chargedAttack.base + (chargeTime - 1) * DAMAGE.chargedAttack.perSecond;
-    const kiCost = KI_COSTS.chargedAttack.base + Math.floor(chargeTime) * KI_COSTS.chargedAttack.perSecond;
+    const chargeTime = Math.max(0.5, Math.min(3, this.stats.chargeTime));
+    const damage = DAMAGE.chargedAttack.base + Math.max(0, chargeTime - 1) * DAMAGE.chargedAttack.perSecond;
+    const kiCost = KI_COSTS.chargedAttack.base;
 
     if (this.stats.playerKi < kiCost) {
-      this.setState("neutral");
-      this.stats.chargeTime = 0;
-      this.vfx.showChargeEffect(false);
+      this.cancelCharge();
       return;
     }
 
     this.stats.playerKi -= kiCost;
+    this.isChargingNormal = false;
+    this.stats.chargeTime = 0;
     this.setState("attacking");
     this.stats.currentAttack = "charged";
+    this.vfx.showChargeEffect(false);
+    this.emit();
 
-    // VFX: esfera cargada con electricidad
     this.vfx.spawnKiProjectile(
       { x: 0, y: 1.5, z: 0.5 },
       { x: 0, y: 1.7, z: 18 },
       "charged",
       () => {
         this.onAttackImpact(damage);
-        // Bullet time corto
         this.activateSlowMotion(800, 0.4);
       }
     );
-
-    this.vfx.showChargeEffect(false);
-    this.stats.chargeTime = 0;
 
     setTimeout(() => {
       if (this.stats.combatState === "attacking") {
         this.setState("neutral");
         this.stats.currentAttack = null;
+        this.emit();
       }
     }, 800);
   }
 
+  private cancelCharge(): void {
+    this.stopChargeInterval();
+    this.isChargingNormal = false;
+    this.activeSpecial = null;
+    this.stats.chargeTime = 0;
+    this.stats.specialType = null;
+    this.vfx.showChargeEffect(false);
+    this.setState("neutral");
+    this.emit();
+  }
+
   // ============================================
-  // KAMEHAMEHA
+  // ATAQUES ESPECIALES — modelo simplificado
+  //
+  // Teclado:  1 = iniciar Kamehameha, presionar 1 de nuevo = lanzar
+  //           2 = iniciar Final Flash, presionar 2 de nuevo = lanzar
+  //
+  // Gestos VR: primer gesto inicia, segundo gesto lanza
   // ============================================
+
+  /**
+   * Llama a este metodo con el mismo tipo para iniciar Y para lanzar.
+   * Primera llamada: empieza la carga.
+   * Segunda llamada (con carga minima cumplida): lanza el ataque.
+   */
   kamehamehaStep(step: number): void {
-    const now = Date.now();
-    
-    if (step === 1) {
-      // Paso 1: ambas manos juntas al costado
-      this.kamehamehaCurrentStep = 1;
-      this.kamehamehaStepTime = now;
-      this.setState("charging");
-      this.isChargingSpecial = true;
-      this.stats.chargeTime = 0;
-      
-      // VFX de聚气
-      this.vfx.showChargeEffect(true, "kamehameha");
-    } 
-    else if (step === 2 && this.kamehamehaCurrentStep === 1) {
-      // Mantener posición mínimo 2 segundos
-      const elapsed = (now - this.kamehamehaStepTime) / 1000;
-      if (elapsed >= 2) {
-        this.kamehamehaCurrentStep = 2;
-        this.kamehamehaStepTime = now;
-        
-        this.chargeInterval = setInterval(() => {
-          this.stats.chargeTime += 0.1;
-          this.emit();
-        }, 100);
-      }
+    // step se ignora — usamos estado interno para saber si iniciar o lanzar
+    if (this.activeSpecial === "kamehameha") {
+      // Ya estaba cargando — intentar lanzar
+      this.launchSpecial("kamehameha");
+    } else if (this.stats.combatState === "neutral") {
+      // Iniciar carga
+      this.beginSpecialCharge("kamehameha");
     }
-    else if (step === 3 && this.kamehamehaCurrentStep === 2) {
-      // Paso 3: empujar ambas manos hacia adelante
-      if (this.chargeInterval) clearInterval(this.chargeInterval);
-      
-      const chargeTime = Math.max(2, Math.min(8, (now - this.kamehamehaStepTime) / 1000));
-      const damage = DAMAGE.kamehameha.base + (chargeTime - 2) * DAMAGE.kamehameha.perSecond;
-      const kiCost = KI_COSTS.kamehameha.base + Math.floor(chargeTime - 2) * KI_COSTS.kamehameha.perSecond;
+  }
 
-      if (this.stats.playerKi < kiCost) {
-        this.resetSpecialAttack();
-        return;
+  finalFlashStep(step: number): void {
+    if (this.activeSpecial === "finalFlash") {
+      this.launchSpecial("finalFlash");
+    } else if (this.stats.combatState === "neutral") {
+      this.beginSpecialCharge("finalFlash");
+    }
+  }
+
+  private beginSpecialCharge(type: SpecialAttackType): void {
+    const cost = type === "kamehameha" ? KI_COSTS.kamehameha : KI_COSTS.finalFlash;
+    if (this.stats.playerKi < cost.base) return;
+
+    this.activeSpecial = type;
+    this.specialChargeStart = Date.now();
+    this.stats.chargeTime = 0;
+    this.stats.specialType = type;
+    this.setState("charging_special");
+    this.vfx.showChargeEffect(true, type);
+
+    this.stopChargeInterval();
+    this.chargeInterval = setInterval(() => {
+      const elapsed = (Date.now() - this.specialChargeStart) / 1000;
+      this.stats.chargeTime = elapsed;
+
+      // Consumir KI progresivamente durante la carga
+      const kiDrain = cost.perSecond * 0.1; // por cada 100ms
+      this.stats.playerKi = Math.max(0, this.stats.playerKi - kiDrain);
+
+      this.emit();
+
+      // Auto-cancelar si se queda sin KI
+      if (this.stats.playerKi <= 0) {
+        this.cancelCharge();
       }
+    }, 100);
+  }
 
-      this.stats.playerKi -= kiCost;
-      this.setState("attacking");
-      this.stats.currentAttack = "kamehameha";
+  private launchSpecial(type: SpecialAttackType): void {
+    if (this.activeSpecial !== type) return;
+    this.stopChargeInterval();
 
-      // VFX: rayo de energía azul
+    const cost = type === "kamehameha" ? KI_COSTS.kamehameha : KI_COSTS.finalFlash;
+    const dmgTable = type === "kamehameha" ? DAMAGE.kamehameha : DAMAGE.finalFlash;
+    const elapsed = (Date.now() - this.specialChargeStart) / 1000;
+
+    // Carga minima requerida
+    if (elapsed < cost.minTime) {
+      // Aun no cumple el minimo — continuar cargando, no lanzar
+      return;
+    }
+
+    const chargeTime = Math.min(elapsed, 10);
+    const damage = dmgTable.base + Math.max(0, chargeTime - cost.minTime) * dmgTable.perSecond;
+
+    // El KI ya se fue consumiendo durante la carga — solo verificar que queda algo
+    if (this.stats.playerKi < 5) {
+      this.cancelCharge();
+      return;
+    }
+
+    this.activeSpecial = null;
+    this.stats.chargeTime = 0;
+    this.stats.specialType = null;
+    this.setState("attacking");
+    this.stats.currentAttack = type;
+    this.vfx.showChargeEffect(false);
+    this.emit();
+
+    if (type === "kamehameha") {
       this.vfx.spawnKamehameha(
         { x: 0, y: 1.4, z: 0.3 },
         { x: 0, y: 1.7, z: 20 },
@@ -275,63 +333,7 @@ export class CombatSystem {
           this.activateSlowMotion(1500, 0.25);
         }
       );
-
-      this.vfx.showChargeEffect(false);
-      this.resetSpecialAttack();
-    }
-  }
-
-  // ============================================
-  // FINAL FLASH
-  // ============================================
-  finalFlashStep(step: number): void {
-    const now = Date.now();
-    
-    if (step === 1) {
-      // Paso 1: brazos en cruz
-      this.finalFlashCurrentStep = 1;
-      this.finalFlashStepTime = now;
-      this.setState("charging");
-      this.isChargingSpecial = true;
-      this.stats.chargeTime = 0;
-      
-      this.vfx.showChargeEffect(true, "finalFlash");
-    } 
-    else if (step === 2 && this.finalFlashCurrentStep === 1) {
-      this.finalFlashCurrentStep = 2;
-      this.finalFlashStepTime = now;
-    }
-    else if (step === 3 && this.finalFlashCurrentStep === 2) {
-      // Mantener mínimo 3 segundos
-      const elapsed = (now - this.finalFlashStepTime) / 1000;
-      if (elapsed >= 3) {
-        this.finalFlashCurrentStep = 3;
-        this.finalFlashStepTime = now;
-        
-        this.chargeInterval = setInterval(() => {
-          this.stats.chargeTime += 0.1;
-          this.emit();
-        }, 100);
-      }
-    }
-    else if (step === 4 && this.finalFlashCurrentStep === 3) {
-      // Lanzamiento en V
-      if (this.chargeInterval) clearInterval(this.chargeInterval);
-      
-      const chargeTime = Math.max(3, Math.min(10, (now - this.finalFlashStepTime) / 1000));
-      const damage = DAMAGE.finalFlash.base + (chargeTime - 3) * DAMAGE.finalFlash.perSecond;
-      const kiCost = KI_COSTS.finalFlash.base + Math.floor(chargeTime - 3) * KI_COSTS.finalFlash.perSecond;
-
-      if (this.stats.playerKi < kiCost) {
-        this.resetSpecialAttack();
-        return;
-      }
-
-      this.stats.playerKi -= kiCost;
-      this.setState("attacking");
-      this.stats.currentAttack = "finalFlash";
-
-      // VFX: explosión dorada
+    } else {
       this.vfx.spawnFinalFlash(
         { x: 0, y: 1.5, z: 0.3 },
         { x: 0, y: 1.7, z: 20 },
@@ -341,24 +343,15 @@ export class CombatSystem {
           this.activateSlowMotion(2000, 0.2);
         }
       );
-
-      this.vfx.showChargeEffect(false);
-      this.resetSpecialAttack();
     }
-  }
 
-  private resetSpecialAttack(): void {
-    this.kamehamehaCurrentStep = 0;
-    this.finalFlashCurrentStep = 0;
-    this.isChargingSpecial = false;
-    this.stats.chargeTime = 0;
-    
     setTimeout(() => {
       if (this.stats.combatState === "attacking") {
         this.setState("neutral");
         this.stats.currentAttack = null;
+        this.emit();
       }
-    }, 1000);
+    }, type === "kamehameha" ? 1200 : 1500);
   }
 
   // ============================================
@@ -374,9 +367,7 @@ export class CombatSystem {
 
     setTimeout(() => {
       this.vfx.showBlockShield(false);
-      if (this.stats.combatState === "defending") {
-        this.setState("neutral");
-      }
+      if (this.stats.combatState === "defending") this.setState("neutral");
     }, 1500);
   }
 
@@ -386,14 +377,10 @@ export class CombatSystem {
 
     this.stats.playerKi -= KI_COSTS.dodge;
     this.setState("defending");
-    
-    // VFX de esquive
     this.vfx.showDodgeEffect();
 
     setTimeout(() => {
-      if (this.stats.combatState === "defending") {
-        this.setState("neutral");
-      }
+      if (this.stats.combatState === "defending") this.setState("neutral");
     }, 300);
   }
 
@@ -406,9 +393,7 @@ export class CombatSystem {
     this.vfx.showDeflectEffect();
 
     setTimeout(() => {
-      if (this.stats.combatState === "defending") {
-        this.setState("neutral");
-      }
+      if (this.stats.combatState === "defending") this.setState("neutral");
     }, 500);
   }
 
@@ -420,10 +405,7 @@ export class CombatSystem {
     this.setState("charging");
 
     const chargeInterval = setInterval(() => {
-      this.stats.playerKi = Math.min(
-        this.stats.maxKi,
-        this.stats.playerKi + 5
-      );
+      this.stats.playerKi = Math.min(this.stats.maxKi, this.stats.playerKi + 5);
       this.emit();
       if (this.stats.playerKi >= this.stats.maxKi) {
         clearInterval(chargeInterval);
@@ -433,62 +415,49 @@ export class CombatSystem {
 
     setTimeout(() => {
       clearInterval(chargeInterval);
-      if (this.stats.combatState === "charging") {
-        this.setState("neutral");
-      }
+      if (this.stats.combatState === "charging") this.setState("neutral");
     }, 3000);
   }
 
   // ============================================
-  // SISTEMA DE IMPACTO Y DAÑO
+  // IMPACTO Y DANO
   // ============================================
   private onAttackImpact(damage: number): void {
     const isDefending = this.stats.combatState === "defending";
-    
-    // Calcular reducción según nivel de poder
     const damageReduction = this.getPowerLevelDamageReduction(this.stats.enemyNP);
     const finalDamage = isDefending ? damage * 0.4 : damage * (1 - damageReduction);
-    
-    // Reducir NP del enemigo
+
     this.stats.enemyNP = Math.max(0, this.stats.enemyNP - finalDamage * 0.5);
-    
-    // Ganar NP por ataque exitoso
     this.stats.playerNP = Math.min(100, this.stats.playerNP + damage * 0.2);
-    
     this.emit();
-    
-    // Verificar condición de victoria
     this.checkVictoryCondition();
   }
 
   private getPowerLevelDamageReduction(np: number): number {
-    if (np >= 91) return 0.9;  // Trascendente: inmune a casi todo
-    if (np >= 76) return 0.7;  // Dominante
-    if (np >= 51) return 0.4;  // Elevado
-    if (np >= 21) return 0.2;  // Normal
-    return 0;                   // Debilitado
+    if (np >= 91) return 0.9;
+    if (np >= 76) return 0.7;
+    if (np >= 51) return 0.4;
+    if (np >= 21) return 0.2;
+    return 0;
   }
 
   private checkVictoryCondition(): void {
     const npDiff = Math.abs(this.stats.playerNP - this.stats.enemyNP);
-    
     if (npDiff > 50) {
       if (this.stats.playerNP > this.stats.enemyNP) {
-        console.log("🎉 ¡Victoria! El enemigo no puede continuar...");
+        console.log("Victoria! El enemigo no puede continuar...");
       } else {
-        console.log("💀 Derrota... Tu poder era insuficiente.");
+        console.log("Derrota... Tu poder era insuficiente.");
       }
     }
   }
 
   // ============================================
-  // CÁMARA LENTA
+  // CAMARA LENTA
   // ============================================
   private activateSlowMotion(durationMs: number, timeScale: number = 0.3): void {
     this.stats.isSlowMotion = true;
     this.setState("slowMotion");
-    
-    // Aplicar timeScale al scene
     (this.scene as any).animationTimeScale = timeScale;
 
     if (this.slowMotionTimeout) clearTimeout(this.slowMotionTimeout);
@@ -500,18 +469,18 @@ export class CombatSystem {
   }
 
   // ============================================
-  // Getters públicos
+  // GETTERS PUBLICOS
   // ============================================
   getStats(): GameStats {
     return { ...this.stats };
   }
 
   getKamehamehaStep(): number {
-    return this.kamehamehaCurrentStep;
+    return this.activeSpecial === "kamehameha" ? 1 : 0;
   }
 
   getFinalFlashStep(): number {
-    return this.finalFlashCurrentStep;
+    return this.activeSpecial === "finalFlash" ? 1 : 0;
   }
 
   getChargeTime(): number {
@@ -519,12 +488,15 @@ export class CombatSystem {
   }
 
   isInChargingState(): boolean {
-    return this.stats.combatState === "charging";
+    return (
+      this.stats.combatState === "charging" ||
+      this.stats.combatState === "charging_special"
+    );
   }
 
   dispose(): void {
     if (this.regenInterval) clearInterval(this.regenInterval);
     if (this.slowMotionTimeout) clearTimeout(this.slowMotionTimeout);
-    if (this.chargeInterval) clearInterval(this.chargeInterval);
+    this.stopChargeInterval();
   }
 }

@@ -276,7 +276,13 @@ export class HUD {
     if (stats.combatState === "charging" || stats.combatState === "charging_special") {
       chargeIndicator.style.display = "block";
       chargeIndicator.style.color = "#ffcc00";
-      chargeIndicator.innerHTML = `⏳ CARGANDO: ${stats.chargeTime.toFixed(1)}s`;
+      const specialName = stats.specialType === "kamehameha" ? "KAMEHAMEHA" : stats.specialType === "finalFlash" ? "FINAL FLASH" : "";
+      const minTime = stats.specialType === "kamehameha" ? 2 : stats.specialType === "finalFlash" ? 3 : 0;
+      const ready = stats.chargeTime >= minTime;
+      chargeIndicator.style.color = ready ? "#00ff88" : "#ffcc00";
+      chargeIndicator.innerHTML = specialName
+        ? `${ready ? "✅" : "⏳"} ${specialName}: ${stats.chargeTime.toFixed(1)}s ${ready ? "— LISTO! Presiona de nuevo" : `(min ${minTime}s)`}`
+        : `⏳ CARGANDO: ${stats.chargeTime.toFixed(1)}s`;
     } else if (stats.combatState === "attacking" && stats.currentAttack) {
       chargeIndicator.style.display = "block";
       chargeIndicator.style.color = "#ff6600";
