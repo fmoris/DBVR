@@ -421,17 +421,17 @@ export class Game {
 
     try {
       // Timeout de seguridad: si createDefaultXRExperienceAsync tarda más de 12s, abortar
-      const xrPromise = this.scene.createDefaultXRExperienceAsync({
+      // dom-overlay: pasar el elemento directamente en la config (no con spread)
+      // La propiedad no está en los tipos de Babylon pero sí es soportada en Quest
+      const xrConfig: any = {
         uiOptions: {
           sessionMode: "immersive-vr",
           referenceSpaceType: "local-floor",
         },
-        // dom-overlay proyecta el div #xr-overlay sobre el visor XR
-        // hand-tracking habilita el hand tracking en Quest
         optionalFeatures: ["hand-tracking", "dom-overlay"],
-        // dom-overlay no está en los tipos de Babylon pero sí es soportado en Quest
-        ...(({ domOverlay: { element: this.xrOverlay } }) as any),
-      });
+        domOverlay: { element: this.xrOverlay },
+      };
+      const xrPromise = this.scene.createDefaultXRExperienceAsync(xrConfig);
 
       const timeoutPromise = new Promise<null>((_, reject) =>
         setTimeout(() => reject(new Error("XR init timeout")), 12000)
@@ -483,45 +483,65 @@ export class Game {
         });
       });
 
-      // Loop de hand tracking
-      // Babylon 6 expone las manos como handTracking.leftHand / handTracking.rightHand
-      // NO como un Map — el uso anterior de .get() siempre devolvía undefined
-      if (handTracking) {
-        this.scene.registerBeforeRender(() => {
-          // Detectar qué API usa Babylon para exponer las manos y reportarlo en el debug
-          let lh: any = null;
-          let rh: any = null;
-          let apiSource = "ninguna";
+      // Loop de hand tracking usando la API correcta de Babylon 6:
+      // WebXRHandTracking expone las manos a través de onHandAddedObservable
+      // y las almacena en _handControllersCache (Map<XRHandedness, WebXRHand>)
+      // Los joints se acceden via hand.getJointMesh(jointName).position
+      let leftHand: any = null;
+      let rightHand: any = null;
 
-          if ((handTracking as any).leftHand !== undefined) {
-            lh = (handTracking as any).leftHand;
-            rh = (handTracking as any).rightHand;
-            apiSource = "leftHand/rightHand";
-          } else if ((handTracking as any).hands instanceof Map) {
-            lh = (handTracking as any).hands.get("left");
-            rh = (handTracking as any).hands.get("right");
-            apiSource = "hands Map";
-          } else if (Array.isArray((handTracking as any).controllers)) {
-            lh = (handTracking as any).controllers.find((c: any) => c.inputSource?.handedness === "left");
-            rh = (handTracking as any).controllers.find((c: any) => c.inputSource?.handedness === "right");
-            apiSource = "controllers array";
-          } else {
-            // Último recurso: inspeccionar todas las propiedades del objeto
-            const keys = Object.keys(handTracking as any);
-            apiSource = `keys:[${keys.slice(0,6).join(",")}]`;
+      if (handTracking) {
+        // Suscribirse al observable de manos agregadas
+        (handTracking as any).onHandAddedObservable?.add((hand: any) => {
+          const handedness = hand.xrController?.inputSource?.handedness
+            ?? hand.handedness
+            ?? hand._handedness;
+          console.log(`[XR] Mano detectada: ${handedness}`, Object.keys(hand));
+          if (handedness === "left")  leftHand  = hand;
+          if (handedness === "right") rightHand = hand;
+        });
+        (handTracking as any).onHandRemovedObservable?.add((hand: any) => {
+          const handedness = hand.xrController?.inputSource?.handedness
+            ?? hand.handedness
+            ?? hand._handedness;
+          if (handedness === "left")  leftHand  = null;
+          if (handedness === "right") rightHand = null;
+        });
+
+        // Fallback: si el observable no dispara, intentar leer del cache cada 2s
+        let fallbackTick = 0;
+        this.scene.registerBeforeRender(() => {
+          fallbackTick++;
+
+          // Cada 120 frames (~2s) intentar leer del cache interno de Babylon
+          if (fallbackTick % 120 === 0 && (!leftHand || !rightHand)) {
+            const cache = (handTracking as any)._handControllersCache
+              ?? (handTracking as any)._handControllers
+              ?? (handTracking as any).handControllersCache;
+            if (cache instanceof Map) {
+              leftHand  = cache.get("left")  ?? leftHand;
+              rightHand = cache.get("right") ?? rightHand;
+              if (leftHand || rightHand) {
+                console.log("[XR] Manos encontradas via cache:", !!leftHand, !!rightHand);
+              }
+            }
           }
 
-          const lJoints = lh ? extractHandJoints(lh) : null;
-          const rJoints = rh ? extractHandJoints(rh) : null;
+          // Extraer joints de las manos disponibles
+          const lJoints = leftHand  ? extractHandJoints(leftHand)  : null;
+          const rJoints = rightHand ? extractHandJoints(rightHand) : null;
 
-          // Actualizar estado de hand tracking
           this.handTrackingActive = !!(lJoints || rJoints);
 
           if (lJoints) this.gestureRecognizer.updateHandJoints("left",  lJoints);
           if (rJoints) this.gestureRecognizer.updateHandJoints("right", rJoints);
           if (lJoints && rJoints) this.processGestures();
 
-          // Alimentar el overlay de debug siempre (para que tenga datos al abrirse)
+          // Construir apiSource para el debug overlay
+          const apiSource = leftHand || rightHand
+            ? `onHandAdded (L:${!!leftHand} R:${!!rightHand})`
+            : `esperando manos...`;
+
           this.debugOverlay?.update({
             handTrackingActive: this.handTrackingActive,
             leftJoints:  lJoints,
@@ -535,10 +555,10 @@ export class Game {
         this.scene.registerBeforeRender(() => {
           this.debugOverlay?.update({
             handTrackingActive: false,
-            leftJoints:  this.gestureRecognizer.getLeftHandJoints(),
-            rightJoints: this.gestureRecognizer.getRightHandJoints(),
+            leftJoints:  null,
+            rightJoints: null,
             gesture: this.gestureRecognizer.getCurrentGesture(),
-            handApiSource: "handTracking=null",
+            handApiSource: "handTracking feature = null",
           });
         });
       }

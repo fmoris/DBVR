@@ -38,35 +38,49 @@ const JOINT_NAMES = {
 } as const;
 
 /**
- * Extrae los joints de un WebXRHand de Babylon (acceso por nombre de joint)
- * Soporta tanto el acceso por Map (joints.get(name)) como por índice numérico
- * como fallback para versiones antiguas de Babylon.
+ * Extrae los joints de un WebXRHand de Babylon 6.
+ *
+ * Babylon 6 expone los joints de tres formas posibles según la versión:
+ *   1. hand.getJointMesh(jointName) → AbstractMesh con .position (Vector3)
+ *   2. hand._jointMeshes como Map<string, AbstractMesh>
+ *   3. hand.xrController.hand (XRHand nativo) + referenceSpace para getJointPose
+ *
+ * El método más confiable es getJointMesh, que devuelve el mesh del joint
+ * cuya posición se actualiza cada frame por Babylon.
  */
 export function extractHandJoints(hand: any): HandJoints | null {
   if (!hand) return null;
 
   const get = (name: string, fallbackIdx: number): { x: number; y: number; z: number } => {
     try {
-      // Babylon 6+: hand.getJointMesh(name) o hand.joints como Map
-      let joint: any = null;
+      let pos: any = null;
 
+      // Método 1: getJointMesh (Babylon 6 WebXRHandTracking)
       if (typeof hand.getJointMesh === "function") {
-        joint = hand.getJointMesh(name);
-      } else if (hand.joints instanceof Map) {
-        joint = hand.joints.get(name);
-      } else if (hand.joints && typeof hand.joints === "object") {
-        // Acceso por nombre como objeto
-        joint = hand.joints[name] ?? hand.joints[fallbackIdx];
+        const mesh = hand.getJointMesh(name);
+        if (mesh?.position) pos = mesh.position;
       }
 
-      if (joint?.position) {
-        return { x: joint.position.x, y: joint.position.y, z: joint.position.z };
+      // Método 2: _jointMeshes como Map<string, AbstractMesh>
+      if (!pos && hand._jointMeshes instanceof Map) {
+        const mesh = hand._jointMeshes.get(name);
+        if (mesh?.position) pos = mesh.position;
       }
-      // Fallback: acceso por índice numérico (Babylon < 6.x)
-      if (hand.joints && hand.joints[fallbackIdx]?.position) {
-        const p = hand.joints[fallbackIdx].position;
-        return { x: p.x, y: p.y, z: p.z };
+
+      // Método 3: jointMeshes como array indexado (Babylon < 6.x)
+      if (!pos && Array.isArray(hand.jointMeshes)) {
+        const mesh = hand.jointMeshes[fallbackIdx];
+        if (mesh?.position) pos = mesh.position;
       }
+
+      // Método 4: joints como objeto plano con nombres
+      if (!pos && hand.joints && typeof hand.joints === "object") {
+        const j = hand.joints[name] ?? hand.joints[fallbackIdx];
+        if (j?.position) pos = j.position;
+        else if (j?.x !== undefined) pos = j;
+      }
+
+      if (pos) return { x: pos.x ?? 0, y: pos.y ?? 0, z: pos.z ?? 0 };
     } catch (_) { /* silencioso */ }
     return { x: 0, y: 0, z: 0 };
   };

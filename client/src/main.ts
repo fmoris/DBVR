@@ -10,17 +10,19 @@ canvas.style.cssText = "width:100%;height:100%;display:block;outline:none;touch-
 canvas.tabIndex = 0;
 app.appendChild(canvas);
 
-// Contenedor DOM Overlay — se proyecta sobre el visor XR cuando se activa dom-overlay
-// DEBE existir antes de que se cree el Game, y DEBE ser hijo directo del body o del app
+// Contenedor DOM Overlay — la especificación WebXR dom-overlay requiere que el elemento
+// sea hijo DIRECTO del <body> para que el navegador de Quest lo proyecte sobre el visor.
+// NO puede ser hijo de un div anidado.
 const xrOverlay = document.createElement("div");
 xrOverlay.id = "xr-overlay";
 xrOverlay.style.cssText = `
-  position: absolute;
+  position: fixed;
   inset: 0;
   pointer-events: none;
-  z-index: 100;
+  z-index: 9999;
+  overflow: hidden;
 `;
-app.appendChild(xrOverlay);
+document.body.appendChild(xrOverlay);
 
 let currentGame: Game | null = null;
 

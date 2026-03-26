@@ -371,3 +371,12 @@
 - [x] Bug 2: pointer-events:none heredado bloqueaba los clics — agregado pointer-events:auto en overlay
 - [x] Bug 3: z-index del overlay subido de 30 a 50 para estar sobre el HUD
 - [x] Botón Menú ahora usa menuCallback limpio en lugar de window.location.reload()
+
+---
+
+## Bug persistente VR (sesión 26/03 tarde)
+- [x] xrOverlay movido a document.body (hijo directo) con position:fixed — requerido por spec dom-overlay
+- [x] domOverlay pasado correctamente como propiedad del objeto config (no con spread)
+- [x] Loop hand tracking reescrito con onHandAddedObservable + fallback cache cada 120 frames
+- [x] extractHandJoints mejorado: 4 métodos de acceso (getJointMesh, _jointMeshes Map, jointMeshes array, joints objeto)
+- [x] Debug overlay muestra estado en tiempo real: L/R detectadas, API usada, joints, gesto
