@@ -1,6 +1,6 @@
 import "dotenv/config";
 import express from "express";
-import { createServer as createHttpServer } from "http";
+import { createServer } from "http";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
@@ -30,27 +30,9 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   const app = express();
 
-  // En desarrollo: HTTPS con certificado autofirmado (requerido por WebXR)
-  // En producción: HTTP simple (el proxy/CDN provee TLS)
-  let server: any;
-
-  if (process.env.NODE_ENV === "development") {
-    try {
-      const { generate } = await import("selfsigned");
-      const pems = generate([{ name: "commonName", value: "localhost" }], {
-        days: 365,
-        algorithm: "sha256",
-      });
-      const { createServer: createHttpsServer } = await import("https");
-      server = createHttpsServer({ key: pems.private, cert: pems.cert }, app);
-      console.log("[Server] HTTPS habilitado (requerido por WebXR)");
-    } catch (e) {
-      console.warn("[Server] selfsigned no disponible, usando HTTP:", e);
-      server = createHttpServer(app);
-    }
-  } else {
-    server = createHttpServer(app);
-  }
+  // El servidor Express usa HTTP; Vite maneja HTTPS via @vitejs/plugin-basic-ssl.
+  // En producción el proxy/CDN provee TLS.
+  const server = createServer(app);
 
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
@@ -80,9 +62,9 @@ async function startServer() {
   }
 
   server.listen(port, () => {
-    const protocol = process.env.NODE_ENV === "development" ? "https" : "http";
-    console.log(`Server running on ${protocol}://localhost:${port}/`);
+    console.log(`Server running on http://localhost:${port}/`);
     if (process.env.NODE_ENV === "development") {
+      console.log(`[WebXR] Vite sirve HTTPS en https://localhost:${port}/`);
       console.log(`[WebXR] En Meta Quest usa: https://<IP-de-tu-PC>:${port}/`);
     }
   });
