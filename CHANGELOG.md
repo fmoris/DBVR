@@ -5,6 +5,27 @@ Las versiones corresponden a los checkpoints del proyecto.
 
 ---
 
+## [v1.5.0] — 2026-03-27 · HUD 3D World-Space para Meta Quest 3
+
+### Problema resuelto
+- El HUD HTML era completamente invisible en `immersive-vr` porque el navegador ignora todo el DOM al entrar en VR. `DOM Overlay` solo funciona en `immersive-ar`.
+
+### Agregado
+- Instalado `@babylonjs/gui 7.54.3` (compatible con `@babylonjs/core 7.x`).
+- **`VRHud.ts`**: HUD 3D world-space con 4 paneles `AdvancedDynamicTexture` adjuntos a la cámara XR:
+  - Panel izquierdo: barras NP/KI del jugador + rango de poder (DEBILITADO → TRASCENDENTE).
+  - Panel derecho: barras NP/KI del enemigo con colores diferenciados.
+  - Panel central inferior: 7 botones de acción interactivos (Atacar, Cargar, Kame, F.Flash, Bloquear, Esquivar, Recargar) — activables con el laser ray de los controladores Quest.
+  - Panel de estado superior: indicador de Bullet Time, alerta de ataque enemigo, progreso de carga.
+- Los paneles se adjuntan a la cámara XR al entrar en VR y siguen la cabeza del jugador.
+- Al salir de VR los paneles se desanclan y vuelve el HUD HTML para desktop.
+- Método `hide()` agregado a `HUD.ts` para ocultarlo al entrar en VR.
+
+### Archivos modificados
+`VRHud.ts` (nuevo) · `Game.ts` · `HUD.ts` · `package.json`
+
+---
+
 ## [v1.4.0] — 2026-03-26 · Botón VR en StartScreen
 
 ### Agregado

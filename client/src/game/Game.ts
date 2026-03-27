@@ -21,6 +21,7 @@ import { GestureRecognizer, extractHandJoints } from "./GestureRecognizer";
 import { GestureDebugOverlay } from "./GestureDebugOverlay";
 import { VoiceRecognizer } from "./VoiceRecognizer";
 import { ResultScreen } from "./ResultScreen";
+import { VRHud } from "./VRHud";
 
 export class Game {
   private engine: Engine;
@@ -38,6 +39,7 @@ export class Game {
   private menuCallback: (() => void) | null = null;
   private debugOverlay!: GestureDebugOverlay;
   private handTrackingActive = false;
+  private vrHud!: VRHud;
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -64,6 +66,9 @@ export class Game {
     this.vfx = new VFXManager(this.scene);
     this.combat = new CombatSystem(this.scene, this.vfx);
     this.gestureRecognizer = new GestureRecognizer(this.scene);
+    // VRHud: HUD 3D world-space para Meta Quest 3
+    // Se crea aquí pero se adjunta a la cámara XR en initWebXR()
+    this.vrHud = new VRHud(this.scene, this.combat);
     // Montar HUD, ResultScreen y DebugOverlay en el xrOverlay
     // para que sean visibles dentro del visor XR via dom-overlay
     this.hud = new HUD(this.xrOverlay, this.combat);
@@ -477,13 +482,28 @@ export class Game {
       }
 
       // Ocultar manos estáticas cuando XR está activo
-      // Y activar automáticamente el debug overlay al entrar en VR
+      // Adjuntar VRHud a la cámara XR al entrar en VR
       this.xr.baseExperience.onStateChangedObservable.add((state: number) => {
         // state 2 = IN_XR, state 0 = NOT_IN_XR
         const inXR = state === 2;
-        // Activar debug overlay automáticamente al entrar en VR
+
         if (inXR) {
+          // Activar debug overlay
           this.debugOverlay?.show();
+
+          // Adjuntar VRHud a la cámara XR y ocultar HUD HTML
+          // La cámara XR está disponible justo después de que la sesión inicia
+          const xrCamera = this.xr.baseExperience.camera;
+          if (xrCamera && this.vrHud) {
+            this.vrHud.attachToXRCamera(xrCamera);
+            console.log("[VRHud] Adjuntado a cámara XR");
+          }
+          // Ocultar el HUD HTML (no visible en immersive-vr de todos modos)
+          this.hud?.hide?.();
+        } else {
+          // Al salir de VR: mostrar HUD HTML, ocultar VRHud
+          this.vrHud?.detachFromCamera();
+          this.hud?.show?.();
         }
         const leftMesh = this.scene.getMeshByName("leftHand");
         const rightMesh = this.scene.getMeshByName("rightHand");

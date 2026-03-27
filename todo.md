@@ -409,3 +409,16 @@
 - [x] enterVR() expuesto como método público en Game.ts
 - [x] startGameVR() en main.ts: inicia juego + entra en VR con delay de 1.5s
 - [x] Fallback: espera hasta 8s a que WebXR esté listo
+
+---
+
+## v1.5.0 — HUD 3D world-space para VR (babylon-hud)
+- [x] Instalar @babylonjs/gui
+- [x] Crear VRHud.ts con paneles AdvancedDynamicTexture en planos 3D
+- [x] Panel izquierdo: barras NP/KI del jugador + nombre de rango
+- [x] Panel derecho: barras NP/KI del enemigo
+- [x] Panel central inferior: botones de acción (Atacar, Cargar, Kame, F.Flash, Bloquear, Esquivar, Recargar)
+- [x] Panel de estado: indicador bullet time, alerta de ataque enemigo, progreso de carga
+- [x] Adjuntar todos los paneles a la cámara XR (siguen la cabeza del jugador)
+- [x] Mantener HUD HTML para modo desktop (no VR)
+- [x] Ocultar HUD HTML al entrar en VR, mostrar VRHud

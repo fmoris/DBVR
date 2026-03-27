@@ -70,6 +70,10 @@ export class HUD {
     this.update(this.combat.getStats());
   }
 
+  hide(): void {
+    this.container.style.display = "none";
+  }
+
   onMenu(cb: () => void): void {
     this.menuCallback = cb;
   }
