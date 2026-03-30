@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
-import { createServer } from "http";
+import { createServer as createHttpServer } from "http";
+import { createServer as createHttpsServer } from "https";
 import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
@@ -30,15 +31,49 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   const app = express();
 
-  // El servidor Express usa HTTP; Vite maneja HTTPS via @vitejs/plugin-basic-ssl.
-  // En producción el proxy/CDN provee TLS.
-  const server = createServer(app);
+  // En desarrollo: HTTPS con certificado autofirmado (requerido por WebXR immersive-vr).
+  // En producción: HTTP simple (el proxy/CDN provee TLS).
+  let server: ReturnType<typeof createHttpServer> | ReturnType<typeof createHttpsServer>;
+  let isHttps = false;
+
+  if (process.env.NODE_ENV === "development") {
+    try {
+      // selfsigned v5 es async — devuelve Promise<{private, public, cert, fingerprint}>
+      const { generate } = await import("selfsigned");
+      const pems = await generate(
+        [{ name: "commonName", value: "localhost" }],
+        {
+          keySize: 2048,
+          algorithm: "sha256",
+          extensions: [
+            {
+              name: "subjectAltName",
+              altNames: [
+                { type: 2, value: "localhost" },
+                { type: 7, ip: "127.0.0.1" },
+              ],
+            },
+          ],
+        }
+      );
+      server = createHttpsServer({ key: pems.private, cert: pems.cert }, app);
+      isHttps = true;
+      console.log("[Server] HTTPS habilitado — WebXR disponible");
+    } catch (e) {
+      console.warn("[Server] No se pudo crear HTTPS, usando HTTP:", e);
+      server = createHttpServer(app);
+    }
+  } else {
+    server = createHttpServer(app);
+  }
 
   // Configure body parser with larger size limit for file uploads
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ limit: "50mb", extended: true }));
+
   // OAuth callback under /api/oauth/callback
   registerOAuthRoutes(app);
+
   // tRPC API
   app.use(
     "/api/trpc",
@@ -47,9 +82,10 @@ async function startServer() {
       createContext,
     })
   );
+
   // development mode uses Vite, production mode uses static files
   if (process.env.NODE_ENV === "development") {
-    await setupVite(app, server);
+    await setupVite(app, server as any);
   } else {
     serveStatic(app);
   }
@@ -62,10 +98,11 @@ async function startServer() {
   }
 
   server.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}/`);
-    if (process.env.NODE_ENV === "development") {
-      console.log(`[WebXR] Vite sirve HTTPS en https://localhost:${port}/`);
-      console.log(`[WebXR] En Meta Quest usa: https://<IP-de-tu-PC>:${port}/`);
+    const protocol = isHttps ? "https" : "http";
+    console.log(`Server running on ${protocol}://localhost:${port}/`);
+    if (process.env.NODE_ENV === "development" && isHttps) {
+      console.log(`[WebXR] Abre ${protocol}://localhost:${port}/ y acepta el certificado`);
+      console.log(`[WebXR] En Meta Quest usa: ${protocol}://<IP-de-tu-PC>:${port}/`);
     }
   });
 }
