@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "skills": {
+    "sonoscli": {
+      "version": "1.0.0",
+      "installedAt": 1773259023363
+    },
+    "aura-openclaw": {
+      "version": "0.1.4",
+      "installedAt": 1773259987943
+    }
+  }
+}

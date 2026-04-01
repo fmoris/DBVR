@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "metaquest-webxr": {
+      "version": "1.0.0",
+      "installedAt": 1743513600000,
+      "source": "../skills/metagame/metaquest-webxr.skill",
+      "active": true
+    }
+  }
+}

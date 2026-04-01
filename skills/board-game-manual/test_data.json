@@ -1,0 +1,37 @@
+{
+  "NOMBRE_DEL_JUEGO": "Aventuras en el Bosque",
+  "MIN_JUGADORES": "2",
+  "MAX_JUGADORES": "4",
+  "DURACION": "30",
+  "EDAD_MINIMA": "6",
+  "INTRODUCCION_TEMATICA": "Bienvenido al Bosque Encantado, donde los jugadores deben encontrar el tesoro perdido antes de que caiga la noche.",
+  "OBJETIVO_DEL_JUEGO": "El primer jugador en encontrar 3 gemas ocultas gana la partida.",
+  "COMPONENTES": [
+    {"nombre": "Tablero del bosque", "cantidad": 1, "descripcion": "Tablero de 40x40cm con 20 casillas"},
+    {"nombre": "Fichas de jugador", "cantidad": 4, "descripcion": "Una por color: rojo, azul, verde, amarillo"},
+    {"nombre": "Cartas de tesoro", "cantidad": 20, "descripcion": "Cartas que indican dónde están las gemas"},
+    {"nombre": "Gemas", "cantidad": 12, "descripcion": "3 gemas por color"}
+  ],
+  "PASOS_SETUP": [
+    "Coloca el tablero en el centro de la mesa",
+    "Baraja las cartas de tesoro y ponlas boca abajo",
+    "Cada jugador elige un color y toma su ficha",
+    "El jugador más joven comienza"
+  ],
+  "NOTA_SETUP": "Para la primera partida, usa solo las cartas de nivel 1.",
+  "REGLA_PRIMER_JUGADOR": "El jugador más joven comienza la partida.",
+  "RESUMEN_ACCIONES": "En tu turno, mueve tu ficha y roba una carta de tesoro.",
+  "ACCIONES": [
+    {
+      "nombre": "Mover",
+      "descripcion": "Avanza tu ficha hasta 3 casillas en cualquier dirección"
+    },
+    {
+      "nombre": "Robar",
+      "descripcion": "Roba la carta superior del mazo de tesoro"
+    }
+  ],
+  "CONDICION_FIN_DE_JUEGO": "un jugador encuentra 3 gemas",
+  "DESCRIPCION_PUNTUACION": "Cada gema encontrada vale 1 punto de victoria.",
+  "REGLA_DESEMPATE": "Si hay empate, gana el jugador que encontró su tercera gema primero."
+}

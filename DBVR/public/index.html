@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VR KI Combat</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            width: 100%;
+            height: 100vh;
+            overflow: hidden;
+            background: #000;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        }
+        
+        #renderCanvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        
+        #ui {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+        
+        .hud {
+            position: absolute;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 60px;
+            pointer-events: auto;
+        }
+        
+        .ki-bar {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .bar-container {
+            width: 200px;
+            height: 30px;
+            background: rgba(0, 0, 0, 0.7);
+            border: 2px solid;
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+        }
+        
+        .bar-fill {
+            height: 100%;
+            width: 100%;
+            background: linear-gradient(90deg, #00ff00, #00aa00);
+            transition: width 0.1s ease;
+            box-shadow: 0 0 10px rgba(0, 255, 0, 0.6);
+        }
+        
+        .player-bar .bar-container {
+            border-color: #00ff00;
+        }
+        
+        .enemy-bar .bar-container {
+            border-color: #ff0000;
+        }
+        
+        .enemy-bar .bar-fill {
+            background: linear-gradient(90deg, #ff0000, #aa0000);
+            box-shadow: 0 0 10px rgba(255, 0, 0, 0.6);
+        }
+        
+        .bar-label {
+            color: #fff;
+            font-size: 12px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .debug-info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 10px;
+            border: 1px solid #00ff00;
+            max-width: 400px;
+            pointer-events: auto;
+        }
+        
+        .debug-info div {
+            margin: 2px 0;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="renderCanvas"></canvas>
+    <div id="ui">
+        <div class="hud">
+            <div class="ki-bar player-bar">
+                <span class="bar-label">Tu KI</span>
+                <div class="bar-container">
+                    <div class="bar-fill" id="playerKiBar" style="width: 100%;"></div>
+                </div>
+            </div>
+            <div class="ki-bar enemy-bar">
+                <span class="bar-label">KI Enemigo</span>
+                <div class="bar-container">
+                    <div class="bar-fill" id="enemyKiBar" style="width: 100%;"></div>
+                </div>
+            </div>
+        </div>
+        <div class="debug-info" id="debugInfo"></div>
+    </div>
+
+    <!-- BabylonJS desde CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/babylonjs@6.49.0/babylon.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/babylonjs-loaders@6.49.0/babylonjs.loaders.min.js"></script>
+
+    <script>
+        // Inicializar escena básica
+        const canvas = document.getElementById('renderCanvas');
+        const engine = new BABYLON.Engine(canvas, true);
+        const scene = new BABYLON.Scene(engine);
+
+        // Cámara
+        const camera = new BABYLON.UniversalCamera('camera', new BABYLON.Vector3(0, 1.6, 0));
+        camera.attachControl(canvas, true);
+        camera.speed = 0;
+
+        // Luces
+        const light = new BABYLON.HemisphericLight('light', new BABYLON.Vector3(0, 1, 0), scene);
+        light.intensity = 0.7;
+
+        // Terreno
+        const ground = BABYLON.MeshBuilder.CreateGround('ground', { width: 100, height: 100 }, scene);
+        const groundMat = new BABYLON.StandardMaterial('groundMat', scene);
+        groundMat.diffuse = new BABYLON.Color3(0.3, 0.3, 0.3);
+        ground.material = groundMat;
+        ground.position.y = -2;
+
+        // Enemigo
+        const enemy = BABYLON.MeshBuilder.CreateCylinder('enemy', { height: 2, diameterTop: 0.6, diameterBottom: 0.6 }, scene);
+        enemy.position = new BABYLON.Vector3(0, 1.5, 20);
+        const enemyMat = new BABYLON.StandardMaterial('enemyMat', scene);
+        enemyMat.diffuse = new BABYLON.Color3(0.8, 0.2, 0.2);
+        enemy.material = enemyMat;
+
+        // Variables de juego
+        let playerKi = 100;
+        let maxKi = 100;
+        let isCharging = false;
+        let chargeStart = 0;
+
+        // Controles
+        document.addEventListener('keydown', (e) => {
+            if (e.key.toLowerCase() === 'a') {
+                console.log('🔥 Ataque lanzado');
+                playerKi = Math.max(0, playerKi - 20);
+                
+                // Crear proyectil
+                const projectile = BABYLON.MeshBuilder.CreateSphere('projectile', { diameter: 0.6 }, scene);
+                projectile.position = new BABYLON.Vector3(0, 1.2, 0);
+                const projMat = new BABYLON.StandardMaterial('projMat', scene);
+                projMat.emissiveColor = new BABYLON.Color3(0, 0.8, 1);
+                projectile.material = projMat;
+
+                // Animar proyectil
+                const anim = new BABYLON.Animation('projectileAnim', 'position.z', 60, BABYLON.Animation.ANIMATIONTYPE_FLOAT);
+                const keys = [];
+                keys.push({ frame: 0, value: 0 });
+                keys.push({ frame: 120, value: 25 });
+                anim.setKeys(keys);
+                projectile.animations = [anim];
+                scene.beginAnimation(projectile, 0, 120, false, 1, () => {
+                    projectile.dispose();
+                });
+
+                // Cámara lenta
+                scene.animationTimeScale = 0.3;
+                setTimeout(() => {
+                    scene.animationTimeScale = 1;
+                }, 1500);
+            } else if (e.key.toLowerCase() === 's') {
+                console.log('🛡️ Bloqueando');
+            } else if (e.key.toLowerCase() === 'r') {
+                console.log('⚡ Recargando KI');
+                playerKi = Math.min(maxKi, playerKi + 30);
+            }
+        });
+
+        // Loop de renderizado
+        engine.runRenderLoop(() => {
+            // Actualizar UI
+            const kiPercent = (playerKi / maxKi) * 100;
+            document.getElementById('playerKiBar').style.width = kiPercent + '%';
+            
+            document.getElementById('debugInfo').innerHTML = `
+                <div><strong>KI:</strong> ${playerKi.toFixed(0)}/${maxKi}</div>
+                <div><strong>Estado:</strong> Normal</div>
+                <div style="margin-top: 10px; font-size: 10px; color: #00aa00;">
+                    A=Ataque | S=Bloqueo | R=Recarga
+                </div>
+            `;
+
+            scene.render();
+        });
+
+        // Manejar redimensionamiento
+        window.addEventListener('resize', () => {
+            engine.resize();
+        });
+
+        console.log('✅ VR KI Combat iniciado');
+    </script>
+</body>
+</html>
