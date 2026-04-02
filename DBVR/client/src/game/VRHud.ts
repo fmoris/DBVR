@@ -33,6 +33,8 @@ import {
   Control,
 } from "@babylonjs/gui";
 import { CombatSystem, GameStats } from "./CombatSystem";
+import powersConfig from "../models/powers.json";
+import gokuConfig from "../models/goku.json";
 
 // ─── Helpers de color/rango (duplicados de HUD.ts para no crear dependencia) ──
 
@@ -225,16 +227,25 @@ export class VRHud {
     row.width = "100%";
     row.height = "70%";
     row.spacing = 10;
-    row.verticalAlignment = Control.VERTICAL_ALIGNMENT_BOTTOM;
-    bg.addControl(row);
-
     const c = this.combat;
 
-    // Ataques
+    // Ataques basicos
     this.makeActionBtn(row, "A", "Atacar",       "#00ff88", "#003322", () => c.launchBasicAttack());
     this.makeActionBtn(row, "W", "Cargar",       "#ffcc00", "#332200", () => c.startChargedAttack());
-    this.makeActionBtn(row, "1", "Kame",         "#00ccff", "#001133", () => c.kamehamehaStep(1));
-    this.makeActionBtn(row, "2", "F.Flash",      "#ff4400", "#331100", () => c.finalFlashStep(1));
+
+    // Ataques dinamicos desde JSON
+    const powersDict = powersConfig as Record<string, any>;
+    const allowedPowers = gokuConfig.transformations[0].powers || [];
+    let keyIdx = 1;
+    for (const key of allowedPowers) {
+      const details = powersDict[key];
+      if (details && (details.type === "ofensiva" || details.type === "sacrificio" || details.type === "especial")) {
+        const color = key === "kamehameha" ? "#00ccff" : (key.includes("flash") ? "#ff4400" : "#bb55ff");
+        const btnName = (details.name || key).substring(0, 10); // nombre corto
+        this.makeActionBtn(row, `${keyIdx}`, btnName, color, "#331100", () => c.triggerSpecial(key));
+        keyIdx++;
+      }
+    }
   }
 
   /** Panel inferior — botones de DEFENSA */
@@ -317,7 +328,8 @@ export class VRHud {
     sep1.height = "2px";
     sep1.background = "#333366";
     sep1.thickness = 0;
-    sep1.margin = "4px 0";
+    sep1.paddingTop = "4px";
+    sep1.paddingBottom = "4px";
     stack.addControl(sep1);
 
     // Mano izquierda
@@ -342,7 +354,8 @@ export class VRHud {
     sep2.height = "2px";
     sep2.background = "#333366";
     sep2.thickness = 0;
-    sep2.margin = "4px 0";
+    sep2.paddingTop = "4px";
+    sep2.paddingBottom = "4px";
     stack.addControl(sep2);
 
     // Mano derecha
@@ -367,7 +380,8 @@ export class VRHud {
     sep3.height = "2px";
     sep3.background = "#333366";
     sep3.thickness = 0;
-    sep3.margin = "4px 0";
+    sep3.paddingTop = "4px";
+    sep3.paddingBottom = "4px";
     stack.addControl(sep3);
 
     // Gesto detectado

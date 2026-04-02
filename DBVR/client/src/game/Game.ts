@@ -13,7 +13,9 @@ import {
   Texture,
   Animation,
   WebXRFeatureName,
+  SceneLoader
 } from "@babylonjs/core";
+import "@babylonjs/loaders/glTF";
 import { HUD } from "./HUD";
 import { CombatSystem } from "./CombatSystem";
 import { VFXManager } from "./VFXManager";
@@ -22,6 +24,19 @@ import { GestureDebugOverlay } from "./GestureDebugOverlay";
 import { VoiceRecognizer } from "./VoiceRecognizer";
 import { ResultScreen } from "./ResultScreen";
 import { VRHud } from "./VRHud";
+import gokuConfig from "../models/goku.json";
+import vegetaConfig from "../models/vegeta.json";
+
+// Importación estática de Vite de los modelos GLB
+// @ts-ignore
+import gokuBaseUrl from "../models/goku/goku_base.glb?url";
+// @ts-ignore
+import vegetaBaseUrl from "../models/vegeta/vegeta_base.glb?url";
+
+const MODEL_URLS: Record<string, string> = {
+  "goku/goku_base.glb": gokuBaseUrl,
+  "vegeta/vegeta_base.glb": vegetaBaseUrl,
+};
 
 export class Game {
   private engine: Engine;
@@ -64,7 +79,7 @@ export class Game {
     this.setupEnvironment();
 
     this.vfx = new VFXManager(this.scene);
-    this.combat = new CombatSystem(this.scene, this.vfx);
+    this.combat = new CombatSystem(this.scene, this.vfx, gokuConfig, vegetaConfig);
     this.gestureRecognizer = new GestureRecognizer(this.scene);
     // VRHud: HUD 3D world-space para Meta Quest 3
     // Se crea aquí pero se adjunta a la cámara XR en initWebXR()
@@ -74,7 +89,7 @@ export class Game {
     this.hud = new HUD(this.xrOverlay, this.combat);
     this.voiceRecognizer = new VoiceRecognizer();
     this.resultScreen = new ResultScreen(this.xrOverlay);
-    this.debugOverlay = new GestureDebugOverlay(this.xrOverlay);
+    this.debugOverlay = new GestureDebugOverlay(this.xrOverlay, this.scene);
 
     // Conectar botón Menú del HUD
     this.hud.onMenu(() => {
@@ -144,22 +159,51 @@ export class Game {
     // Formaciones rocosas de fondo (canon)
     this.createCanyonRocks();
 
-    // Enemigo
+    // Enemigo (Vegeta)
     const enemy = MeshBuilder.CreateCapsule("enemy", { height: 1.8, radius: 0.3 }, this.scene);
     enemy.position = new Vector3(0, 0.9, 18);
     const enemyMat = new StandardMaterial("enemyMat", this.scene);
-    enemyMat.diffuseColor = new Color3(0.8, 0.1, 0.1);
-    enemyMat.emissiveColor = new Color3(0.3, 0.0, 0.0);
+    enemyMat.diffuseColor = Color3.FromHexString("#1e1b4b");
+    enemyMat.emissiveColor = new Color3(0.0, 0.0, 0.2);
     enemy.material = enemyMat;
+    
+    // Attempt dynamic 3D Model loading via Vite static url parsing
+    const tryUrl = vegetaConfig.transformations?.[0]?.url;
+    if (tryUrl && MODEL_URLS[tryUrl]) {
+      SceneLoader.ImportMeshAsync("", MODEL_URLS[tryUrl], "", this.scene).then((result) => {
+         enemy.isVisible = false; // Hide fallback capsule
+         const root = result.meshes[0];
+         const bInfo = root.getHierarchyBoundingVectors();
+         const height = bInfo.max.y - bInfo.min.y;
+         if (height > 0.001) {
+             const factor = 1.8 / height;
+             root.scaling.scaleInPlace(factor);
+         } else {
+             root.scaling.scaleInPlace(100);
+         }
 
-    // Aura del enemigo
+         const spawnPos = Math.abs(enemy.position.z) > 0 ? enemy.position.clone() : new Vector3(0, 0.9, 18);
+         spawnPos.y -= 0.9; // El pivote de GLB suele estar en los pies (suelo)
+         root.position = spawnPos;
+         
+         // Asegurar que mire al jugador
+         root.rotationQuaternion = null;
+         root.rotation.y = 0; // El modelo probablemente ya venía orientado hacia el frente
+         
+         console.log(`[GLB] Successfully loaded ${tryUrl} (height=${height.toFixed(3)})`);
+      }).catch((e) => {
+         console.warn(`[GLB] Missing model file ${tryUrl}, defaulting to collision capsule:`, e); 
+      });
+    }
+
+    // Aura del enemigo (Vegeta)
     const aura = new ParticleSystem("enemyAura", 200, this.scene);
     aura.particleTexture = new Texture("https://assets.babylonjs.com/textures/flare.png", this.scene);
     aura.emitter = enemy;
     aura.minEmitBox = new Vector3(-0.3, -0.9, -0.3);
     aura.maxEmitBox = new Vector3(0.3, 0.9, 0.3);
-    aura.color1 = new Color4(1, 0.2, 0.2, 0.6);
-    aura.color2 = new Color4(1, 0.5, 0.0, 0.3);
+    aura.color1 = new Color4(0.2, 0.2, 0.8, 0.6); // Azul
+    aura.color2 = new Color4(0.1, 0.1, 0.6, 0.3);
     aura.minSize = 0.05;
     aura.maxSize = 0.2;
     aura.minLifeTime = 0.3;
@@ -358,16 +402,10 @@ export class Game {
     }
 
     this.voiceRecognizer.onCommand((command, transcript) => {
-      if (!this.started) return;
+      if (!this.started || !command) return;
       console.log(`[Voice] Comando detectado: ${command} ("${transcript}")`);
-      if (command === "kamehameha") {
-        this.combat.kamehamehaStep(1);
-        // Bonus de NP por gritar el ataque
-        this.combat.applyVoiceBonus("kamehameha");
-      } else if (command === "finalFlash") {
-        this.combat.finalFlashStep(1);
-        this.combat.applyVoiceBonus("finalFlash");
-      }
+      this.combat.triggerSpecial(command);
+      this.combat.applyVoiceBonus(command);
     });
 
     this.voiceRecognizer.onStatus((_active, transcript) => {
@@ -395,8 +433,8 @@ export class Game {
         case "s": this.combat.activateBlock(); break;
         case "d": this.combat.activateDodge(); break;
         case "r": this.combat.rechargeKi(); break;
-        case "1": this.combat.kamehamehaStep(1); break;
-        case "2": this.combat.finalFlashStep(1); break;
+        case "1": this.combat.triggerSpecial("kamehameha"); break;
+        case "2": this.combat.triggerSpecial("finalFlash"); break;
         case "v": this.enterVR(); break;
       }
     });
@@ -511,15 +549,17 @@ export class Game {
           // Adjuntar VRHud a la cámara XR y ocultar HUD HTML
           // La cámara XR está disponible justo después de que la sesión inicia
           const xrCamera = this.xr.baseExperience.camera;
-          if (xrCamera && this.vrHud) {
-            this.vrHud.attachToXRCamera(xrCamera);
-            console.log("[VRHud] Adjuntado a cámara XR");
+          if (xrCamera) {
+            if (this.vrHud) this.vrHud.attachToXRCamera(xrCamera);
+            if (this.debugOverlay) this.debugOverlay.attachToXRCamera(xrCamera);
+            console.log("[VRHud y DebugOverlay] Adjuntados a cámara XR");
           }
           // Ocultar el HUD HTML (no visible en immersive-vr de todos modos)
           this.hud?.hide?.();
         } else {
-          // Al salir de VR: mostrar HUD HTML, ocultar VRHud
+          // Al salir de VR: mostrar HUD HTML, ocultar UI 3D
           this.vrHud?.detachFromCamera();
+          this.debugOverlay?.detachFromCamera();
           this.hud?.show?.();
         }
         const leftMesh = this.scene.getMeshByName("leftHand");

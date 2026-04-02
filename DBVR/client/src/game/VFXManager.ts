@@ -13,7 +13,7 @@ import {
 
 interface Vec3 { x: number; y: number; z: number; }
 
-export type AttackType = "basic" | "charged" | "kamehameha" | "finalFlash";
+export type AttackType = string;
 
 export class VFXManager {
   private chargeMesh: Mesh | null = null;
@@ -290,15 +290,15 @@ export class VFXManager {
   // ============================================
   // EFECTOS DE IMPACTO
   // ============================================
-  private spawnImpact(pos: Vec3, type: "basic" | "charged" | "kamehameha" | "finalFlash"): void {
-    const colors = {
+  private spawnImpact(pos: Vec3, type: string): void {
+    const colors: Record<string, any> = {
       basic: { c1: new Color4(0.5, 0.9, 1.0, 1.0), c2: new Color4(1.0, 1.0, 1.0, 0.8) },
       charged: { c1: new Color4(1.0, 0.7, 0.3, 1.0), c2: new Color4(1.0, 0.4, 0.0, 0.8) },
       kamehameha: { c1: new Color4(0.3, 0.8, 1.0, 1.0), c2: new Color4(0.1, 0.5, 1.0, 0.6) },
       finalFlash: { c1: new Color4(1.0, 0.9, 0.3, 1.0), c2: new Color4(1.0, 0.5, 0.0, 0.8) },
     };
 
-    const c = colors[type];
+    const c = colors[type] || colors.charged;
     const intensity = type === "finalFlash" ? 2 : type === "kamehameha" ? 1.5 : 1;
 
     const impact = new ParticleSystem("impact", Math.floor(300 * intensity), this.scene);
@@ -324,7 +324,7 @@ export class VFXManager {
   // ============================================
   // EFECTOS DE CARGA
   // ============================================
-  showChargeEffect(active: boolean, type: "normal" | "kamehameha" | "finalFlash" = "normal"): void {
+  showChargeEffect(active: boolean, type: string = "normal"): void {
     if (!active) {
       if (this.chargeMesh) {
         this.chargeMesh.dispose();

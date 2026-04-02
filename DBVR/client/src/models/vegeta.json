@@ -1,0 +1,138 @@
+{
+  "name": "Vegeta",
+  "race": "Saiyan",
+  "base_power": 18000,
+  "special_mechanics": {
+    "ultraEgo": "recibe daño -> +5% ataque por golpe recibido",
+    "zenkai": "al llegar a <20% HP, +15% ataque permanente en sesión"
+  },
+  "transformations": [
+    {
+      "name": "Base",
+      "url": "vegeta/vegeta_base.glb",
+      "powers": [
+        "galick_gun"
+      ],
+      "props": {
+        "multiplier": 1.0,
+        "required_np_percentage": 0,
+        "ki_drain_per_second": 0,
+        "color_palette": "#1e1b4b"
+      }
+    },
+    {
+      "name": "Ozaru",
+      "url": "vegeta/vegeta_ozaru.glb",
+      "powers": [
+        "galick_gun"
+      ],
+      "props": {
+        "multiplier": 10.0,
+        "required_np_percentage": 5,
+        "ki_drain_per_second": 5,
+        "color_palette": "#451a03",
+        "description": "Mono Gigante que multiplica x10 el poder, requiere luna llena o artificial"
+      }
+    },
+    {
+      "name": "Super Saiyan",
+      "url": "vegeta/vegeta_ssj.glb",
+      "powers": [
+        "big_bang_attack",
+        "final_flash"
+      ],
+      "props": {
+        "multiplier": 2.5,
+        "required_np_percentage": 25,
+        "ki_drain_per_second": 2,
+        "color_palette": "#fbbf24",
+        "description": "Cabello dorado brillante por primera vez contra 19"
+      }
+    },
+    {
+      "name": "Super Saiyan 2",
+      "url": "vegeta/vegeta_ssj2.glb",
+      "powers": [
+        "big_bang_attack",
+        "final_flash",
+        "final_explosion"
+      ],
+      "props": {
+        "multiplier": 3.5,
+        "required_np_percentage": 45,
+        "ki_drain_per_second": 5,
+        "color_palette": "#fbbf24",
+        "description": "Cabello más erizado con chispas eléctricas; puede usar el Final Explosion"
+      }
+    },
+    {
+      "name": "Super Saiyan God",
+      "url": "vegeta/vegeta_ssg.glb",
+      "powers": [
+        "galick_gun",
+        "big_bang_attack",
+        "final_flash"
+      ],
+      "props": {
+        "multiplier": 8.0,
+        "required_np_percentage": 70,
+        "ki_drain_per_second": 1,
+        "color_palette": "#dc2626",
+        "description": "Forma muy precisa y escurridiza con aura de fuego"
+      }
+    },
+    {
+      "name": "Super Saiyan Blue",
+      "url": "vegeta/vegeta_ssb.glb",
+      "powers": [
+        "galick_gun",
+        "big_bang_attack",
+        "final_flash",
+        "final_explosion"
+      ],
+      "props": {
+        "multiplier": 10.0,
+        "required_np_percentage": 85,
+        "ki_drain_per_second": 8,
+        "color_palette": "#3b82f6",
+        "power_type": "divine_ki"
+      }
+    },
+    {
+      "name": "SSB Evolution",
+      "url": "vegeta/vegeta_ssbe.glb",
+      "powers": [
+        "final_flash",
+        "final_explosion"
+      ],
+      "props": {
+        "multiplier": 15.0,
+        "required_np_percentage": 92,
+        "ki_drain_per_second": 12,
+        "color_palette": "#1d4ed8",
+        "description": "Forma superada del Blue exclusiva del Príncipe, aura azul oscura estrellada (ToP)"
+      }
+    },
+    {
+      "name": "Ultra Ego",
+      "url": "vegeta/vegeta_ue.glb",
+      "powers": [
+        "final_flash",
+        "hakai"
+      ],
+      "props": {
+        "multiplier": 25.0,
+        "required_np_percentage": 100,
+        "ki_drain_per_second": 30,
+        "color_palette": "#7c3aed",
+        "description": "Poder de la Destrucción. En combate absorbe daño y lo convierte en poder creciente",
+        "power_type": "destruction_ki"
+      }
+    }
+  ],
+  "meta": {
+    "author": "GameDev",
+    "year": 2024,
+    "description": "Datos canónicos del balance de Vegeta basados en Daizenshuu y DBS."
+  }
+}

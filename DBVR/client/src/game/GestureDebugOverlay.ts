@@ -1,15 +1,11 @@
 /**
  * GestureDebugOverlay
  * Panel de debug en pantalla para diagnosticar el hand tracking en Meta Quest 3.
- * Muestra en tiempo real:
- *   - Estado del hand tracking (activo / sin datos)
- *   - Coordenadas de muñecas izquierda y derecha
- *   - Gesto detectado actualmente
- *   - Distancia entre muñecas
- *   - Velocidad de empuje (para gesto de ataque)
- * Toggle con tecla G (desktop) o botón [DBG] en el HUD.
+ * Muestra en tiempo real estadísticas de manos tanto en DOM normal como en un Mesh 3D para VR.
  */
 
+import { Scene, MeshBuilder, Mesh, Vector3 } from "@babylonjs/core";
+import { AdvancedDynamicTexture, TextBlock, Control, Rectangle } from "@babylonjs/gui";
 import { GestureType, HandJoints } from "./GestureRecognizer";
 
 const GESTURE_COLORS: Record<GestureType, string> = {
@@ -26,7 +22,12 @@ export class GestureDebugOverlay {
   private visible = false;
   private frameId = 0;
 
-  // Estado actualizado desde Game.ts
+  // VR 3D GUI
+  private vrPlane: Mesh;
+  private vrAdt: AdvancedDynamicTexture;
+  private vrText: TextBlock;
+  private xrCamera: any = null;
+
   private handTrackingActive = false;
   private leftJoints: HandJoints | null = null;
   private rightJoints: HandJoints | null = null;
@@ -35,12 +36,11 @@ export class GestureDebugOverlay {
   private prevRightZ = 0;
   private gestureLog: string[] = [];
 
-  // Fuente de datos de la API de manos (para debug)
   private handApiSource = "desconocido";
 
-  constructor(private parent: HTMLElement) {
+  constructor(private parent: HTMLElement, private scene: Scene) {
+    // ─── 1. DOM OVERLAY (Desktop) ───
     this.panel = document.createElement("div");
-    // position:fixed para que sea visible dentro del dom-overlay de Quest
     this.panel.style.cssText = `
       position: fixed;
       top: 60px;
@@ -62,35 +62,76 @@ export class GestureDebugOverlay {
     `;
     this.parent.appendChild(this.panel);
 
-    // Toggle con tecla G (desktop)
+    // ─── 2. VR OVERLAY (Quest 3) ───
+    this.vrPlane = MeshBuilder.CreatePlane("vrDebugPlane", { width: 1.5, height: 1.0 }, this.scene);
+    this.vrPlane.isVisible = false;
+    
+    this.vrAdt = AdvancedDynamicTexture.CreateForMesh(this.vrPlane);
+    
+    const bg = new Rectangle("debugBg");
+    bg.background = "rgba(0, 30, 50, 0.85)";
+    bg.thickness = 2;
+    bg.color = "#00c8ff";
+    bg.cornerRadius = 10;
+    this.vrAdt.addControl(bg);
+
+    this.vrText = new TextBlock("vrDebugText");
+    this.vrText.color = "cyan";
+    this.vrText.fontSize = 24;
+    this.vrText.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+    this.vrText.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    this.vrText.paddingTop = "20px";
+    this.vrText.paddingLeft = "20px";
+    this.vrText.fontFamily = "monospace";
+    bg.addControl(this.vrText);
+
     window.addEventListener("keydown", (e) => {
       if (e.key.toLowerCase() === "g") this.toggle();
     });
-    // Nota: la activación automática en VR se hace desde Game.ts
-    // via onStateChangedObservable (no sessiongranted, que no dispara en Quest)
+  }
+
+  attachToXRCamera(camera: any): void {
+    this.xrCamera = camera;
+    this.vrPlane.parent = camera;
+    // Colocar el panel debug encima del combate o en un lugar comodo
+    this.vrPlane.position = new Vector3(0, 0.4, 2.0); 
+    if (this.visible) this.vrPlane.isVisible = true;
+  }
+
+  detachFromCamera(): void {
+    this.xrCamera = null;
+    this.vrPlane.parent = null;
+    this.vrPlane.isVisible = false;
   }
 
   toggle(): void {
     this.visible = !this.visible;
-    this.panel.style.display = this.visible ? "block" : "none";
-    if (this.visible) this.renderLoop();
+    this.syncVisibility();
   }
 
   show(): void {
     this.visible = true;
-    this.panel.style.display = "block";
-    this.renderLoop();
+    this.syncVisibility();
   }
 
   hide(): void {
     this.visible = false;
-    this.panel.style.display = "none";
-    cancelAnimationFrame(this.frameId);
+    this.syncVisibility();
+  }
+
+  private syncVisibility(): void {
+    this.panel.style.display = this.visible ? "block" : "none";
+    this.vrPlane.isVisible = this.visible && this.xrCamera !== null;
+    
+    if (this.visible) {
+        this.renderLoop();
+    } else {
+        cancelAnimationFrame(this.frameId);
+    }
   }
 
   isVisible(): boolean { return this.visible; }
 
-  // Llamado desde Game.ts cada frame con los datos actuales
   update(opts: {
     handTrackingActive: boolean;
     leftJoints: HandJoints | null;
@@ -99,7 +140,6 @@ export class GestureDebugOverlay {
     handApiSource?: string;
   }): void {
     if (opts.handApiSource) this.handApiSource = opts.handApiSource;
-    // Guardar Z anterior para calcular velocidad de empuje
     this.prevLeftZ  = this.leftJoints?.wrist.z  ?? opts.leftJoints?.wrist.z  ?? 0;
     this.prevRightZ = this.rightJoints?.wrist.z ?? opts.rightJoints?.wrist.z ?? 0;
 
@@ -107,7 +147,6 @@ export class GestureDebugOverlay {
     this.leftJoints         = opts.leftJoints;
     this.rightJoints        = opts.rightJoints;
 
-    // Registrar cambios de gesto en el log
     if (opts.gesture !== this.currentGesture) {
       const ts = new Date().toLocaleTimeString("es", { hour12: false });
       this.gestureLog.unshift(`[${ts}] ${opts.gesture}`);
@@ -135,70 +174,63 @@ export class GestureDebugOverlay {
     const L = this.leftJoints;
     const R = this.rightJoints;
 
-    const htStatus = this.handTrackingActive
-      ? `<span style="color:#00ff88">● ACTIVO</span>`
-      : `<span style="color:#ff4444">● SIN DATOS</span>`;
-
-    const gestureColor = GESTURE_COLORS[this.currentGesture];
-    const gestureLabel = `<span style="color:${gestureColor};font-weight:bold">${this.currentGesture}</span>`;
-
     const wristDist = L && R ? this.dist3(L.wrist, R.wrist).toFixed(3) : "---";
     const pushL  = L ? (this.prevLeftZ  - L.wrist.z).toFixed(3) : "---";
     const pushR  = R ? (this.prevRightZ - R.wrist.z).toFixed(3) : "---";
 
-    const lRow = L
-      ? `x:${this.fmt(L.wrist.x)} y:${this.fmt(L.wrist.y)} z:${this.fmt(L.wrist.z)}`
-      : `<span style="color:#ff4444">sin datos</span>`;
-    const rRow = R
-      ? `x:${this.fmt(R.wrist.x)} y:${this.fmt(R.wrist.y)} z:${this.fmt(R.wrist.z)}`
-      : `<span style="color:#ff4444">sin datos</span>`;
+    // ─── DOM UPDATE ───
+    if (this.panel.style.display !== "none") {
+      const htStatus = this.handTrackingActive ? `<span style="color:#00ff88">● ACTIVO</span>` : `<span style="color:#ff4444">● SIN DATOS</span>`;
+      const gestureColor = GESTURE_COLORS[this.currentGesture];
+      const gestureLabel = `<span style="color:${gestureColor};font-weight:bold">${this.currentGesture}</span>`;
 
-    const lIdx = L
-      ? `x:${this.fmt(L.indexTip.x)} y:${this.fmt(L.indexTip.y)} z:${this.fmt(L.indexTip.z)}`
-      : "---";
-    const rIdx = R
-      ? `x:${this.fmt(R.indexTip.x)} y:${this.fmt(R.indexTip.y)} z:${this.fmt(R.indexTip.z)}`
-      : "---";
+      const lRow = L ? `x:${this.fmt(L.wrist.x)} y:${this.fmt(L.wrist.y)} z:${this.fmt(L.wrist.z)}` : `<span style="color:#ff4444">sin datos</span>`;
+      const rRow = R ? `x:${this.fmt(R.wrist.x)} y:${this.fmt(R.wrist.y)} z:${this.fmt(R.wrist.z)}` : `<span style="color:#ff4444">sin datos</span>`;
+      const lIdx = L ? `x:${this.fmt(L.indexTip.x)} y:${this.fmt(L.indexTip.y)} z:${this.fmt(L.indexTip.z)}` : "---";
+      const rIdx = R ? `x:${this.fmt(R.indexTip.x)} y:${this.fmt(R.indexTip.y)} z:${this.fmt(R.indexTip.z)}` : "---";
+      const logRows = this.gestureLog.length ? this.gestureLog.map(l => `<div style="color:#aaa;font-size:10px">${l}</div>`).join("") : `<div style="color:#444">— sin cambios —</div>`;
 
-    const logRows = this.gestureLog.length
-      ? this.gestureLog.map(l => `<div style="color:#aaa;font-size:10px">${l}</div>`).join("")
-      : `<div style="color:#444">— sin cambios —</div>`;
+      this.panel.innerHTML = `
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px;border-bottom:1px solid #0a2a4a;padding-bottom:4px;">
+          <span style="letter-spacing:2px;font-size:10px;color:#0088aa">GESTURE DEBUG</span>
+          <span style="font-size:10px">[G] toggle</span>
+        </div>
+        <div style="margin-bottom:4px">Hand Tracking: ${htStatus}</div>
+        <div style="margin-bottom:4px;font-size:10px;color:#aaa">API usada: <span style="color:#ffcc44">${this.handApiSource}</span></div>
+        <div style="margin-bottom:6px">Gesto actual: ${gestureLabel}</div>
+        <div style="display:grid;grid-template-columns:60px 1fr;gap:2px 8px;margin-bottom:6px;font-size:10px;">
+          <span style="color:#0088aa">L.wrist</span><span>${lRow}</span>
+          <span style="color:#ff8844">R.wrist</span><span>${rRow}</span>
+          <span style="color:#0088aa">L.index</span><span>${lIdx}</span>
+          <span style="color:#ff8844">R.index</span><span>${rIdx}</span>
+          <span style="color:#aaa">dist</span><span>${wristDist} m</span>
+          <span style="color:#aaa">push L/R</span><span>${pushL} / ${pushR}</span>
+        </div>
+        <div style="border-top:1px solid #0a2a4a;padding-top:4px;font-size:10px;color:#0088aa;margin-bottom:2px">Historial de gestos:</div>
+        ${logRows}
+      `;
+    }
 
-    this.panel.innerHTML = `
-      <div style="display:flex;justify-content:space-between;margin-bottom:6px;border-bottom:1px solid #0a2a4a;padding-bottom:4px;">
-        <span style="letter-spacing:2px;font-size:10px;color:#0088aa">GESTURE DEBUG</span>
-        <span style="font-size:10px">[G] toggle</span>
-      </div>
-
-      <div style="margin-bottom:4px">
-        Hand Tracking: ${htStatus}
-      </div>
-      <div style="margin-bottom:4px;font-size:10px;color:#aaa">
-        API usada: <span style="color:#ffcc44">${this.handApiSource}</span>
-      </div>
-
-      <div style="margin-bottom:6px">
-        Gesto actual: ${gestureLabel}
-      </div>
-
-      <div style="display:grid;grid-template-columns:60px 1fr;gap:2px 8px;margin-bottom:6px;font-size:10px;">
-        <span style="color:#0088aa">L.wrist</span><span>${lRow}</span>
-        <span style="color:#ff8844">R.wrist</span><span>${rRow}</span>
-        <span style="color:#0088aa">L.index</span><span>${lIdx}</span>
-        <span style="color:#ff8844">R.index</span><span>${rIdx}</span>
-        <span style="color:#aaa">dist</span><span>${wristDist} m</span>
-        <span style="color:#aaa">push L/R</span><span>${pushL} / ${pushR}</span>
-      </div>
-
-      <div style="border-top:1px solid #0a2a4a;padding-top:4px;font-size:10px;color:#0088aa;margin-bottom:2px">
-        Historial de gestos:
-      </div>
-      ${logRows}
-    `;
+    // ─── VR TEXT UPDATE ───
+    if (this.vrPlane.isVisible) {
+      const status = this.handTrackingActive ? "ACTIVO" : "SIN DATOS";
+      const vrLogs = this.gestureLog.length ? this.gestureLog.slice(0, 3).join("\n") : "--";
+      
+      this.vrText.text = `=== GESTURE DEBUG ===\n` +
+          `Status: ${status}\n` +
+          `API: ${this.handApiSource}\n` +
+          `Gesture: ${this.currentGesture}\n\n` +
+          `L Wrist: ${L ? `x:${this.fmt(L.wrist.x)} y:${this.fmt(L.wrist.y)} z:${this.fmt(L.wrist.z)}` : "None"}\n` +
+          `R Wrist: ${R ? `x:${this.fmt(R.wrist.x)} y:${this.fmt(R.wrist.y)} z:${this.fmt(R.wrist.z)}` : "None"}\n` +
+          `Wrist Dist: ${wristDist} m\n` +
+          `Push Speed: L=${pushL} R=${pushR}\n\n` +
+          `Log:\n${vrLogs}`;
+    }
   }
 
   dispose(): void {
     cancelAnimationFrame(this.frameId);
     this.panel.remove();
+    this.vrPlane.dispose();
   }
 }

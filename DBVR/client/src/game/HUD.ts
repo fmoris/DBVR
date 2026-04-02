@@ -1,4 +1,6 @@
 import { CombatSystem, GameStats, CombatState } from "./CombatSystem";
+import powersConfig from "../models/powers.json";
+import gokuConfig from "../models/goku.json";
 
 const STATE_LABELS: Record<CombatState, string> = {
   neutral: "Neutral",
@@ -258,26 +260,6 @@ export class HUD {
           </div>
         </div>
 
-        <!-- Barra HP (verde solida) -->
-        <div style="margin-bottom:7px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
-            <span style="font-size:9px;letter-spacing:2px;color:rgba(255,255,255,0.5);">HP</span>
-            <span style="font-size:10px;color:#44ff66;">100%</span>
-          </div>
-          <div style="
-            width:100%; height:8px;
-            background:rgba(0,0,0,0.6);
-            border:1px solid rgba(0,255,80,0.3);
-            border-radius:2px; overflow:hidden;
-          ">
-            <div id="player-hp-bar" style="
-              height:100%; width:100%;
-              background:linear-gradient(90deg,#22aa44,#44ff66);
-              box-shadow:0 0 6px #44ff66;
-              transition:width 0.15s ease;
-            "></div>
-          </div>
-        </div>
 
         <!-- Barra KI (cyan) -->
         <div>
@@ -365,26 +347,6 @@ export class HUD {
           </div>
         </div>
 
-        <!-- Barra HP enemigo (rojo) -->
-        <div style="margin-bottom:7px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
-            <span style="font-size:10px;color:#ff6666;">100%</span>
-            <span style="font-size:9px;letter-spacing:2px;color:rgba(255,255,255,0.5);">HP</span>
-          </div>
-          <div style="
-            width:100%; height:8px;
-            background:rgba(0,0,0,0.6);
-            border:1px solid rgba(255,60,60,0.3);
-            border-radius:2px; overflow:hidden;
-          ">
-            <div id="enemy-hp-bar" style="
-              height:100%; width:100%;
-              background:linear-gradient(90deg,#aa2222,#ff6666);
-              box-shadow:0 0 6px #ff4444;
-              transition:width 0.15s ease;
-            "></div>
-          </div>
-        </div>
 
         <!-- Barra KI enemigo (naranja) -->
         <div>
@@ -500,8 +462,18 @@ export class HUD {
     attackPanel.appendChild(makePanelLabel("ATAQUE", "#00ccff"));
     attackPanel.appendChild(makeBtn("btn-attack",     "A", "Atacar",    "#00ccff", "rgba(0,40,80,0.85)",     true));
     attackPanel.appendChild(makeBtn("btn-charged",    "W", "Cargar",    "#ffcc00", "rgba(40,30,0,0.85)",     true));
-    attackPanel.appendChild(makeBtn("btn-kamehameha", "1", "Kamehameha","#00aaff", "rgba(0,20,60,0.90)",     true));
-    attackPanel.appendChild(makeBtn("btn-finalflash", "2", "Final Flash","#ffaa00", "rgba(50,25,0,0.90)",    true));
+
+    const powersDict = powersConfig as Record<string, any>;
+    const allowedPowers = gokuConfig.transformations[0].powers || [];
+    let keyIdx = 1;
+    for (const key of allowedPowers) {
+      const details = powersDict[key];
+      if (details && (details.type === "ofensiva" || details.type === "sacrificio" || details.type === "especial")) {
+        const color = key === "kamehameha" ? "#00aaff" : (key.includes("flash") ? "#ffaa00" : "#ff44ff");
+        attackPanel.appendChild(makeBtn(`btn-${key}`, `${keyIdx}`, details.name || key, color, "rgba(50,25,0,0.90)", true));
+        keyIdx++;
+      }
+    }
 
     // ── PANEL IZQUIERDO — DEFENSA ────────────────────────────────────────────
     const defensePanel = document.createElement("div");
@@ -555,8 +527,14 @@ export class HUD {
     wrapper.querySelector("#btn-block")!.addEventListener("click", () => c.activateBlock());
     wrapper.querySelector("#btn-dodge")!.addEventListener("click", () => c.activateDodge());
     wrapper.querySelector("#btn-recharge")!.addEventListener("click", () => c.rechargeKi());
-    wrapper.querySelector("#btn-kamehameha")!.addEventListener("click", () => c.kamehamehaStep(1));
-    wrapper.querySelector("#btn-finalflash")!.addEventListener("click", () => c.finalFlashStep(1));
+
+    for (const key of allowedPowers) {
+      const details = powersDict[key];
+      if (details && (details.type === "ofensiva" || details.type === "sacrificio" || details.type === "especial")) {
+        const btn = wrapper.querySelector(`#btn-${key}`);
+        if (btn) btn.addEventListener("click", () => c.triggerSpecial(key));
+      }
+    }
     wrapper.querySelector("#btn-menu")!.addEventListener("click", () => {
       if (this.menuCallback) this.menuCallback();
     });

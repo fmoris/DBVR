@@ -1,5 +1,7 @@
 import { Scene } from "@babylonjs/core";
 import { VFXManager, AttackType } from "./VFXManager";
+import powersConfig from "../models/powers.json";
+import vegetaConfig from "../models/vegeta.json";
 
 export type CombatState =
   | "neutral"
@@ -11,11 +13,13 @@ export type CombatState =
   | "hit"
   | "melee";
 
-export type SpecialAttackType = "kamehameha" | "finalFlash";
+export type SpecialAttackType = string;
 
 export type PowerLevel = 1 | 2 | 3 | 4 | 5;
 
 export interface GameStats {
+  playerName?: string;
+  enemyName?: string;
   playerKi: number;
   maxKi: number;
   playerNP: number;
@@ -50,20 +54,28 @@ const DAMAGE = {
   chargedAttack: { base: 20, perSecond: 10 },
 };
 
-// Niveles de carga para ataques especiales
-// Cada nivel define: tiempo minimo para alcanzarlo, KI consumido total y daño base
-const SPECIAL_LEVELS = {
-  kamehameha: [
-    { label: "MINIMO",  timeMin: 2,  timeMax: 4.9, ki: 40,  damage: 40  },
-    { label: "MEDIO",   timeMin: 5,  timeMax: 7.9, ki: 60,  damage: 70  },
-    { label: "MAXIMO",  timeMin: 8,  timeMax: 99,  ki: 80,  damage: 100 },
-  ],
-  finalFlash: [
-    { label: "MINIMO",  timeMin: 3,  timeMax: 5.9, ki: 60,  damage: 60  },
-    { label: "MEDIO",   timeMin: 6,  timeMax: 9.9, ki: 90,  damage: 110 },
-    { label: "MAXIMO",  timeMin: 10, timeMax: 99,  ki: 120, damage: 150 },
-  ],
-} as const;
+export interface ChargeLevel {
+  label: string;
+  timeMin: number;
+  timeMax: number;
+  ki: number;
+  damage: number;
+}
+
+// Niveles de carga para ataques especiales generados dinámicamente
+const SPECIAL_LEVELS: Record<string, ChargeLevel[]> = {};
+const powersDict = powersConfig as Record<string, any>;
+
+for (const [key, details] of Object.entries(powersDict)) {
+  if (details.charge_time) {
+    const ct = details.charge_time;
+    SPECIAL_LEVELS[key] = [
+      { label: "MINIMO",  timeMin: ct * 0.5, timeMax: ct * 0.9, ki: 40,  damage: 40  },
+      { label: "MEDIO",   timeMin: ct,       timeMax: ct * 1.5, ki: 60,  damage: 70  },
+      { label: "MAXIMO",  timeMin: ct * 1.6, timeMax: 99,       ki: 80,  damage: 100 },
+    ];
+  }
+}
 
 // Factor de daño segun NP del atacante (mas NP = mas daño)
 function npDamageFactor(np: number): number {
@@ -74,20 +86,12 @@ function npDamageFactor(np: number): number {
   return 0.7;
 }
 
-// Obtener el nivel de carga actual segun el tiempo transcurrido
-interface ChargeLevel {
-  label: string;
-  timeMin: number;
-  timeMax: number;
-  ki: number;
-  damage: number;
-}
-
 function getChargeLevel(
-  type: "kamehameha" | "finalFlash",
+  type: string,
   elapsed: number
 ): ChargeLevel | null {
-  const levels = SPECIAL_LEVELS[type] as readonly ChargeLevel[];
+  const levels = SPECIAL_LEVELS[type];
+  if (!levels) return null;
   // Buscar el nivel mas alto alcanzado
   let reached: ChargeLevel | null = null;
   for (const level of levels) {
@@ -130,7 +134,19 @@ export class CombatSystem {
   // Estado de carga normal
   private isChargingNormal = false;
 
-  constructor(private scene: Scene, private vfx: VFXManager) {
+  public playerName = "Player";
+  public enemyName = "Enemy";
+
+  constructor(private scene: Scene, private vfx: VFXManager, playerConfig?: any, enemyConfig?: any) {
+    if (playerConfig) {
+      this.playerName = playerConfig.name || "Goku";
+      console.log(`[Combat] Player initialized as: ${this.playerName}`);
+    }
+    if (enemyConfig) {
+      this.enemyName = enemyConfig.name || "Vegeta";
+      console.log(`[Combat] Enemy initialized as: ${this.enemyName}`);
+    }
+
     this.startKiRegen();
     this.startNPFluctuation();
     this.startEnemyAI();
@@ -215,12 +231,13 @@ export class CombatSystem {
     // Elegir ataque segun KI disponible y nivel de NP del enemigo
     const roll = Math.random();
     const enemyNP = this.stats.enemyNP;
+    
+    const vegetaPowers = vegetaConfig.transformations[0].powers || [];
+    const randomSpecial = vegetaPowers.length > 0 ? vegetaPowers[Math.floor(Math.random() * vegetaPowers.length)] : "charged";
 
     // Enemigo fuerte usa ataques especiales con mas frecuencia
-    if (enemyNP >= 60 && this.stats.enemyKi >= 60 && roll < 0.25) {
-      this.enemyLaunchSpecial("kamehameha");
-    } else if (enemyNP >= 70 && this.stats.enemyKi >= 90 && roll < 0.15) {
-      this.enemyLaunchSpecial("finalFlash");
+    if (enemyNP >= 60 && this.stats.enemyKi >= 60 && roll < 0.35) {
+      this.enemyLaunchSpecial(randomSpecial);
     } else if (this.stats.enemyKi >= 20 && roll < 0.7) {
       this.enemyLaunchBasic();
     } else {
@@ -264,21 +281,22 @@ export class CombatSystem {
     }, 700);
   }
 
-  private enemyLaunchSpecial(type: "kamehameha" | "finalFlash"): void {
-    const kiCost = type === "kamehameha" ? 60 : 90;
+  private enemyLaunchSpecial(type: string): void {
+    const powerConfig = (powersConfig as any)[type];
+    const kiCost = 60; // Consumo estandar AI
     if (this.stats.enemyKi < kiCost) return;
     this.stats.enemyKi -= kiCost;
 
-    const attackName = type === "kamehameha" ? "Kamehameha!" : "Final Flash!";
+    const attackName = powerConfig ? (powerConfig.name || type) : type;
     this.stats.enemyAttacking = true;
-    this.stats.enemyAttackName = attackName;
+    this.stats.enemyAttackName = attackName + "!!!";
     this.emit();
 
-    const baseDamage = type === "kamehameha" ? 35 : 55;
+    const baseDamage = 45;
     const factor = npDamageFactor(this.stats.enemyNP);
     const damage = baseDamage * factor;
 
-    if (type === "kamehameha") {
+    if (type === "kamehameha" || type === "galick_gun") {
       this.vfx.spawnKamehameha(
         { x: 0, y: 1.7, z: 15 },
         { x: 0, y: 1.5, z: 0 },
@@ -288,7 +306,7 @@ export class CombatSystem {
           this.activateSlowMotion(1200, 0.3);
         }
       );
-    } else {
+    } else if (type === "finalFlash" || type === "final_flash") {
       this.vfx.spawnFinalFlash(
         { x: 0, y: 1.7, z: 15 },
         { x: 0, y: 1.5, z: 0 },
@@ -296,6 +314,16 @@ export class CombatSystem {
         () => {
           this.onEnemyAttackImpact(damage);
           this.activateSlowMotion(1500, 0.25);
+        }
+      );
+    } else {
+      this.vfx.spawnKiProjectile(
+        { x: 0, y: 1.7, z: 15 },
+        { x: 0, y: 1.5, z: 0 },
+        "charged",
+        () => {
+          this.onEnemyAttackImpact(damage);
+          this.activateSlowMotion(1200, 0.3);
         }
       );
     }
@@ -434,27 +462,11 @@ export class CombatSystem {
   // Gestos VR: primer gesto inicia, segundo gesto lanza
   // ============================================
 
-  /**
-   * Llama a este metodo con el mismo tipo para iniciar Y para lanzar.
-   * Primera llamada: empieza la carga.
-   * Segunda llamada (con carga minima cumplida): lanza el ataque.
-   */
-  kamehamehaStep(step: number): void {
-    // step se ignora — usamos estado interno para saber si iniciar o lanzar
-    if (this.activeSpecial === "kamehameha") {
-      // Ya estaba cargando — intentar lanzar
-      this.launchSpecial("kamehameha");
+  triggerSpecial(attackName: string): void {
+    if (this.activeSpecial === attackName) {
+      this.launchSpecial(attackName);
     } else if (this.stats.combatState === "neutral") {
-      // Iniciar carga
-      this.beginSpecialCharge("kamehameha");
-    }
-  }
-
-  finalFlashStep(step: number): void {
-    if (this.activeSpecial === "finalFlash") {
-      this.launchSpecial("finalFlash");
-    } else if (this.stats.combatState === "neutral") {
-      this.beginSpecialCharge("finalFlash");
+      this.beginSpecialCharge(attackName);
     }
   }
 
@@ -540,7 +552,7 @@ export class CombatSystem {
           this.onAttackImpact(damage);
         }
       );
-    } else {
+    } else if (type === "finalFlash" || type === "final_flash") {
       // Final Flash: más largo y más lento
       this.activateSlowMotion(4500, 0.12);
       this.vfx.spawnFinalFlash(
@@ -551,18 +563,28 @@ export class CombatSystem {
           this.onAttackImpact(damage);
         }
       );
+    } else {
+      // GENERIC FALLBACK FOR ANY DYNAMIC POWER FROM POWERS.JSON
+      this.activateSlowMotion(2500, 0.25);
+      // We will cast a generic big charged ball as fallback
+      this.vfx.spawnKiProjectile(
+        { x: 0, y: 1.5, z: 0.5 },
+        { x: 0, y: 1.7, z: 20 },
+        "charged",
+        () => {
+          this.onAttackImpact(damage);
+        }
+      );
     }
 
     // El estado "attacking" dura hasta que termina el bullet time (slow motion)
-    // activateSlowMotion ya llama setState("neutral") al expirar
-    // Solo hacemos fallback por si el slow motion no se activó
     setTimeout(() => {
       if (this.stats.combatState === "attacking") {
         this.setState("neutral");
         this.stats.currentAttack = null;
         this.emit();
       }
-    }, type === "kamehameha" ? 4500 : 5500);
+    }, type === "kamehameha" ? 4500 : (type === "finalFlash" ? 5500 : 3500));
   }
 
   // ============================================
@@ -720,7 +742,7 @@ export class CombatSystem {
   // ============================================
   // BONUS DE VOZ
   // ============================================
-  applyVoiceBonus(attackType: "kamehameha" | "finalFlash"): void {
+  applyVoiceBonus(attackType: string): void {
     if (this.stats.gameOver) return;
     // +5 NP por gritar el nombre del ataque
     const bonus = 5;
@@ -736,12 +758,8 @@ export class CombatSystem {
     return { ...this.stats };
   }
 
-  getKamehamehaStep(): number {
-    return this.activeSpecial === "kamehameha" ? 1 : 0;
-  }
-
-  getFinalFlashStep(): number {
-    return this.activeSpecial === "finalFlash" ? 1 : 0;
+  isChargingSpecial(attackName: string): boolean {
+    return this.activeSpecial === attackName;
   }
 
   getChargeTime(): number {

@@ -1,37 +1,18 @@
 // VoiceRecognizer.ts
-// Reconocimiento de voz usando Web Speech API para activar ataques especiales
-// Comandos: "kamehameha" -> activa Kamehameha, "final flash" -> activa Final Flash
+// Reconocimiento de voz usando Web Speech API para activar ataques especiales.
+// Integrado dinámicamente con powers.json.
 
-export type VoiceCommand = "kamehameha" | "finalFlash" | null;
+import powersConfig from "../models/powers.json";
+import gokuConfig from "../models/goku.json";
 
+export type VoiceCommand = string | null;
 type VoiceCommandCallback = (command: VoiceCommand, transcript: string) => void;
-
-// Variantes de los comandos para mayor tolerancia
-const KAMEHAMEHA_VARIANTS = [
-  "kamehameha", "kame hame ha", "kame-hame-ha", "kamejameha",
-  "camehameja", "camehamea", "kamejameja",
-];
-
-const FINAL_FLASH_VARIANTS = [
-  "final flash", "final flas", "final flas", "final flasch",
-  "final flas", "fainaru furashhu", "final flash",
-];
 
 function normalizeText(text: string): string {
   return text.toLowerCase().trim().replace(/[^a-z\s]/g, "");
 }
 
-function matchesKamehameha(text: string): boolean {
-  const normalized = normalizeText(text);
-  return KAMEHAMEHA_VARIANTS.some((v) => normalized.includes(v));
-}
-
-function matchesFinalFlash(text: string): boolean {
-  const normalized = normalizeText(text);
-  return FINAL_FLASH_VARIANTS.some((v) => normalized.includes(v));
-}
-
-// Declaraciones de tipos para Web Speech API (no siempre incluidas en lib.dom.d.ts)
+// Declaraciones de tipos para Web Speech API
 declare class SpeechRecognition extends EventTarget {
   continuous: boolean;
   interimResults: boolean;
@@ -75,39 +56,51 @@ export class VoiceRecognizer {
     this.recognition = rec;
     rec.continuous = true;
     rec.interimResults = true;
-    rec.lang = "es-ES"; // Espanol como idioma principal
+    rec.lang = "es-ES";
 
     rec.onresult = (event: SpeechRecognitionEvent) => {
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
         const transcript = result[0].transcript;
+        const normalizedTranscript = normalizeText(transcript);
+        
+        let matchedCommand: string | null = null;
 
-        if (matchesKamehameha(transcript)) {
-          this.notifyCommand("kamehameha", transcript);
-        } else if (matchesFinalFlash(transcript)) {
-          this.notifyCommand("finalFlash", transcript);
+        // Búsqueda dinámica en powers.json limitando a goku base
+        const powersDict = powersConfig as Record<string, any>;
+        const allowedPowers = gokuConfig.transformations[0].powers || [];
+        for (const key of allowedPowers) {
+          const details = powersDict[key];
+          if (!details) continue;
+          
+          const prompts = details.voice_prompts as string[];
+          if (!prompts) continue;
+
+          if (prompts.some(p => normalizedTranscript.includes(normalizeText(p)))) {
+             matchedCommand = key;
+             break;
+          }
         }
 
-        // Notificar el texto reconocido para el HUD
+        if (matchedCommand) {
+          this.notifyCommand(matchedCommand, transcript);
+        }
+
         this.statusCallbacks.forEach((cb) => cb(true, transcript));
       }
     };
 
     rec.onerror = (event: SpeechRecognitionErrorEvent) => {
-      // Ignorar errores de no-speech (silencio normal)
       if (event.error === "no-speech") return;
       console.warn("[VoiceRecognizer] Error:", event.error);
     };
 
     rec.onend = () => {
-      // Reiniciar automaticamente si sigue activo
       if (this.isListening) {
         this.restartTimeout = setTimeout(() => {
           try {
             this.recognition?.start();
-          } catch (_) {
-            // Ignorar si ya esta corriendo
-          }
+          } catch (_) {}
         }, 300);
       }
     };

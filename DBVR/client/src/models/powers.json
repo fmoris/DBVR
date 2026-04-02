@@ -1,0 +1,92 @@
+{
+  "kamehameha": {
+    "type": "ofensiva",
+    "description": "Ola de energía azul, cargada con ambas manos unidas",
+    "voice_prompts": ["kamehameha", "ka me ha me ha", "kame"],
+    "vr_gestures": {
+      "preparation": "hands_clasped_at_waist",
+      "firing": "palms_forward_push"
+    },
+    "charge_time": 2.5
+  },
+  "genkidama": {
+    "type": "ofensiva",
+    "description": "Brazos al cielo, esfera de luz blanca, crece lentamente absorbiendo ki del entorno",
+    "voice_prompts": ["genkidama", "spirit bomb", "prestame tu energia", "dame tu fuerza pegaso", "manos arriba"],
+    "vr_gestures": {
+      "preparation": "arms_raised_to_sky",
+      "firing": "arms_throw_forward"
+    },
+    "charge_time": 5.0
+  },
+  "super_kamehameha": {
+    "type": "ofensiva",
+    "description": "Una versión mucho más potente del Kamehameha normal con mayor onda de choque",
+    "voice_prompts": ["super kamehameha", "kamehamehaaa"],
+    "vr_gestures": {
+      "preparation": "hands_clasped_at_waist",
+      "firing": "palms_forward_push_wide"
+    },
+    "charge_time": 3.0
+  },
+  "x10_kamehameha": {
+    "type": "ofensiva",
+    "description": "Kamehameha rojo amplificado diez veces",
+    "voice_prompts": ["kamehameha por diez", "times ten kamehameha"],
+    "vr_gestures": {
+      "preparation": "hands_clasped_at_waist_red_aura",
+      "firing": "palms_forward_push_wide"
+    },
+    "charge_time": 4.0
+  },
+  "galick_gun": {
+    "type": "ofensiva",
+    "description": "Rayo púrpura concentrado lanzado con las palmas abiertas hacia el objetivo",
+    "voice_prompts": ["galick ho", "galick gun"],
+    "vr_gestures": {
+      "preparation": "hands_left_shoulder_crossed",
+      "firing": "palms_forward_push"
+    },
+    "charge_time": 2.0
+  },
+  "big_bang_attack": {
+    "type": "ofensiva",
+    "description": "Una enorme bola de energía compactada arrojada desde la palma de la mano",
+    "voice_prompts": ["big bang attack", "ataque big bang"],
+    "vr_gestures": {
+      "preparation": "right_arm_extended_palm_open",
+      "firing": "palm_blast"
+    },
+    "charge_time": 1.5
+  },
+  "final_flash": {
+    "type": "ofensiva",
+    "description": "Brazos extendidos acumulando ki dorado, libera un rayo masivo y expansivo",
+    "voice_prompts": ["final flash", "resplandor final"],
+    "vr_gestures": {
+      "preparation": "arms_extended_horizontally",
+      "firing": "palms_forward_together"
+    },
+    "charge_time": 3.5
+  },
+  "final_explosion": {
+    "type": "sacrificio",
+    "description": "Técnica de autodestrucción masiva. Libera todo el Ki a costa de la vida del usuario",
+    "voice_prompts": ["final explosion", "adios bulma", "explosion final"],
+    "vr_gestures": {
+      "preparation": "arms_crossed_chest_look_up",
+      "firing": "arms_spread_wide_roar"
+    },
+    "charge_time": 5.0
+  },
+  "hakai": {
+    "type": "especial",
+    "description": "Técnica canalizada de los dioses de la destrucción capaz de borrar la materia de raíz",
+    "voice_prompts": ["hakai", "destruccion"],
+    "vr_gestures": {
+      "preparation": "palm_forward_aim",
+      "firing": "clench_fist"
+    },
+    "charge_time": 1.0
+  }
+}
