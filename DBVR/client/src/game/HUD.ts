@@ -216,173 +216,187 @@ export class HUD {
   private buildLeftPanel(): HTMLDivElement {
     const panel = document.createElement("div");
     panel.style.cssText = `
-      position:absolute; bottom:24px; left:20px;
-      pointer-events:auto;
+      position:absolute; top:16px; left:16px;
+      pointer-events:none;
     `;
-
-    // SVG clip-path para forma de escudo tech (esquina redondeada arriba-derecha)
-    panel.innerHTML = `
-      <div style="
-        position:relative;
-        background:linear-gradient(135deg,rgba(0,20,50,0.92) 0%,rgba(0,40,80,0.85) 100%);
-        border:1.5px solid rgba(0,180,255,0.55);
-        border-radius:10px 28px 10px 10px;
-        padding:14px 18px 12px 14px;
-        min-width:190px;
-        box-shadow:0 0 24px rgba(0,150,255,0.25), inset 0 0 16px rgba(0,100,200,0.1);
-      ">
-        <!-- Decoracion tech superior -->
-        <div style="
-          position:absolute; top:-1px; left:16px; right:32px; height:2px;
-          background:linear-gradient(90deg,transparent,rgba(0,200,255,0.8),transparent);
-        "></div>
-
-        <!-- Etiqueta jugador -->
-        <div style="
-          font-size:9px; letter-spacing:3px; color:rgba(0,200,255,0.7);
-          text-transform:uppercase; margin-bottom:10px;
-        ">JUGADOR</div>
-
-        <!-- Barra NP (verde/color dinamico) -->
-        <div style="margin-bottom:7px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
-            <span style="font-size:9px;letter-spacing:2px;color:rgba(255,255,255,0.5);">NP</span>
-            <span id="player-np-label" style="font-size:10px;font-weight:bold;color:#00ff88;">NORMAL 50%</span>
-          </div>
-          <div style="
-            width:100%; height:10px;
-            background:rgba(0,0,0,0.6);
-            border:1px solid rgba(0,255,136,0.3);
-            border-radius:2px; overflow:hidden;
-          ">
-            <div id="player-np-bar" style="
-              height:100%; width:50%;
-              background:linear-gradient(90deg,#00aa5588,#00ff88);
-              box-shadow:0 0 8px #00ff88;
-              transition:width 0.15s ease;
-            "></div>
-          </div>
-        </div>
-
-
-        <!-- Barra KI (cyan) -->
-        <div>
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
-            <span style="font-size:9px;letter-spacing:2px;color:rgba(255,255,255,0.5);">KI</span>
-            <span id="player-ki-label" style="font-size:10px;color:#00ccff;">100</span>
-          </div>
-          <div style="
-            width:100%; height:8px;
-            background:rgba(0,0,0,0.6);
-            border:1px solid rgba(0,200,255,0.3);
-            border-radius:2px; overflow:hidden;
-          ">
-            <div id="player-ki-bar" style="
-              height:100%; width:100%;
-              background:linear-gradient(90deg,#0088bb88,#00ccff);
-              box-shadow:0 0 6px #00ccff;
-              transition:width 0.15s ease;
-            "></div>
-          </div>
-        </div>
-
-        <!-- Decoracion esquina tech -->
-        <div style="
-          position:absolute; bottom:6px; right:8px;
-          width:8px; height:8px;
-          border-right:2px solid rgba(0,200,255,0.5);
-          border-bottom:2px solid rgba(0,200,255,0.5);
-        "></div>
-      </div>
-    `;
+    panel.innerHTML = this.buildCharacterPanelHTML("player", "blue");
     return panel;
   }
 
   // =========================================================================
-  // PANEL DERECHO — enemigo + indicador de KI circular
+  // PANEL DERECHO — enemigo
   // =========================================================================
   private buildRightPanel(): HTMLDivElement {
     const panel = document.createElement("div");
     panel.style.cssText = `
-      position:absolute; bottom:24px; right:20px;
+      position:absolute; top:16px; right:16px;
       pointer-events:none;
     `;
+    panel.innerHTML = this.buildCharacterPanelHTML("enemy", "red");
+    return panel;
+  }
 
-    panel.innerHTML = `
+  // =========================================================================
+  // CHARACTER PANEL — componente reutilizable (azul o rojo)
+  // =========================================================================
+  private buildCharacterPanelHTML(side: "player" | "enemy", theme: "blue" | "red"): string {
+    const isBlue = theme === "blue";
+
+    // Colores del tema
+    const borderColor    = isBlue ? "rgba(0,200,255,0.7)"   : "rgba(255,60,60,0.7)";
+    const glowColor      = isBlue ? "rgba(0,150,255,0.3)"   : "rgba(255,50,50,0.3)";
+    const glowInner      = isBlue ? "rgba(0,100,200,0.12)"  : "rgba(180,0,0,0.12)";
+    const bgGradient     = isBlue
+      ? "linear-gradient(135deg,rgba(0,15,40,0.95) 0%,rgba(0,30,70,0.90) 100%)"
+      : "linear-gradient(135deg,rgba(40,5,5,0.95) 0%,rgba(70,10,10,0.90) 100%)";
+    const accentLine     = isBlue ? "rgba(0,200,255,0.8)"   : "rgba(255,80,80,0.8)";
+    const avatarBorder   = isBlue ? "#00ccff"               : "#ff4444";
+    const avatarGlow     = isBlue ? "rgba(0,200,255,0.5)"   : "rgba(255,60,60,0.5)";
+    const avatarBg       = isBlue ? "rgba(0,30,60,0.9)"     : "rgba(60,5,5,0.9)";
+    const avatarInitials = isBlue ? "G"                     : "F";
+    const avatarColor    = isBlue ? "#00ccff"               : "#ff4444";
+
+    const npBarId        = `${side}-np-bar`;
+    const npLabelId      = `${side}-np-label`;
+    const kiBarId        = `${side}-ki-bar`;
+    const kiLabelId      = `${side}-ki-label`;
+    const estadoId       = `${side}-estado`;
+
+    const npBarColor     = isBlue ? "#00ff88" : "#ff4444";
+    const npBarGlow      = isBlue ? "#00ff88" : "#ff4444";
+    const npBarGrad      = isBlue
+      ? "linear-gradient(90deg,#00aa5588,#00ff88)"
+      : "linear-gradient(90deg,#aa222288,#ff4444)";
+    const kiBarColor     = isBlue ? "#00ccff" : "#ff6600";
+    const kiBarGrad      = isBlue
+      ? "linear-gradient(90deg,#0088bb88,#00ccff)"
+      : "linear-gradient(90deg,#aa440088,#ff6600)";
+    const estadoColor    = isBlue ? "#00ff88" : "#ff4444";
+
+    // Avatar: si hay imagen se usa, si no se muestra inicial
+    const avatarImg = isBlue
+      ? `<img id="${side}-avatar-img" src="" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:none;" />`
+      : `<img id="${side}-avatar-img" src="" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:none;" />`;
+
+    return `
       <div style="
         position:relative;
-        background:linear-gradient(225deg,rgba(0,20,50,0.92) 0%,rgba(0,40,80,0.85) 100%);
-        border:1.5px solid rgba(0,180,255,0.55);
-        border-radius:28px 10px 10px 10px;
-        padding:14px 14px 12px 18px;
-        min-width:190px;
-        box-shadow:0 0 24px rgba(0,150,255,0.25), inset 0 0 16px rgba(0,100,200,0.1);
+        display:flex;
+        flex-direction:row;
+        align-items:center;
+        gap:0;
+        background:${bgGradient};
+        border:1.5px solid ${borderColor};
+        border-radius:12px;
+        padding:10px 14px 10px 10px;
+        min-width:220px;
+        box-shadow:0 0 20px ${glowColor}, inset 0 0 14px ${glowInner};
       ">
-        <!-- Decoracion tech superior -->
+
+        <!-- Linea decorativa superior -->
         <div style="
-          position:absolute; top:-1px; left:32px; right:16px; height:2px;
-          background:linear-gradient(90deg,transparent,rgba(0,200,255,0.8),transparent);
+          position:absolute; top:-1px; left:14px; right:14px; height:2px;
+          background:linear-gradient(90deg,transparent,${accentLine},transparent);
         "></div>
 
-        <!-- Etiqueta enemigo -->
+        <!-- Avatar circular -->
         <div style="
-          font-size:9px; letter-spacing:3px; color:rgba(255,80,80,0.8);
-          text-transform:uppercase; margin-bottom:10px; text-align:right;
-        ">ENEMIGO</div>
-
-        <!-- Barra NP enemigo -->
-        <div style="margin-bottom:7px;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
-            <span id="enemy-np-label" style="font-size:10px;font-weight:bold;color:#ff4444;">NORMAL 50%</span>
-            <span style="font-size:9px;letter-spacing:2px;color:rgba(255,255,255,0.5);">NP</span>
-          </div>
+          position:relative;
+          flex-shrink:0;
+          width:64px; height:64px;
+          border-radius:50%;
+          border:2px solid ${avatarBorder};
+          box-shadow:0 0 14px ${avatarGlow}, 0 0 4px ${avatarGlow};
+          background:${avatarBg};
+          display:flex; align-items:center; justify-content:center;
+          overflow:hidden;
+          margin-right:12px;
+        ">
+          ${avatarImg}
+          <span id="${side}-avatar-initial" style="
+            font-size:26px; font-weight:bold;
+            color:${avatarColor};
+            text-shadow:0 0 12px ${avatarColor};
+            font-family:'Courier New',monospace;
+          ">${avatarInitials}</span>
+          <!-- Anillo decorativo exterior -->
           <div style="
-            width:100%; height:10px;
-            background:rgba(0,0,0,0.6);
-            border:1px solid rgba(255,60,60,0.3);
-            border-radius:2px; overflow:hidden;
-          ">
-            <div id="enemy-np-bar" style="
-              height:100%; width:50%;
-              background:linear-gradient(90deg,#aa222288,#ff4444);
-              box-shadow:0 0 8px #ff4444;
-              transition:width 0.15s ease;
-            "></div>
-          </div>
+            position:absolute; inset:-4px;
+            border-radius:50%;
+            border:1px solid ${avatarBorder}44;
+            pointer-events:none;
+          "></div>
         </div>
 
+        <!-- Barras de stats -->
+        <div style="flex:1; display:flex; flex-direction:column; gap:6px;">
 
-        <!-- Barra KI enemigo (naranja) -->
-        <div>
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
-            <span id="enemy-ki-label" style="font-size:10px;color:#00ccff;">100</span>
-            <span style="font-size:9px;letter-spacing:2px;color:rgba(255,255,255,0.5);">KI</span>
+          <!-- NP -->
+          <div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
+              <span style="font-size:9px;letter-spacing:2px;color:rgba(255,255,255,0.5);font-family:'Courier New',monospace;">NP</span>
+              <span id="${npLabelId}" style="font-size:9px;font-weight:bold;color:${npBarColor};font-family:'Courier New',monospace;">100</span>
+            </div>
+            <div style="
+              width:100%; height:9px;
+              background:rgba(0,0,0,0.6);
+              border:1px solid ${npBarColor}44;
+              border-radius:2px; overflow:hidden;
+            ">
+              <div id="${npBarId}" style="
+                height:100%; width:100%;
+                background:${npBarGrad};
+                box-shadow:0 0 7px ${npBarGlow};
+                transition:width 0.2s ease;
+              "></div>
+            </div>
           </div>
-          <div style="
-            width:100%; height:8px;
-            background:rgba(0,0,0,0.6);
-            border:1px solid rgba(0,200,255,0.3);
-            border-radius:2px; overflow:hidden;
-          ">
-            <div id="enemy-ki-bar" style="
-              height:100%; width:100%;
-              background:linear-gradient(90deg,#0088bb88,#00ccff);
-              box-shadow:0 0 6px #00ccff;
-              transition:width 0.15s ease;
-            "></div>
+
+          <!-- KI -->
+          <div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
+              <span style="font-size:9px;letter-spacing:2px;color:rgba(255,255,255,0.5);font-family:'Courier New',monospace;">KI</span>
+              <span id="${kiLabelId}" style="font-size:9px;color:${kiBarColor};font-family:'Courier New',monospace;">100</span>
+            </div>
+            <div style="
+              width:100%; height:7px;
+              background:rgba(0,0,0,0.6);
+              border:1px solid ${kiBarColor}44;
+              border-radius:2px; overflow:hidden;
+            ">
+              <div id="${kiBarId}" style="
+                height:100%; width:100%;
+                background:${kiBarGrad};
+                box-shadow:0 0 6px ${kiBarColor};
+                transition:width 0.2s ease;
+              "></div>
+            </div>
           </div>
+
+          <!-- ESTADO -->
+          <div style="display:flex;align-items:center;gap:6px;margin-top:1px;">
+            <span style="font-size:9px;letter-spacing:2px;color:rgba(255,255,255,0.4);font-family:'Courier New',monospace;">ESTADO</span>
+            <span id="${estadoId}" style="
+              font-size:10px; font-weight:bold; letter-spacing:2px;
+              color:${estadoColor};
+              text-shadow:0 0 8px ${estadoColor};
+              font-family:'Courier New',monospace;
+              text-transform:uppercase;
+            ">OK</span>
+          </div>
+
         </div>
 
-        <!-- Decoracion esquina tech -->
+        <!-- Esquina decorativa -->
         <div style="
-          position:absolute; bottom:6px; left:8px;
-          width:8px; height:8px;
-          border-left:2px solid rgba(0,200,255,0.5);
-          border-bottom:2px solid rgba(0,200,255,0.5);
+          position:absolute; bottom:6px; ${isBlue ? "right" : "left"}:8px;
+          width:7px; height:7px;
+          border-${isBlue ? "right" : "left"}:1.5px solid ${borderColor};
+          border-bottom:1.5px solid ${borderColor};
         "></div>
+
       </div>
     `;
-    return panel;
   }
 
   // =========================================================================
@@ -600,9 +614,11 @@ export class HUD {
     if (bl) bl.style.opacity = inSlow ? "1" : "0";
 
     // Barras jugador
-    const pNPBar = this.container.querySelector("#player-np-bar") as HTMLElement;
+    const pNPBar   = this.container.querySelector("#player-np-bar")   as HTMLElement;
     const pNPLabel = this.container.querySelector("#player-np-label") as HTMLElement;
+    const pKiBar   = this.container.querySelector("#player-ki-bar")   as HTMLElement;
     const pKiLabel = this.container.querySelector("#player-ki-label") as HTMLElement;
+    const pEstado  = this.container.querySelector("#player-estado")   as HTMLElement;
 
     if (pNPBar) {
       const c2 = getNPColor(stats.playerNP);
@@ -612,16 +628,22 @@ export class HUD {
       pNPBar.style.boxShadow = `0 0 8px ${c2}`;
     }
     if (pNPLabel) {
-      const c2 = getNPColor(stats.playerNP);
-      const npFormatted = stats.playerNP.toLocaleString();
-      pNPLabel.textContent = `${getNPRange(stats.playerNP)} ${npFormatted}`;
-      pNPLabel.style.color = c2;
+      pNPLabel.textContent = stats.playerNP.toLocaleString();
+      pNPLabel.style.color = getNPColor(stats.playerNP);
+    }
+    if (pKiBar) {
+      pKiBar.style.width = `${Math.min(100, (stats.playerKi / stats.maxKi) * 100)}%`;
     }
     if (pKiLabel) {
-      pKiLabel.textContent = `KI: ${stats.playerKi.toFixed(0)}`;
+      pKiLabel.textContent = `${stats.playerKi.toFixed(0)}`;
       pKiLabel.style.color = stats.playerKi > 30 ? "#00ccff" : "#ff4444";
-      pKiLabel.style.fontSize = "12px";
-      pKiLabel.style.fontWeight = "bold";
+    }
+    if (pEstado) {
+      const estadoLabel = STATE_LABELS[stats.combatState];
+      const estadoColor = STATE_COLORS[stats.combatState];
+      pEstado.textContent = estadoLabel.toUpperCase();
+      pEstado.style.color = estadoColor;
+      pEstado.style.textShadow = `0 0 8px ${estadoColor}`;
     }
 
     // Filtrado de botones por KI
@@ -641,23 +663,34 @@ export class HUD {
     });
 
     // Barras enemigo
-    const eNPBar = this.container.querySelector("#enemy-np-bar") as HTMLElement;
+    const eNPBar   = this.container.querySelector("#enemy-np-bar")   as HTMLElement;
     const eNPLabel = this.container.querySelector("#enemy-np-label") as HTMLElement;
-    const eKiBar = this.container.querySelector("#enemy-ki-bar") as HTMLElement;
+    const eKiBar   = this.container.querySelector("#enemy-ki-bar")   as HTMLElement;
     const eKiLabel = this.container.querySelector("#enemy-ki-label") as HTMLElement;
+    const eEstado  = this.container.querySelector("#enemy-estado")   as HTMLElement;
+
     if (eNPBar) {
       const c2 = getNPColor(stats.enemyNP);
-      eNPBar.style.width = `${stats.enemyNP}%`;
+      const pct = Math.min(100, (stats.enemyNP / 100000) * 100);
+      eNPBar.style.width = `${pct}%`;
       eNPBar.style.background = `linear-gradient(90deg,${c2}66,${c2})`;
       eNPBar.style.boxShadow = `0 0 8px ${c2}`;
     }
     if (eNPLabel) {
-      const c2 = getNPColor(stats.enemyNP);
-      eNPLabel.textContent = `${getNPRange(stats.enemyNP)} ${stats.enemyNP.toFixed(0)}%`;
-      eNPLabel.style.color = c2;
+      eNPLabel.textContent = stats.enemyNP.toLocaleString();
+      eNPLabel.style.color = getNPColor(stats.enemyNP);
     }
-    if (eKiBar) eKiBar.style.width = `${stats.enemyKi}%`;
+    if (eKiBar) {
+      eKiBar.style.width = `${Math.min(100, (stats.enemyKi / stats.enemyMaxKi) * 100)}%`;
+    }
     if (eKiLabel) eKiLabel.textContent = `${stats.enemyKi.toFixed(0)}`;
+    if (eEstado) {
+      const eRange = getNPRange(stats.enemyNP);
+      const eColor = getNPColor(stats.enemyNP);
+      eEstado.textContent = eRange;
+      eEstado.style.color = eColor;
+      eEstado.style.textShadow = `0 0 8px ${eColor}`;
+    }
 
     // Alerta ataque enemigo
     const enemyAttackEl = this.elements["enemyAttack"];
