@@ -9,12 +9,19 @@ import { AdvancedDynamicTexture, TextBlock, Control, Rectangle } from "@babylonj
 import { GestureType, HandJoints } from "./GestureRecognizer";
 
 const GESTURE_COLORS: Record<GestureType, string> = {
-  [GestureType.IDLE]:       "#888888",
-  [GestureType.ATTACKING]:  "#ff6600",
-  [GestureType.CHARGING]:   "#ffcc00",
-  [GestureType.BLOCKING]:   "#00ff88",
-  [GestureType.PARRYING]:   "#00ccff",
+  [GestureType.IDLE]: "#aaaaaa",
+  [GestureType.ATTACKING]: "#ff4444",
+  [GestureType.CHARGING]: "#ffcc00",
+  [GestureType.BLOCKING]: "#44ff44",
+  [GestureType.PARRYING]: "#44aaff",
   [GestureType.RECHARGING]: "#cc44ff",
+  [GestureType.RECHARGE_PREP]: "#ff88ff",
+  [GestureType.KAMEHAMEHA]: "#00e5ff",
+  [GestureType.KAMEHAMEHA_PREP]: "#00aacc",
+  [GestureType.KI_BLAST_L]: "#eeff00",
+  [GestureType.KI_BLAST_R]: "#eeff00",
+  [GestureType.CHARGED_KI_BLAST_L]: "#ff00ff",
+  [GestureType.CHARGED_KI_BLAST_R]: "#ff00ff",
 };
 
 export class GestureDebugOverlay {
@@ -93,8 +100,13 @@ export class GestureDebugOverlay {
   attachToXRCamera(camera: any): void {
     this.xrCamera = camera;
     this.vrPlane.parent = camera;
-    // Colocar el panel debug encima del combate o en un lugar comodo
-    this.vrPlane.position = new Vector3(0, 0.4, 2.0); 
+    
+    // Posicionar en la mitad izquierda de la pantalla (local a la cámara), debajo del HUD del jugador
+    this.vrPlane.position = new Vector3(-0.65, 0.0, 1.2);
+    
+    // Leve rotación para que mire hacia el centro
+    this.vrPlane.rotation = new Vector3(0, 0.25, 0);
+
     if (this.visible) this.vrPlane.isVisible = true;
   }
 
@@ -120,8 +132,11 @@ export class GestureDebugOverlay {
   }
 
   private syncVisibility(): void {
-    this.panel.style.display = this.visible ? "block" : "none";
-    this.vrPlane.isVisible = this.visible && this.xrCamera !== null;
+    const isXR = this.xrCamera !== null;
+    
+    // Ocultar la versión HTML si estamos en VR, para no tapar la pantalla del HUD principal
+    this.panel.style.display = (this.visible && !isXR) ? "block" : "none";
+    this.vrPlane.isVisible = this.visible && isXR;
     
     if (this.visible) {
         this.renderLoop();
@@ -138,6 +153,7 @@ export class GestureDebugOverlay {
     rightJoints: HandJoints | null;
     gesture: GestureType;
     handApiSource?: string;
+    success?: boolean;
   }): void {
     if (opts.handApiSource) this.handApiSource = opts.handApiSource;
     this.prevLeftZ  = this.leftJoints?.wrist.z  ?? opts.leftJoints?.wrist.z  ?? 0;
@@ -147,10 +163,20 @@ export class GestureDebugOverlay {
     this.leftJoints         = opts.leftJoints;
     this.rightJoints        = opts.rightJoints;
 
-    if (opts.gesture !== this.currentGesture) {
+    // Loguear si el gesto cambia O si es una ejecución exitosa (para ver spam de ataques si se quiere)
+    const gestureChanged = opts.gesture !== this.currentGesture;
+    const actionSuccess = opts.success === true;
+
+    if (gestureChanged || (actionSuccess && opts.gesture !== "IDLE")) {
       const ts = new Date().toLocaleTimeString("es", { hour12: false });
-      this.gestureLog.unshift(`[${ts}] ${opts.gesture}`);
-      if (this.gestureLog.length > 5) this.gestureLog.pop();
+      const status = opts.success ? "OK" : "Ignorado";
+      const entry = `[${ts}] ${opts.gesture} (${status})`;
+      
+      // Evitar saturar el log con "IDLE" o "Ignorado" repetidos si no hay cambio
+      if (gestureChanged || actionSuccess) {
+         this.gestureLog.unshift(entry);
+         if (this.gestureLog.length > 15) this.gestureLog.pop();
+      }
     }
     this.currentGesture = opts.gesture;
   }
@@ -214,7 +240,7 @@ export class GestureDebugOverlay {
     // ─── VR TEXT UPDATE ───
     if (this.vrPlane.isVisible) {
       const status = this.handTrackingActive ? "ACTIVO" : "SIN DATOS";
-      const vrLogs = this.gestureLog.length ? this.gestureLog.slice(0, 3).join("\n") : "--";
+      const vrLogs = this.gestureLog.length ? this.gestureLog.slice(0, 10).join("\n") : "--";
       
       this.vrText.text = `=== GESTURE DEBUG ===\n` +
           `Status: ${status}\n` +

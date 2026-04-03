@@ -4,7 +4,13 @@
     "metaquest-webxr": {
       "version": "1.0.0",
       "installedAt": 1743513600000,
-      "source": "../skills/metagame/metaquest-webxr.skill",
+      "source": "../.agents/skills/metaquest-webxr.skill",
+      "active": true
+    },
+    "dragon-ball-game": {
+      "version": "1.0.0",
+      "installedAt": 1743525120000,
+      "source": "../.agents/skills/dragon-ball-game.skill",
       "active": true
     }
   }

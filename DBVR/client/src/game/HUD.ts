@@ -11,6 +11,7 @@ const STATE_LABELS: Record<CombatState, string> = {
   slowMotion: "Camara Lenta",
   hit: "Impacto",
   melee: "Combate Cercano",
+  recharging: "Recargando KI...",
 };
 
 const STATE_COLORS: Record<CombatState, string> = {
@@ -22,21 +23,24 @@ const STATE_COLORS: Record<CombatState, string> = {
   slowMotion: "#cc44ff",
   hit: "#ff2222",
   melee: "#ff0066",
+  recharging: "#cc44ff",
 };
 
 function getNPColor(np: number): string {
-  if (np >= 91) return "#ffffff";
-  if (np >= 76) return "#ff8800";
-  if (np >= 51) return "#ffcc00";
-  if (np >= 21) return "#00ff88";
-  return "#0088ff";
+  if (np >= 150000) return "#ffffff";
+  if (np >= 70000)  return "#ff8800";
+  if (np >= 30000)  return "#ffcc00";
+  if (np >= 10000)  return "#00ecff";
+  if (np >= 3000)   return "#00ff88";
+  return "#aabbcc";
 }
 
 function getNPRange(np: number): string {
-  if (np >= 91) return "TRASCENDENTE";
-  if (np >= 76) return "DOMINANTE";
-  if (np >= 51) return "ELEVADO";
-  if (np >= 21) return "NORMAL";
+  if (np >= 150000) return "TRASCENDENTE";
+  if (np >= 70000)  return "DOMINANTE";
+  if (np >= 30000)  return "ELEVADO";
+  if (np >= 10000)  return "FUERTE";
+  if (np >= 3000)   return "ESTABLE";
   return "DEBILITADO";
 }
 
@@ -598,21 +602,43 @@ export class HUD {
     // Barras jugador
     const pNPBar = this.container.querySelector("#player-np-bar") as HTMLElement;
     const pNPLabel = this.container.querySelector("#player-np-label") as HTMLElement;
-    const pKiBar = this.container.querySelector("#player-ki-bar") as HTMLElement;
     const pKiLabel = this.container.querySelector("#player-ki-label") as HTMLElement;
+
     if (pNPBar) {
       const c2 = getNPColor(stats.playerNP);
-      pNPBar.style.width = `${stats.playerNP}%`;
+      const pct = Math.min(100, (stats.playerNP / 100000) * 100);
+      pNPBar.style.width = `${pct}%`;
       pNPBar.style.background = `linear-gradient(90deg,${c2}66,${c2})`;
       pNPBar.style.boxShadow = `0 0 8px ${c2}`;
     }
     if (pNPLabel) {
       const c2 = getNPColor(stats.playerNP);
-      pNPLabel.textContent = `${getNPRange(stats.playerNP)} ${stats.playerNP.toFixed(0)}%`;
+      const npFormatted = stats.playerNP.toLocaleString();
+      pNPLabel.textContent = `${getNPRange(stats.playerNP)} ${npFormatted}`;
       pNPLabel.style.color = c2;
     }
-    if (pKiBar) pKiBar.style.width = `${stats.playerKi}%`;
-    if (pKiLabel) pKiLabel.textContent = `${stats.playerKi.toFixed(0)}`;
+    if (pKiLabel) {
+      pKiLabel.textContent = `KI: ${stats.playerKi.toFixed(0)}`;
+      pKiLabel.style.color = stats.playerKi > 30 ? "#00ccff" : "#ff4444";
+      pKiLabel.style.fontSize = "12px";
+      pKiLabel.style.fontWeight = "bold";
+    }
+
+    // Filtrado de botones por KI
+    this.container.querySelectorAll("button").forEach(btn => {
+      const id = btn.id;
+      let cost = 0;
+      if (id === "btn-attack") cost = 8;
+      if (id === "btn-charged") cost = 20;
+      if (id === "btn-block") cost = 15;
+      if (id === "btn-dodge") cost = 5;
+      if (id.startsWith("btn-") && !["btn-menu", "btn-debug", "btn-recharge"].includes(id)) {
+        // Asumir coste 40 para especiales
+        if (id !== "btn-attack" && id !== "btn-charged" && id !== "btn-block" && id !== "btn-dodge") cost = 40;
+      }
+      
+      btn.style.display = stats.playerKi >= cost ? "block" : "none";
+    });
 
     // Barras enemigo
     const eNPBar = this.container.querySelector("#enemy-np-bar") as HTMLElement;

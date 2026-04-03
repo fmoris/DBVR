@@ -9,6 +9,7 @@ import {
   Texture,
   Animation,
   Mesh,
+  CylinderParticleEmitter,
 } from "@babylonjs/core";
 
 interface Vec3 { x: number; y: number; z: number; }
@@ -290,7 +291,7 @@ export class VFXManager {
   // ============================================
   // EFECTOS DE IMPACTO
   // ============================================
-  private spawnImpact(pos: Vec3, type: string): void {
+  public spawnImpact(pos: Vec3, type: string): void {
     const colors: Record<string, any> = {
       basic: { c1: new Color4(0.5, 0.9, 1.0, 1.0), c2: new Color4(1.0, 1.0, 1.0, 0.8) },
       charged: { c1: new Color4(1.0, 0.7, 0.3, 1.0), c2: new Color4(1.0, 0.4, 0.0, 0.8) },
@@ -460,10 +461,74 @@ export class VFXManager {
   // ============================================
   // AURAS Y EFECTOS AMBIENTALES
   // ============================================
-  updatePlayerAura(np: number): void {
-    // El color del aura cambia según el nivel de poder
-    // Esta función se conectará con el sistema de partículas del jugador
-    // np: 0-20 azul (debilitado), 21-50 verde (normal), 51-75 amarillo (elevado), 
-    //     76-90 naranja (dominante), 91-100 blanco brillante (trascendente)
+  /**
+   * Crea un aura de Ki persistente para un personaje.
+   */
+  public createAura(name: string, emitter: Mesh | Vector3): ParticleSystem {
+    const ps = new ParticleSystem(name, 500, this.scene);
+    ps.particleTexture = new Texture("https://assets.babylonjs.com/textures/flare.png", this.scene);
+    ps.emitter = emitter;
+    
+    // Configurar emisor cilíndrico para crear un "anillo" de energía
+    // Esto deja el centro (la visión) más despejada
+    const cylinderEmitter = new CylinderParticleEmitter();
+    cylinderEmitter.radius = 1.2;
+    cylinderEmitter.height = 2.0;
+    cylinderEmitter.radiusRange = 0.4; // Emite en un anillo de 0.8 a 1.2
+    ps.particleEmitterType = cylinderEmitter;
+    
+    ps.color1 = new Color4(0.3, 0.6, 1.0, 0.4);
+    ps.color2 = new Color4(1.0, 1.0, 1.0, 0.2);
+    ps.colorDead = new Color4(0, 0, 0.5, 0);
+
+    ps.minSize = 0.1;
+    ps.maxSize = 0.4;
+    ps.minLifeTime = 0.5;
+    ps.maxLifeTime = 1.0;
+    ps.emitRate = 0; // Empieza apagada
+    
+    ps.direction1 = new Vector3(-0.1, 1, -0.1);
+    ps.direction2 = new Vector3(0.1, 1, 0.1);
+    ps.minEmitPower = 1;
+    ps.maxEmitPower = 3;
+    ps.updateSpeed = 0.01;
+    
+    ps.start();
+    return ps;
+  }
+
+  /**
+   * Actualiza la intensidad del aura según el % de Ki y estado de carga.
+   */
+  public updateAura(ps: ParticleSystem, kiPercent: number, isCharging: boolean, npBase: number = 1000, customColor?: Color4): void {
+    if (kiPercent <= 0) {
+      ps.emitRate = 0;
+      return;
+    }
+
+    // Usar color personalizado si se provee, si no, lógica por NP
+    if (customColor) {
+      ps.color1 = new Color4(customColor.r, customColor.g, customColor.b, 0.4);
+      ps.color2 = new Color4(customColor.r * 1.2, customColor.g * 1.2, customColor.b * 1.2, 0.15);
+    } else {
+      // El color cambia ligeramente según el NP (más blanco/amarillo si es muy poderoso)
+      if (npBase > 5000) {
+        ps.color1 = new Color4(1.0, 0.9, 0.4, 0.4); // Dorado semitransparente
+      } else {
+        ps.color1 = new Color4(0.3, 0.7, 1.0, 0.4); // Azul semitransparente
+      }
+      ps.color2 = new Color4(1, 1, 1, 0.15);
+    }
+
+    // Escalado de intensidad
+    const chargeMultiplier = isCharging ? 2.5 : 1.0;
+    ps.emitRate = (100 + kiPercent * 3) * chargeMultiplier;
+    ps.minSize = 0.1 + (kiPercent / 100) * 0.2;
+    ps.maxSize = 0.3 + (kiPercent / 100) * 0.5;
+    
+    // Si carga, las partículas suben más rápido y errático
+    ps.minEmitPower = isCharging ? 4 : 1;
+    ps.maxEmitPower = isCharging ? 8 : 3;
+    ps.updateSpeed = isCharging ? 0.02 : 0.01;
   }
 }

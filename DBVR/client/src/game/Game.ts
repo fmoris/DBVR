@@ -8,6 +8,7 @@ import {
   Color3,
   Color4,
   MeshBuilder,
+  Mesh,
   StandardMaterial,
   ParticleSystem,
   Texture,
@@ -24,6 +25,7 @@ import { GestureDebugOverlay } from "./GestureDebugOverlay";
 import { VoiceRecognizer } from "./VoiceRecognizer";
 import { ResultScreen } from "./ResultScreen";
 import { VRHud } from "./VRHud";
+import { GestureSimulator } from "./GestureSimulator";
 import gokuConfig from "../models/goku.json";
 import vegetaConfig from "../models/vegeta.json";
 
@@ -49,12 +51,25 @@ export class Game {
   private voiceRecognizer!: VoiceRecognizer;
   private resultScreen!: ResultScreen;
   private combatStartTime = 0;
+  private lastKiBlastTime: number = 0;
+  private leftChargePower: number = 1.0;
+  private rightChargePower: number = 1.0; 
+  private leftChargeStartKi: number = 0;
+  private rightChargeStartKi: number = 0;
+  private lastChargeUpdateTime: number = 0;
+  private lastChargedFireTime: number = 0; // Grace period para evitar doble disparo
+  private playerAura: ParticleSystem | null = null;
+  private enemyAura: ParticleSystem | null = null;
   private xr: any = null;
   private started = false;
   private menuCallback: (() => void) | null = null;
   private debugOverlay!: GestureDebugOverlay;
   private handTrackingActive = false;
   private vrHud!: VRHud;
+  private simulator!: GestureSimulator;
+  private leftPalmMesh?: Mesh;
+  private rightPalmMesh?: Mesh;
+  private lastReportedGesture: string = "IDLE";
 
   constructor(
     private canvas: HTMLCanvasElement,
@@ -76,20 +91,30 @@ export class Game {
   start(): void {
     this.setupCamera();
     this.setupLights();
-    this.setupEnvironment();
-
+    
+    // Inicializar Managers antes del entorno (porque el entorno usa VFX/Auras)
     this.vfx = new VFXManager(this.scene);
     this.combat = new CombatSystem(this.scene, this.vfx, gokuConfig, vegetaConfig);
     this.gestureRecognizer = new GestureRecognizer(this.scene);
+    this.voiceRecognizer = new VoiceRecognizer();
+
+    // Sincronizar poderes iniciales (Goku Base) desde powers.json
+    const initialPowers = gokuConfig.transformations?.[0]?.powers || [];
+    this.combat.setAvailablePowers(initialPowers);
+    this.voiceRecognizer.setAllowedPowers(initialPowers);
+    this.gestureRecognizer.setAllowedPowers(initialPowers);
+
+    this.setupEnvironment();
+
     // VRHud: HUD 3D world-space para Meta Quest 3
     // Se crea aquí pero se adjunta a la cámara XR en initWebXR()
     this.vrHud = new VRHud(this.scene, this.combat);
     // Montar HUD, ResultScreen y DebugOverlay en el xrOverlay
     // para que sean visibles dentro del visor XR via dom-overlay
     this.hud = new HUD(this.xrOverlay, this.combat);
-    this.voiceRecognizer = new VoiceRecognizer();
     this.resultScreen = new ResultScreen(this.xrOverlay);
     this.debugOverlay = new GestureDebugOverlay(this.xrOverlay, this.scene);
+    this.simulator = new GestureSimulator(this.gestureRecognizer);
 
     // Conectar botón Menú del HUD
     this.hud.onMenu(() => {
@@ -105,11 +130,17 @@ export class Game {
     this.initWebXR();
     this.started = true;
     this.combatStartTime = Date.now();
+    this.playerAura = this.vfx.createAura("player_aura", this.camera.position);
     this.hud.show();
     this.canvas.focus();
 
     this.engine.runRenderLoop(() => {
       this.scene.render();
+    });
+
+    // Sincronizar mallas de manos con el GestureRecognizer (para Simulación y XR)
+    this.scene.registerBeforeRender(() => {
+      this.syncHandMeshes();
     });
 
     window.addEventListener("resize", () => {
@@ -196,24 +227,9 @@ export class Game {
       });
     }
 
-    // Aura del enemigo (Vegeta)
-    const aura = new ParticleSystem("enemyAura", 200, this.scene);
-    aura.particleTexture = new Texture("https://assets.babylonjs.com/textures/flare.png", this.scene);
-    aura.emitter = enemy;
-    aura.minEmitBox = new Vector3(-0.3, -0.9, -0.3);
-    aura.maxEmitBox = new Vector3(0.3, 0.9, 0.3);
-    aura.color1 = new Color4(0.2, 0.2, 0.8, 0.6); // Azul
-    aura.color2 = new Color4(0.1, 0.1, 0.6, 0.3);
-    aura.minSize = 0.05;
-    aura.maxSize = 0.2;
-    aura.minLifeTime = 0.3;
-    aura.maxLifeTime = 0.8;
-    aura.emitRate = 80;
-    aura.minEmitPower = 0.5;
-    aura.maxEmitPower = 1.5;
-    aura.updateSpeed = 0.02;
-    aura.start();
-
+    // Aura del enemigo (Vegeta) - Inicializada con la capsula base
+    this.enemyAura = this.vfx.createAura("enemy_aura", enemy);
+    
     // Manos del jugador (visibles en primera persona)
     this.createPlayerHands();
   }
@@ -287,53 +303,57 @@ export class Game {
     handMat.ambientColor = new Color3(0.3, 0.22, 0.15);
 
     // Mano izquierda — palma + dedos
-    const leftPalm = MeshBuilder.CreateBox("leftHand", { width: 0.22, height: 0.06, depth: 0.28 }, this.scene);
-    leftPalm.position = new Vector3(-0.52, 1.12, 0.55);
-    leftPalm.rotation = new Vector3(-0.35, 0.12, 0.18);
-    leftPalm.material = handMat;
+    this.leftPalmMesh = MeshBuilder.CreateBox("leftHand", { width: 0.22, height: 0.06, depth: 0.28 }, this.scene);
+    this.leftPalmMesh.position = new Vector3(-0.52, 1.12, 0.55);
+    this.leftPalmMesh.rotation = new Vector3(-0.35, 0.12, 0.18);
+    this.leftPalmMesh.material = handMat;
 
     // Dedos izquierda (4 cajas)
     for (let i = 0; i < 4; i++) {
       const finger = MeshBuilder.CreateBox(`lFinger${i}`, { width: 0.04, height: 0.04, depth: 0.14 }, this.scene);
+      finger.parent = this.leftPalmMesh;
       finger.position = new Vector3(
-        leftPalm.position.x - 0.07 + i * 0.05,
-        leftPalm.position.y - 0.01,
-        leftPalm.position.z + 0.19
+        -0.07 + i * 0.05,
+        -0.01,
+        0.19
       );
-      finger.rotation = leftPalm.rotation.clone();
+      finger.rotation = new Vector3(0, 0, 0); // Local a la palma
       finger.material = handMat;
     }
     // Pulgar izquierdo
     const lThumb = MeshBuilder.CreateBox("lThumb", { width: 0.05, height: 0.04, depth: 0.10 }, this.scene);
-    lThumb.position = new Vector3(leftPalm.position.x + 0.14, leftPalm.position.y, leftPalm.position.z + 0.06);
+    lThumb.parent = this.leftPalmMesh;
+    lThumb.position = new Vector3(0.14, 0, 0.06);
     lThumb.rotation = new Vector3(-0.2, 0.5, 0.3);
     lThumb.material = handMat;
 
     // Mano derecha — palma + dedos
-    const rightPalm = MeshBuilder.CreateBox("rightHand", { width: 0.22, height: 0.06, depth: 0.28 }, this.scene);
-    rightPalm.position = new Vector3(0.52, 1.12, 0.55);
-    rightPalm.rotation = new Vector3(-0.35, -0.12, -0.18);
-    rightPalm.material = handMat;
+    this.rightPalmMesh = MeshBuilder.CreateBox("rightHand", { width: 0.22, height: 0.06, depth: 0.28 }, this.scene);
+    this.rightPalmMesh.position = new Vector3(0.52, 1.12, 0.55);
+    this.rightPalmMesh.rotation = new Vector3(-0.35, -0.12, -0.18);
+    this.rightPalmMesh.material = handMat;
 
     for (let i = 0; i < 4; i++) {
       const finger = MeshBuilder.CreateBox(`rFinger${i}`, { width: 0.04, height: 0.04, depth: 0.14 }, this.scene);
+      finger.parent = this.rightPalmMesh;
       finger.position = new Vector3(
-        rightPalm.position.x + 0.07 - i * 0.05,
-        rightPalm.position.y - 0.01,
-        rightPalm.position.z + 0.19
+        0.07 - i * 0.05,
+        -0.01,
+        0.19
       );
-      finger.rotation = rightPalm.rotation.clone();
+      finger.rotation = new Vector3(0, 0, 0); // Local a la palma
       finger.material = handMat;
     }
     const rThumb = MeshBuilder.CreateBox("rThumb", { width: 0.05, height: 0.04, depth: 0.10 }, this.scene);
-    rThumb.position = new Vector3(rightPalm.position.x - 0.14, rightPalm.position.y, rightPalm.position.z + 0.06);
+    rThumb.parent = this.rightPalmMesh;
+    rThumb.position = new Vector3(-0.14, 0, 0.06);
     rThumb.rotation = new Vector3(-0.2, -0.5, -0.3);
     rThumb.material = handMat;
 
     // Aura de KI azul alrededor de las manos
     const kiAura = new ParticleSystem("handAura", 120, this.scene);
     kiAura.particleTexture = new Texture("https://assets.babylonjs.com/textures/flare.png", this.scene);
-    kiAura.emitter = leftPalm;
+    kiAura.emitter = this.leftPalmMesh;
     kiAura.minEmitBox = new Vector3(-0.35, -0.05, -0.15);
     kiAura.maxEmitBox = new Vector3(0.35, 0.05, 0.15);
     kiAura.color1 = new Color4(0.2, 0.7, 1.0, 0.5);
@@ -358,10 +378,10 @@ export class Game {
       { frame: 50, value: 1.09 },
       { frame: 100, value: 1.12 },
     ]);
-    leftPalm.animations  = [breathAnim];
-    rightPalm.animations = [breathAnim];
-    this.scene.beginAnimation(leftPalm,  0, 100, true);
-    this.scene.beginAnimation(rightPalm, 0, 100, true);
+    this.leftPalmMesh.animations  = [breathAnim];
+    this.rightPalmMesh.animations = [breathAnim];
+    this.scene.beginAnimation(this.leftPalmMesh,  0, 100, true);
+    this.scene.beginAnimation(this.rightPalmMesh, 0, 100, true);
   }
 
   private setupGameOverHandler(): void {
@@ -432,10 +452,16 @@ export class Game {
           break;
         case "s": this.combat.activateBlock(); break;
         case "d": this.combat.activateDodge(); break;
-        case "r": this.combat.rechargeKi(); break;
+        case "d": this.combat.activateDodge(); break;
+        case "r": 
+          console.log("[Game] 'R' desactivado. Usa el gesto o la tecla 'K' para simular.");
+          break;
         case "1": this.combat.triggerSpecial("kamehameha"); break;
         case "2": this.combat.triggerSpecial("finalFlash"); break;
         case "v": this.enterVR(); break;
+        case "k": this.simulator.playRechargeSequence(); break;
+        case "i": this.simulator.playKiBlastSequence("left"); break;
+        case "o": this.simulator.playKiBlastSequence("right"); break;
       }
     });
   }
@@ -526,8 +552,8 @@ export class Game {
           {
             xrInput: this.xr.input,
             jointMeshes: {
-              disableDefaultHandMesh: false,  // Mostrar malla 3D de manos
-              invisible: false,               // Manos visibles
+              disableDefaultHandMesh: true,  // Forzar esferas primitivas en Meta Quest en vez de descargar 3D model
+              enablePhysics: false
             },
           }
         );
@@ -546,21 +572,27 @@ export class Game {
           // Activar debug overlay
           this.debugOverlay?.show();
 
-          // Adjuntar VRHud a la cámara XR y ocultar HUD HTML
-          // La cámara XR está disponible justo después de que la sesión inicia
+          // Adjuntar VRHud a la cámara XR
           const xrCamera = this.xr.baseExperience.camera;
           if (xrCamera) {
-            if (this.vrHud) this.vrHud.attachToXRCamera(xrCamera);
-            if (this.debugOverlay) this.debugOverlay.attachToXRCamera(xrCamera);
-            console.log("[VRHud y DebugOverlay] Adjuntados a cámara XR");
+            // Instanciar el HUD 3D fijándolo en el espacio frente a la mirada del usuario
+            if (this.vrHud) {
+                // Retrasar la posición estática un frame para garantizar que el hardware Quest
+                // entregó su vector rotacional real (y no spawnee en diagonal o neutro).
+                this.xr.baseExperience.sessionManager.onXRFrameObservable.addOnce(() => {
+                    this.vrHud.attachToXRCamera(xrCamera);
+                    console.log("[XR] VRHud 3D anclado globalmente con el primer XRFrame válido.");
+                });
+            }
           }
-          // Ocultar el HUD HTML (no visible en immersive-vr de todos modos)
+          
           this.hud?.hide?.();
+          this.debugOverlay?.hide(); // Forzar apagado de debug plano celeste antiguo
         } else {
-          // Al salir de VR: mostrar HUD HTML, ocultar UI 3D
+          // Al salir de VR: ocultar UI 3D y mostrar UI 2D
           this.vrHud?.detachFromCamera();
-          this.debugOverlay?.detachFromCamera();
           this.hud?.show?.();
+          // El debugOverlay 2D puede persistir según el toggle
         }
         const leftMesh = this.scene.getMeshByName("leftHand");
         const rightMesh = this.scene.getMeshByName("rightHand");
@@ -610,28 +642,48 @@ export class Game {
           fallbackTick++;
 
           // Cada 120 frames (~2s) intentar leer del cache interno de Babylon
-          if (fallbackTick % 120 === 0 && (!leftHand || !rightHand)) {
+          if (fallbackTick % 60 === 0 && (!leftHand || !rightHand)) {
             const cache = (handTracking as any)._handControllersCache
               ?? (handTracking as any)._handControllers
               ?? (handTracking as any).handControllersCache;
-            if (cache instanceof Map) {
-              leftHand  = cache.get("left")  ?? leftHand;
-              rightHand = cache.get("right") ?? rightHand;
+            
+            if (cache) {
+              const handsArray = cache instanceof Map 
+                ? Array.from(cache.values()) 
+                : (Array.isArray(cache) ? cache : Object.values(cache));
+                
+              handsArray.forEach((h: any) => {
+                 const hnd = h.xrController?.inputSource?.handedness ?? h.handedness ?? h._handedness;
+                 if (hnd === "left") leftHand = h;
+                 if (hnd === "right") rightHand = h;
+              });
+              
               if (leftHand || rightHand) {
-                console.log("[XR] Manos encontradas via cache:", !!leftHand, !!rightHand);
+                console.log(`[XR] Manos recobradas via cache (L:${!!leftHand} R:${!!rightHand})`);
               }
             }
           }
 
-          // Extraer joints de las manos disponibles
-          const lJoints = leftHand  ? extractHandJoints(leftHand)  : null;
-          const rJoints = rightHand ? extractHandJoints(rightHand) : null;
+          // Extraer joints de las manos disponibles (solo de XR)
+          let lJointsXR = leftHand  ? extractHandJoints(leftHand)  : null;
+          let rJointsXR = rightHand ? extractHandJoints(rightHand) : null;
 
-          this.handTrackingActive = !!(lJoints || rJoints);
+          // Si el simulador está inyectando posiciones, ignoramos el hardware basura / emulador
+          if (this.simulator && this.simulator.isActive()) {
+            lJointsXR = null;
+            rJointsXR = null;
+          }
 
-          if (lJoints) this.gestureRecognizer.updateHandJoints("left",  lJoints);
-          if (rJoints) this.gestureRecognizer.updateHandJoints("right", rJoints);
-          if (lJoints && rJoints) this.processGestures();
+          // Solo pasamos joints nativos de XR al recognizer
+          if (lJointsXR) this.gestureRecognizer.updateHandJoints("left",  lJointsXR);
+          if (rJointsXR) this.gestureRecognizer.updateHandJoints("right", rJointsXR);
+
+          // IMPORTANTE: Obtenemos los joints ACTUALES desde el recognizer para el debug
+          // (Así incluimos los datos del Simulator si están activos)
+          const lJointsActual = this.gestureRecognizer.getLeftHandJoints();
+          const rJointsActual = this.gestureRecognizer.getRightHandJoints();
+          
+          if (lJointsXR && rJointsXR) this.processGestures();
 
           // Construir apiSource para el debug overlay
           const apiSource = leftHand || rightHand
@@ -642,8 +694,8 @@ export class Game {
 
           this.debugOverlay?.update({
             handTrackingActive: this.handTrackingActive,
-            leftJoints:  lJoints,
-            rightJoints: rJoints,
+            leftJoints:  lJointsActual,
+            rightJoints: rJointsActual,
             gesture: currentGesture,
             handApiSource: apiSource,
           });
@@ -652,8 +704,8 @@ export class Game {
           this.vrHud?.updateHandTrackingDebug(
             !!leftHand,
             !!rightHand,
-            lJoints,
-            rJoints,
+            lJointsActual,
+            rJointsActual,
             currentGesture,
             apiSource
           );
@@ -677,21 +729,242 @@ export class Game {
     }
   }
 
+  private syncHandMeshes(): void {
+    const lJoints = this.gestureRecognizer.getLeftHandJoints();
+    const rJoints = this.gestureRecognizer.getRightHandJoints();
+
+    // Actualizar estado de tracking activo (basado en si hay joints)
+    const wasActive = this.handTrackingActive;
+    this.handTrackingActive = !!(lJoints || rJoints);
+
+    if (this.handTrackingActive) {
+      // Detener animaciones automáticas si hay control manual/simulado
+      if (!wasActive && this.leftPalmMesh) {
+         this.scene.stopAnimation(this.leftPalmMesh);
+         this.scene.stopAnimation(this.rightPalmMesh);
+         console.log("[Game] Animación de manos detenida para modo Tracking/Simulación");
+      }
+
+      if (this.leftPalmMesh && lJoints) {
+        this.leftPalmMesh.position.copyFromFloats(lJoints.wrist.x, lJoints.wrist.y, lJoints.wrist.z);
+      }
+      if (this.rightPalmMesh && rJoints) {
+        this.rightPalmMesh.position.copyFromFloats(rJoints.wrist.x, rJoints.wrist.y, rJoints.wrist.z);
+      }
+    }
+
+    // ACTUALIZACIÓN DE AURAS
+    const stats = this.combat.getStats();
+    const activeCombo = this.gestureRecognizer.getActiveCombo();
+    
+    // El jugador carga si está en RECHARGING o en fase de CHARGED_KI_BLAST
+    const isPlayerCharging = stats.combatState === "slowMotion" || 
+                           activeCombo === "CHARGED_KI_BLAST_L" || 
+                           activeCombo === "CHARGED_KI_BLAST_R" ||
+                           this.gestureRecognizer.getCurrentGesture() === "RECHARGING";
+
+    if (this.playerAura) {
+      // El aura sigue a la cámara (pero quizás un poco abajo)
+      this.playerAura.emitter = new Vector3(this.camera.position.x, this.camera.position.y - 0.5, this.camera.position.z);
+      const colorHex = gokuConfig.transformations?.[0]?.props?.color_palette || "#3b82f6";
+      const pColor = Color4.FromHexString(colorHex.length === 7 ? colorHex + "cc" : colorHex);
+      this.vfx.updateAura(this.playerAura, (stats.playerKi / 100) * 100, isPlayerCharging, stats.playerNP, pColor);
+    }
+
+    if (this.enemyAura) {
+      const colorHex = vegetaConfig.transformations?.[0]?.props?.color_palette || "#1e1b4b";
+      const eColor = Color4.FromHexString(colorHex.length === 7 ? colorHex + "cc" : colorHex);
+      this.vfx.updateAura(this.enemyAura, (stats.enemyKi / 100) * 100, stats.combatState === "slowMotion", stats.enemyNP, eColor);
+    }
+
+    // Si estamos en modo simulación (sin XR activo), procesamos los gestos aquí
+    const inXR = this.xr?.baseExperience?.state === 2; // 2 = IN_XR
+    if (!inXR && this.handTrackingActive) {
+      this.processGestures();
+    }
+  }
+
   private processGestures(): void {
     const gesture = this.gestureRecognizer.getCurrentGesture();
+    const gestureChanged = gesture !== this.lastReportedGesture;
+    const activeCombo = this.gestureRecognizer.getActiveCombo();
+    const comboStep = this.gestureRecognizer.getComboStep();
+    const now = Date.now();
+
+    // LÓGICA DE CARGA EN PASO INTERMEDIO (PARA CHARGED BLAST)
+    if (now - this.lastChargeUpdateTime > 100) {
+      this.lastChargeUpdateTime = now;
+      
+      const stats = this.combat.getStats();
+
+      if (activeCombo === "CHARGED_KI_BLAST_L" && comboStep === 1) {
+           if (this.leftChargeStartKi === 0) this.leftChargeStartKi = stats.playerKi;
+           // Limitar el gasto al 20% del KI inicial
+           const canSpend = (stats.playerKi > this.leftChargeStartKi * 0.8);
+
+           if (canSpend && this.leftChargePower < 3.5 && this.combat.consumeKi(4)) {
+              this.leftChargePower += 0.2;
+              this.vrHud?.showToast(`CARGANDO L: x${this.leftChargePower.toFixed(1)}`, "#ff8800", 0);
+           }
+      } else if (activeCombo === "CHARGED_KI_BLAST_R" && comboStep === 1) {
+           if (this.rightChargeStartKi === 0) this.rightChargeStartKi = stats.playerKi;
+           const canSpend = (stats.playerKi > this.rightChargeStartKi * 0.8);
+
+           if (canSpend && this.rightChargePower < 3.5 && this.combat.consumeKi(4)) {
+              this.rightChargePower += 0.2;
+              this.vrHud?.showToast(`CARGANDO R: x${this.rightChargePower.toFixed(1)}`, "#ff8800", 0);
+           }
+      } else {
+          // Resetear potencia y KI de inicio si NO estamos cargando Y NO acabamos de completar el gesto
+          if (gesture !== "CHARGED_KI_BLAST_L") {
+            this.leftChargePower = 1.0;
+            this.leftChargeStartKi = 0;
+          }
+          if (gesture !== "CHARGED_KI_BLAST_R") {
+            this.rightChargePower = 1.0;
+            this.rightChargeStartKi = 0;
+          }
+      }
+    }
+    
+    // Detectar cancelaciones (pasar de PREP a IDLE sin llegar a RECHARGING)
+    if (gestureChanged && this.lastReportedGesture === "RECHARGE_PREP" && gesture === "IDLE") {
+      this.vrHud?.showToast("Secuencia Cancelada", "#ff4444", 2000);
+    }
+    
+    // Si estábamos recargando y la postura cambió, DETENEMOS la recarga
+    if (gestureChanged && this.lastReportedGesture === "RECHARGING") {
+      this.combat.stopRecharge();
+      this.vrHud?.showToast("Fin de Recarga", "#aaaaaa", 1500);
+    }
+    
+    this.lastReportedGesture = gesture;
+    let success = false;
+
     switch (gesture) {
       case "ATTACKING":
-        if (!this.combat.isInChargingState()) this.combat.launchBasicAttack();
+        success = this.combat.launchBasicAttack();
+        if (gestureChanged) {
+          this.vrHud?.showToast(success ? "¡ATAQUE BÁSICO!" : "Sin KI", success ? "#ff4444" : "#aaaaaa");
+        }
         break;
       case "CHARGING":
-        this.combat.startChargedAttack();
+        success = this.combat.startChargedAttack();
+        if (gestureChanged) this.vrHud?.showToast("Cargando...", "#ffcc00");
         break;
       case "BLOCKING":
-        this.combat.activateBlock();
+        success = this.combat.activateBlock();
+        if (gestureChanged && success) this.vrHud?.showToast("¡BLOQUEO!", "#44ff44");
         break;
       case "RECHARGING":
-        this.combat.rechargeKi();
+        success = this.combat.rechargeKi();
+        if (gestureChanged) {
+           this.vrHud?.showToast("¡RECARGANDO KI!", "#cc44ff", 0);
+        }
         break;
+      case "RECHARGE_PREP":
+        success = false; // Falso para no saturar el log visual de debug, pero el gesto es válido
+        if (gestureChanged) {
+           this.vrHud?.showToast("Fase 1: Preparando...", "#ff8800", 0);
+        }
+        break;
+      case "KAMEHAMEHA_PREP":
+        success = false;
+        if (gestureChanged) {
+           this.vrHud?.showToast("KA... ME...", "#00e5ff", 0);
+        }
+        break;
+      case "KAMEHAMEHA":
+        success = true; // TODO: Lógica de combate de Kamehameha real
+        if (gestureChanged) {
+           this.vrHud?.showToast("¡HAAAAAAAAAA!", "#00e5ff", 4000);
+           // Efecto de impacto global
+           this.vfx.spawnImpact({x: 0, y: 1.5, z: 2}, "heavy");
+        }
+        break;
+      case "KI_BLAST_L": {
+        const now = performance.now();
+        // Evitar disparo normal si acabamos de hacer uno cargado (grace period 500ms)
+        if (now - this.lastChargedFireTime < 500) break;
+        if (now - this.lastKiBlastTime < 400) break;
+        this.lastKiBlastTime = now;
+        
+        const L = this.gestureRecognizer.getLeftHandJoints();
+        if (L) {
+          const forward = this.camera.getForwardRay().direction;
+          // Si hay carga acumulada, la usamos (pero en teoría este caso es para el blast normal)
+          success = this.combat.launchKiBlast(L.wrist, forward, 1.0);
+          this.vrHud?.showToast(success ? "KI BLAST L" : "Sin Ki", success ? "#eeff00" : "#aaaaaa", 1000);
+        }
+        break;
+      }
+      case "KI_BLAST_R": {
+        const now = performance.now();
+        if (now - this.lastChargedFireTime < 500) break;
+        if (now - this.lastKiBlastTime < 400) break;
+        this.lastKiBlastTime = now;
+        
+        const R = this.gestureRecognizer.getRightHandJoints();
+        if (R) {
+          const forward = this.camera.getForwardRay().direction;
+          success = this.combat.launchKiBlast(R.wrist, forward, 1.0);
+          this.vrHud?.showToast(success ? "KI BLAST R" : "Sin Ki", success ? "#eeff00" : "#aaaaaa", 1000);
+        }
+        break;
+      }
+      case "CHARGED_KI_BLAST_L": {
+        const L = this.gestureRecognizer.getLeftHandJoints();
+        if (L) {
+           const forward = this.camera.getForwardRay().direction;
+           success = this.combat.launchKiBlast(L.wrist, forward, this.leftChargePower);
+           this.vrHud?.showToast(`¡CARGA: x${this.leftChargePower.toFixed(1)}!`, "#ff00ff", 1500);
+           this.leftChargePower = 1.0; 
+           this.lastChargedFireTime = performance.now();
+        }
+        break;
+      }
+      case "CHARGED_KI_BLAST_R": {
+        const R = this.gestureRecognizer.getRightHandJoints();
+        if (R) {
+           const forward = this.camera.getForwardRay().direction;
+           success = this.combat.launchKiBlast(R.wrist, forward, this.rightChargePower);
+           this.vrHud?.showToast(`¡CARGA: x${this.rightChargePower.toFixed(1)}!`, "#ff00ff", 1500);
+           this.rightChargePower = 1.0;
+           this.lastChargedFireTime = performance.now();
+        }
+        break;
+      }
+      case "IDLE":
+        success = true;
+        if (gestureChanged) {
+            const wasAction = this.lastReportedGesture.startsWith("KI_BLAST") || this.lastReportedGesture === "KAMEHAMEHA";
+            // Si venimos de un ataque exitoso, dejamos que su propio timer lo oculte. 
+            // Si es un cambio manual a reposo, ocultamos al instante.
+            if (!wasAction) {
+                this.vrHud?.hideToast();
+            }
+        }
+        break;
+    }
+
+    // Actualizar debug de overlay (Desktop)
+    this.debugOverlay?.update({
+      handTrackingActive: true,
+      leftJoints:  this.gestureRecognizer.getLeftHandJoints(),
+      rightJoints: this.gestureRecognizer.getRightHandJoints(),
+      gesture: gesture,
+      success: success
+    });
+
+    // Actualizar debug en VRHud (VR)
+    if (this.vrHud?.isVisible()) {
+      this.vrHud.updateHandTrackingDebug(
+        true, true,
+        this.gestureRecognizer.getLeftHandJoints(),
+        this.gestureRecognizer.getRightHandJoints(),
+        gesture,
+        "WebXR + Success Check"
+      );
     }
   }
 

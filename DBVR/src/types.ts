@@ -20,8 +20,8 @@ export enum GestureType {
 }
 
 export interface PlayerStats {
-  health: number;
-  maxHealth: number;
+  np: number;
+  maxNP: number;
   ki: number;
   maxKi: number;
   position: { x: number; y: number; z: number };

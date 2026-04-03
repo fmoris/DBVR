@@ -39,18 +39,20 @@ import gokuConfig from "../models/goku.json";
 // ─── Helpers de color/rango (duplicados de HUD.ts para no crear dependencia) ──
 
 function getNPColor(np: number): string {
-  if (np >= 91) return "#ffffff";
-  if (np >= 76) return "#ff8800";
-  if (np >= 51) return "#ffcc00";
-  if (np >= 21) return "#00ff88";
-  return "#4499ff";
+  if (np >= 150000) return "#ffffff";
+  if (np >= 70000)  return "#ff8800";
+  if (np >= 30000)  return "#ffcc00";
+  if (np >= 10000)  return "#00ecff";
+  if (np >= 3000)   return "#00ff88";
+  return "#aabbcc";
 }
 
 function getNPRange(np: number): string {
-  if (np >= 91) return "TRASCENDENTE";
-  if (np >= 76) return "DOMINANTE";
-  if (np >= 51) return "ELEVADO";
-  if (np >= 21) return "NORMAL";
+  if (np >= 150000) return "TRASCENDENTE";
+  if (np >= 70000)  return "DOMINANTE";
+  if (np >= 30000)  return "ELEVADO";
+  if (np >= 10000)  return "FUERTE";
+  if (np >= 3000)   return "ESTABLE";
   return "DEBILITADO";
 }
 
@@ -98,6 +100,14 @@ export class VRHud {
   private debugGestureText!: TextBlock;
   private debugStatusText!: TextBlock;
 
+  // Estado del HUD dinámico
+  private currentHudType: "normal" | "defense" | "melee" | null = null;
+  private attackRow: StackPanel | null = null;
+  private defenseRow: StackPanel | null = null;
+  private attackTitle: TextBlock | null = null;
+  private defenseTitle: TextBlock | null = null;
+  private toastTimeout: any = null;
+
   private visible = false;
 
   constructor(scene: Scene, combat: CombatSystem) {
@@ -122,7 +132,7 @@ export class VRHud {
 
   /** Panel izquierdo — stats del jugador */
   private buildPlayerPanel(): void {
-    const { mesh, adt } = this.createPanel("vrHud-player", 0.52, 0.28, 512);
+    const { mesh, adt } = this.createPanel("vrHud-player", 0.52, 0.35, 512);
     this.playerPanel = mesh;
     this.playerADT = adt;
 
@@ -145,7 +155,12 @@ export class VRHud {
     this.playerNPBar = npGroup.fill;
     this.playerNPText = npGroup.valueText;
 
-    // Rango NP
+    // Barra KI
+    const kiGroup = this.makeBarGroup(bg, "KI", 42, "#cc44ff");
+    this.playerKIBar = kiGroup.fill;
+    this.playerKIText = kiGroup.valueText;
+
+    // Rango NP o Rango General
     const rankText = new TextBlock("p-rank", "NORMAL");
     rankText.color = "#00ff88";
     rankText.fontSize = 20;
@@ -153,19 +168,14 @@ export class VRHud {
     rankText.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
     rankText.paddingLeftInPixels = 14;
     rankText.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-    rankText.top = "90px";
+    rankText.top = "110px";
     bg.addControl(rankText);
     this.playerNPRank = rankText;
-
-    // Barra KI
-    const kiGroup = this.makeBarGroup(bg, "KI", 120, "#cc44ff");
-    this.playerKIBar = kiGroup.fill;
-    this.playerKIText = kiGroup.valueText;
   }
 
   /** Panel derecho — stats del enemigo */
   private buildEnemyPanel(): void {
-    const { mesh, adt } = this.createPanel("vrHud-enemy", 0.52, 0.28, 512);
+    const { mesh, adt } = this.createPanel("vrHud-enemy", 0.52, 0.35, 512);
     this.enemyPanel = mesh;
     this.enemyADT = adt;
 
@@ -186,6 +196,10 @@ export class VRHud {
     this.enemyNPBar = npGroup.fill;
     this.enemyNPText = npGroup.valueText;
 
+    const kiGroup = this.makeBarGroup(bg, "KI", 42, "#ff6600");
+    this.enemyKIBar = kiGroup.fill;
+    this.enemyKIText = kiGroup.valueText;
+
     const rankText = new TextBlock("e-rank", "NORMAL");
     rankText.color = "#ff8800";
     rankText.fontSize = 20;
@@ -193,13 +207,9 @@ export class VRHud {
     rankText.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
     rankText.paddingLeftInPixels = 14;
     rankText.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-    rankText.top = "90px";
+    rankText.top = "110px";
     bg.addControl(rankText);
     this.enemyNPRank = rankText;
-
-    const kiGroup = this.makeBarGroup(bg, "KI", 120, "#ff6600");
-    this.enemyKIBar = kiGroup.fill;
-    this.enemyKIText = kiGroup.valueText;
   }
 
   /** Panel superior — botones de ATAQUE */
@@ -221,31 +231,15 @@ export class VRHud {
     title.top = "8px";
     bg.addControl(title);
 
-    // Fila de botones en horizontal
+    // Fila de botones en horizontal (contenedor dinámico)
     const row = new StackPanel("attack-row");
     row.isVertical = false;
     row.width = "100%";
     row.height = "70%";
     row.spacing = 10;
-    const c = this.combat;
-
-    // Ataques basicos
-    this.makeActionBtn(row, "A", "Atacar",       "#00ff88", "#003322", () => c.launchBasicAttack());
-    this.makeActionBtn(row, "W", "Cargar",       "#ffcc00", "#332200", () => c.startChargedAttack());
-
-    // Ataques dinamicos desde JSON
-    const powersDict = powersConfig as Record<string, any>;
-    const allowedPowers = gokuConfig.transformations[0].powers || [];
-    let keyIdx = 1;
-    for (const key of allowedPowers) {
-      const details = powersDict[key];
-      if (details && (details.type === "ofensiva" || details.type === "sacrificio" || details.type === "especial")) {
-        const color = key === "kamehameha" ? "#00ccff" : (key.includes("flash") ? "#ff4400" : "#bb55ff");
-        const btnName = (details.name || key).substring(0, 10); // nombre corto
-        this.makeActionBtn(row, `${keyIdx}`, btnName, color, "#331100", () => c.triggerSpecial(key));
-        keyIdx++;
-      }
-    }
+    bg.addControl(row);
+    this.attackRow = row;
+    this.attackTitle = title;
   }
 
   /** Panel inferior — botones de DEFENSA */
@@ -267,7 +261,7 @@ export class VRHud {
     title.top = "8px";
     bg.addControl(title);
 
-    // Fila de botones en horizontal
+    // Fila de botones en horizontal (contenedor dinámico)
     const row = new StackPanel("defense-row");
     row.isVertical = false;
     row.width = "100%";
@@ -275,13 +269,8 @@ export class VRHud {
     row.spacing = 12;
     row.verticalAlignment = Control.VERTICAL_ALIGNMENT_BOTTOM;
     bg.addControl(row);
-
-    const c = this.combat;
-
-    // Defensas
-    this.makeActionBtn(row, "S", "Bloquear",     "#66ffaa", "#002211", () => c.activateBlock());
-    this.makeActionBtn(row, "D", "Esquivar",     "#66ccff", "#001122", () => c.activateDodge());
-    this.makeActionBtn(row, "R", "Recargar",     "#cc44ff", "#220033", () => c.rechargeKi());
+    this.defenseRow = row;
+    this.defenseTitle = title;
   }
 
   /** Panel de debug para hand tracking — posición fija a la derecha */
@@ -411,8 +400,9 @@ export class VRHud {
     bg.width = "100%";
     bg.height = "100%";
     bg.cornerRadius = 12;
-    bg.background = "rgba(0,0,0,0)";
+    bg.background = "rgba(0,0,0,0.5)";
     bg.thickness = 0;
+    bg.isVisible = false; // Oculto por defecto
     adt.addControl(bg);
     this.statusBg = bg;
 
@@ -490,8 +480,9 @@ export class VRHud {
 
     // Etiqueta
     const lbl = new TextBlock(`${label}-lbl`, label);
-    lbl.color = "#aabbcc";
-    lbl.fontSize = 18;
+    lbl.color = "#00ccff";
+    lbl.fontSize = 16;
+    lbl.fontStyle = "bold";
     lbl.heightInPixels = 22;
     lbl.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
     lbl.paddingLeftInPixels = 14;
@@ -499,40 +490,40 @@ export class VRHud {
     lbl.top = `${BASE_TOP + topOffset}px`;
     parent.addControl(lbl);
 
-    // Fondo de la barra
-    const barBg = new Rectangle(`${label}-bar-bg`);
-    barBg.width = "88%";
-    barBg.heightInPixels = 18;
-    barBg.cornerRadius = 6;
-    barBg.background = "#0a1a2a";
-    barBg.thickness = 1;
-    barBg.color = "#223344";
-    barBg.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
-    barBg.paddingLeftInPixels = 14;
-    barBg.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-    barBg.top = `${BASE_TOP + topOffset + 24}px`;
-    parent.addControl(barBg);
-
-    // Relleno de la barra
-    const fill = new Rectangle(`${label}-fill`);
-    fill.width = "100%";
-    fill.heightInPixels = 18;
-    fill.cornerRadius = 6;
-    fill.background = fillColor;
-    fill.thickness = 0;
-    fill.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
-    barBg.addControl(fill);
-
-    // Valor numérico
-    const val = new TextBlock(`${label}-val`, "100%");
+    // Valor numérico (AHORA ES VISIBLE)
+    const val = new TextBlock(`${label}-val`, "100"); 
+    val.isVisible = true; 
     val.color = "white";
-    val.fontSize = 16;
-    val.heightInPixels = 20;
+    val.fontSize = 18;
+    val.fontStyle = "bold";
+    val.heightInPixels = 22;
     val.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
     val.paddingRightInPixels = 14;
     val.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
     val.top = `${BASE_TOP + topOffset}px`;
     parent.addControl(val);
+
+    // Fondo de la barra
+    const barBg = new Rectangle(`${label}-bar-bg`);
+    barBg.width = "90%";
+    barBg.heightInPixels = 14;
+    barBg.cornerRadius = 4;
+    barBg.background = "rgba(0,0,0,0.5)";
+    barBg.thickness = 1;
+    barBg.color = "rgba(0,200,255,0.3)";
+    barBg.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    barBg.top = `${BASE_TOP + topOffset + 26}px`;
+    parent.addControl(barBg);
+
+    // Relleno de la barra
+    const fill = new Rectangle(`${label}-fill`);
+    fill.width = "100%";
+    fill.heightInPixels = 14;
+    fill.cornerRadius = 4;
+    fill.background = fillColor;
+    fill.thickness = 0;
+    fill.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+    barBg.addControl(fill);
 
     return { fill, valueText: val };
   }
@@ -544,9 +535,11 @@ export class VRHud {
     label: string,
     color: string,
     bgColor: string,
-    action: () => void
+    action: () => void,
+    cost: number = 0
   ): void {
     const btn = Button.CreateSimpleButton(`btn-${label}`, `[${key}]\n${label}`);
+    (btn as any).kiCost = cost; // Metadata
     btn.width = "118px";
     btn.heightInPixels = 88;
     btn.color = color;
@@ -568,61 +561,62 @@ export class VRHud {
     parent.addControl(btn);
   }
 
-  // ─── Posicionar en el mundo (no adjunto a cámara) ────────────────────────────
+  // ─── Posicionamiento Gaze-Locked ──────────────────────────────────────────
 
   /**
-   * Llama este método cuando la sesión XR inicia.
-   * Posiciona los paneles en coordenadas fijas del mundo (no siguen la cámara).
-   * El jugador debe mirar hacia adelante para ver el HUD correctamente.
+   * Posiciona los paneles de forma Fija en el mundo frente al jugador.
+   * Remueve el anclaje a la cabeza para prevenir Motion Sickness.
    */
   attachToXRCamera(xrCamera: any): void {
-    // Posición base: frente al jugador en el suelo (local-floor)
-    // La cámara XR está en la posición del jugador
+    // Desligar completamente de la cámara para mantener el HUD fijo en el mundo
+    [this.playerPanel, this.enemyPanel, this.attackPanel, this.defensePanel, this.statusPanel, this.debugPanel].forEach(m => {
+      m.parent = null;
+    });
+
+    const camPos = xrCamera.globalPosition;
+    
+    // Calcular el vector de visión "hacia adelante" del jugador omitiendo el pitch (Y=0)
     const forward = xrCamera.getDirection(new Vector3(0, 0, 1));
-    const right = xrCamera.getDirection(new Vector3(1, 0, 0));
-    const basePos = xrCamera.position.clone();
+    forward.y = 0;
+    if (forward.lengthSquared() === 0) forward.z = 1;
+    forward.normalize();
+    
+    // Derecha es producto cruz entre Y y Forward
+    const right = Vector3.Cross(Vector3.Up(), forward).normalize();
+    const up = Vector3.Up();
 
-    // Panel jugador — izquierda del campo de visión (a nivel de pecho)
-    this.playerPanel.parent = null; // No adjunto a cámara
-    this.playerPanel.position = basePos.add(forward.scale(1.0)).add(right.scale(-0.55));
-    this.playerPanel.position.y = 1.5; // A nivel de pecho
-    this.playerPanel.lookAt(this.playerPanel.position.add(forward));
+    // Función auxiliar para plantar paneles alrededor del jugador
+    const place = (mesh: any, xLocal: number, yLocal: number, zLocal: number) => {
+        mesh.position = camPos
+            .add(right.scale(xLocal))
+            .add(up.scale(yLocal))
+            .add(forward.scale(zLocal));
+            
+        // El HUD mira hacia el jugador (el frente por defecto de un Plano en BJS es +Z local o -Z según ADT)
+        // Con lookAt, el panel girará para enfocarse en la cabeza del jugador
+        mesh.lookAt(camPos, Math.PI);
+    };
 
-    // Panel enemigo — derecha del campo de visión
-    this.enemyPanel.parent = null;
-    this.enemyPanel.position = basePos.add(forward.scale(1.0)).add(right.scale(0.55));
-    this.enemyPanel.position.y = 1.5;
-    this.enemyPanel.lookAt(this.enemyPanel.position.add(forward));
-
-    // Panel de ataques — arriba (a nivel de ojos + un poco)
-    this.attackPanel.parent = null;
-    this.attackPanel.position = basePos.add(forward.scale(0.8));
-    this.attackPanel.position.y = 2.0; // Arriba
-    this.attackPanel.lookAt(this.attackPanel.position.add(forward));
-
-    // Panel de defensas — abajo (a nivel de cintura)
-    this.defensePanel.parent = null;
-    this.defensePanel.position = basePos.add(forward.scale(0.8));
-    this.defensePanel.position.y = 1.0; // Abajo
-    this.defensePanel.lookAt(this.defensePanel.position.add(forward));
-
-    // Panel de estado — centro, más cerca
-    this.statusPanel.parent = null;
-    this.statusPanel.position = basePos.add(forward.scale(0.6));
-    this.statusPanel.position.y = 1.5;
-    this.statusPanel.lookAt(this.statusPanel.position.add(forward));
-
-    // Panel de debug — a la derecha, rotado hacia el jugador
-    this.debugPanel.parent = null;
-    this.debugPanel.position = basePos.add(forward.scale(0.5)).add(right.scale(1.2));
-    this.debugPanel.position.y = 1.5;
-    this.debugPanel.lookAt(this.debugPanel.position.add(right.scale(-1))); // Mira hacia el jugador
+    // Radios de distancia local (X, Y relativo al visor, Z)
+    place(this.playerPanel, -0.85,  0.40, 1.3);
+    place(this.enemyPanel,   0.85,  0.40, 1.3);
+    
+    place(this.attackPanel,  0.00,  0.75, 1.4);
+    place(this.defensePanel, 0.00, -0.60, 1.4);
+    
+    place(this.statusPanel,  0.00,  0.35, 1.25);
+    
+    // Debug panel
+    place(this.debugPanel,  -0.90, -0.40, 1.3);
 
     this.show();
   }
 
-  /** Oculta los paneles (para volver a desktop) */
+  /** Desenlaza el HUD de la cámara */
   detachFromCamera(): void {
+    [this.playerPanel, this.enemyPanel, this.attackPanel, this.defensePanel, this.statusPanel, this.debugPanel].forEach(m => {
+      m.parent = null;
+    });
     this.hide();
   }
 
@@ -652,43 +646,159 @@ export class VRHud {
   update(stats: GameStats): void {
     if (!this.visible) return;
 
+    // Determinar qué layout mostrar
+    let targetType: "normal" | "defense" | "melee" = "normal";
+    if (stats.enemyAttacking) {
+      targetType = "defense";
+    } else if (stats.combatState === "melee") {
+      targetType = "melee";
+    }
+
+    // Si cambió el contexto, refrescar los botones
+    if (this.currentHudType !== targetType) {
+      this.refreshActions(targetType, stats);
+      this.currentHudType = targetType;
+    }
+
     // ── Jugador ──
-    const pNP = Math.max(0, Math.min(100, stats.playerNP));
+    const pNP = stats.playerNP || 10000;
+    const pNPPct = (pNP / 100000); // ADT utiliza 0-1 para widths habitualmente o píxeles. En rectángulos es píxeles o porcentaje.
     const pKI = Math.max(0, Math.min(100, (stats.playerKi / stats.maxKi) * 100));
-    this.playerNPBar.width = `${pNP}%`;
+    
+    this.playerNPBar.width = `${Math.min(100, pNPPct * 100)}%`;
     this.playerNPBar.background = getNPColor(pNP);
-    this.playerNPText.text = `${pNP.toFixed(0)}%`;
+    this.playerNPText.text = pNP.toLocaleString(); 
     this.playerNPRank.text = getNPRange(pNP);
     this.playerNPRank.color = getNPColor(pNP);
     this.playerKIBar.width = `${pKI}%`;
-    this.playerKIBar.background = pKI > 30 ? "#cc44ff" : "#ff2222";
     this.playerKIText.text = `${stats.playerKi.toFixed(0)}`;
 
     // ── Enemigo ──
-    const eNP = Math.max(0, Math.min(100, stats.enemyNP));
+    const eNP = stats.enemyNP || 10000;
+    const eNPPct = (eNP / 100000);
     const eKI = Math.max(0, Math.min(100, (stats.enemyKi / stats.enemyMaxKi) * 100));
-    this.enemyNPBar.width = `${eNP}%`;
-    this.enemyNPBar.background = "#ff4444";
-    this.enemyNPText.text = `${eNP.toFixed(0)}%`;
+    
+    this.enemyNPBar.width = `${Math.min(100, eNPPct * 100)}%`;
+    this.enemyNPBar.background = getNPColor(eNP);
+    this.enemyNPText.text = eNP.toLocaleString();
     this.enemyNPRank.text = getNPRange(eNP);
     this.enemyNPRank.color = getNPColor(eNP);
     this.enemyKIBar.width = `${eKI}%`;
-    this.enemyKIBar.background = "#ff6600";
     this.enemyKIText.text = `${stats.enemyKi.toFixed(0)}`;
 
-    // ── Estado / alertas ──
+    this.updateStatus(stats);
+    this.updateActionKiCounter(stats);
+    this.filterActionsByKi(stats);
+  }
+
+  /** Oculta botones si no hay KI suficiente */
+  private filterActionsByKi(stats: GameStats): void {
+    if (!this.attackRow || !this.defenseRow) return;
+    
+    const allBtns = [...this.attackRow.getDescendants(), ...this.defenseRow.getDescendants()];
+    for (const ctrl of allBtns) {
+      if (ctrl instanceof Button) {
+        const cost = (ctrl as any).kiCost || 0;
+        ctrl.isVisible = stats.playerKi >= cost;
+      }
+    }
+  }
+
+  /** Muestra el KI actual en una esquina de los paneles de acción */
+  private updateActionKiCounter(stats: GameStats): void {
+    const kiText = `KI: ${stats.playerKi.toFixed(0)}`;
+    const kiColor = stats.playerKi > 20 ? "#00ccff" : "#ff4444";
+    
+    // Podríamos añadir un pequeño indicador flotante o simplemente actualizar el título
+    if (this.attackTitle && this.currentHudType === "normal") {
+      this.attackTitle.text = `⚔ ATAQUES  [${kiText}]`;
+      this.attackTitle.color = kiColor;
+    }
+    if (this.defenseTitle && this.currentHudType === "defense") {
+      this.defenseTitle.color = kiColor;
+    }
+  }
+
+  /** Refresca los botones de acción según el contexto */
+  private refreshActions(type: "normal" | "defense" | "melee", stats: any): void {
+    if (!this.attackRow || !this.defenseRow) return;
+
+    // Limpiar filas
+    this.attackRow.getDescendants().forEach(c => c.dispose());
+    this.defenseRow.getDescendants().forEach(c => c.dispose());
+
+    const c = this.combat;
+
+    if (type === "normal") {
+      this.attackPanel.isVisible = true;
+      this.defensePanel.isVisible = true;
+      this.attackTitle!.text = "⚔ ATAQUES";
+      this.defenseTitle!.text = "🛡 COMPLEMENTO";
+
+      this.makeActionBtn(this.attackRow, "A", "Atacar", "#00ff88", "#003322", () => c.launchBasicAttack(), 8);
+      this.makeActionBtn(this.attackRow, "W", "Cargar", "#ffcc00", "#332200", () => c.startChargedAttack(), 20);
+
+      const allowedPowers = gokuConfig.transformations[0].powers || [];
+      const powersDict = powersConfig as Record<string, any>;
+      let kIdx = 1;
+      for (const k of allowedPowers) {
+        const d = powersDict[k];
+        if (d && (d.type === "ofensiva" || d.type === "especial")) {
+          const color = k === "kamehameha" ? "#00ccff" : "#ff4400";
+          // Coste mínimo para especiales es 40
+          this.makeActionBtn(this.attackRow, `${kIdx}`, d.name || k, color, "#331100", () => c.triggerSpecial(k), 40);
+          kIdx++;
+        }
+      }
+
+      // Complementos (en el panel de defensa)
+      this.makeActionBtn(this.defenseRow, "R", "Recargar KI", "#cc44ff", "#220033", () => c.rechargeKi(), 0);
+    } 
+    else if (type === "defense") {
+      this.attackPanel.isVisible = false; // Ocultar ataques si estamos bajo fuego
+      this.defensePanel.isVisible = true;
+      this.defenseTitle!.text = `⚠️ ¡CUIDADO! VIENE: ${stats.enemyAttackName}`;
+      
+      const attType = stats.enemyAttackType || "basic";
+
+      if (attType === "basic") {
+        this.makeActionBtn(this.defenseRow, "S", "Bloqueo Seguro", "#00ff88", "#002211", () => c.activateBlock(), 15);
+        this.makeActionBtn(this.defenseRow, "D", "Esquiva",        "#66ccff", "#001122", () => c.activateDodge(), 5);
+      } else {
+        // Ataques especiales o cargados
+        this.makeActionBtn(this.defenseRow, "S", "Desvío Preciso", "#ff8800", "#331100", () => c.activateDeflect(), 10);
+        this.makeActionBtn(this.defenseRow, "K", "Choque de Poder", "#ffcc00", "#332200", () => c.triggerPowerClash(), 50);
+        this.makeActionBtn(this.defenseRow, "D", "Esquiva Crucial", "#ffffff", "#333333", () => c.activateDodge(), 5);
+      }
+    }
+    else if (type === "melee") {
+      this.attackPanel.isVisible = true;
+      this.defensePanel.isVisible = false;
+      this.attackTitle!.text = "👊 PUÑO DE HIERRO (MELEE)";
+      
+      this.makeActionBtn(this.attackRow, "A", "Rápido",   "#00ff88", "#002211", () => c.meleeAttack("light"), 0);
+      this.makeActionBtn(this.attackRow, "S", "Múltiple", "#66ccff", "#001122", () => c.meleeAttack("heavy"), 0);
+      this.makeActionBtn(this.attackRow, "D", "Cargado",  "#ffcc00", "#332200", () => c.meleeAttack("charged"), 0);
+      this.makeActionBtn(this.attackRow, "W", "Vanish",   "#cc44ff", "#220033", () => c.meleeAttack("vanish"), 10);
+    }
+  }
+
+  private updateStatus(stats: any): void {
     if (stats.isSlowMotion) {
       this.statusText.text = "⚡ BULLET TIME";
       this.statusText.color = "#cc44ff";
       this.statusBg.background = "rgba(80,0,120,0.75)";
       this.statusBg.thickness = 2;
       this.statusBg.color = "#cc44ff";
-    } else if (stats.enemyAttacking) {
-      this.statusText.text = `⚠ ${stats.enemyAttackName || "ATAQUE ENEMIGO"}`;
-      this.statusText.color = "#ff2222";
-      this.statusBg.background = "rgba(80,0,0,0.75)";
+    } else if (stats.enemyAttackName) {
+      // Mostrar el nombre del ataque o acción enemiga (ej: "Recargando KI") 
+      // incluso si no es un ataque directo que requiera defensa.
+      const isAttacking = stats.enemyAttacking;
+      this.statusText.text = (isAttacking ? "⚠ " : "ℹ ") + stats.enemyAttackName;
+      this.statusText.color = isAttacking ? "#ff2222" : "#00ff88";
+      this.statusBg.background = isAttacking ? "rgba(80,0,0,0.75)" : "rgba(0,60,20,0.75)";
       this.statusBg.thickness = 2;
-      this.statusBg.color = "#ff2222";
+      this.statusBg.color = isAttacking ? "#ff2222" : "#00ff88";
     } else if (stats.combatState === "charging" || stats.combatState === "charging_special") {
       const pct = Math.min(100, (stats.chargeTime / 8) * 100);
       this.statusText.text = `⚡ CARGANDO ${pct.toFixed(0)}%`;
@@ -759,10 +869,33 @@ export class VRHud {
       "CHARGING": "#ffcc00",
       "BLOCKING": "#44ff44",
       "RECHARGING": "#cc44ff",
+      "RECHARGE_PREP": "#ff8800",
       "PARRYING": "#44ccff",
       "IDLE": "#aaaaaa",
     };
     this.debugGestureText.color = gestureColors[gesture] || "#ffffff";
+  }
+
+  showToast(message: string, color: string = "white", duration: number = 2000): void {
+    if (!this.statusText || !this.statusBg) return;
+    
+    this.statusText.text = message;
+    this.statusText.color = color;
+    this.statusBg.isVisible = true;
+    
+    if (this.toastTimeout) clearTimeout(this.toastTimeout);
+    
+    if (duration > 0) {
+      this.toastTimeout = setTimeout(() => {
+        this.hideToast();
+      }, duration);
+    }
+  }
+
+  hideToast(): void {
+    if (this.statusText) this.statusText.text = "";
+    if (this.statusBg) this.statusBg.isVisible = false;
+    if (this.toastTimeout) clearTimeout(this.toastTimeout);
   }
 
   // ─── Dispose ────────────────────────────────────────────────────────────────

@@ -40,6 +40,7 @@ export class VoiceRecognizer {
   private statusCallbacks: Array<(active: boolean, transcript: string) => void> = [];
   private available = false;
   private restartTimeout: ReturnType<typeof setTimeout> | null = null;
+  private allowedPowers: string[] = [];
 
   constructor() {
     const SpeechRecognitionAPI =
@@ -66,10 +67,9 @@ export class VoiceRecognizer {
         
         let matchedCommand: string | null = null;
 
-        // Búsqueda dinámica en powers.json limitando a goku base
+        // Búsqueda dinámica en powers.json filtrando por allowedPowers
         const powersDict = powersConfig as Record<string, any>;
-        const allowedPowers = gokuConfig.transformations[0].powers || [];
-        for (const key of allowedPowers) {
+        for (const key of this.allowedPowers) {
           const details = powersDict[key];
           if (!details) continue;
           
@@ -90,6 +90,9 @@ export class VoiceRecognizer {
       }
     };
 
+    // Inicializar con Goku base
+    this.setAllowedPowers(gokuConfig.transformations?.[0]?.powers || []);
+
     rec.onerror = (event: SpeechRecognitionErrorEvent) => {
       if (event.error === "no-speech") return;
       console.warn("[VoiceRecognizer] Error:", event.error);
@@ -108,6 +111,14 @@ export class VoiceRecognizer {
 
   isAvailable(): boolean {
     return this.available;
+  }
+
+  /**
+   * Actualiza los poderes permitidos para el reconocimiento de voz.
+   */
+  public setAllowedPowers(powers: string[]): void {
+    this.allowedPowers = powers;
+    console.log(`[VoiceRecognizer] Escuchando comandos para: ${powers.join(", ")}`);
   }
 
   start(): void {

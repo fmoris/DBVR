@@ -1,6 +1,6 @@
-# VR KI Combat
+# Dragon Ball VR: Power Clash
 
-Juego de Realidad Virtual en primera persona con combates basados en el sistema de acción-reacción de **Yu Yu Hakusho: Tokubetsu Hen**. Desarrollado con **TypeScript**, **Vite** y **BabylonJS** para WebXR.
+Juego de Realidad Virtual en primera persona con combates basados en el sistema de acción-reacción de **Yu Yu Hakusho: Tokubetsu Hen**. Experiencia de peleas **sin turnos** donde la velocidad de reacción y la gestión de recursos (KI y NP) son clave. Desarrollado con **TypeScript**, **Vite** y **BabylonJS** para WebXR.
 
 ## 🎮 Características del MVP
 
@@ -28,7 +28,7 @@ src/
 └── systems/
     ├── CombatStateManager.ts   # Máquina de estados del combate
     ├── GestureRecognizer.ts    # Detección de gestos de manos
-    ├── PlayerStats.ts          # Gestión de salud y KI
+    ├── PlayerStats.ts          # Gestión de NP (Nivel de Poder) y KI
     ├── VFXManager.ts           # Efectos visuales y proyectiles
     └── WebXRManager.ts         # Gestión de WebXR y hand tracking
 ```
@@ -63,8 +63,7 @@ pnpm build
 
 ## 🎮 Controles VR (Con Meta Quest)
 
-- **Cargar Ataque:** Juntar las manos en el pecho
-- **Lanzar Ataque:** Empujar las manos hacia adelante
+- **Cargar/Lanzar Super Poder:** Gesto de carga (mantener) + Gesto de lanzamiento
 - **Bloquear:** Cruzar los brazos frente al pecho
 - **Recargar KI:** Brazos a los lados con puños cerrados
 
@@ -87,7 +86,6 @@ Detecta gestos basado en 25 puntos de articulación por mano:
 
 ### PlayerStats
 Gestiona recursos del jugador:
-- Salud (0-100)
 - KI (0-100) con regeneración automática
 - Consumo de KI por acciones
 
@@ -97,14 +95,15 @@ Crea y gestiona:
 - Sistemas de partículas radiantes
 - Efectos de impacto
 
-## 📊 Sistema de Energía (KI)
+## 📊 Sistema de Energía (KI) y NP
 
-| Acción | Costo KI | Efecto |
-| :--- | :--- | :--- |
-| Ataque Básico | 10 | Daño 15 |
-| Ataque Cargado | 30 | Daño 50 |
-| Bloqueo | 15 | Mitiga daño |
-| Repulsión | 25 | Desvía ataque |
+| Acción | Gasto KI | NP Generado | Efecto |
+| :--- | :--- | :--- | :--- |
+| Ataque Rápido | Bajo (Gradual) | Medio-Alto | Puede activar cadena de melee |
+| Ataque Cargado | Medio | Alto | Empieza cadena automáticamente |
+| Super Poder | Alto | Muy Alto | Requiere carga mínima (2 pasos) |
+| Bloqueo | 15 | Sube NP (Def) | Mitiga daño, otorga NP al atacante |
+| Desvío | Bajo | Muy Alto | Timing preciso, baja NP al atacante |
 
 ## 🎨 Especificaciones Visuales
 

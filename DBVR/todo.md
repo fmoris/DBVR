@@ -10,15 +10,31 @@
 - [x] Almacenamiento S3 para replays de partidas
 - [x] Escena 3D con BabylonJS (camara primera persona, entorno, enemigo)
 - [x] Sistema de camara lenta base
-- [x] HUD con barras de KI y salud
+- [x] HUD con barras de KI y NP (Nivel de Poder)
 - [x] Pantalla de inicio
+
+---
+
+## PARTE 0 — Reconocimiento de Gestos (Quest 3)
+- [ ] Gesto: mano extendida hacia adelante, palma abierta (GestureType.ATTACKING)
+- [ ] Gesto: puno cerrado (GestureType.CHARGING) → abrir para lanzar
+- [ ] Gesto de lanzamiento: abrir el puno (soltar)
+- [ ] Secuencia Kamehameha: ambas manos juntas al costado (GestureType.CHARGING)
+- [ ] Secuencia Kamehameha: empujar ambas manos hacia adelante (lanzamiento)
+- [ ] Secuencia Final Flash: brazos extendidos a los lados (posicion en cruz)
+- [ ] Secuencia Final Flash: juntar las manos frente al pecho (concentracion)
+- [ ] Secuencia Final Flash: empujar ambas manos hacia adelante (lanzamiento)
+- [ ] Gesto Bloqueo: GestureType.BLOCKING (brazos cruzados)
+- [ ] Gesto Esquive: GestureType.PARRYING (esquiva lateral/ruptura)
+- [ ] Gesto Desvio: Gesto de redirección (timing preciso)
+- [ ] Gesto de recarga activa: GestureType.RECHARGING
+- [ ] Mapear gestos de manos a acciones del juego (GestureRecognizer v2, joints W3C)
 
 ---
 
 ## PARTE 1 — Combate a distancia (KI)
 
 ### 1.1 Ataque basico de KI (proyectil rapido)
-- [x] Gesto: mano extendida hacia adelante, palma abierta (GestureType.ATTACKING)
 - [x] No relentiza el tiempo
 - [x] Consume KI bajo (10 pts)
 - [x] Causa dano leve al enemigo
@@ -26,42 +42,22 @@
 - [x] VFX: proyectil de KI con trail de particulas (VFXManager)
 
 ### 1.2 Ataque de KI cargado
-- [x] Gesto: puno cerrado (GestureType.CHARGING) → abrir para lanzar
-- [x] Durante la carga: VFX de energia concentrandose (VFXManager)
-- [x] Gesto de lanzamiento: abrir el puno (soltar)
 - [x] Relentiza el tiempo levemente al impactar (bullet time 800ms 0.4x)
-- [ ] Interrumpe ataques especiales del rival si impacta durante la carga
+- [x] Interrumpe ataques especiales del rival si impacta durante la carga (Efecto 'Hit' activo)
 - [x] Consume KI medio (20-30 pts segun tiempo de carga)
 - [x] Dano proporcional al tiempo de carga (minimo 1s, maximo 3s)
-- [x] VFX: esfera compacta con electricidad, escala segun carga
+- [x] VFX: esfera compacta con electricidad, escala segun carga (Efecto 'charged' activado)
 
-### 1.3 Ataque especial — Kamehameha
-- [x] Secuencia de movimientos requerida (gestos VR o tecla 1):
-  - [x] Paso 1: ambas manos juntas al costado (GestureType.CHARGING)
-  - [x] Paso 2: mantener posicion minimo 2 segundos (carga minima)
-  - [x] Paso 3: empujar ambas manos hacia adelante (lanzamiento)
-- [x] Tiempo de carga minimo: 2s | maximo: 8s (3 niveles)
-- [x] Dano escala con tiempo de carga (base 40, medio 70, maximo 100)
-- [x] Relentiza el tiempo 3500ms a 0.18x al lanzar
-- [x] Consume KI alto (40/60/80 pts segun nivel)
-- [x] VFX: rayo de energia azul/blanco (VFXManager)
-- [ ] Audio: sonido de carga creciente + disparo
-
-### 1.4 Ataque especial — Final Flash
-- [x] Secuencia de movimientos requerida (gestos VR o tecla 2):
-  - [x] Paso 1: brazos extendidos a los lados (posicion en cruz)
-  - [x] Paso 2: juntar las manos frente al pecho (concentracion)
-  - [x] Paso 3: mantener posicion minimo 3 segundos (carga minima)
-  - [x] Paso 4: empujar ambas manos hacia adelante (lanzamiento)
-- [x] Tiempo de carga minimo: 3s | maximo: 10s (3 niveles)
-- [x] Dano escala con tiempo de carga (base 60, medio 110, maximo 150)
-- [x] Relentiza el tiempo 4500ms a 0.12x (mas que Kamehameha)
-- [x] Consume KI muy alto (60/90/120 pts segun nivel)
-- [x] VFX: explosion de energia amarilla/dorada (VFXManager)
-- [ ] Audio: sonido de carga mas grave e intenso que Kamehameha
+### 1.3 Super Poder — Kamehameha / Final Flash
+- [x] Mecánica de 2 pasos: Carga mínima (mantener gesto) + Lanzamiento (gesto final)
+- [x] Carga mínima requerida (según nivel 1-3)
+- [x] Si el gesto de lanzamiento se hace antes de la carga mínima -> El ataque falla
+- [x] Consume KI alto (escalado por nivel)
+- [x] NP Generado: Muy Alto
+- [x] VFX: Rayo masivo con distorsión y partículas
 
 ### 1.5 Defensas contra ataques especiales
-- [x] **Bloqueo**: gesto GestureType.BLOCKING (brazos cruzados)
+- [x] **Bloqueo**: activar con tecla S
   - [x] Reduce dano en 70% (isDefending = true)
   - [x] Consume KI medio (15 pts)
   - [ ] VFX: escudo de energia frente al personaje
@@ -74,18 +70,17 @@
   - [ ] Ambos ataques se anulan o el mas cargado gana
   - [ ] Si son iguales: explosion en el centro, ambos reciben dano reducido
   - [ ] VFX: explosion epica en el punto de choque
-- [x] **Esquive**: gesto GestureType.PARRYING o tecla D
+- [x] **Esquive**: activar con tecla D
   - [x] Reduce dano al esquivar
   - [x] Consume KI muy bajo (5 pts)
   - [ ] Ventana de tiempo muy corta (0.3s)
-  - [ ] Gesto: inclinacion rapida de cabeza (head tracking)
-
+  
 ---
 
 ## PARTE 2 — Combate cuerpo a cuerpo (Melee)
 
 ### 2.1 Activacion del modo melee
-- [ ] Gesto de activacion: ambos punos cerrados empujados hacia adelante simultaneamente
+- [ ] Activacion melee: empuje simultaneo (detección manual)
 - [ ] Al activar: el tiempo se relentiza para el ATACANTE (elige tipo de ataque)
 - [ ] Tipos de ataque a elegir:
   - [ ] Ataque rapido (bajo dano, bajo KI, dificulta defensa perfecta)
@@ -98,30 +93,15 @@
   - [ ] Cuanto mas cargado el ataque, menos tiempo tiene el defensor para leer el golpe
 
 ### 2.2 Acciones del atacante en melee
-- [ ] Seleccion de punto de impacto (cabeza, torso, costado)
-- [ ] Ataque rapido: gesto de puno hacia adelante (un brazo)
-- [ ] Ataque cargado: gesto de puno con ambos brazos o carga previa
-- [ ] Cadena de golpes: si el primer golpe conecta, puede encadenar siguiente accion
-  - [ ] Maximo 3 golpes por cadena antes de que el defensor pueda expulsar
-  - [ ] Cada golpe en cadena consume KI adicional
+- [ ] **Ataque Rápido**: Ventana corta, bajo KI, NP medio.
+- [ ] **Ataque Múltiple**: El defensor debe bloquear >51% para no perder control.
+- [ ] **Ataque Cargado**: Lanza lejos al rival + activa cadena de KI.
+- [ ] **Ataque Desvanecedor**: Reaparece en puntos cardinales (requiere giro del defensor).
 
 ### 2.3 Acciones del defensor en melee
-- [ ] **Defensa normal**: bloquear el golpe real (reduce dano 50%)
-  - [ ] Gesto: cruzar brazo hacia el punto del golpe
-  - [ ] Consume KI bajo
-- [ ] **Defensa perfecta**: bloquear en el momento exacto de impacto (ventana 0.2s)
-  - [ ] Anula completamente el dano
-  - [ ] Abre ventana para CONTRA-ATAQUE o EXPULSION
-  - [ ] VFX especial al lograr defensa perfecta (flash de luz)
-- [ ] **Contra-ataque** (solo tras defensa perfecta):
-  - [ ] El defensor pasa a ser atacante en melee
-  - [ ] El atacante original pasa a ser defensor
-  - [ ] Consume KI medio
-- [ ] **Expulsion** (solo tras defensa perfecta o al final de cadena):
-  - [ ] Empujar con ambas manos al rival
-  - [ ] Ambos personajes vuelven a la posicion inicial de combate a distancia
-  - [ ] Genera KI para el que expulsa (10-15 pts)
-  - [ ] VFX: onda de choque que separa a los personajes
+- [ ] **Bloqueo Total**: Gasta KI, no rompe la cadena.
+- [ ] **Bloqueo Predictivo**: Adivinar zona -> Contraataque inmediato (inversión de roles).
+- [ ] **Esquiva**: Mayor gasto de KI, rompe cadena + ventaja.
 
 ### 2.4 Generacion y consumo de KI en melee
 - [ ] Ataques rapidos: consumen 10 KI por golpe
@@ -142,12 +122,12 @@
 - [ ] El NP determina la fuerza, resistencia e inmunidad a ciertos ataques
 - [ ] La condicion de victoria NO es reducir el NP a 0, sino lograr una diferencia de NP suficiente para que el rival no pueda continuar (rendicion narrativa, como en el anime)
 
-### Escala y rangos del Nivel de Poder
-- [x] Rango 1 — Debilitado (NP 0-20%): sin reduccion de dano (0%)
-- [x] Rango 2 — Normal (NP 21-50%): reduccion de dano 20%
-- [x] Rango 3 — Elevado (NP 51-75%): reduccion de dano 40%
-- [x] Rango 4 — Dominante (NP 76-90%): reduccion de dano 70%
-- [x] Rango 5 — Trascendente (NP 91-100%): reduccion de dano 90%
+### Escala y rangos del Nivel de Poder (Irreversibles)
+- [x] Rango 1 — Debilitado (NP 0-24k): Reducción daño 0%.
+- [x] Rango 2 — Normal (NP 25k-49k): Umbral irreversible alcanzado. Reducción daño 20%.
+- [x] Rango 3 — Elevado (NP 50k-74k): Umbral irreversible alcanzado. Reducción daño 40%.
+- [x] Rango 4 — Dominante (NP 75k-89k): Umbral irreversible alcanzado. Reducción daño 70%.
+- [x] Rango 5 — Trascendente (NP 90k-100k): Umbral irreversible alcanzado. Reducción daño 90%.
 
 ### Como sube el Nivel de Poder
 - [x] Ataques conectados exitosamente: +NP segun tipo de ataque (launchBasicAttack, etc.)
@@ -170,17 +150,16 @@
 - [x] Simula la tension dramatica del anime (startNPFluctuation en CombatSystem)
 - [ ] Visualmente: el aura del personaje pulsa al ritmo de la fluctuacion
 
-### Condicion de victoria
-- [x] Victoria cuando la diferencia de NP entre ambos luchadores supera 50 puntos
-- [ ] El luchador con NP mas bajo entra en estado de "rendicion inminente"
-- [ ] El luchador dominante tiene una ventana de 5s para ejecutar el golpe final
-- [ ] Si no ejecuta el golpe final en ese tiempo, el rival puede iniciar un COMEBACK
+### Condicion de victoria (3 Caminos)
+- [x] 1. Diferencia notable de NP (+35% de ventaja).
+- [ ] 2. Llegar al tope de NP (100%).
+- [ ] 3. Comeback exitoso (activación tras gran desventaja).
 
 ### Sistema de Comeback (luchador en desventaja)
 - [ ] Se activa cuando el NP del jugador cae por debajo del 25% Y el rival supera el 75%
 - [ ] El jugador en desventaja recibe una notificacion visual/haptica de "momento critico"
 - [ ] Opciones de comeback disponibles (cada una con requisito de gesto + grito):
-  - [ ] **Transformacion**: gesto de explosion de energia (brazos al cielo) + grito
+  - [ ] **Transformacion**: explosion de energia + grito
     - [ ] Multiplica el NP actual por 2.5 instantaneamente
     - [ ] Cambia el aura visual del personaje (color diferente)
     - [ ] Consume todo el KI disponible
@@ -189,19 +168,31 @@
     - [ ] Se activa con NP por debajo de 20%
     - [ ] El personaje usa su propia energia vital (NP) como combustible
     - [ ] Si conecta: +40 NP instantaneo y el rival pierde -30 NP
-    - [ ] Si falla: el luchador queda en NP 5% (al borde de la derrota)
-  - [ ] **Momento de Determinacion**: gesto de meditacion rapida (5 segundos completamente quieto)
-    - [ ] Requiere que el rival no ataque durante esos 5 segundos (lectura psicologica)
-    - [ ] Si se completa: NP sube a 40% instantaneamente
-    - [ ] VFX: aura explosiva que empuja al rival hacia atras
+- [x] Se activa cuando el NP del jugador cae por debajo del 25% Y el rival supera el 75%
+- [x] El jugador en desventaja recibe una notificacion visual/haptica de "momento critico"
+- [x] Opciones de comeback disponibles (cada una con requisito de gesto + grito):
+  - [x] **Transformacion**: explosion de energia + grito
+    - [x] Multiplica el NP actual por 2.5 instantaneamente
+    - [x] Cambia el aura visual del personaje (color diferente)
+    - [x] Consume todo el KI disponible
+    - [x] Solo disponible una vez por combate
+  - [x] **Ataque Desesperado**: lanzar un ataque especial sin tener el KI suficiente
+    - [x] Se activa con NP por debajo de 20%
+    - [x] El personaje usa su propia energia vital (NP) como combustible
+    - [x] Si conecta: +40 NP instantaneo y el rival pierde -30 NP
+    - [x] Si falla: el luchador queda en NP 5% (al borde de la derrota)
+  - [x] **Momento de Determinacion**: meditacion rapida (5s quieto)
+    - [x] Requiere que el rival no ataque durante esos 5 segundos (lectura psicologica)
+    - [x] Si se completa: NP sube a 40% instantaneamente
+    - [x] VFX: aura explosiva que empuja al rival hacia atras
 
 ### Representacion visual del NP
 - [x] Barra de NP con color dinamico en el HUD (cyan → verde → amarillo → naranja segun valor)
 - [x] Aura del personaje (manos) con particulas de KI azul
-- [ ] Aura escala en tamano e intensidad con el NP
-- [ ] Particulas de energia aumentan en cantidad y velocidad con el NP alto
-- [ ] Efecto de distorsion de calor alrededor del personaje en rangos 4 y 5
-- [x] Numero flotante de NP visible en el HUD cuando cambia
+- [x] Aura escala en tamano e intensidad con el NP (VFXManager refactor)
+- [x] Particulas de energia aumentan en cantidad y velocidad con el NP alto
+- [x] Efecto de distorsion de calor alrededor del personaje en rangos 4 y 5
+- [x] Numero de NP oculto (solo visible en Debug Info para dev)
 
 ---
 
@@ -209,7 +200,7 @@
 
 ### Regeneracion de KI
 - [x] Regeneracion pasiva lenta en estado neutral (2 pts/0.5s = 4 pts/s)
-- [x] Gesto de recarga activa: GestureType.RECHARGING (tecla R) — recarga rapida
+- [x] Recarga activa de KI (tecla R)
 - [x] Recibir dano genera KI (5 pts por impacto)
 
 ### IA del enemigo
@@ -218,8 +209,7 @@
 - [ ] Respuesta a ataques del jugador (defensa, esquive)
 - [ ] Activacion de melee cuando el jugador tiene KI bajo
 
-### WebXR Hand Tracking (Meta Quest)
-- [x] Mapear gestos de manos a acciones del juego (GestureRecognizer v2, joints W3C)
+- [ ] WebXR Hand Tracking: Integracion refinada
 - [ ] Calibracion inicial de posicion del jugador
 - [ ] Feedback haptico en acciones clave
 

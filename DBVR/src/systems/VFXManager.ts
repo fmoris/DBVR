@@ -10,6 +10,7 @@ export class VFXManager {
   private projectiles: Map<string, Projectile> = new Map();
   private projectileMeshes: Map<string, BABYLON.Mesh> = new Map();
   private particleSystems: BABYLON.ParticleSystem[] = [];
+  private playerAura: BABYLON.ParticleSystem | null = null;
   private projectileCounter: number = 0;
 
   constructor(private scene: BABYLON.Scene) {}
@@ -124,6 +125,63 @@ export class VFXManager {
 
     particleSystem.start();
     this.particleSystems.push(particleSystem);
+  }
+
+  /**
+   * Crear o actualizar el aura del jugador
+   * @param emitter Mesh o cámara que emitirá el aura
+   * @param npPercentage Porcentaje de NP (0-100)
+   */
+  updatePlayerAura(emitter: BABYLON.AbstractMesh | BABYLON.Camera, npPercentage: number): void {
+    if (!this.playerAura) {
+      this.playerAura = new BABYLON.ParticleSystem("playerAura", 1000, this.scene);
+      
+      // Textura de llamarada (gradiente radial)
+      const auraType = new BABYLON.DynamicTexture("auraTex", 64, this.scene);
+      const ctx = auraType.getContext();
+      const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+      grad.addColorStop(0, "rgba(255, 255, 255, 1)");
+      grad.addColorStop(1, "rgba(255, 255, 255, 0)");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 64, 64);
+      auraType.update();
+
+      this.playerAura.particleTexture = auraType;
+      this.playerAura.emitter = emitter as any;
+      
+      // Configuración base
+      this.playerAura.minSize = 0.1;
+      this.playerAura.maxSize = 0.5;
+      this.playerAura.minLifeTime = 0.5;
+      this.playerAura.maxLifeTime = 1.0;
+      this.playerAura.emitRate = 200;
+      this.playerAura.blendMode = BABYLON.ParticleSystem.BLENDMODE_ADD;
+      
+      // Gravedad negativa para que suba como fuego
+      this.playerAura.gravity = new BABYLON.Vector3(0, 2, 0);
+      
+      this.playerAura.start();
+    }
+
+    // Escalar según NP
+    const factor = npPercentage / 100;
+    this.playerAura.minSize = 0.1 + factor * 0.5;
+    this.playerAura.maxSize = 0.3 + factor * 1.0;
+    this.playerAura.emitRate = 100 + factor * 900;
+    
+    // Cambiar color según umbrales
+    if (npPercentage < 25) {
+      this.playerAura.color1 = new BABYLON.Color4(1, 1, 1, 0.5); // Blanco tenue
+    } else if (npPercentage < 50) {
+      this.playerAura.color1 = new BABYLON.Color4(0, 0.6, 1, 0.8); // Azul
+    } else if (npPercentage < 75) {
+      this.playerAura.color1 = new BABYLON.Color4(1, 0.8, 0, 1.0); // Dorado
+    } else {
+      this.playerAura.color1 = new BABYLON.Color4(1, 1, 0.5, 1.0); // Eléctrico / Blanco
+      this.playerAura.minSize *= 1.2; // Aumento final
+    }
+    
+    this.playerAura.color2 = new BABYLON.Color4(this.playerAura.color1.r, this.playerAura.color1.g, this.playerAura.color1.b, 0);
   }
 
   /**

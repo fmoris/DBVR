@@ -226,6 +226,7 @@ class VRKICombatGame {
     this.combatStateManager.update(deltaTime);
     this.playerStats.update();
     this.vfxManager.update(deltaTime);
+    this.vfxManager.updatePlayerAura(this.camera, this.playerStats.getNPPercentage());
 
     // Actualizar gestos
     const leftHands = this.webxrManager.getLeftHandJoints();
@@ -402,14 +403,17 @@ class VRKICombatGame {
    */
   private updateUI(): void {
     const playerKiBar = document.getElementById('playerKiBar') as HTMLElement;
-    const enemyKiBar = document.getElementById('enemyKiBar') as HTMLElement;
+    const playerAuraIcon = document.getElementById('playerAuraIcon') as HTMLElement; // Nuevo elemento para brillo
 
     if (playerKiBar) {
       playerKiBar.style.width = `${this.playerStats.getKiPercentage()}%`;
     }
 
-    if (enemyKiBar) {
-      enemyKiBar.style.width = '75%'; // Simulado
+    // El NP no se muestra en barra, se "siente" (puedes añadir un brillo al HUD)
+    if (playerAuraIcon) {
+      const npFactor = this.playerStats.getNPPercentage() / 100;
+      playerAuraIcon.style.opacity = `${0.3 + npFactor * 0.7}`;
+      playerAuraIcon.style.filter = `blur(${npFactor * 10}px) brightness(${1 + npFactor})`;
     }
   }
 
@@ -428,7 +432,7 @@ class VRKICombatGame {
       <div><strong>Estado Combate:</strong> ${state}</div>
       <div><strong>Gesto:</strong> ${gesture}</div>
       <div><strong>KI:</strong> ${stats.ki.toFixed(1)}/${stats.maxKi}</div>
-      <div><strong>Salud:</strong> ${stats.health}/${stats.maxHealth}</div>
+      <div><strong>NP (Oculto):</strong> ${stats.np.toFixed(0)} (Umbral: ${this.playerStats.getCurrentThreshold()})</div>
       <div><strong>Cámara Lenta:</strong> ${this.combatStateManager.isInSlowMotion() ? 'SÍ' : 'NO'}</div>
       <div><strong>WebXR:</strong> ${this.webxrManager.isHandTrackingAvailable() ? 'Activo' : 'Inactivo'}</div>
       <div style="margin-top: 10px; font-size: 10px; color: #00aa00;">
