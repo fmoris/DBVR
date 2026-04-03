@@ -2,6 +2,7 @@ import { useRef, useState, useCallback } from "react";
 import GameCanvas from "../game/GameCanvas";
 import GameHUD from "../game/GameHUD";
 import { BabylonScene, GameState } from "../game/BabylonScene";
+import backgroundImage from "../asstets/images/background.png";
 
 const DEFAULT_STATE: GameState = {
   playerKi: 100,
@@ -41,11 +42,23 @@ export default function Home() {
             flexDirection: "column",
             alignItems: "center",
             justifyContent: "center",
-            background: "linear-gradient(180deg, #050510 0%, #0a0a2a 100%)",
+            backgroundImage: `url(${backgroundImage})`,
+            backgroundSize: "cover",
+            backgroundPosition: "center",
+            backgroundAttachment: "fixed",
             zIndex: 20,
             gap: 64,
           }}
         >
+          {/* Overlay oscuro para mejorar legibilidad del texto */}
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              background: "rgba(5, 5, 16, 0.6)",
+              zIndex: -1,
+            }}
+          />
           <div style={{ textAlign: "center" }}>
             <h1
               style={{
