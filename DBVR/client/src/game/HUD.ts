@@ -96,7 +96,7 @@ export class HUD {
     if (this.voiceTimeout) clearTimeout(this.voiceTimeout);
     this.voiceTimeout = window.setTimeout(() => {
       el.style.opacity = "0";
-    }, 2000);
+    }, 5000);
   }
 
   private buildDOM(): void {

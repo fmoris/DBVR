@@ -72,7 +72,7 @@ const powersDict = powersConfig as Record<string, any>;
 for (const [key, details] of Object.entries(powersDict)) {
   if (details.charge_time) {
     const ct = details.charge_time;
-    SPECIAL_LEVELS[key] = [
+    SPECIAL_LEVELS[key.toLowerCase()] = [
       { label: "MINIMO",  timeMin: ct * 0.5, timeMax: ct * 0.9, ki: 40,  damage: 40  },
       { label: "MEDIO",   timeMin: ct,       timeMax: ct * 1.5, ki: 60,  damage: 70  },
       { label: "MAXIMO",  timeMin: ct * 1.6, timeMax: 99,       ki: 80,  damage: 100 },
@@ -90,7 +90,7 @@ function getChargeLevel(
   type: string,
   elapsed: number
 ): ChargeLevel | null {
-  const levels = SPECIAL_LEVELS[type];
+  const levels = SPECIAL_LEVELS[type.toLowerCase()];
   if (!levels) return null;
   // Buscar el nivel mas alto alcanzado
   let reached: ChargeLevel | null = null;
@@ -145,6 +145,8 @@ export class CombatSystem {
 
   constructor(private scene: Scene, private vfx: VFXManager, playerConfig?: any, enemyConfig?: any) {
     this.setAvailablePowers(playerConfig?.transformations?.[0]?.powers || gokuConfig.transformations?.[0]?.powers || []);
+    this.stats.playerKi = 30; // Inicio al 30%
+    this.stats.enemyKi = 30;
     if (playerConfig) {
       this.playerName = playerConfig.name || "Goku";
       this.stats.playerNP = playerConfig.base_power || 10000;
@@ -470,23 +472,25 @@ export class CombatSystem {
   // ============================================
 
   triggerSpecial(attackName: string): boolean {
-    if (this.activeSpecial === attackName) {
-      return this.launchSpecial(attackName);
+    const id = attackName.toLowerCase();
+    if (this.activeSpecial?.toLowerCase() === id) {
+      return this.launchSpecial(id);
     } else if (this.stats.combatState === "neutral") {
-      return this.beginSpecialCharge(attackName);
+      return this.beginSpecialCharge(id);
     }
     return false;
   }
 
   private beginSpecialCharge(type: SpecialAttackType): boolean {
+    const id = type.toLowerCase();
     // Validar si el poder está habilitado para este personaje/transformación
-    if (!this.availablePowers.includes(type)) {
+    if (!this.availablePowers.some(p => p.toLowerCase() === id)) {
       console.warn(`[CombatSystem] El poder ${type} no está disponible actualmente.`);
       return false;
     }
 
     // Verificar KI minimo para el primer nivel (safe check)
-    const firstLevel = SPECIAL_LEVELS[type]?.[0];
+    const firstLevel = SPECIAL_LEVELS[id]?.[0];
     if (!firstLevel || this.stats.playerKi < firstLevel.ki) return false;
 
     this.activeSpecial = type;

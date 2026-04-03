@@ -188,6 +188,8 @@ export class GestureRecognizer {
   private lastPoseTime: number = 0;
   private lastHandDetectionTime: number = Date.now();
   private consecutiveWrongPoseCount: number = 0;
+  private comboStartTime: number = 0;
+  private lastSpecialEndTime: number = 0;
   private leftHandStartPos: { x: number; y: number; z: number } | null = null;
   private rightHandStartPos: { x: number; y: number; z: number } | null = null;
   private dynamicCombos: Record<string, StaticPose[]> = { ...Combos };
@@ -253,12 +255,12 @@ export class GestureRecognizer {
        poses.push(StaticPose.PALMS_HIP_RIGHT);
     }
 
-    // 4. KAMEHAMEHA_P2
+    // 4. KAMEHAMEHA_P2: Más tolerante
     const rightAboveLeft = R.wrist.y > L.wrist.y;
     const yDist = Math.abs(R.wrist.y - L.wrist.y);
-    const closeXZ = Math.abs(L.wrist.x - R.wrist.x) < 0.25 && Math.abs(L.wrist.z - R.wrist.z) < 0.25;
+    const closeXZ = Math.abs(L.wrist.x - R.wrist.x) < 0.35 && Math.abs(L.wrist.z - R.wrist.z) < 0.35;
     const forwardPush = L.wrist.z > 0.3 && R.wrist.z > 0.3; 
-    if (!isFistL && !isFistR && rightAboveLeft && yDist > 0.05 && closeXZ && forwardPush) {
+    if (!isFistL && !isFistR && rightAboveLeft && yDist > 0.02 && closeXZ && forwardPush) {
        poses.push(StaticPose.PALMS_FORWARD_STACKED);
     }
 
@@ -299,8 +301,8 @@ export class GestureRecognizer {
     if (L.wrist.x > 0.1 && R.wrist.x > 0.1 && L.wrist.y > 1.3 && R.wrist.y > 1.3) {
       poses.push(StaticPose.HANDS_LEFT_SHOULDER);
     }
-    // Genkidama Prep: brazos al cielo
-    if (L.wrist.y > 1.8 && R.wrist.y > 1.8) {
+    // Genkidama Prep: brazos al cielo (1.6m más ergonómico)
+    if (L.wrist.y > 1.6 && R.wrist.y > 1.6) {
       poses.push(StaticPose.ARMS_UP);
     }
     // Genkidama Fire: brazos lanzados adelante
@@ -356,9 +358,15 @@ export class GestureRecognizer {
         // Buscar iniciar un combo con CUALQUIERA de las poses detectadas
         for (const [comboName, sequence] of Object.entries(this.dynamicCombos)) {
           if (detectedPoses.includes(sequence[0])) {
+            // Anti-spam para Ki Blasts si acabamos de lanzar un especial
+            if (comboName.startsWith("KI_BLAST") && now - this.lastSpecialEndTime < 800) {
+              continue;
+            }
+
             console.log(`[Combo Engine] Iniciando combo: ${comboName}`);
             this.activeCombo = comboName;
             this.comboStep = 1;
+            this.comboStartTime = now;
             
             // Graba la posición inicial de las manos para medir desplazamiento físico posterior
             this.leftHandStartPos = { ...L.wrist };
@@ -372,6 +380,18 @@ export class GestureRecognizer {
         const expectedNextPose = sequence[this.comboStep];
         
         if (detectedPoses.includes(expectedNextPose)) {
+          // Validar charge_time para la Fase 2 (firing) de ataques especiales
+          const id = this.activeCombo.toLowerCase();
+          const powerData = (powersConfig as any)[id];
+          
+          if (this.comboStep === 1 && powerData?.charge_time) {
+              const elapsed = (now - this.comboStartTime) / 1000;
+              if (elapsed < powerData.charge_time) {
+                  // Aun no ha cargado lo suficiente para disparar
+                  return;
+              }
+          }
+
           this.comboStep++;
           this.consecutiveWrongPoseCount = 0;
           console.log(`[Combo Engine] Avanzando ${this.activeCombo} -> Paso ${this.comboStep}/${sequence.length}`);
@@ -381,6 +401,8 @@ export class GestureRecognizer {
             this.setGesture(this.activeCombo as GestureType);
             if (this.activeCombo.startsWith("KI_BLAST")) {
                 this.cancelCombo("Trigger completado");
+            } else {
+                this.lastSpecialEndTime = now;
             }
             return;
           }

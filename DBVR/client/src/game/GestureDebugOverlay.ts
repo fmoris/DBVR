@@ -101,8 +101,8 @@ export class GestureDebugOverlay {
     this.xrCamera = camera;
     this.vrPlane.parent = camera;
     
-    // Posicionar en la mitad izquierda de la pantalla (local a la cámara), debajo del HUD del jugador
-    this.vrPlane.position = new Vector3(-0.65, 0.0, 1.2);
+    // Posicionar en la mitad derecha de la pantalla (local a la cámara)
+    this.vrPlane.position = new Vector3(0.65, 0.0, 1.2);
     
     // Leve rotación para que mire hacia el centro
     this.vrPlane.rotation = new Vector3(0, 0.25, 0);
