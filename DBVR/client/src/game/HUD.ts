@@ -1,6 +1,8 @@
 import { CombatSystem, GameStats, CombatState } from "./CombatSystem";
 import powersConfig from "../models/powers.json";
 import gokuConfig from "../models/goku.json";
+import gokuBaseImg from "../asstets/images/rosters/goku_base.png";
+import vegetaBaseImg from "../asstets/images/rosters/vegeta_base.png";
 
 const STATE_LABELS: Record<CombatState, string> = {
   neutral: "Neutral",
@@ -273,10 +275,9 @@ export class HUD {
       : "linear-gradient(90deg,#aa440088,#ff6600)";
     const estadoColor    = isBlue ? "#00ff88" : "#ff4444";
 
-    // Avatar: si hay imagen se usa, si no se muestra inicial
-    const avatarImg = isBlue
-      ? `<img id="${side}-avatar-img" src="" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:none;" />`
-      : `<img id="${side}-avatar-img" src="" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%;display:none;" />`;
+    // Avatar: imagen del personaje (goku azul, vegeta rojo)
+    const avatarSrc = isBlue ? gokuBaseImg : vegetaBaseImg;
+    const avatarImg = `<img id="${side}-avatar-img" src="${avatarSrc}" alt="" style="width:100%;height:100%;object-fit:cover;object-position:top center;border-radius:50%;display:block;" />`;
 
     return `
       <div style="
@@ -286,100 +287,118 @@ export class HUD {
         align-items:center;
         gap:0;
         background:${bgGradient};
-        border:1.5px solid ${borderColor};
-        border-radius:12px;
-        padding:10px 14px 10px 10px;
-        min-width:220px;
-        box-shadow:0 0 20px ${glowColor}, inset 0 0 14px ${glowInner};
+        border:2px solid ${borderColor};
+        border-radius:14px;
+        padding:14px 18px 14px 14px;
+        min-width:300px;
+        box-shadow:0 0 32px ${glowColor}, 0 0 8px ${glowColor}, inset 0 0 20px ${glowInner};
       ">
 
         <!-- Linea decorativa superior -->
         <div style="
-          position:absolute; top:-1px; left:14px; right:14px; height:2px;
+          position:absolute; top:-1px; left:18px; right:18px; height:2px;
           background:linear-gradient(90deg,transparent,${accentLine},transparent);
+        "></div>
+
+        <!-- Linea decorativa inferior -->
+        <div style="
+          position:absolute; bottom:-1px; left:18px; right:18px; height:1px;
+          background:linear-gradient(90deg,transparent,${accentLine}88,transparent);
         "></div>
 
         <!-- Avatar circular -->
         <div style="
           position:relative;
           flex-shrink:0;
-          width:64px; height:64px;
+          width:84px; height:84px;
           border-radius:50%;
-          border:2px solid ${avatarBorder};
-          box-shadow:0 0 14px ${avatarGlow}, 0 0 4px ${avatarGlow};
+          border:2.5px solid ${avatarBorder};
+          box-shadow:0 0 24px ${avatarGlow}, 0 0 8px ${avatarGlow}, inset 0 0 12px ${avatarBg};
           background:${avatarBg};
           display:flex; align-items:center; justify-content:center;
           overflow:hidden;
-          margin-right:12px;
+          margin-right:16px;
         ">
           ${avatarImg}
           <span id="${side}-avatar-initial" style="
-            font-size:26px; font-weight:bold;
+            font-size:34px; font-weight:bold;
             color:${avatarColor};
-            text-shadow:0 0 12px ${avatarColor};
+            text-shadow:0 0 16px ${avatarColor}, 0 0 32px ${avatarColor};
             font-family:'Courier New',monospace;
+            display:none;
           ">${avatarInitials}</span>
           <!-- Anillo decorativo exterior -->
           <div style="
-            position:absolute; inset:-4px;
+            position:absolute; inset:-6px;
             border-radius:50%;
-            border:1px solid ${avatarBorder}44;
+            border:1.5px solid ${avatarBorder}55;
+            pointer-events:none;
+          "></div>
+          <!-- Segundo anillo mas exterior -->
+          <div style="
+            position:absolute; inset:-12px;
+            border-radius:50%;
+            border:1px solid ${avatarBorder}22;
             pointer-events:none;
           "></div>
         </div>
 
         <!-- Barras de stats -->
-        <div style="flex:1; display:flex; flex-direction:column; gap:6px;">
+        <div style="flex:1; display:flex; flex-direction:column; gap:10px;">
 
           <!-- NP -->
           <div>
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
-              <span style="font-size:9px;letter-spacing:2px;color:rgba(255,255,255,0.5);font-family:'Courier New',monospace;">NP</span>
-              <span id="${npLabelId}" style="font-size:9px;font-weight:bold;color:${npBarColor};font-family:'Courier New',monospace;">100</span>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
+              <span style="font-size:11px;letter-spacing:3px;color:rgba(255,255,255,0.6);font-family:'Courier New',monospace;font-weight:bold;">NP</span>
+              <span id="${npLabelId}" style="font-size:11px;font-weight:bold;color:${npBarColor};font-family:'Courier New',monospace;text-shadow:0 0 8px ${npBarColor};">100</span>
             </div>
             <div style="
-              width:100%; height:9px;
-              background:rgba(0,0,0,0.6);
-              border:1px solid ${npBarColor}44;
-              border-radius:2px; overflow:hidden;
+              width:100%; height:13px;
+              background:rgba(0,0,0,0.7);
+              border:1px solid ${npBarColor}55;
+              border-radius:3px; overflow:hidden;
+              box-shadow:inset 0 0 6px rgba(0,0,0,0.5);
             ">
               <div id="${npBarId}" style="
                 height:100%; width:100%;
                 background:${npBarGrad};
-                box-shadow:0 0 7px ${npBarGlow};
+                box-shadow:0 0 10px ${npBarGlow}, 0 0 4px ${npBarGlow};
                 transition:width 0.2s ease;
+                border-radius:2px;
               "></div>
             </div>
           </div>
 
           <!-- KI -->
           <div>
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px;">
-              <span style="font-size:9px;letter-spacing:2px;color:rgba(255,255,255,0.5);font-family:'Courier New',monospace;">KI</span>
-              <span id="${kiLabelId}" style="font-size:9px;color:${kiBarColor};font-family:'Courier New',monospace;">100</span>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
+              <span style="font-size:11px;letter-spacing:3px;color:rgba(255,255,255,0.6);font-family:'Courier New',monospace;font-weight:bold;">KI</span>
+              <span id="${kiLabelId}" style="font-size:11px;color:${kiBarColor};font-family:'Courier New',monospace;text-shadow:0 0 8px ${kiBarColor};">100</span>
             </div>
             <div style="
-              width:100%; height:7px;
-              background:rgba(0,0,0,0.6);
-              border:1px solid ${kiBarColor}44;
-              border-radius:2px; overflow:hidden;
+              width:100%; height:10px;
+              background:rgba(0,0,0,0.7);
+              border:1px solid ${kiBarColor}55;
+              border-radius:3px; overflow:hidden;
+              box-shadow:inset 0 0 6px rgba(0,0,0,0.5);
             ">
               <div id="${kiBarId}" style="
                 height:100%; width:100%;
                 background:${kiBarGrad};
-                box-shadow:0 0 6px ${kiBarColor};
+                box-shadow:0 0 8px ${kiBarColor}, 0 0 3px ${kiBarColor};
                 transition:width 0.2s ease;
+                border-radius:2px;
               "></div>
             </div>
           </div>
 
           <!-- ESTADO -->
-          <div style="display:flex;align-items:center;gap:6px;margin-top:1px;">
-            <span style="font-size:9px;letter-spacing:2px;color:rgba(255,255,255,0.4);font-family:'Courier New',monospace;">ESTADO</span>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:10px;letter-spacing:3px;color:rgba(255,255,255,0.35);font-family:'Courier New',monospace;">ESTADO</span>
             <span id="${estadoId}" style="
-              font-size:10px; font-weight:bold; letter-spacing:2px;
+              font-size:12px; font-weight:bold; letter-spacing:3px;
               color:${estadoColor};
-              text-shadow:0 0 8px ${estadoColor};
+              text-shadow:0 0 10px ${estadoColor}, 0 0 20px ${estadoColor};
               font-family:'Courier New',monospace;
               text-transform:uppercase;
             ">OK</span>
@@ -389,10 +408,10 @@ export class HUD {
 
         <!-- Esquina decorativa -->
         <div style="
-          position:absolute; bottom:6px; ${isBlue ? "right" : "left"}:8px;
-          width:7px; height:7px;
-          border-${isBlue ? "right" : "left"}:1.5px solid ${borderColor};
-          border-bottom:1.5px solid ${borderColor};
+          position:absolute; bottom:8px; ${isBlue ? "right" : "left"}:10px;
+          width:9px; height:9px;
+          border-${isBlue ? "right" : "left"}:2px solid ${borderColor};
+          border-bottom:2px solid ${borderColor};
         "></div>
 
       </div>
