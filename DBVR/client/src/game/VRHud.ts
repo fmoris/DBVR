@@ -31,10 +31,41 @@ import {
   StackPanel,
   Button,
   Control,
+  Image,
+  Ellipse,
 } from "@babylonjs/gui";
 import { CombatSystem, GameStats } from "./CombatSystem";
 import powersConfig from "../models/powers.json";
 import gokuConfig from "../models/goku.json";
+import gokuBaseImg from "../asstets/images/rosters/goku_base.png";
+import vegetaBaseImg from "../asstets/images/rosters/vegeta_base.png";
+
+// ─── Constantes de estado (copiadas de HUD.ts) ────────────────────────────────
+type CombatState = "neutral" | "charging" | "charging_special" | "attacking" | "defending" | "slowMotion" | "hit" | "melee" | "recharging";
+
+const STATE_LABELS: Record<CombatState, string> = {
+  neutral: "Neutral",
+  charging: "Cargando...",
+  charging_special: "Carga Especial",
+  attacking: "Atacando",
+  defending: "Defendiendo",
+  slowMotion: "Camara Lenta",
+  hit: "Impacto",
+  melee: "Combate Cercano",
+  recharging: "Recargando KI...",
+};
+
+const STATE_COLORS: Record<CombatState, string> = {
+  neutral: "#00ff88",
+  charging: "#ffcc00",
+  charging_special: "#ff8800",
+  attacking: "#ff6600",
+  defending: "#00aaff",
+  slowMotion: "#cc44ff",
+  hit: "#ff2222",
+  melee: "#ff0066",
+  recharging: "#cc44ff",
+};
 
 // ─── Helpers de color/rango (duplicados de HUD.ts para no crear dependencia) ──
 
@@ -84,12 +115,16 @@ export class VRHud {
   private playerNPRank!: TextBlock;
   private playerKIBar!: Rectangle;
   private playerKIText!: TextBlock;
+  private playerEstadoText!: TextBlock;
+  private playerAvatarImage!: Ellipse;
 
   private enemyNPBar!: Rectangle;
   private enemyNPText!: TextBlock;
   private enemyNPRank!: TextBlock;
   private enemyKIBar!: Rectangle;
   private enemyKIText!: TextBlock;
+  private enemyEstadoText!: TextBlock;
+  private enemyAvatarImage!: Ellipse;
 
   private statusText!: TextBlock;
   private statusBg!: Rectangle;
@@ -606,8 +641,8 @@ export class VRHud {
     
     place(this.statusPanel,  0.00,  0.35, 1.25);
     
-    // Debug panel
-    place(this.debugPanel,  -0.90, -0.40, 1.3);
+    // Debug panel: centrado
+    place(this.debugPanel,  0.00, -0.40, 1.3);
 
     this.show();
   }
@@ -668,10 +703,14 @@ export class VRHud {
     this.playerNPBar.width = `${Math.min(100, pNPPct * 100)}%`;
     this.playerNPBar.background = getNPColor(pNP);
     this.playerNPText.text = pNP.toLocaleString(); 
-    this.playerNPRank.text = getNPRange(pNP);
-    this.playerNPRank.color = getNPColor(pNP);
     this.playerKIBar.width = `${pKI}%`;
     this.playerKIText.text = `${stats.playerKi.toFixed(0)}`;
+    
+    // Actualizar ESTADO
+    const pEstadoText = STATE_LABELS[stats.combatState as CombatState] || "NEUTRAL";
+    const pEstadoColor = STATE_COLORS[stats.combatState as CombatState] || "#00ff88";
+    this.playerEstadoText.text = pEstadoText;
+    this.playerEstadoText.color = pEstadoColor;
 
     // ── Enemigo ──
     const eNP = stats.enemyNP || 10000;
@@ -681,10 +720,14 @@ export class VRHud {
     this.enemyNPBar.width = `${Math.min(100, eNPPct * 100)}%`;
     this.enemyNPBar.background = getNPColor(eNP);
     this.enemyNPText.text = eNP.toLocaleString();
-    this.enemyNPRank.text = getNPRange(eNP);
-    this.enemyNPRank.color = getNPColor(eNP);
     this.enemyKIBar.width = `${eKI}%`;
     this.enemyKIText.text = `${stats.enemyKi.toFixed(0)}`;
+    
+    // Actualizar ESTADO
+    const eEstadoText = STATE_LABELS[stats.combatState as CombatState] || "NEUTRAL";
+    const eEstadoColor = STATE_COLORS[stats.combatState as CombatState] || "#ff4444";
+    this.enemyEstadoText.text = eEstadoText;
+    this.enemyEstadoText.color = eEstadoColor;
 
     this.updateStatus(stats);
     this.updateActionKiCounter(stats);
@@ -807,9 +850,12 @@ export class VRHud {
       this.statusBg.thickness = 2;
       this.statusBg.color = "#ffcc00";
     } else {
-      this.statusText.text = "";
-      this.statusBg.background = "rgba(0,0,0,0)";
-      this.statusBg.thickness = 0;
+      // Sólo limpiar si NO hay un toast activo (para no borrar los mensajes rápidos de acciones)
+      if (!this.toastTimeout) {
+        this.statusText.text = "";
+        this.statusBg.background = "rgba(0,0,0,0)";
+        this.statusBg.thickness = 0;
+      }
     }
   }
 
@@ -894,8 +940,15 @@ export class VRHud {
 
   hideToast(): void {
     if (this.statusText) this.statusText.text = "";
-    if (this.statusBg) this.statusBg.isVisible = false;
-    if (this.toastTimeout) clearTimeout(this.toastTimeout);
+    if (this.statusBg) {
+        this.statusBg.background = "rgba(0,0,0,0)";
+        this.statusBg.thickness = 0;
+        this.statusBg.isVisible = false;
+    }
+    if (this.toastTimeout) {
+        clearTimeout(this.toastTimeout);
+        this.toastTimeout = null;
+    }
   }
 
   // ─── Dispose ────────────────────────────────────────────────────────────────
@@ -913,5 +966,63 @@ export class VRHud {
     this.defensePanel.dispose();
     this.statusPanel.dispose();
     this.debugPanel.dispose();
+  }
+}
+
+  /** Crea un avatar circular con imagen y glow */
+  private createAvatarCircle(
+    parent: StackPanel,
+    imageUrl: string,
+    borderColor: string
+  ): Ellipse {
+    const glowColor = borderColor === "#00ccff" ? "rgba(0,200,255,0.5)" : "rgba(255,60,60,0.5)";
+    
+    // Glow exterior
+    const glow = new Ellipse("avatar-glow");
+    glow.width = "90px";
+    glow.height = "90px";
+    glow.color = "transparent";
+    glow.thickness = 0;
+    glow.shadowBlur = 15;
+    glow.shadowColor = glowColor;
+    parent.addControl(glow);
+
+    // Borde del avatar
+    const border = new Ellipse("avatar-border");
+    border.width = "84px";
+    border.height = "84px";
+    border.color = borderColor;
+    border.thickness = 2.5;
+    border.background = "transparent";
+    glow.addControl(border);
+
+    // Imagen
+    const img = new Image("avatar-img", imageUrl);
+    img.stretch = Image.STRETCH_UNIFORM;
+    border.addControl(img);
+
+    return border;
+  }
+
+  /** Crea una fila de etiqueta para stat (NP, KI, ESTADO) */
+  private createStatRow(
+    parent: StackPanel,
+    label: string,
+    color: string
+  ): void {
+    const row = new StackPanel(`stat-${label}-label-row`);
+    row.isVertical = false;
+    row.width = "100%";
+    row.heightInPixels = 18;
+    row.spacing = 4;
+    parent.addControl(row);
+
+    const lbl = new TextBlock(`stat-${label}-lbl`, label);
+    lbl.color = color;
+    lbl.fontSize = 14;
+    lbl.fontStyle = "bold";
+    lbl.width = "50px";
+    lbl.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+    row.addControl(lbl);
   }
 }
