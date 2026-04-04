@@ -1025,7 +1025,6 @@ export class VRHud {
     this.statusPanel.dispose();
     this.debugPanel.dispose();
   }
-}
 
   /** Crea un avatar circular con imagen y glow */
   private createAvatarCircle(
@@ -1083,7 +1082,6 @@ export class VRHud {
     lbl.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
     row.addControl(lbl);
   }
-}
 
   /** Crea un grupo barra de progreso + valor para StackPanel */
   private makeBarGroupForStack(
@@ -1131,3 +1129,4 @@ export class VRHud {
 
     return { fill, valueText: val };
   }
+}
