@@ -181,6 +181,7 @@ export class GestureRecognizer {
   private rightHandJoints: HandJoints | null = null;
   private currentGesture: GestureType = GestureType.IDLE;
   private frameCount = 0;
+  private eyeLevelY: number = 1.6; // Valor por defecto (Phase 15)
 
   // Estado del Motor de Combos
   private activeCombo: string | null = null;
@@ -235,6 +236,13 @@ export class GestureRecognizer {
     if (this.frameCount % 2 === 0) this.recognizeGesture();
   }
 
+  /**
+   * Sincroniza la altura de los ojos/cámara para gestos ergonómicos (Phase 15)
+   */
+  public setEyeLevelY(y: number): void {
+    this.eyeLevelY = y;
+  }
+
   private evaluateValidPoses(L: HandJoints, R: HandJoints): StaticPose[] {
     const poses: StaticPose[] = [];
     const isFistL = this.isFist(L);
@@ -259,11 +267,11 @@ export class GestureRecognizer {
       poses.push(StaticPose.PALMS_HIP_RIGHT);
     }
 
-    // 4. KAMEHAMEHA_P2: Más tolerante
+    // 4. KAMEHAMEHA_P2: Más tolerante (Phase 19)
     const rightAboveLeft = R.wrist.y > L.wrist.y;
     const yDist = Math.abs(R.wrist.y - L.wrist.y);
-    const closeXZ = Math.abs(L.wrist.x - R.wrist.x) < 0.35 && Math.abs(L.wrist.z - R.wrist.z) < 0.35;
-    const forwardPush = L.wrist.z > 0.3 && R.wrist.z > 0.3;
+    const closeXZ = Math.abs(L.wrist.x - R.wrist.x) < 0.45 && Math.abs(L.wrist.z - R.wrist.z) < 0.45;
+    const forwardPush = L.wrist.z > 0.22 && R.wrist.z > 0.22;
     if (!isFistL && !isFistR && rightAboveLeft && yDist > 0.02 && closeXZ && forwardPush) {
       poses.push(StaticPose.PALMS_FORWARD_STACKED);
     }
@@ -292,38 +300,14 @@ export class GestureRecognizer {
     if (isOpenL) poses.push(StaticPose.PALM_STOP_L);
     if (isOpenR) poses.push(StaticPose.PALM_STOP_R);
 
-    // 8. NUEVAS POSES ESPECIALES
-    // Final Flash Prep: brazos extendidos horizontalmente
-    if (L.wrist.y > 1.2 && R.wrist.y > 1.2 && Math.abs(L.wrist.x) > 0.4 && Math.abs(R.wrist.x) > 0.4) {
-      poses.push(StaticPose.ARMS_HORIZONTAL);
-    }
-    // Final Flash Fire: manos juntas frente al pecho
-    if (this.dist3(L.wrist, R.wrist) < 0.15 && L.wrist.z > 0.3) {
-      poses.push(StaticPose.PALMS_TOGETHER);
-    }
-    // Galick Gun: manos cruzadas en el hombro izquierdo
-    if (L.wrist.x > 0.1 && R.wrist.x > 0.1 && L.wrist.y > 1.3 && R.wrist.y > 1.3) {
-      poses.push(StaticPose.HANDS_LEFT_SHOULDER);
-    }
-    // Genkidama Prep: brazos al cielo (1.6m más ergonómico)
-    if (L.wrist.y > 1.6 && R.wrist.y > 1.6) {
+    // 8. ESPECIALES
+    // Genkidama Prep: brazos al cielo (Basado en altura de ojos Phase 15)
+    if (L.wrist.y > this.eyeLevelY && R.wrist.y > this.eyeLevelY) {
       poses.push(StaticPose.ARMS_UP);
     }
     // Genkidama Fire: brazos lanzados adelante
     if (L.wrist.y < 1.4 && R.wrist.y < 1.4 && L.wrist.z > 0.4 && R.wrist.z > 0.4) {
       poses.push(StaticPose.ARMS_THROW);
-    }
-    // Final Explosion Prep: brazos cruzados en el pecho
-    if (Math.abs(L.wrist.x - R.wrist.x) < 0.2 && L.wrist.y > 1.2 && L.wrist.y < 1.6) {
-      poses.push(StaticPose.ARMS_CROSSED_CHEST);
-    }
-    // Hakai Prep: apuntar mano palma abierta
-    if (isOpenR && R.wrist.z > 0.5) {
-      poses.push(StaticPose.PALM_AIM);
-    }
-    // Hakai Fire: cerrar puño
-    if (isFistR && R.wrist.z > 0.5) {
-      poses.push(StaticPose.FIST_CLENCH);
     }
 
     return poses;

@@ -146,6 +146,9 @@ export class CombatSystem {
   private lastVoiceTrigger: string | null = null;
   private lastVoiceTriggerTime = 0;
 
+  // Soporte para posiciones dinámicas de ataques especiales (Phase 12)
+  private activeSpecialOrigin: { x: number; y: number; z: number } | null = null;
+
   private playerHeight: number = 1.75;
   private enemyHeight: number = 1.64;
 
@@ -474,7 +477,7 @@ export class CombatSystem {
     }, 800);
   }
 
-  private cancelCharge(): void {
+  public cancelCharge(): void {
     this.stopChargeInterval();
     this.isChargingNormal = false;
     this.activeSpecial = null;
@@ -494,19 +497,29 @@ export class CombatSystem {
   // Gestos VR: primer gesto inicia, segundo gesto lanza
   // ============================================
 
-  triggerSpecial(attackName: string): boolean {
+  triggerSpecial(attackName: string, origin?: { x: number, y: number, z: number }): boolean {
     const id = attackName.toLowerCase();
     if (this.activeSpecial?.toLowerCase() === id) {
       this.log(`Lanzando ${attackName.toUpperCase()}!`, "#00ff88");
-      return this.launchSpecial(id);
+      return this.launchSpecial(id, origin);
     } else if (this.stats.combatState === "neutral") {
-      this.log(`Iniciando carga de ${attackName.toUpperCase()}`, "#ff8800");
-      return this.beginSpecialCharge(id);
+      this.log(`Iniciando carga de ${attackName.toUpperCase()}...`, "#ff8800");
+      return this.beginSpecialCharge(id, origin);
     }
     return false;
   }
 
-  private beginSpecialCharge(type: SpecialAttackType): boolean {
+  /**
+   * Actualiza el origen de la carga en tiempo real (Phase 14)
+   * Útil para que la esfera siga las manos en VR.
+   */
+  public updateSpecialChargeOrigin(origin: { x: number, y: number, z: number }): void {
+    if (this.stats.combatState === "charging_special") {
+        this.activeSpecialOrigin = origin;
+    }
+  }
+
+  private beginSpecialCharge(type: string, origin?: { x: number, y: number, z: number }): boolean {
     const id = type.toLowerCase();
     // Validar si el poder está habilitado para este personaje/transformación
     if (!this.availablePowers.some(p => p.toLowerCase() === id)) {
@@ -520,10 +533,11 @@ export class CombatSystem {
 
     this.activeSpecial = type;
     this.specialChargeStart = Date.now();
+    this.activeSpecialOrigin = origin || { x: 0.3, y: this.playerHeight * 0.7, z: 0.5 };
     this.stats.chargeTime = 0;
     this.stats.specialType = type;
     this.setState("charging_special");
-    this.vfx.showChargeEffect(true, type);
+    this.vfx.showChargeEffect(true, type, this.activeSpecialOrigin as any);
 
     // KI se consume de forma gradual: el costo total del nivel maximo repartido en su tiempo
     // Kamehameha max: 80 KI en 8s = 1 KI/100ms
@@ -542,23 +556,28 @@ export class CombatSystem {
 
       // Auto-cancelar si se queda sin KI antes del nivel minimo
       const minLevel = SPECIAL_LEVELS[type][0];
-      if (this.stats.playerKi <= 0 && elapsed < minLevel.timeMin) {
-        this.cancelCharge();
+      if (this.stats.playerKi <= 0) {
+        if (elapsed < minLevel.timeMin) {
+            this.log("Ki Agotado: Carga Fallida", "#ff4444");
+            this.cancelCharge();
+        } else {
+            // Si ya pasó el mínimo, solo dejamos de cargar (se congela el tiempo)
+            // No auto-lanzamos por petición del usuario (Phase 14)
+        }
         return;
       }
 
-      // Auto-lanzar al llegar al tiempo maximo
-      if (elapsed >= maxLevel.timeMin) {
-        this.launchSpecial(type);
-        return;
-      }
+      // Actualizar efectos de carga dinámicos (Phase 14/16/19)
+      // Usamos el charge_time real de powers.json para el crecimiento visual
+      const pData = (powersConfig as any)[type.toLowerCase()];
+      this.vfx.updateChargeEffect(elapsed, type, this.activeSpecialOrigin as any, pData?.charge_time || 2.5);
 
       this.emit();
     }, 100);
     return true;
   }
 
-  private launchSpecial(type: SpecialAttackType): boolean {
+  private launchSpecial(type: string, origin?: { x: number, y: number, z: number }): boolean {
     if (this.activeSpecial !== type) return false;
     this.stopChargeInterval();
 
@@ -574,9 +593,11 @@ export class CombatSystem {
     // Calcular daño final con factor de NP
     const damage = level.damage * npDamageFactor(this.stats.playerNP);
 
-    // El KI ya se consumio durante la carga — no se descuenta extra al lanzar
+    // Si pasaron un origen en el lanzamiento, lo usamos, sino el que guardamos al cargar
+    const finalOrigin = origin || this.activeSpecialOrigin || { x: 0, y: this.playerHeight * 0.7, z: 0.3 };
 
     this.activeSpecial = null;
+    this.activeSpecialOrigin = null;
     this.stats.chargeTime = 0;
     this.stats.specialType = null;
     this.setState("attacking");
@@ -588,7 +609,7 @@ export class CombatSystem {
       // Bullet time al LANZAR: 300ms de ramp-in + 3500ms en slow + 500ms ramp-out
       this.activateSlowMotion(3500, 0.18);
       this.vfx.spawnKamehameha(
-        { x: 0, y: this.playerHeight * 0.7, z: 0.3 },
+        finalOrigin,
         { x: 0, y: this.enemyHeight * 0.6, z: 20 },
         elapsed,
         () => {
@@ -599,7 +620,7 @@ export class CombatSystem {
       // Final Flash: más largo y más lento
       this.activateSlowMotion(4500, 0.12);
       this.vfx.spawnFinalFlash(
-        { x: 0, y: this.playerHeight * 0.75, z: 0.3 },
+        finalOrigin,
         { x: 0, y: this.enemyHeight * 0.6, z: 20 },
         elapsed,
         () => {
@@ -611,7 +632,7 @@ export class CombatSystem {
       this.activateSlowMotion(2500, 0.25);
       // We will cast a generic big charged ball as fallback
       this.vfx.spawnKiProjectile(
-        { x: 0, y: this.playerHeight * 0.75, z: 0.5 },
+        finalOrigin,
         { x: 0, y: this.enemyHeight * 0.6, z: 20 },
         "charged",
         () => {

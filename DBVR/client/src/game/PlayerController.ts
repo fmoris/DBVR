@@ -9,6 +9,7 @@ import { CombatSystem } from "./CombatSystem";
 import { VFXManager } from "./VFXManager";
 import { InputManager } from "./InputManager";
 import { VRHud } from "./VRHud";
+import powersData from "../models/powers.json";
 import gokuConfig from "../models/goku.json";
 
 export interface PlayerControllerConfig {
@@ -25,6 +26,7 @@ export class PlayerController {
   private combat: CombatSystem;
   private inputManager: InputManager;
   private vrHud: VRHud;
+  private frameCount: number = 0;
 
   private playerAura: ParticleSystem | null = null;
   private leftPalmMesh?: Mesh;
@@ -143,6 +145,12 @@ export class PlayerController {
 
   public processGestures(cameraForward: Vector3): void {
     const G = this.inputManager.getGestureRecognizer();
+    
+    // Phase 15: Sincronizar altura de ojos para detección ergonómica
+    if (this.scene.activeCamera) {
+        G.setEyeLevelY(this.scene.activeCamera.globalPosition.y);
+    }
+
     const gesture = G.getCurrentGesture();
     const gestureChanged = gesture !== this.lastReportedGesture;
     
@@ -175,7 +183,74 @@ export class PlayerController {
     
     this.lastReportedGesture = gesture;
 
+    // Phase 12: Unified Special Attack Logic
+    const stats = this.combat.getStats();
+    let midpoint: Vector3 | undefined = undefined;
+    const L = G.getLeftHandJoints();
+    const R = G.getRightHandJoints();
+
+    if (L && R) {
+        midpoint = new Vector3(
+            (L.wrist.x + R.wrist.x) / 2,
+            (L.wrist.y + R.wrist.y) / 2,
+            (L.wrist.z + R.wrist.z) / 2
+        );
+    } else if (R) {
+        midpoint = new Vector3(R.wrist.x, R.wrist.y, R.wrist.z);
+    } else if (L) {
+        midpoint = new Vector3(L.wrist.x, L.wrist.y, L.wrist.z);
+    }
+
+    // Phase 14: Seguimiento en tiempo real
+    if (stats.combatState === "charging_special" && midpoint) {
+        this.combat.updateSpecialChargeOrigin(midpoint);
+        this.frameCount++;
+        
+        // Indicador visual de carga mínima (cada 500ms para no saturar toasts)
+        const powerId = stats.specialType || "";
+        const ct = (powersData as any)[powerId]?.charge_time || 3.0;
+        const progress = Math.min(100, Math.floor((stats.chargeTime / ct) * 100));
+        
+        if (this.frameCount % 30 === 0) { // ~cada 500ms si el frameCount actualiza rápido
+            const icon = progress >= 100 ? "🔥" : "⏳";
+            this.vrHud?.showToast(`${icon} CARGA: ${progress}%`, progress >= 100 ? "#00ff00" : "#ffff00", 600);
+        }
+    }
+
+    // Auto-trigger PREP if detected
+    if (gesture.endsWith("_PREP")) {
+        const powerId = gesture.replace("_PREP", "").toLowerCase();
+        if (stats.combatState !== "charging_special" || stats.specialType !== powerId) {
+            this.combat.triggerSpecial(powerId, midpoint);
+        }
+    }
+
+    // Auto-trigger FIRE if detected (for canonical powers from powers.json)
+    const isSpecialPower = !gesture.endsWith("_PREP") && 
+                          !gesture.startsWith("KI_BLAST") && 
+                          gesture !== "ATTACKING" && 
+                          gesture !== "RECHARGING" && 
+                          gesture !== "IDLE" &&
+                          gesture !== "BLOCKING" &&
+                          gesture !== "CHARGING";
+
+    if (isSpecialPower) {
+        const powerId = gesture.toLowerCase();
+        if (stats.combatState === "charging_special" && stats.specialType === powerId) {
+            this.combat.triggerSpecial(powerId, midpoint);
+            G.reset("both");
+            return; // Ya terminamos el procesamiento para este frame
+        }
+    }
+
     switch (gesture) {
+      case "IDLE": {
+        if (stats.combatState === "charging_special") {
+            this.combat.cancelCharge();
+            this.vrHud?.showToast("Carga Cancelada", "#ff4444", 1500);
+        }
+        break;
+      }
       case "ATTACKING": {
         const time = performance.now();
         if (time - this.lastBasicAttackTime > 600) {
@@ -188,7 +263,6 @@ export class PlayerController {
       case "CHARGING": this.combat.startChargedAttack(); break;
       case "BLOCKING": this.combat.activateBlock(); break;
       case "RECHARGING": this.combat.rechargeKi(); break;
-      case "KAMEHAMEHA": this.vfx.spawnImpact({x:0,y:1.5,z:2}, "heavy"); break;
       case "KI_BLAST_L":
       case "KI_BLAST_R": {
         const time = performance.now();

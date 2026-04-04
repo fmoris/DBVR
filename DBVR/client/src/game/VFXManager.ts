@@ -10,6 +10,7 @@ import {
   Animation,
   Mesh,
   CylinderParticleEmitter,
+  PointLight,
 } from "@babylonjs/core";
 
 export interface Vec3 { x: number; y: number; z: number; }
@@ -18,6 +19,8 @@ export type AttackType = string;
 
 export class VFXManager {
   private chargeMesh: Mesh | null = null;
+  private chargePS: ParticleSystem | null = null;
+  private chargeLight: PointLight | null = null;
   private blockShield: Mesh | null = null;
   private scene: Scene;
 
@@ -116,6 +119,7 @@ export class VFXManager {
   }
 
   spawnKamehameha(from: Vec3, to: Vec3, chargeTime: number, onImpact?: () => void): void {
+    const fromVec = new Vector3(from.x, from.y, from.z);
     // Beam principal
     const beam = MeshBuilder.CreateCylinder("kamehameha", {
       height: 18,
@@ -124,7 +128,7 @@ export class VFXManager {
       tessellation: 16,
     }, this.scene);
     
-    beam.position = new Vector3(from.x, from.y, (from.z + to.z) / 2);
+    beam.position = fromVec.add(new Vector3(0, 0, 9));
     beam.rotation.x = Math.PI / 2;
 
     const beamMat = new StandardMaterial("beamMat", this.scene);
@@ -137,7 +141,7 @@ export class VFXManager {
     // Partículas de energía azul
     const ps = new ParticleSystem("kamehameha_ps", 500, this.scene);
     ps.particleTexture = new Texture("https://assets.babylonjs.com/textures/flare.png", this.scene);
-    ps.emitter = new Vector3(from.x, from.y, from.z + 1);
+    ps.emitter = fromVec;
     ps.minEmitBox = new Vector3(-0.3, -0.3, 0);
     ps.maxEmitBox = new Vector3(0.3, 0.3, 0);
     ps.color1 = new Color4(0.3, 0.8, 1.0, 1.0);
@@ -210,7 +214,8 @@ export class VFXManager {
       tessellation: 24,
     }, this.scene);
     
-    beam.position = new Vector3(from.x, from.y, (from.z + to.z) / 2);
+    const fromVec = new Vector3(from.x, from.y, from.z);
+    beam.position = fromVec.add(new Vector3(0, 0, 9));
     beam.rotation.x = Math.PI / 2;
 
     const beamMat = new StandardMaterial("ffMat", this.scene);
@@ -223,7 +228,7 @@ export class VFXManager {
     // Partículas doradas
     const ps = new ParticleSystem("finalFlash_ps", 800, this.scene);
     ps.particleTexture = new Texture("https://assets.babylonjs.com/textures/flare.png", this.scene);
-    ps.emitter = new Vector3(from.x, from.y, from.z + 1);
+    ps.emitter = fromVec;
     ps.minEmitBox = new Vector3(-0.5, -0.5, 0);
     ps.maxEmitBox = new Vector3(0.5, 0.5, 0);
     ps.color1 = new Color4(1.0, 0.9, 0.3, 1.0);
@@ -319,29 +324,46 @@ export class VFXManager {
   // ============================================
   // EFECTOS DE CARGA
   // ============================================
-  showChargeEffect(active: boolean, type: string = "normal"): void {
+  showChargeEffect(active: boolean, type: string = "normal", position?: Vector3): void {
     if (!active) {
       if (this.chargeMesh) {
         this.chargeMesh.dispose();
         this.chargeMesh = null;
       }
+      if (this.chargePS) {
+        this.chargePS.stop();
+        this.chargePS.dispose();
+        this.chargePS = null;
+      }
+      if (this.chargeLight) {
+        this.chargeLight.dispose();
+        this.chargeLight = null;
+      }
       return;
     }
 
-    // Crear esfera de carga alrededor de la mano
-    this.chargeMesh = MeshBuilder.CreateSphere("charge", { diameter: 0.15 }, this.scene);
-    this.chargeMesh.position = new Vector3(0.3, 1.4, 0.5);
+    // Crear esfera de carga más pequeña inicialmente
+    this.chargeMesh = MeshBuilder.CreateSphere("charge", { diameter: 0.3 }, this.scene);
+    this.chargeMesh.position = position || new Vector3(0.3, 1.4, 0.5);
+
+    // Luz de carga
+    this.chargeLight = new PointLight("chargeLight", this.chargeMesh.position, this.scene);
+    this.chargeLight.intensity = 0;
+    this.chargeLight.range = 5;
 
     const mat = new StandardMaterial("chargeMat", this.scene);
     if (type === "kamehameha") {
       mat.diffuseColor = new Color3(0.2, 0.5, 1.0);
       mat.emissiveColor = new Color3(0.1, 0.3, 0.8);
+      this.chargeLight.diffuse = new Color3(0.4, 0.6, 1.0);
     } else if (type === "finalFlash") {
       mat.diffuseColor = new Color3(1.0, 0.7, 0.2);
       mat.emissiveColor = new Color3(0.8, 0.4, 0.0);
+      this.chargeLight.diffuse = new Color3(1.0, 0.8, 0.3);
     } else {
       mat.diffuseColor = new Color3(0.8, 0.4, 0.1);
       mat.emissiveColor = new Color3(0.5, 0.2, 0.0);
+      this.chargeLight.diffuse = new Color3(1.0, 0.5, 0.2);
     }
     mat.alpha = 0.7;
     this.chargeMesh.material = mat;
@@ -357,19 +379,57 @@ export class VFXManager {
     this.scene.beginAnimation(this.chargeMesh, 0, 30, true);
 
     // Partículas de carga
-    const ps = new ParticleSystem("charge_ps", 100, this.scene);
-    ps.particleTexture = new Texture("https://assets.babylonjs.com/textures/flare.png", this.scene);
-    ps.emitter = this.chargeMesh;
-    ps.color1 = new Color4(1, 0.6, 0.2, 0.8);
-    ps.color2 = new Color4(1, 0.3, 0.0, 0.5);
-    ps.minSize = 0.03;
-    ps.maxSize = 0.08;
-    ps.minLifeTime = 0.2;
-    ps.maxLifeTime = 0.5;
-    ps.emitRate = 60;
-    ps.minEmitPower = 0.5;
-    ps.maxEmitPower = 1.5;
-    ps.start();
+    this.chargePS = new ParticleSystem("charge_ps", 100, this.scene);
+    this.chargePS.particleTexture = new Texture("https://assets.babylonjs.com/textures/flare.png", this.scene);
+    this.chargePS.emitter = this.chargeMesh;
+    this.chargePS.color1 = new Color4(1, 0.6, 0.2, 0.8);
+    this.chargePS.color2 = new Color4(1, 0.3, 0.0, 0.5);
+    this.chargePS.minSize = 0.03;
+    this.chargePS.maxSize = 0.08;
+    this.chargePS.minLifeTime = 0.2;
+    this.chargePS.maxLifeTime = 0.5;
+    this.chargePS.emitRate = 60;
+    this.chargePS.minEmitPower = 0.5;
+    this.chargePS.maxEmitPower = 1.5;
+    this.chargePS.start();
+  }
+
+  /**
+   * Actualiza la intensidad de los efectos de carga (Phase 13)
+   * @param elapsed Segundos transcurridos cargando
+   * @param position Nueva posición (opcional, para seguimiento)
+   * @param targetTime Tiempo objetivo para carga completa (Phase 16)
+   */
+  updateChargeEffect(elapsed: number, _type: string, position?: Vector3, targetTime: number = 2.0): void {
+    const progress = Math.min(1.0, elapsed / targetTime);
+    
+    if (this.chargeMesh && position) {
+        this.chargeMesh.position.copyFrom(position);
+    }
+
+    if (this.chargeLight) {
+        if (position) this.chargeLight.position.copyFrom(position);
+        
+        // La luz crece mayormente DESPUÉS de completar el tamaño de la esfera (Phase 16)
+        if (progress >= 1.0) {
+            const overCharge = elapsed - targetTime;
+            this.chargeLight.intensity = Math.min(5.0, 1.0 + overCharge * 2.0);
+            this.chargeLight.range = 8 + Math.min(12, overCharge * 4);
+        } else {
+            // Brillo tenue durante el crecimiento inicial
+            this.chargeLight.intensity = progress * 0.5;
+            this.chargeLight.range = 3 + progress * 2;
+        }
+    }
+    
+    if (this.chargeMesh) {
+        // La esfera crece de 0.05 a 1.2 (un poco más grande que antes para drama)
+        const baseScale = 0.05 + (1.15 * progress);
+        // Pequeño jitter/pulso adicional si ya está cargado
+        const pulse = progress >= 1.0 ? (Math.sin(elapsed * 10) * 0.1) : 0;
+        const s = baseScale + pulse;
+        this.chargeMesh.scaling.set(s, s, s);
+    }
   }
 
   // ============================================
