@@ -8,7 +8,8 @@ import {
   MeshBuilder,
   StandardMaterial,
   Mesh,
-  SceneLoader
+  SceneLoader,
+  AbstractMesh
 } from "@babylonjs/core";
 import "@babylonjs/loaders/glTF";
 
@@ -18,14 +19,14 @@ export class EnvironmentManager {
 
   constructor(private scene: Scene) {}
 
-  public setup(models: Record<string, string>, vegetaUrl?: string): void {
+  public setup(models: Record<string, string>, vegetaUrl?: string, enemyHeightM: number = 1.64): void {
     this.setupLights();
     this.setupSkyAndGround();
     this.createCanyonRocks();
     this.createPlayerHands();
     
     if (vegetaUrl && models[vegetaUrl]) {
-        this.loadEnemyModel(models[vegetaUrl]);
+        this.loadEnemyModel(models[vegetaUrl], enemyHeightM);
     }
   }
 
@@ -72,13 +73,39 @@ export class EnvironmentManager {
     });
   }
 
-  private loadEnemyModel(url: string): void {
+  private loadEnemyModel(url: string, targetHeightM: number): void {
     const fallback = this.scene.getMeshByName("enemy");
     SceneLoader.ImportMeshAsync("", url, "", this.scene).then((result) => {
       if (fallback) fallback.isVisible = false;
+      
       const root = result.meshes[0];
-      root.scaling.scaleInPlace(100); // Scale factor adjusted for current version
-      root.position = new Vector3(0, 0, 18);
+
+      // Calcular altura real del modelo usando bounding box
+      let min = new Vector3(Number.MAX_VALUE, Number.MAX_VALUE, Number.MAX_VALUE);
+      let max = new Vector3(Number.MIN_VALUE, Number.MIN_VALUE, Number.MIN_VALUE);
+
+      result.meshes.forEach(m => {
+          if (m instanceof AbstractMesh && m.getBoundingInfo) {
+              const bounds = m.getBoundingInfo().boundingBox;
+              min = Vector3.Minimize(min, bounds.minimumWorld);
+              max = Vector3.Maximize(max, bounds.maximumWorld);
+          }
+      });
+
+      const currentHeight = max.y - min.y;
+      
+      if (currentHeight > 0) {
+        // Escalar para que coincida exactamente con targetHeightM
+        const finalScale = targetHeightM / currentHeight;
+        root.scaling = new Vector3(finalScale, finalScale, finalScale);
+        console.log(`[Environment] Enemy height: ${currentHeight.toFixed(2)}m -> Scaled to: ${targetHeightM}m (Factor: ${finalScale.toFixed(4)})`);
+      } else {
+        // Fallback si no hay altura (raro)
+        root.scaling = new Vector3(1, 1, 1);
+      }
+
+      root.position = new Vector3(0, 0, 15); // A 15 metros del jugador
+      root.rotation = new Vector3(0, Math.PI, 0); // Cara al jugador
     });
   }
 

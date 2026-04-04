@@ -70,7 +70,7 @@ export class Game {
     });
 
     this.inputManager.setup(gokuConfig.transformations?.[0]?.powers || []);
-    this.envManager.setup(MODEL_URLS, vegetaConfig.transformations?.[0]?.url);
+    this.envManager.setup(MODEL_URLS, vegetaConfig.transformations?.[0]?.url, (vegetaConfig as any).height_m || 1.64);
 
     this.hud.onMenu(() => this.menuCallback?.());
     this.hud.onDebugToggle(() => this.debugOverlay.toggle());

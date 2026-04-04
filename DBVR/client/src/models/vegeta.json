@@ -2,6 +2,7 @@
   "name": "Vegeta",
   "race": "Saiyan",
   "base_power": 18000,
+  "height_m": 1.64,
   "special_mechanics": {
     "ultraEgo": "recibe daño -> +5% ataque por golpe recibido",
     "zenkai": "al llegar a <20% HP, +15% ataque permanente en sesión"

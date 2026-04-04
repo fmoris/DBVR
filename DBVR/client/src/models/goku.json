@@ -2,6 +2,7 @@
   "name": "Goku",
   "race": "Saiyan",
   "base_power": 3200,
+  "height_m": 1.75,
   "special_mechanics": {
     "instantTransmission": "teletransportación al enemigo, ignora distancia",
     "zenkai": "al llegar a <20% HP, +15% ataque permanente en sesión"

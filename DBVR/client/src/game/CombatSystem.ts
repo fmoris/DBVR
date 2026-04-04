@@ -140,10 +140,16 @@ export class CombatSystem {
   private isChargingNormal = false;
   private availablePowers: string[] = [];
 
+  private playerHeight: number = 1.75;
+  private enemyHeight: number = 1.64;
+
   public playerName = "Player";
   public enemyName = "Enemy";
 
   constructor(private scene: Scene, private vfx: VFXManager, playerConfig?: any, enemyConfig?: any) {
+    this.playerHeight = playerConfig?.height_m || gokuConfig.height_m || 1.75;
+    this.enemyHeight = enemyConfig?.height_m || (vegetaConfig as any).height_m || 1.64;
+    
     this.setAvailablePowers(playerConfig?.transformations?.[0]?.powers || gokuConfig.transformations?.[0]?.powers || []);
     this.stats.playerKi = 30; // Inicio al 30%
     this.stats.enemyKi = 30;
@@ -271,8 +277,8 @@ export class CombatSystem {
 
     // Proyectil del enemigo (viene desde el frente)
     this.vfx.spawnKiProjectile(
-      { x: 0, y: 1.7, z: 15 },
-      { x: 0, y: 1.5, z: 0 },
+      { x: 0, y: this.enemyHeight * 0.8, z: 15 },
+      { x: 0, y: this.playerHeight * 0.6, z: 0 },
       "basic",
       () => { this.onEnemyAttackImpact(damage); }
     );
@@ -303,8 +309,8 @@ export class CombatSystem {
 
     if (type === "kamehameha" || type === "galick_gun") {
       this.vfx.spawnKamehameha(
-        { x: 0, y: 1.7, z: 15 },
-        { x: 0, y: 1.5, z: 0 },
+        { x: 0, y: this.enemyHeight * 0.8, z: 15 },
+        { x: 0, y: this.playerHeight * 0.6, z: 0 },
         4,
         () => {
           this.onEnemyAttackImpact(damage);
@@ -313,8 +319,8 @@ export class CombatSystem {
       );
     } else if (type === "finalFlash" || type === "final_flash") {
       this.vfx.spawnFinalFlash(
-        { x: 0, y: 1.7, z: 15 },
-        { x: 0, y: 1.5, z: 0 },
+        { x: 0, y: this.enemyHeight * 0.8, z: 15 },
+        { x: 0, y: this.playerHeight * 0.6, z: 0 },
         6,
         () => {
           this.onEnemyAttackImpact(damage);
@@ -323,8 +329,8 @@ export class CombatSystem {
       );
     } else {
       this.vfx.spawnKiProjectile(
-        { x: 0, y: 1.7, z: 15 },
-        { x: 0, y: 1.5, z: 0 },
+        { x: 0, y: this.enemyHeight * 0.8, z: 15 },
+        { x: 0, y: this.playerHeight * 0.6, z: 0 },
         "charged",
         () => {
           this.onEnemyAttackImpact(damage);
@@ -368,8 +374,8 @@ export class CombatSystem {
     this.emit();
 
     this.vfx.spawnKiProjectile(
-      { x: -0.2, y: 1.4, z: 0.5 },
-      { x: 0, y: 1.7, z: 18 },
+      { x: -0.2, y: this.playerHeight * 0.7, z: 0.5 },
+      { x: 0, y: this.enemyHeight * 0.6, z: 18 },
       "basic",
       () => { this.onAttackImpact(DAMAGE.basicAttack); }
     );
@@ -433,8 +439,8 @@ export class CombatSystem {
     this.emit();
 
     this.vfx.spawnKiProjectile(
-      { x: 0, y: 1.5, z: 0.5 },
-      { x: 0, y: 1.7, z: 18 },
+      { x: 0, y: this.playerHeight * 0.75, z: 0.5 },
+      { x: 0, y: this.enemyHeight * 0.6, z: 18 },
       "charged",
       () => {
         this.onAttackImpact(damage);
@@ -563,8 +569,8 @@ export class CombatSystem {
       // Bullet time al LANZAR: 300ms de ramp-in + 3500ms en slow + 500ms ramp-out
       this.activateSlowMotion(3500, 0.18);
       this.vfx.spawnKamehameha(
-        { x: 0, y: 1.4, z: 0.3 },
-        { x: 0, y: 1.7, z: 20 },
+        { x: 0, y: this.playerHeight * 0.7, z: 0.3 },
+        { x: 0, y: this.enemyHeight * 0.6, z: 20 },
         elapsed,
         () => {
           this.onAttackImpact(damage);
@@ -574,8 +580,8 @@ export class CombatSystem {
       // Final Flash: más largo y más lento
       this.activateSlowMotion(4500, 0.12);
       this.vfx.spawnFinalFlash(
-        { x: 0, y: 1.5, z: 0.3 },
-        { x: 0, y: 1.7, z: 20 },
+        { x: 0, y: this.playerHeight * 0.75, z: 0.3 },
+        { x: 0, y: this.enemyHeight * 0.6, z: 20 },
         elapsed,
         () => {
           this.onAttackImpact(damage);
@@ -586,8 +592,8 @@ export class CombatSystem {
       this.activateSlowMotion(2500, 0.25);
       // We will cast a generic big charged ball as fallback
       this.vfx.spawnKiProjectile(
-        { x: 0, y: 1.5, z: 0.5 },
-        { x: 0, y: 1.7, z: 20 },
+        { x: 0, y: this.playerHeight * 0.75, z: 0.5 },
+        { x: 0, y: this.enemyHeight * 0.6, z: 20 },
         "charged",
         () => {
           this.onAttackImpact(damage);
