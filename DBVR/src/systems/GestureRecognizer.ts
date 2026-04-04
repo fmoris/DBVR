@@ -9,6 +9,7 @@ export class GestureRecognizer {
   private leftHandJoints: HandJoints | null = null;
   private rightHandJoints: HandJoints | null = null;
   private currentGesture: GestureType = GestureType.IDLE;
+  private forcedIdle: boolean = false;
   private gestureThresholds = {
     chargeDistance: 0.15,
     blockAngle: 45,
@@ -28,14 +29,20 @@ export class GestureRecognizer {
     } else {
       this.rightHandJoints = joints;
     }
+  }
 
-    this.recognizeGesture();
+  /**
+   * Forzar reseteo del gesto (ej. después de disparar)
+   */
+  public reset(): void {
+    this.forcedIdle = true;
+    this.currentGesture = GestureType.IDLE;
   }
 
   /**
    * Reconocer el gesto actual basado en posiciones de manos
    */
-  private recognizeGesture(): void {
+  public recognizeGesture(): void {
     if (!this.leftHandJoints || !this.rightHandJoints) {
       this.currentGesture = GestureType.IDLE;
       return;
@@ -53,6 +60,18 @@ export class GestureRecognizer {
       y: (this.leftHandJoints.wrist.y + this.rightHandJoints.wrist.y) / 2,
       z: (this.leftHandJoints.wrist.z + this.rightHandJoints.wrist.z) / 2,
     };
+
+    // Si estamos en forcedIdle, verificar si el jugador ha vuelto a una postura neutral o de carga
+    if (this.forcedIdle) {
+      if (wristDistance < this.gestureThresholds.chargeDistance || this.isRechargingPosture()) {
+         // Si vuelve a juntar las manos o bajar los brazos, liberamos el bloqueo
+         this.forcedIdle = false;
+      } else {
+         // Mantener en IDLE hasta que cambie de postura
+         this.currentGesture = GestureType.IDLE;
+         return;
+      }
+    }
 
     // Detectar carga de ataque (manos juntas en el pecho)
     if (wristDistance < this.gestureThresholds.chargeDistance) {

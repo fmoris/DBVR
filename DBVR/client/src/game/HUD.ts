@@ -30,26 +30,25 @@ const STATE_COLORS: Record<CombatState, string> = {
 
 function getNPColor(np: number): string {
   if (np >= 150000) return "#ffffff";
-  if (np >= 70000)  return "#ff8800";
-  if (np >= 30000)  return "#ffcc00";
-  if (np >= 10000)  return "#00ecff";
-  if (np >= 3000)   return "#00ff88";
+  if (np >= 70000) return "#ff8800";
+  if (np >= 30000) return "#ffcc00";
+  if (np >= 10000) return "#00ecff";
+  if (np >= 3000) return "#00ff88";
   return "#aabbcc";
 }
 
 function getNPRange(np: number): string {
   if (np >= 150000) return "TRASCENDENTE";
-  if (np >= 70000)  return "DOMINANTE";
-  if (np >= 30000)  return "ELEVADO";
-  if (np >= 10000)  return "FUERTE";
-  if (np >= 3000)   return "ESTABLE";
+  if (np >= 70000) return "DOMINANTE";
+  if (np >= 30000) return "ELEVADO";
+  if (np >= 10000) return "FUERTE";
+  if (np >= 3000) return "ESTABLE";
   return "DEBILITADO";
 }
 
 export class HUD {
   private container: HTMLDivElement;
   private elements: Record<string, HTMLElement> = {};
-  private npPopupTimeout: number | null = null;
   private voiceTimeout: number | null = null;
   private menuCallback: (() => void) | null = null;
   private debugCallback: (() => void) | null = null;
@@ -245,35 +244,35 @@ export class HUD {
     const isBlue = theme === "blue";
 
     // Colores del tema
-    const borderColor    = isBlue ? "rgba(0,200,255,0.7)"   : "rgba(255,60,60,0.7)";
-    const glowColor      = isBlue ? "rgba(0,150,255,0.3)"   : "rgba(255,50,50,0.3)";
-    const glowInner      = isBlue ? "rgba(0,100,200,0.12)"  : "rgba(180,0,0,0.12)";
-    const bgGradient     = isBlue
+    const borderColor = isBlue ? "rgba(0,200,255,0.7)" : "rgba(255,60,60,0.7)";
+    const glowColor = isBlue ? "rgba(0,150,255,0.3)" : "rgba(255,50,50,0.3)";
+    const glowInner = isBlue ? "rgba(0,100,200,0.12)" : "rgba(180,0,0,0.12)";
+    const bgGradient = isBlue
       ? "linear-gradient(135deg,rgba(0,15,40,0.95) 0%,rgba(0,30,70,0.90) 100%)"
       : "linear-gradient(135deg,rgba(40,5,5,0.95) 0%,rgba(70,10,10,0.90) 100%)";
-    const accentLine     = isBlue ? "rgba(0,200,255,0.8)"   : "rgba(255,80,80,0.8)";
-    const avatarBorder   = isBlue ? "#00ccff"               : "#ff4444";
-    const avatarGlow     = isBlue ? "rgba(0,200,255,0.5)"   : "rgba(255,60,60,0.5)";
-    const avatarBg       = isBlue ? "rgba(0,30,60,0.9)"     : "rgba(60,5,5,0.9)";
-    const avatarInitials = isBlue ? "G"                     : "F";
-    const avatarColor    = isBlue ? "#00ccff"               : "#ff4444";
+    const accentLine = isBlue ? "rgba(0,200,255,0.8)" : "rgba(255,80,80,0.8)";
+    const avatarBorder = isBlue ? "#00ccff" : "#ff4444";
+    const avatarGlow = isBlue ? "rgba(0,200,255,0.5)" : "rgba(255,60,60,0.5)";
+    const avatarBg = isBlue ? "rgba(0,30,60,0.9)" : "rgba(60,5,5,0.9)";
+    const avatarInitials = isBlue ? "G" : "F";
+    const avatarColor = isBlue ? "#00ccff" : "#ff4444";
 
-    const npBarId        = `${side}-np-bar`;
-    const npLabelId      = `${side}-np-label`;
-    const kiBarId        = `${side}-ki-bar`;
-    const kiLabelId      = `${side}-ki-label`;
-    const estadoId       = `${side}-estado`;
+    const npBarId = `${side}-np-bar`;
+    const npLabelId = `${side}-np-label`;
+    const kiBarId = `${side}-ki-bar`;
+    const kiLabelId = `${side}-ki-label`;
+    const estadoId = `${side}-estado`;
 
-    const npBarColor     = isBlue ? "#00ff88" : "#ff4444";
-    const npBarGlow      = isBlue ? "#00ff88" : "#ff4444";
-    const npBarGrad      = isBlue
+    const npBarColor = isBlue ? "#00ff88" : "#ff4444";
+    const npBarGlow = isBlue ? "#00ff88" : "#ff4444";
+    const npBarGrad = isBlue
       ? "linear-gradient(90deg,#00aa5588,#00ff88)"
       : "linear-gradient(90deg,#aa222288,#ff4444)";
-    const kiBarColor     = isBlue ? "#00ccff" : "#ff6600";
-    const kiBarGrad      = isBlue
+    const kiBarColor = isBlue ? "#00ccff" : "#ff6600";
+    const kiBarGrad = isBlue
       ? "linear-gradient(90deg,#0088bb88,#00ccff)"
       : "linear-gradient(90deg,#aa440088,#ff6600)";
-    const estadoColor    = isBlue ? "#00ff88" : "#ff4444";
+    const estadoColor = isBlue ? "#00ff88" : "#ff4444";
 
     // Avatar: imagen del personaje (goku azul, vegeta rojo)
     const avatarSrc = isBlue ? gokuBaseImg : vegetaBaseImg;
@@ -497,8 +496,8 @@ export class HUD {
       box-shadow:0 0 28px rgba(0,150,255,0.18), inset 0 0 12px rgba(0,100,200,0.08);
     `;
     attackPanel.appendChild(makePanelLabel("ATAQUE", "#00ccff"));
-    attackPanel.appendChild(makeBtn("btn-attack",     "A", "Atacar",    "#00ccff", "rgba(0,40,80,0.85)",     true));
-    attackPanel.appendChild(makeBtn("btn-charged",    "W", "Cargar",    "#ffcc00", "rgba(40,30,0,0.85)",     true));
+    attackPanel.appendChild(makeBtn("btn-attack", "A", "Atacar", "#00ccff", "rgba(0,40,80,0.85)", true));
+    attackPanel.appendChild(makeBtn("btn-charged", "W", "Cargar", "#ffcc00", "rgba(40,30,0,0.85)", true));
 
     const powersDict = powersConfig as Record<string, any>;
     const allowedPowers = gokuConfig.transformations[0].powers || [];
@@ -532,9 +531,9 @@ export class HUD {
       box-shadow:0 0 28px rgba(0,200,100,0.15), inset 0 0 12px rgba(0,150,80,0.08);
     `;
     defensePanel.appendChild(makePanelLabel("DEFENSA", "#00ff88"));
-    defensePanel.appendChild(makeBtn("btn-block",    "S", "Bloquear",  "#00ff88", "rgba(0,40,20,0.85)",  true));
-    defensePanel.appendChild(makeBtn("btn-dodge",    "D", "Esquivar",  "#66ccff", "rgba(0,20,40,0.85)",  true));
-    defensePanel.appendChild(makeBtn("btn-recharge", "R", "Recargar",  "#cc44ff", "rgba(30,0,50,0.85)",  true));
+    defensePanel.appendChild(makeBtn("btn-block", "S", "Bloquear", "#00ff88", "rgba(0,40,20,0.85)", true));
+    defensePanel.appendChild(makeBtn("btn-dodge", "D", "Esquivar", "#66ccff", "rgba(0,20,40,0.85)", true));
+    defensePanel.appendChild(makeBtn("btn-recharge", "R", "Recargar", "#cc44ff", "rgba(30,0,50,0.85)", true));
 
     // ── BOTONES DE SISTEMA — esquina inferior central ────────────────────────
     const sysBar = document.createElement("div");
@@ -547,8 +546,8 @@ export class HUD {
       gap:6px;
       pointer-events:auto;
     `;
-    sysBar.appendChild(makeBtn("btn-menu",  "M", "Menú",  "#ff4444", "rgba(50,0,0,0.85)"));
-    sysBar.appendChild(makeBtn("btn-debug", "G", "DBG",   "#ffff00", "rgba(30,30,0,0.85)"));
+    sysBar.appendChild(makeBtn("btn-menu", "M", "Menú", "#ff4444", "rgba(50,0,0,0.85)"));
+    sysBar.appendChild(makeBtn("btn-debug", "G", "DBG", "#ffff00", "rgba(30,30,0,0.85)"));
 
     wrapper.appendChild(attackPanel);
     wrapper.appendChild(defensePanel);
@@ -626,18 +625,18 @@ export class HUD {
     }
 
     const inSlow = stats.isSlowMotion;
-    this.elements["slowBorder"].style.display    = inSlow ? "block" : "none";
+    this.elements["slowBorder"].style.display = inSlow ? "block" : "none";
     this.elements["chromaOverlay"].style.display = inSlow ? "block" : "none";
     // Mostrar etiqueta BULLET TIME solo al inicio (fade in/out)
     const bl = this.elements["bulletLabel"];
     if (bl) bl.style.opacity = inSlow ? "1" : "0";
 
     // Barras jugador
-    const pNPBar   = this.container.querySelector("#player-np-bar")   as HTMLElement;
+    const pNPBar = this.container.querySelector("#player-np-bar") as HTMLElement;
     const pNPLabel = this.container.querySelector("#player-np-label") as HTMLElement;
-    const pKiBar   = this.container.querySelector("#player-ki-bar")   as HTMLElement;
+    const pKiBar = this.container.querySelector("#player-ki-bar") as HTMLElement;
     const pKiLabel = this.container.querySelector("#player-ki-label") as HTMLElement;
-    const pEstado  = this.container.querySelector("#player-estado")   as HTMLElement;
+    const pEstado = this.container.querySelector("#player-estado") as HTMLElement;
 
     if (pNPBar) {
       const c2 = getNPColor(stats.playerNP);
@@ -677,16 +676,16 @@ export class HUD {
         // Asumir coste 40 para especiales
         if (id !== "btn-attack" && id !== "btn-charged" && id !== "btn-block" && id !== "btn-dodge") cost = 40;
       }
-      
+
       btn.style.display = stats.playerKi >= cost ? "block" : "none";
     });
 
     // Barras enemigo
-    const eNPBar   = this.container.querySelector("#enemy-np-bar")   as HTMLElement;
+    const eNPBar = this.container.querySelector("#enemy-np-bar") as HTMLElement;
     const eNPLabel = this.container.querySelector("#enemy-np-label") as HTMLElement;
-    const eKiBar   = this.container.querySelector("#enemy-ki-bar")   as HTMLElement;
+    const eKiBar = this.container.querySelector("#enemy-ki-bar") as HTMLElement;
     const eKiLabel = this.container.querySelector("#enemy-ki-label") as HTMLElement;
-    const eEstado  = this.container.querySelector("#enemy-estado")   as HTMLElement;
+    const eEstado = this.container.querySelector("#enemy-estado") as HTMLElement;
 
     if (eNPBar) {
       const c2 = getNPColor(stats.enemyNP);

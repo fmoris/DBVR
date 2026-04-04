@@ -10,6 +10,7 @@ import { GestureRecognizer } from './systems/GestureRecognizer';
 import { PlayerStats } from './systems/PlayerStats';
 import { VFXManager } from './systems/VFXManager';
 import { WebXRManager } from './systems/WebXRManager';
+import { UIManager } from './systems/UIManager';
 import { CombatState, GestureType } from './types';
 
 class VRKICombatGame {
@@ -23,6 +24,7 @@ class VRKICombatGame {
   private playerStats: PlayerStats;
   private vfxManager: VFXManager;
   private webxrManager: WebXRManager;
+  private uiManager: UIManager;
 
   // Enemigo simulado
   private enemyPosition: BABYLON.Vector3 = new BABYLON.Vector3(0, 1.5, 20);
@@ -30,9 +32,12 @@ class VRKICombatGame {
 
   // Control de ataque
   private isCharging: boolean = false;
+  private hasFiredThisAction: boolean = false;
   private chargeStartTime: number = 0;
   private lastAttackTime: number = 0;
   private attackCooldown: number = 0.5; // segundos
+
+  private boundEventListeners: Map<string, (e: any) => void> = new Map();
 
   constructor() {
     // Obtener canvas
@@ -58,10 +63,11 @@ class VRKICombatGame {
 
     // Inicializar sistemas
     this.combatStateManager = new CombatStateManager(this.scene);
-    this.gestureRecognizer = new GestureRecognizer();
+    this.gestureRecognizer = new GestureRecognizer(this.scene);
     this.playerStats = new PlayerStats();
     this.vfxManager = new VFXManager(this.scene);
     this.webxrManager = new WebXRManager(this.scene);
+    this.uiManager = new UIManager();
 
     this.setupScene();
     this.setupEventListeners();
@@ -157,12 +163,14 @@ class VRKICombatGame {
    */
   private setupEventListeners(): void {
     // Botón para entrar en VR
-    document.addEventListener('click', () => {
+    const clickHandler = () => {
       this.webxrManager.enterVR().catch(console.error);
-    });
+    };
+    document.addEventListener('click', clickHandler);
+    this.boundEventListeners.set('click', clickHandler);
 
     // Teclas para testing (cuando no está en VR)
-    document.addEventListener('keydown', (e) => {
+    const keydownHandler = (e: KeyboardEvent) => {
       switch (e.key.toLowerCase()) {
         case 'a':
           this.simulateAttack();
@@ -174,7 +182,20 @@ class VRKICombatGame {
           this.simulateRecharge();
           break;
       }
+    };
+    document.addEventListener('keydown', keydownHandler);
+    this.boundEventListeners.set('keydown', keydownHandler);
+  }
+
+  /**
+   * Limpiar event listeners (para evitar duplicación en HMR)
+   */
+  public destroy(): void {
+    this.boundEventListeners.forEach((handler, event) => {
+      document.removeEventListener(event, handler);
     });
+    this.boundEventListeners.clear();
+    this.engine.dispose();
   }
 
   /**
@@ -239,6 +260,9 @@ class VRKICombatGame {
       this.gestureRecognizer.updateHandJoints('right', rightHands);
     }
 
+    // Reconocer gesto una vez por frame después de actualizar ambas manos
+    this.gestureRecognizer.recognizeGesture();
+
     // Procesar gesto actual
     this.processGesture(deltaTime);
 
@@ -280,8 +304,10 @@ class VRKICombatGame {
   private handleCharging(_deltaTime: number): void {
     if (!this.isCharging) {
       this.isCharging = true;
+      this.hasFiredThisAction = false; // Permitir disparar en el próximo ataque
       this.chargeStartTime = Date.now();
       console.log('⚡ Iniciando carga de ataque');
+      this.uiManager.showToast('⚡ CARGANDO...', 1500, '#ffee00', '#aa8800');
     }
   }
 
@@ -289,13 +315,14 @@ class VRKICombatGame {
    * Manejar ataque
    */
   private handleAttacking(): void {
-    if (!this.isCharging) return;
+    if (!this.isCharging || this.hasFiredThisAction) return;
 
     const now = Date.now();
     if (now - this.lastAttackTime < this.attackCooldown * 1000) return;
 
     const chargeTime = (now - this.chargeStartTime) / 1000;
     this.isCharging = false;
+    this.hasFiredThisAction = true; // Bloquear más disparos para esta carga
     this.lastAttackTime = now;
 
     // Determinar tipo de ataque basado en tiempo de carga
@@ -312,6 +339,7 @@ class VRKICombatGame {
     // Consumir KI
     if (!this.playerStats.consumeKi(kiCost)) {
       console.log('❌ KI insuficiente');
+      this.uiManager.showToast('❌ KI INSUFICIENTE', 1500, '#ff4444', '#aa0000');
       return;
     }
 
@@ -326,6 +354,15 @@ class VRKICombatGame {
     );
 
     console.log(`🔥 ${attackType === 'charged' ? 'Ataque Cargado' : 'Ataque Básico'} lanzado`);
+    this.uiManager.showToast(
+      `🔥 ${attackType === 'charged' ? 'ATAQUE CARGADO' : 'ATAQUE BÁSICO'}`,
+      2500,
+      '#ffffff',
+      '#ff4400'
+    );
+
+    // Forzar reseteo del gesto para requerir recarga
+    this.gestureRecognizer.reset();
 
     // Iniciar cámara lenta
     this.combatStateManager.startSlowMotion(1.5, 0.3);
@@ -338,6 +375,7 @@ class VRKICombatGame {
     if (this.combatStateManager.getState() !== CombatState.DEFENDING) {
       this.combatStateManager.transitionTo(CombatState.DEFENDING);
       console.log('🛡️ Bloqueando');
+      this.uiManager.showToast('🛡️ BLOQUEO', 1500, '#00ffff', '#0088ff');
     }
   }
 
@@ -368,6 +406,7 @@ class VRKICombatGame {
 
       if (enemyBounds.intersectsPoint(projectilePos)) {
         console.log(`💥 ¡Impacto! Daño: ${projectile.damage}`);
+        this.uiManager.showToast(`💥 ¡IMPACTO! (-${projectile.damage} HP)`, 1500, '#ffcccc', '#ff0000');
         this.vfxManager.removeProjectile(projectile.id);
         this.createImpactEffect(projectilePos);
       }
@@ -462,6 +501,22 @@ class VRKICombatGame {
   }
 }
 
+// Manejar HMR (Hot Module Replacement)
+if ((import.meta as any).hot) {
+  (import.meta as any).hot.dispose(() => {
+    if (window.gameInstance) {
+      window.gameInstance.destroy();
+    }
+  });
+}
+
 // Iniciar aplicación
+declare global {
+  interface Window {
+    gameInstance: VRKICombatGame;
+  }
+}
+
 const game = new VRKICombatGame();
+window.gameInstance = game;
 game.initialize().catch(console.error);

@@ -78,14 +78,7 @@ function getNPColor(np: number): string {
   return "#aabbcc";
 }
 
-function getNPRange(np: number): string {
-  if (np >= 150000) return "TRASCENDENTE";
-  if (np >= 70000) return "DOMINANTE";
-  if (np >= 30000) return "ELEVADO";
-  if (np >= 10000) return "FUERTE";
-  if (np >= 3000) return "ESTABLE";
-  return "DEBILITADO";
-}
+
 
 // ─── Clase principal ──────────────────────────────────────────────────────────
 
@@ -112,19 +105,15 @@ export class VRHud {
   // Referencias a controles que se actualizan en tiempo real
   private playerNPBar!: Rectangle;
   private playerNPText!: TextBlock;
-  private playerNPRank!: TextBlock;
   private playerKIBar!: Rectangle;
   private playerKIText!: TextBlock;
   private playerEstadoText!: TextBlock;
-  private playerAvatarImage!: Ellipse;
 
   private enemyNPBar!: Rectangle;
   private enemyNPText!: TextBlock;
-  private enemyNPRank!: TextBlock;
   private enemyKIBar!: Rectangle;
   private enemyKIText!: TextBlock;
   private enemyEstadoText!: TextBlock;
-  private enemyAvatarImage!: Ellipse;
 
   private statusText!: TextBlock;
   private statusBg!: Rectangle;
@@ -188,7 +177,7 @@ export class VRHud {
     bg.addControl(mainStack);
 
     // Avatar circular (Goku)
-    this.playerAvatarImage = this.createAvatarCircle(mainStack, gokuBaseImg, "#00ccff");
+    this.createAvatarCircle(mainStack, gokuBaseImg, "#00ccff");
 
     // StackPanel vertical para barras
     const barsStack = new StackPanel("p-bars-stack");
@@ -232,7 +221,7 @@ export class VRHud {
     estadoRow.addControl(this.playerEstadoText);
 
     // Guardar referencia a rango para compatibilidad
-    this.playerNPRank = this.playerEstadoText;
+    // playerNPRank remotion cleanup
   }
 
   /** Panel derecho — stats del enemigo */
@@ -258,7 +247,7 @@ export class VRHud {
     bg.addControl(mainStack);
 
     // Avatar circular (Vegeta)
-    this.enemyAvatarImage = this.createAvatarCircle(mainStack, vegetaBaseImg, "#ff4444");
+    this.createAvatarCircle(mainStack, vegetaBaseImg, "#ff4444");
 
     // StackPanel vertical para barras
     const barsStack = new StackPanel("e-bars-stack");
@@ -302,7 +291,7 @@ export class VRHud {
     estadoRow.addControl(this.enemyEstadoText);
 
     // Guardar referencia a rango para compatibilidad
-    this.enemyNPRank = this.enemyEstadoText;
+    // enemyNPRank remotion cleanup
   }
 
   /** Panel superior — botones de ATAQUE */
@@ -563,63 +552,7 @@ export class VRHud {
    * Crea un grupo etiqueta + barra de progreso + valor numérico.
    * topOffset: posición vertical desde el borde superior del panel (px).
    */
-  private makeBarGroup(
-    parent: Rectangle,
-    label: string,
-    topOffset: number,
-    fillColor: string
-  ): { fill: Rectangle; valueText: TextBlock } {
-    const BASE_TOP = 48; // debajo del título
 
-    // Etiqueta
-    const lbl = new TextBlock(`${label}-lbl`, label);
-    lbl.color = "#00ccff";
-    lbl.fontSize = 16;
-    lbl.fontStyle = "bold";
-    lbl.heightInPixels = 22;
-    lbl.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
-    lbl.paddingLeftInPixels = 14;
-    lbl.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-    lbl.top = `${BASE_TOP + topOffset}px`;
-    parent.addControl(lbl);
-
-    // Valor numérico (AHORA ES VISIBLE)
-    const val = new TextBlock(`${label}-val`, "100");
-    val.isVisible = true;
-    val.color = "white";
-    val.fontSize = 18;
-    val.fontStyle = "bold";
-    val.heightInPixels = 22;
-    val.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
-    val.paddingRightInPixels = 14;
-    val.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-    val.top = `${BASE_TOP + topOffset}px`;
-    parent.addControl(val);
-
-    // Fondo de la barra
-    const barBg = new Rectangle(`${label}-bar-bg`);
-    barBg.width = "90%";
-    barBg.heightInPixels = 14;
-    barBg.cornerRadius = 4;
-    barBg.background = "rgba(0,0,0,0.5)";
-    barBg.thickness = 1;
-    barBg.color = "rgba(0,200,255,0.3)";
-    barBg.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-    barBg.top = `${BASE_TOP + topOffset + 26}px`;
-    parent.addControl(barBg);
-
-    // Relleno de la barra
-    const fill = new Rectangle(`${label}-fill`);
-    fill.width = "100%";
-    fill.heightInPixels = 14;
-    fill.cornerRadius = 4;
-    fill.background = fillColor;
-    fill.thickness = 0;
-    fill.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
-    barBg.addControl(fill);
-
-    return { fill, valueText: val };
-  }
 
   /** Botón de acción compacto para el panel central */
   private makeActionBtn(
@@ -1061,27 +994,7 @@ export class VRHud {
     return border;
   }
 
-  /** Crea una fila de etiqueta para stat (NP, KI, ESTADO) */
-  private createStatRow(
-    parent: StackPanel,
-    label: string,
-    color: string
-  ): void {
-    const row = new StackPanel(`stat-${label}-label-row`);
-    row.isVertical = false;
-    row.width = "100%";
-    row.heightInPixels = 18;
-    row.spacing = 4;
-    parent.addControl(row);
 
-    const lbl = new TextBlock(`stat-${label}-lbl`, label);
-    lbl.color = color;
-    lbl.fontSize = 14;
-    lbl.fontStyle = "bold";
-    lbl.width = "50px";
-    lbl.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
-    row.addControl(lbl);
-  }
 
   /** Crea un grupo barra de progreso + valor para StackPanel */
   private makeBarGroupForStack(

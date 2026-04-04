@@ -18,7 +18,7 @@ export class ResultScreen {
   private callbacks: ResultActionCallback[] = [];
   private visible = false;
 
-  constructor(private parent: HTMLElement) {
+  constructor(parent: HTMLElement) {
     this.overlay = document.createElement("div");
     this.overlay.id = "result-screen";
     this.overlay.style.cssText = `

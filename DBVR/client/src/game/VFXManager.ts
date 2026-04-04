@@ -12,7 +12,7 @@ import {
   CylinderParticleEmitter,
 } from "@babylonjs/core";
 
-interface Vec3 { x: number; y: number; z: number; }
+export interface Vec3 { x: number; y: number; z: number; }
 
 export type AttackType = string;
 
@@ -91,11 +91,6 @@ export class VFXManager {
     }
 
     // Animación de vuelo
-    const distance = Math.sqrt(
-      Math.pow(to.x - from.x, 2) + 
-      Math.pow(to.y - from.y, 2) + 
-      Math.pow(to.z - from.z, 2)
-    );
     const totalFrames = Math.floor(60 / speed);
 
     const anim = new Animation(
@@ -182,7 +177,6 @@ export class VFXManager {
       Animation.ANIMATIONLOOPMODE_CONSTANT
     );
     
-    const targetZ = to.z - from.z;
     const frames = 45;
     
     beam.scaling.z = 0;

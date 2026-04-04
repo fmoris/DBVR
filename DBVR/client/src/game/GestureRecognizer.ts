@@ -186,12 +186,14 @@ export class GestureRecognizer {
   private activeCombo: string | null = null;
   private comboStep: number = 0;
   private lastPoseTime: number = 0;
-  private lastHandDetectionTime: number = Date.now();
   private consecutiveWrongPoseCount: number = 0;
   private comboStartTime: number = 0;
   private lastSpecialEndTime: number = 0;
   private leftHandStartPos: { x: number; y: number; z: number } | null = null;
   private rightHandStartPos: { x: number; y: number; z: number } | null = null;
+  private handLockL: boolean = false;
+  private handLockR: boolean = false;
+  private lastHandDetectionTime: number = 0;
   private dynamicCombos: Record<string, StaticPose[]> = { ...Combos };
   private allowedPowers: string[] = [];
 
@@ -265,16 +267,16 @@ export class GestureRecognizer {
     }
 
     // 5. THRUSTS (Ataques rápidos)
-    // Se requiere aceleración > 0.02 y un desplazamiento mínimo de 15cm desde el inicio
-    if (isOpenL && this.leftVelocityZ > 0.02) {
+    // Se requiere aceleración > 0.012 y un desplazamiento mínimo de 9cm desde el inicio
+    if (isOpenL && this.leftVelocityZ > 0.012) {
         const start = this.leftHandStartPos;
-        if (start && this.dist3(L.wrist, start) > 0.15) {
+        if (start && this.dist3(L.wrist, start) > 0.09) {
             poses.push(StaticPose.PALM_THRUST_L);
         }
     }
-    if (isOpenR && this.rightVelocityZ > 0.02) {
+    if (isOpenR && this.rightVelocityZ > 0.012) {
         const start = this.rightHandStartPos;
-        if (start && this.dist3(R.wrist, start) > 0.15) {
+        if (start && this.dist3(R.wrist, start) > 0.09) {
             poses.push(StaticPose.PALM_THRUST_R);
         }
     }
@@ -330,6 +332,10 @@ export class GestureRecognizer {
     const L = this.leftHandJoints;
     const R = this.rightHandJoints;
 
+    // EL RESET DE LOCKS DEBE SER ALCANZABLE
+    if (L && L.wrist.y < 1.3) this.handLockL = false;
+    if (R && R.wrist.y < 1.3) this.handLockR = false;
+
     if (!L || !R) {
       // Hysteresis: No cancelar el combo instantáneamente si las manos desaparecen por < 200ms
       if (this.activeCombo && now - this.lastHandDetectionTime > 200) {
@@ -340,9 +346,29 @@ export class GestureRecognizer {
     }
     this.lastHandDetectionTime = now;
 
+    // CANCELAR SI SE CIERRA EL PUÑO DURANTE PREP O THRUST (OPCIONAL SEGÚN DISEÑO)
+    const isFistL = this.isFist(L);
+    const isFistR = this.isFist(R);
+
+    if (this.activeCombo) {
+        const isLeftCombo = this.activeCombo.endsWith("_L") || this.activeCombo === "KAMEHAMEHA";
+        const isRightCombo = this.activeCombo.endsWith("_R") || this.activeCombo === "KAMEHAMEHA";
+
+        if ((isLeftCombo && isFistL) || (isRightCombo && isFistR)) {
+            this.cancelCombo("Mano cerrada detectada");
+            this.setGesture(GestureType.IDLE);
+            return;
+        }
+    }
+
     const cooldown = this.gestureCooldownMs[this.currentGesture] || 0;
     if (now - this.lastGestureTime < cooldown) return;
 
+    // BLOQUEO PER-HAND PARA KI BLASTS
+    if (this.activeCombo === null) {
+        // No bloqueamos el inicio de combos aquí, lo haremos al intentar disparar
+    }
+    
     // 1. Extraer TODAS las Poses Estáticas Atómicas detectadas en este frame
     const detectedPoses = this.evaluateValidPoses(L, R);
 
@@ -358,6 +384,10 @@ export class GestureRecognizer {
         // Buscar iniciar un combo con CUALQUIERA de las poses detectadas
         for (const [comboName, sequence] of Object.entries(this.dynamicCombos)) {
           if (detectedPoses.includes(sequence[0])) {
+            // BLOQUEO PER-HAND
+            if (comboName.endsWith("_L") && this.handLockL) continue;
+            if (comboName.endsWith("_R") && this.handLockR) continue;
+
             // Anti-spam para Ki Blasts si acabamos de lanzar un especial
             if (comboName.startsWith("KI_BLAST") && now - this.lastSpecialEndTime < 800) {
               continue;
@@ -505,5 +535,18 @@ export class GestureRecognizer {
   private dist3(a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }): number {
     const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
     return Math.sqrt(dx * dx + dy * dy + dz * dz);
+  }
+
+  public reset(hand?: "left" | "right" | "both"): void {
+    if (!hand || hand === "both") {
+        this.handLockL = true;
+        this.handLockR = true;
+    } else if (hand === "left") {
+        this.handLockL = true;
+    } else {
+        this.handLockR = true;
+    }
+    this.currentGesture = GestureType.IDLE;
+    this.cancelCombo("Reset explicito (Per-Hand Lock)");
   }
 }

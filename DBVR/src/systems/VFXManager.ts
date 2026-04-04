@@ -12,6 +12,7 @@ export class VFXManager {
   private particleSystems: BABYLON.ParticleSystem[] = [];
   private playerAura: BABYLON.ParticleSystem | null = null;
   private projectileCounter: number = 0;
+  private glowLayer: BABYLON.GlowLayer | null = null;
 
   constructor(private scene: BABYLON.Scene) {}
 
@@ -73,10 +74,12 @@ export class VFXManager {
     material.specularColor = new BABYLON.Color3(0.5, 0.5, 0.5);
     material.alpha = 0.9;
 
-    // Glow layer para efecto de brillo
-    const glow = new BABYLON.GlowLayer('glow', this.scene);
-    glow.addIncludedOnlyMesh(sphere);
-    glow.intensity = 1.5;
+    // Usar Glow Layer compartido para efecto de brillo
+    if (!this.glowLayer) {
+      this.glowLayer = new BABYLON.GlowLayer('glow', this.scene);
+      this.glowLayer.intensity = 1.5;
+    }
+    this.glowLayer.addIncludedOnlyMesh(sphere);
 
     sphere.material = material;
 
@@ -247,5 +250,9 @@ export class VFXManager {
     this.projectiles.clear();
     this.particleSystems.forEach(ps => ps.dispose());
     this.particleSystems = [];
+    if (this.glowLayer) {
+      this.glowLayer.dispose();
+      this.glowLayer = null;
+    }
   }
 }

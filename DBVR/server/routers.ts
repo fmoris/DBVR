@@ -104,7 +104,7 @@ export const appRouter = router({
 
     delete: protectedProcedure
       .input(z.object({ replayId: z.number() }))
-      .mutation(async ({ ctx, input }) => {
+      .mutation(async ({ input }) => {
         await deleteReplay(input.replayId);
         return { success: true };
       }),
