@@ -128,11 +128,47 @@ export class Game {
   }
 
   private setupVoiceRecognition(): void {
-    if (!this.inputManager.getVoiceRecognizer().isAvailable()) return;
-    this.inputManager.onVoiceCommand((command) => {
-       if (this.started && command) { this.combat.triggerSpecial(command); this.combat.applyVoiceBonus(command); }
+    console.log("[Game] Setting up voice recognition...");
+    if (!this.inputManager.getVoiceRecognizer().isAvailable()) {
+        console.warn("[Game] Voice recognition NOT available.");
+        return;
+    }
+    this.inputManager.onVoiceCommand((command, transcript) => {
+       console.log(`[Game] Voice Command detected: ${command} ("${transcript}")`);
+       if (this.started && command) { 
+           this.combat.triggerSpecial(command); 
+           this.combat.applyVoiceBonus(command); 
+           this.vrHud?.showToast(`Voz: "${transcript}" -> ¡ÉXITO!`, "#00ff88", 2000);
+       }
     });
-    this.inputManager.onVoiceStatus((_, transcript) => this.hud.showVoiceTranscript(transcript));
+
+    this.inputManager.onVoiceStatus((active, transcript) => {
+        if (transcript) console.log(`[Game] Voice Status: ${active}, Transcript: "${transcript}"`);
+        this.hud.showVoiceTranscript(transcript);
+    });
+
+    this.inputManager.onSpeech((transcript) => {
+        console.log(`[Game] Raw Speech detected: "${transcript}"`);
+        if (!this.started) return;
+        
+        // Notificar actividad para recarga
+        this.combat.registerVoiceActivity();
+        
+        const lower = transcript.toLowerCase();
+        const isBonus = lower.includes("ha") || lower.includes("ja") || lower.includes("pum");
+        
+        if (isBonus) {
+            this.combat.registerVoiceTrigger("blast_bonus");
+            this.vrHud?.showToast(`Voz: "${transcript}" -> ¡POTENCIADO!`, "#ffcc00", 1500);
+        } else {
+            // Mostrar transcripción simple si no es un comando para dar feedback de que el micro funciona
+            // Solo si no estamos en medio de un ataque especial para no saturar
+            const stats = this.combat.getStats();
+            if (stats.combatState !== "attacking") {
+                this.vrHud?.showToast(`Voz: "${transcript}"`, "#aaaaaa", 1000);
+            }
+        }
+    });
   }
 
   private setupKeyboard(): void {

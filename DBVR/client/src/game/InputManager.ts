@@ -54,6 +54,10 @@ export class InputManager {
     this.voiceRecognizer.onStatus(callback);
   }
 
+  public onSpeech(callback: (transcript: string) => void): void {
+    this.voiceRecognizer.onSpeech(callback);
+  }
+
   /**
    * Encapsulates keyboard event logic previously in Game.ts
    */

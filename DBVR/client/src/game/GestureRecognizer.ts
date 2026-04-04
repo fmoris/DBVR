@@ -193,6 +193,8 @@ export class GestureRecognizer {
   private rightHandStartPos: { x: number; y: number; z: number } | null = null;
   private handLockL: boolean = false;
   private handLockR: boolean = false;
+  private isWaitingForPoseBreakL: boolean = false;
+  private isWaitingForPoseBreakR: boolean = false;
   private lastHandDetectionTime: number = 0;
   private dynamicCombos: Record<string, StaticPose[]> = { ...Combos };
   private allowedPowers: string[] = [];
@@ -332,9 +334,10 @@ export class GestureRecognizer {
     const L = this.leftHandJoints;
     const R = this.rightHandJoints;
 
-    // EL RESET DE LOCKS DEBE SER ALCANZABLE
-    if (L && L.wrist.y < 1.3) this.handLockL = false;
-    if (R && R.wrist.y < 1.3) this.handLockR = false;
+    // EL RESET DE LOCKS AHORA REQUIERE ROMPER LA POSTURA (Phase 11)
+    // Se resetean si no hay poses ofensivas detectadas o si las manos están bajas
+    const isLHandLow = L && L.wrist.y < 1.1;
+    const isRHandLow = R && R.wrist.y < 1.1;
 
     if (!L || !R) {
       // Hysteresis: No cancelar el combo instantáneamente si las manos desaparecen por < 200ms
@@ -372,6 +375,16 @@ export class GestureRecognizer {
     // 1. Extraer TODAS las Poses Estáticas Atómicas detectadas en este frame
     const detectedPoses = this.evaluateValidPoses(L, R);
 
+    // Lógica de Pose Break: liberar candados si no hay poses de ataque activas
+    if (this.handLockL && (detectedPoses.length === 0 || isLHandLow)) {
+        this.handLockL = false;
+        this.isWaitingForPoseBreakL = false;
+    }
+    if (this.handLockR && (detectedPoses.length === 0 || isRHandLow)) {
+        this.handLockR = false;
+        this.isWaitingForPoseBreakR = false;
+    }
+
     // Filter by allowed powers (suppress lint)
     if (this.frameCount % 100 === 0 && this.allowedPowers.length > 0) {
       console.log(`[GestureRecognizer] Monitoring: ${this.allowedPowers.join(", ")}`);
@@ -384,9 +397,14 @@ export class GestureRecognizer {
         // Buscar iniciar un combo con CUALQUIERA de las poses detectadas
         for (const [comboName, sequence] of Object.entries(this.dynamicCombos)) {
           if (detectedPoses.includes(sequence[0])) {
-            // BLOQUEO PER-HAND
-            if (comboName.endsWith("_L") && this.handLockL) continue;
-            if (comboName.endsWith("_R") && this.handLockR) continue;
+            // BLOQUEO PER-HAND (Phase 11)
+            if (comboName.endsWith("_L") && (this.handLockL || this.isWaitingForPoseBreakL)) continue;
+            if (comboName.endsWith("_R") && (this.handLockR || this.isWaitingForPoseBreakR)) continue;
+
+            // Bloqueo para combos duales (como RECHARGING o KAMEHAMEHA)
+            if (!comboName.endsWith("_L") && !comboName.endsWith("_R")) {
+                if (this.isWaitingForPoseBreakL || this.isWaitingForPoseBreakR) continue;
+            }
 
             // Anti-spam para Ki Blasts si acabamos de lanzar un especial
             if (comboName.startsWith("KI_BLAST") && now - this.lastSpecialEndTime < 800) {
@@ -541,10 +559,14 @@ export class GestureRecognizer {
     if (!hand || hand === "both") {
       this.handLockL = true;
       this.handLockR = true;
+      this.isWaitingForPoseBreakL = true;
+      this.isWaitingForPoseBreakR = true;
     } else if (hand === "left") {
       this.handLockL = true;
+      this.isWaitingForPoseBreakL = true;
     } else {
       this.handLockR = true;
+      this.isWaitingForPoseBreakR = true;
     }
     this.currentGesture = GestureType.IDLE;
     this.cancelCombo("Reset explicito (Per-Hand Lock)");

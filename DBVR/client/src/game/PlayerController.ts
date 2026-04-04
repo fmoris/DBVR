@@ -31,6 +31,7 @@ export class PlayerController {
   private rightPalmMesh?: Mesh;
   
   private lastKiBlastTime: number = 0;
+  private lastBasicAttackTime: number = 0;
   private leftChargePower: number = 1.0;
   private rightChargePower: number = 1.0; 
   private leftChargeStartKi: number = 0;
@@ -54,6 +55,11 @@ export class PlayerController {
     
     this.leftPalmMesh = this.scene.getMeshByName("leftHand") as Mesh;
     this.rightPalmMesh = this.scene.getMeshByName("rightHand") as Mesh;
+
+    // Suscribirse a mensajes del sistema de combate para mostrarlos en el HUD
+    this.combat.onMessage((msg, color) => {
+        this.vrHud?.showToast(msg, color, 3000);
+    });
   }
 
   public update(cameraPosition: Vector3): void {
@@ -140,6 +146,25 @@ export class PlayerController {
     const gesture = G.getCurrentGesture();
     const gestureChanged = gesture !== this.lastReportedGesture;
     
+    if (gestureChanged && gesture !== "IDLE") {
+        const gestureLabels: Record<string, { label: string, color: string }> = {
+            "ATTACKING": { label: "¡ATAQUE BÁSICO!", color: "#00ccff" },
+            "CHARGING": { label: "¡CARGANDO ENERGÍA!", color: "#ffcc00" },
+            "BLOCKING": { label: "🛡️ BLOQUEO ACTIVO", color: "#00ff88" },
+            "RECHARGING": { label: "⚡ RECARGANDO KI...", color: "#cc44ff" },
+            "KAMEHAMEHA": { label: "¡KAMEHAMEHA!", color: "#00ccff" },
+            "KI_BLAST_L": { label: "¡KI BLAST (IZQ)!", color: "#00ccff" },
+            "KI_BLAST_R": { label: "¡KI BLAST (DER)!", color: "#00ccff" },
+            "CHARGED_KI_BLAST_L": { label: "¡CARGA KI BLAST (IZQ)!", color: "#ff8800" },
+            "CHARGED_KI_BLAST_R": { label: "¡CARGA KI BLAST (DER)!", color: "#ff8800" },
+            "RECHARGE_PREP": { label: "Preparando Recarga...", color: "#aa44ff" }
+        };
+        const info = gestureLabels[gesture];
+        if (info) {
+            this.vrHud?.showToast(info.label, info.color, 1500);
+        }
+    }
+    
     if (gestureChanged && this.lastReportedGesture === "RECHARGE_PREP" && gesture === "IDLE") {
         this.vrHud?.showToast("Secuencia Cancelada", "#ff4444", 2000);
     }
@@ -151,7 +176,15 @@ export class PlayerController {
     this.lastReportedGesture = gesture;
 
     switch (gesture) {
-      case "ATTACKING": this.combat.launchBasicAttack(); break;
+      case "ATTACKING": {
+        const time = performance.now();
+        if (time - this.lastBasicAttackTime > 600) {
+          this.lastBasicAttackTime = time;
+          this.combat.launchBasicAttack();
+          G.reset("both");
+        }
+        break;
+      }
       case "CHARGING": this.combat.startChargedAttack(); break;
       case "BLOCKING": this.combat.activateBlock(); break;
       case "RECHARGING": this.combat.rechargeKi(); break;
@@ -164,6 +197,8 @@ export class PlayerController {
         const hand = gesture === "KI_BLAST_L" ? G.getLeftHandJoints() : G.getRightHandJoints();
         if (hand) {
           this.combat.launchKiBlast(hand.wrist, cameraForward, 1.0);
+          this.combat.applyVoiceBonus("ki_blast");
+          this.inputManager.getGestureRecognizer().reset(gesture === "KI_BLAST_L" ? "left" : "right");
         }
         break;
       }
@@ -173,7 +208,9 @@ export class PlayerController {
         const power = gesture === "CHARGED_KI_BLAST_L" ? this.leftChargePower : this.rightChargePower;
         if (hand) {
           this.combat.launchKiBlast(hand.wrist, cameraForward, power);
+          this.combat.applyVoiceBonus("ki_blast");
           this.lastChargedFireTime = performance.now();
+          this.inputManager.getGestureRecognizer().reset(gesture === "CHARGED_KI_BLAST_L" ? "left" : "right");
         }
         break;
       }

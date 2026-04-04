@@ -131,6 +131,7 @@ export class VRHud {
   private attackTitle: TextBlock | null = null;
   private defenseTitle: TextBlock | null = null;
   private toastTimeout: any = null;
+  private statusBuffer: string[] = [];
 
   private visible = false;
 
@@ -472,28 +473,30 @@ export class VRHud {
     stack.addControl(this.debugGestureText);
   }
 
-  /** Panel de estado — bullet time, alerta de ataque */
+  /** Panel de estado — bullet time, alerta de ataque, historial de acciones */
   private buildStatusPanel(): void {
-    const { mesh, adt } = this.createPanel("vrHud-status", 0.70, 0.10, 512);
+    const { mesh, adt } = this.createPanel("vrHud-status", 0.85, 0.22, 512); // Más alto para 3 líneas
     this.statusPanel = mesh;
     this.statusADT = adt;
 
     const bg = new Rectangle("status-bg");
     bg.width = "100%";
     bg.height = "100%";
-    bg.cornerRadius = 12;
-    bg.background = "rgba(0,0,0,0.5)";
-    bg.thickness = 0;
+    bg.cornerRadius = 14;
+    bg.background = "rgba(0,0,0,0.65)";
+    bg.color = "rgba(255,255,255,0.2)";
+    bg.thickness = 1.5;
     bg.isVisible = false; // Oculto por defecto
     adt.addControl(bg);
     this.statusBg = bg;
 
     const txt = new TextBlock("status-txt", "");
     txt.color = "white";
-    txt.fontSize = 28;
+    txt.fontSize = 22; // Un poco más pequeño para que quepan 3 líneas
     txt.fontStyle = "bold";
     txt.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_CENTER;
     txt.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_CENTER;
+    txt.textWrapping = true;
     bg.addControl(txt);
     this.statusText = txt;
   }
@@ -913,10 +916,14 @@ export class VRHud {
     this.debugGestureText.color = gestureColors[gesture] || "#ffffff";
   }
 
-  showToast(message: string, color: string = "white", duration: number = 2000): void {
+  showToast(message: string, color: string = "white", duration: number = 4000): void {
     if (!this.statusText || !this.statusBg) return;
 
-    this.statusText.text = message;
+    // Agregar al buffer e historial
+    this.statusBuffer.push(message);
+    if (this.statusBuffer.length > 3) this.statusBuffer.shift();
+
+    this.statusText.text = this.statusBuffer.join("\n");
     this.statusText.color = color;
     this.statusBg.isVisible = true;
 
@@ -930,12 +937,21 @@ export class VRHud {
   }
 
   hideToast(): void {
-    if (this.statusText) this.statusText.text = "";
+    // No vaciar el texto inmediatamente si queremos que se vea el historial
+    // Solo desvanecer el fondo tras el tiempo de espera
     if (this.statusBg) {
-      this.statusBg.background = "rgba(0,0,0,0)";
+      this.statusBg.background = "rgba(0,0,0,0.2)"; // Semi-visible para el historial?
       this.statusBg.thickness = 0;
       this.statusBg.isVisible = false;
     }
+    // Si queremos limpiar el historial después de un tiempo extra
+    setTimeout(() => {
+        if (!this.toastTimeout && this.statusText) {
+            this.statusBuffer = [];
+            this.statusText.text = "";
+        }
+    }, 2000);
+
     if (this.toastTimeout) {
       clearTimeout(this.toastTimeout);
       this.toastTimeout = null;

@@ -129,6 +129,7 @@ export class CombatSystem {
   private enemyAIInterval: ReturnType<typeof setTimeout> | null = null;
   private enemyRegenInterval: ReturnType<typeof setInterval> | null = null;
   private gameOverCallbacks: Array<(winner: "player" | "enemy") => void> = [];
+  private messageListeners: Array<(msg: string, color?: string) => void> = [];
   
   private rechargeIntervalRef: ReturnType<typeof setInterval> | null = null;
 
@@ -139,6 +140,11 @@ export class CombatSystem {
   // Estado de carga normal
   private isChargingNormal = false;
   private availablePowers: string[] = [];
+  
+  // Soporte para bonos de Voz (Phase 10)
+  private lastVoiceActivity = 0;
+  private lastVoiceTrigger: string | null = null;
+  private lastVoiceTriggerTime = 0;
 
   private playerHeight: number = 1.75;
   private enemyHeight: number = 1.64;
@@ -156,12 +162,12 @@ export class CombatSystem {
     if (playerConfig) {
       this.playerName = playerConfig.name || "Goku";
       this.stats.playerNP = playerConfig.base_power || 10000;
-      console.log(`[Combat] Player initialized as: ${this.playerName} (NP: ${this.stats.playerNP})`);
+      this.log(`Jugador: ${this.playerName} (NP: ${this.stats.playerNP})`, "#00ccff");
     }
     if (enemyConfig) {
       this.enemyName = enemyConfig.name || "Vegeta";
       this.stats.enemyNP = enemyConfig.base_power || 10000;
-      console.log(`[Combat] Enemy initialized as: ${this.enemyName} (NP: ${this.stats.enemyNP})`);
+      this.log(`Enemigo: ${this.enemyName} (NP: ${this.stats.enemyNP})`, "#ff4444");
     }
 
     this.startKiRegen();
@@ -179,6 +185,15 @@ export class CombatSystem {
 
   onStatsChange(listener: StatsListener): void {
     this.listeners.push(listener);
+  }
+
+  onMessage(listener: (msg: string, color?: string) => void): void {
+    this.messageListeners.push(listener);
+  }
+
+  private log(msg: string, color: string = "white"): void {
+    console.log(`[Combat] ${msg}`);
+    this.messageListeners.forEach(l => l(msg, color));
   }
 
   private emit(): void {
@@ -356,6 +371,8 @@ export class CombatSystem {
     // El jugador PIERDE NP al ser golpeado
     this.stats.playerNP = Math.max(0, this.stats.playerNP - finalDamage * 2.0);
     this.stats.enemyNP = Math.min(100000, this.stats.enemyNP + damage * 0.5);
+    
+    this.log(`¡RECIBISTE GOLPE! -${finalDamage.toFixed(0)} DAÑO`, "#ff2222");
     this.emit();
     this.checkVictoryCondition();
   }
@@ -480,8 +497,10 @@ export class CombatSystem {
   triggerSpecial(attackName: string): boolean {
     const id = attackName.toLowerCase();
     if (this.activeSpecial?.toLowerCase() === id) {
+      this.log(`Lanzando ${attackName.toUpperCase()}!`, "#00ff88");
       return this.launchSpecial(id);
     } else if (this.stats.combatState === "neutral") {
+      this.log(`Iniciando carga de ${attackName.toUpperCase()}`, "#ff8800");
       return this.beginSpecialCharge(id);
     }
     return false;
@@ -630,7 +649,7 @@ export class CombatSystem {
     
     if (!this.stats.enemyAttacking) {
       if (this.stats.enemyAttackName === "Recargando KI") {
-        console.log("[Combat] Bloqueo ignorado: El enemigo solo está recargando.");
+        this.log("Bloqueo ignorado: El enemigo solo está recargando.");
       }
       return false; 
     }
@@ -684,7 +703,7 @@ export class CombatSystem {
     this.stats.currentAttack = "special";
     this.emit();
     // Placeholder para el efecto visual
-    console.log("Power Clash Triggered!");
+    this.log("¡CHOQUE DE PODER! (Power Clash)");
     setTimeout(() => this.setState("neutral"), 2000);
     return true;
   }
@@ -698,7 +717,7 @@ export class CombatSystem {
     this.vfx.spawnImpact({ x: 0, y: 1.5, z: 1.0 }, "basic");
     this.onAttackImpact(type === "heavy" ? 15 : 8);
     this.emit();
-    console.log(`Melee Attack: ${type}`);
+    this.log(`Ataque Melee: ${type.toUpperCase()}`, "#00ff88");
     return true;
   }
 
@@ -741,7 +760,7 @@ export class CombatSystem {
     }
 
     this.emit();
-    console.log(`[Combat] Ki Blast fired! (Charged: ${isCharged}, Multi: ${damageMultiplier})`);
+    this.log(`Fuego de Ki! (Cargado: ${isCharged ? "SÍ" : "NO"})`, "#00ccff");
 
     setTimeout(() => {
       if (this.stats.combatState === "attacking") {
@@ -764,7 +783,7 @@ export class CombatSystem {
     // Si estamos cargando un ataque (normal o especial), cancelamos la carga 
     // para priorizar la recuperación de KI solicitada.
     if (this.stats.combatState === "charging" || this.stats.combatState === "charging_special") {
-      console.log(`[KI] Cancelling active charge (${this.stats.combatState}) to start recharge.`);
+      this.log(`Cancelando carga (${this.stats.combatState}) para RECARGAR`, "#ffcc00");
       this.cancelCharge();
     }
 
@@ -772,10 +791,18 @@ export class CombatSystem {
     if (this.stats.enemyAttacking) return false;
     this.setState("recharging");
 
-    console.log(`[KI] Starting recharge. Current: ${this.stats.playerKi.toFixed(0)}`);
+    this.log(`Iniciando recarga de KI...`, "#cc44ff");
 
     this.rechargeIntervalRef = setInterval(() => {
-      const nextKi = this.stats.playerKi + 5;
+      // Bono de Voz: si hubo actividad de voz reciente, recarga el doble
+      const isGritando = (Date.now() - this.lastVoiceActivity) < 1500;
+      const kiGain = isGritando ? 12 : 5;
+      
+      if (isGritando && Math.random() > 0.8) {
+        this.log("¡RECARGA POTENCIADA POR GRITO! ⚡⚡", "#ffff00");
+      }
+
+      const nextKi = this.stats.playerKi + kiGain;
       this.stats.playerKi = Math.min(this.stats.maxKi, nextKi);
       this.emit();
       
@@ -810,6 +837,8 @@ export class CombatSystem {
     // El defensor PIERDE NP (Salud/Resistencia), el atacante GANA NP (Dominio)
     this.stats.enemyNP = Math.max(0, this.stats.enemyNP - finalDamage * 2.0); // Más castigo al recibir daño
     this.stats.playerNP = Math.min(100000, this.stats.playerNP + damage * 0.8);
+    
+    this.log(`¡IMPACTO! -${finalDamage.toFixed(0)} NP AL ENEMIGO`, "#00ff88");
     this.emit();
     this.checkVictoryCondition();
   }
@@ -838,6 +867,13 @@ export class CombatSystem {
     if (this.stats.gameOver) return;
     this.stats.gameOver = true;
     this.stats.winner = winner;
+    
+    if (winner === "player") {
+        this.log("¡VICTORIA! HAS DERROTADO AL ENEMIGO", "#00ff00");
+    } else {
+        this.log("¡DERROTA! EL ENEMIGO TE HA VENCIDO", "#ff4444");
+    }
+
     // Detener IA del enemigo
     if (this.enemyAIInterval) {
       clearTimeout(this.enemyAIInterval);
@@ -893,11 +929,32 @@ export class CombatSystem {
   // ============================================
   applyVoiceBonus(attackType: string): void {
     if (this.stats.gameOver) return;
-    // +100 NP por gritar el nombre del ataque (escalado a 100k)
-    const bonus = 100;
+    
+    let bonus = 100;
+    let message = `Bonus de Voz: +${bonus} NP (${attackType})`;
+    let color = "#ffff00";
+
+    // Si es un ataque básico y hay un trigger de voz reciente (ha, ja, pum)
+    if (attackType === "basic" || attackType === "ki_blast") {
+        if (this.lastVoiceTrigger === "blast_bonus" && (Date.now() - this.lastVoiceTriggerTime < 800)) {
+            bonus = 500;
+            message = "¡ATAQUE POTENCIADO! (Ha/Ja/Pum) 🔥";
+            color = "#ff8800";
+        }
+    }
+
     this.stats.playerNP = Math.min(100000, this.stats.playerNP + bonus);
-    console.log(`[Voice Bonus] +${bonus} NP por gritar ${attackType}!`);
+    this.log(message, color);
     this.emit();
+  }
+
+  public registerVoiceActivity(): void {
+    this.lastVoiceActivity = Date.now();
+  }
+
+  public registerVoiceTrigger(id: string): void {
+    this.lastVoiceTrigger = id;
+    this.lastVoiceTriggerTime = Date.now();
   }
 
   // ============================================
@@ -935,6 +992,6 @@ export class CombatSystem {
    */
   public setAvailablePowers(powers: string[]): void {
     this.availablePowers = powers;
-    console.log(`[CombatSystem] Poderes disponibles: ${powers.join(", ")}`);
+    this.log(`Poderes: ${powers.join(", ")}`, "#aaaaaa");
   }
 }

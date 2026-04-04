@@ -7,6 +7,7 @@ import gokuConfig from "../models/goku.json";
 
 export type VoiceCommand = string | null;
 type VoiceCommandCallback = (command: VoiceCommand, transcript: string) => void;
+type SpeechCallback = (transcript: string) => void;
 
 function normalizeText(text: string): string {
   return text.toLowerCase().trim().replace(/[^a-z\s]/g, "");
@@ -20,6 +21,10 @@ declare class SpeechRecognition extends EventTarget {
   onresult: ((event: SpeechRecognitionEvent) => void) | null;
   onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
   onend: (() => void) | null;
+  onstart: (() => void) | null;
+  onaudiostart: (() => void) | null;
+  onsoundstart: (() => void) | null;
+  onspeechstart: (() => void) | null;
   start(): void;
   stop(): void;
 }
@@ -37,6 +42,7 @@ export class VoiceRecognizer {
   private recognition: SpeechRecognition | null = null;
   private isListening = false;
   private callbacks: VoiceCommandCallback[] = [];
+  private speechCallbacks: SpeechCallback[] = [];
   private statusCallbacks: Array<(active: boolean, transcript: string) => void> = [];
   private available = false;
   private restartTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -58,12 +64,30 @@ export class VoiceRecognizer {
     rec.continuous = true;
     rec.interimResults = true;
     rec.lang = "es-ES";
+    
+    rec.onstart = () => console.log("[VoiceRecognizer] Recognition started (onstart)");
+    rec.onaudiostart = () => console.log("[VoiceRecognizer] Audio capture started");
+    rec.onsoundstart = () => console.log("[VoiceRecognizer] Sound detected");
+    rec.onspeechstart = () => console.log("[VoiceRecognizer] Speech detected (onspeechstart)");
+    rec.onend = () => {
+      console.log("[VoiceRecognizer] Recognition ended (onend)");
+      if (this.isListening) {
+        console.log("[VoiceRecognizer] Restarting recognition...");
+        this.restartTimeout = setTimeout(() => {
+          try {
+            this.recognition?.start();
+          } catch (_) {}
+        }, 300);
+      }
+    };
 
     rec.onresult = (event: SpeechRecognitionEvent) => {
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
         const transcript = result[0].transcript;
         const normalizedTranscript = normalizeText(transcript);
+        
+        console.log(`[VoiceRecognizer] Result: "${transcript}" (isFinal: ${result.isFinal})`);
         
         let matchedCommand: string | null = null;
 
@@ -86,6 +110,7 @@ export class VoiceRecognizer {
           this.notifyCommand(matchedCommand, transcript);
         }
 
+        this.notifySpeech(transcript);
         this.statusCallbacks.forEach((cb) => cb(true, transcript));
       }
     };
@@ -95,18 +120,10 @@ export class VoiceRecognizer {
 
     rec.onerror = (event: SpeechRecognitionErrorEvent) => {
       if (event.error === "no-speech") return;
-      console.warn("[VoiceRecognizer] Error:", event.error);
+      console.error("[VoiceRecognizer] Speech Recognition Error:", event.error);
     };
 
-    rec.onend = () => {
-      if (this.isListening) {
-        this.restartTimeout = setTimeout(() => {
-          try {
-            this.recognition?.start();
-          } catch (_) {}
-        }, 300);
-      }
-    };
+    // rec.onend is now handled above for consistency
   }
 
   isAvailable(): boolean {
@@ -124,10 +141,11 @@ export class VoiceRecognizer {
   start(): void {
     if (!this.available || this.isListening) return;
     this.isListening = true;
+    console.log("[VoiceRecognizer] Starting recognition (continuous: true)...");
     try {
       this.recognition?.start();
-    } catch (_) {
-      // Puede lanzar si ya esta activo
+    } catch (e) {
+      console.error("[VoiceRecognizer] Error starting recognition:", e);
     }
   }
 
@@ -148,6 +166,14 @@ export class VoiceRecognizer {
 
   onStatus(callback: (active: boolean, transcript: string) => void): void {
     this.statusCallbacks.push(callback);
+  }
+
+  onSpeech(callback: SpeechCallback): void {
+    this.speechCallbacks.push(callback);
+  }
+
+  private notifySpeech(transcript: string): void {
+    this.speechCallbacks.forEach((cb) => cb(transcript));
   }
 
   private notifyCommand(command: VoiceCommand, transcript: string): void {
