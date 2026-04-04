@@ -71,19 +71,19 @@ const STATE_COLORS: Record<CombatState, string> = {
 
 function getNPColor(np: number): string {
   if (np >= 150000) return "#ffffff";
-  if (np >= 70000)  return "#ff8800";
-  if (np >= 30000)  return "#ffcc00";
-  if (np >= 10000)  return "#00ecff";
-  if (np >= 3000)   return "#00ff88";
+  if (np >= 70000) return "#ff8800";
+  if (np >= 30000) return "#ffcc00";
+  if (np >= 10000) return "#00ecff";
+  if (np >= 3000) return "#00ff88";
   return "#aabbcc";
 }
 
 function getNPRange(np: number): string {
   if (np >= 150000) return "TRASCENDENTE";
-  if (np >= 70000)  return "DOMINANTE";
-  if (np >= 30000)  return "ELEVADO";
-  if (np >= 10000)  return "FUERTE";
-  if (np >= 3000)   return "ESTABLE";
+  if (np >= 70000) return "DOMINANTE";
+  if (np >= 30000) return "ELEVADO";
+  if (np >= 10000) return "FUERTE";
+  if (np >= 3000) return "ESTABLE";
   return "DEBILITADO";
 }
 
@@ -584,8 +584,8 @@ export class VRHud {
     parent.addControl(lbl);
 
     // Valor numérico (AHORA ES VISIBLE)
-    const val = new TextBlock(`${label}-val`, "100"); 
-    val.isVisible = true; 
+    const val = new TextBlock(`${label}-val`, "100");
+    val.isVisible = true;
     val.color = "white";
     val.fontSize = 18;
     val.fontStyle = "bold";
@@ -667,40 +667,40 @@ export class VRHud {
     });
 
     const camPos = xrCamera.globalPosition;
-    
+
     // Calcular el vector de visión "hacia adelante" del jugador omitiendo el pitch (Y=0)
     const forward = xrCamera.getDirection(new Vector3(0, 0, 1));
     forward.y = 0;
     if (forward.lengthSquared() === 0) forward.z = 1;
     forward.normalize();
-    
+
     // Derecha es producto cruz entre Y y Forward
     const right = Vector3.Cross(Vector3.Up(), forward).normalize();
     const up = Vector3.Up();
 
     // Función auxiliar para plantar paneles alrededor del jugador
     const place = (mesh: any, xLocal: number, yLocal: number, zLocal: number) => {
-        mesh.position = camPos
-            .add(right.scale(xLocal))
-            .add(up.scale(yLocal))
-            .add(forward.scale(zLocal));
-            
-        // El HUD mira hacia el jugador (el frente por defecto de un Plano en BJS es +Z local o -Z según ADT)
-        // Con lookAt, el panel girará para enfocarse en la cabeza del jugador
-        mesh.lookAt(camPos, Math.PI);
+      mesh.position = camPos
+        .add(right.scale(xLocal))
+        .add(up.scale(yLocal))
+        .add(forward.scale(zLocal));
+
+      // El HUD mira hacia el jugador (el frente por defecto de un Plano en BJS es +Z local o -Z según ADT)
+      // Con lookAt, el panel girará para enfocarse en la cabeza del jugador
+      mesh.lookAt(camPos, Math.PI);
     };
 
     // Radios de distancia local (X, Y relativo al visor, Z)
-    place(this.playerPanel, -0.85,  0.40, 1.3);
-    place(this.enemyPanel,   0.85,  0.40, 1.3);
-    
-    place(this.attackPanel,  0.00,  0.75, 1.4);
+    place(this.playerPanel, -0.85, 0.40, 1.3);
+    place(this.enemyPanel, 0.85, 0.40, 1.3);
+
+    place(this.attackPanel, 0.00, 0.75, 1.4);
     place(this.defensePanel, 0.00, -0.60, 1.4);
-    
-    place(this.statusPanel,  0.00,  0.35, 1.25);
-    
+
+    place(this.statusPanel, 0.00, 0.35, 1.25);
+
     // Debug panel: centrado
-    place(this.debugPanel,  0.00, -0.40, 1.3);
+    place(this.debugPanel, 0.00, -0.40, 1.3);
 
     this.show();
   }
@@ -757,13 +757,13 @@ export class VRHud {
     const pNP = stats.playerNP || 10000;
     const pNPPct = (pNP / 100000); // ADT utiliza 0-1 para widths habitualmente o píxeles. En rectángulos es píxeles o porcentaje.
     const pKI = Math.max(0, Math.min(100, (stats.playerKi / stats.maxKi) * 100));
-    
+
     this.playerNPBar.width = `${Math.min(100, pNPPct * 100)}%`;
     this.playerNPBar.background = getNPColor(pNP);
-    this.playerNPText.text = pNP.toLocaleString(); 
+    this.playerNPText.text = pNP.toLocaleString();
     this.playerKIBar.width = `${pKI}%`;
     this.playerKIText.text = `${stats.playerKi.toFixed(0)}`;
-    
+
     // Actualizar ESTADO
     const pEstadoText = STATE_LABELS[stats.combatState as CombatState] || "NEUTRAL";
     const pEstadoColor = STATE_COLORS[stats.combatState as CombatState] || "#00ff88";
@@ -774,13 +774,13 @@ export class VRHud {
     const eNP = stats.enemyNP || 10000;
     const eNPPct = (eNP / 100000);
     const eKI = Math.max(0, Math.min(100, (stats.enemyKi / stats.enemyMaxKi) * 100));
-    
+
     this.enemyNPBar.width = `${Math.min(100, eNPPct * 100)}%`;
     this.enemyNPBar.background = getNPColor(eNP);
     this.enemyNPText.text = eNP.toLocaleString();
     this.enemyKIBar.width = `${eKI}%`;
     this.enemyKIText.text = `${stats.enemyKi.toFixed(0)}`;
-    
+
     // Actualizar ESTADO
     const eEstadoText = STATE_LABELS[stats.combatState as CombatState] || "NEUTRAL";
     const eEstadoColor = STATE_COLORS[stats.combatState as CombatState] || "#ff4444";
@@ -795,7 +795,7 @@ export class VRHud {
   /** Oculta botones si no hay KI suficiente */
   private filterActionsByKi(stats: GameStats): void {
     if (!this.attackRow || !this.defenseRow) return;
-    
+
     const allBtns = [...this.attackRow.getDescendants(), ...this.defenseRow.getDescendants()];
     for (const ctrl of allBtns) {
       if (ctrl instanceof Button) {
@@ -809,7 +809,7 @@ export class VRHud {
   private updateActionKiCounter(stats: GameStats): void {
     const kiText = `KI: ${stats.playerKi.toFixed(0)}`;
     const kiColor = stats.playerKi > 20 ? "#00ccff" : "#ff4444";
-    
+
     // Podríamos añadir un pequeño indicador flotante o simplemente actualizar el título
     if (this.attackTitle && this.currentHudType === "normal") {
       this.attackTitle.text = `⚔ ATAQUES  [${kiText}]`;
@@ -854,17 +854,17 @@ export class VRHud {
 
       // Complementos (en el panel de defensa)
       this.makeActionBtn(this.defenseRow, "R", "Recargar KI", "#cc44ff", "#220033", () => c.rechargeKi(), 0);
-    } 
+    }
     else if (type === "defense") {
       this.attackPanel.isVisible = false; // Ocultar ataques si estamos bajo fuego
       this.defensePanel.isVisible = true;
       this.defenseTitle!.text = `⚠️ ¡CUIDADO! VIENE: ${stats.enemyAttackName}`;
-      
+
       const attType = stats.enemyAttackType || "basic";
 
       if (attType === "basic") {
         this.makeActionBtn(this.defenseRow, "S", "Bloqueo Seguro", "#00ff88", "#002211", () => c.activateBlock(), 15);
-        this.makeActionBtn(this.defenseRow, "D", "Esquiva",        "#66ccff", "#001122", () => c.activateDodge(), 5);
+        this.makeActionBtn(this.defenseRow, "D", "Esquiva", "#66ccff", "#001122", () => c.activateDodge(), 5);
       } else {
         // Ataques especiales o cargados
         this.makeActionBtn(this.defenseRow, "S", "Desvío Preciso", "#ff8800", "#331100", () => c.activateDeflect(), 10);
@@ -876,11 +876,11 @@ export class VRHud {
       this.attackPanel.isVisible = true;
       this.defensePanel.isVisible = false;
       this.attackTitle!.text = "👊 PUÑO DE HIERRO (MELEE)";
-      
-      this.makeActionBtn(this.attackRow, "A", "Rápido",   "#00ff88", "#002211", () => c.meleeAttack("light"), 0);
+
+      this.makeActionBtn(this.attackRow, "A", "Rápido", "#00ff88", "#002211", () => c.meleeAttack("light"), 0);
       this.makeActionBtn(this.attackRow, "S", "Múltiple", "#66ccff", "#001122", () => c.meleeAttack("heavy"), 0);
-      this.makeActionBtn(this.attackRow, "D", "Cargado",  "#ffcc00", "#332200", () => c.meleeAttack("charged"), 0);
-      this.makeActionBtn(this.attackRow, "W", "Vanish",   "#cc44ff", "#220033", () => c.meleeAttack("vanish"), 10);
+      this.makeActionBtn(this.attackRow, "D", "Cargado", "#ffcc00", "#332200", () => c.meleeAttack("charged"), 0);
+      this.makeActionBtn(this.attackRow, "W", "Vanish", "#cc44ff", "#220033", () => c.meleeAttack("vanish"), 10);
     }
   }
 
@@ -982,13 +982,13 @@ export class VRHud {
 
   showToast(message: string, color: string = "white", duration: number = 2000): void {
     if (!this.statusText || !this.statusBg) return;
-    
+
     this.statusText.text = message;
     this.statusText.color = color;
     this.statusBg.isVisible = true;
-    
+
     if (this.toastTimeout) clearTimeout(this.toastTimeout);
-    
+
     if (duration > 0) {
       this.toastTimeout = setTimeout(() => {
         this.hideToast();
@@ -999,13 +999,13 @@ export class VRHud {
   hideToast(): void {
     if (this.statusText) this.statusText.text = "";
     if (this.statusBg) {
-        this.statusBg.background = "rgba(0,0,0,0)";
-        this.statusBg.thickness = 0;
-        this.statusBg.isVisible = false;
+      this.statusBg.background = "rgba(0,0,0,0)";
+      this.statusBg.thickness = 0;
+      this.statusBg.isVisible = false;
     }
     if (this.toastTimeout) {
-        clearTimeout(this.toastTimeout);
-        this.toastTimeout = null;
+      clearTimeout(this.toastTimeout);
+      this.toastTimeout = null;
     }
   }
 
@@ -1033,7 +1033,7 @@ export class VRHud {
     borderColor: string
   ): Ellipse {
     const glowColor = borderColor === "#00ccff" ? "rgba(0,200,255,0.5)" : "rgba(255,60,60,0.5)";
-    
+
     // Glow exterior
     const glow = new Ellipse("avatar-glow");
     glow.width = "90px";
