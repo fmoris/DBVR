@@ -10,37 +10,37 @@
  */
 
 export enum GestureType {
-  IDLE        = "IDLE",
-  CHARGING    = "CHARGING",
-  ATTACKING   = "ATTACKING",
-  BLOCKING    = "BLOCKING",
-  PARRYING    = "PARRYING",
-  RECHARGING  = "RECHARGING",
+  IDLE = "IDLE",
+  CHARGING = "CHARGING",
+  ATTACKING = "ATTACKING",
+  BLOCKING = "BLOCKING",
+  PARRYING = "PARRYING",
+  RECHARGING = "RECHARGING",
   RECHARGE_PREP = "RECHARGE_PREP",
-  KAMEHAMEHA  = "KAMEHAMEHA",
+  KAMEHAMEHA = "KAMEHAMEHA",
   KAMEHAMEHA_PREP = "KAMEHAMEHA_PREP",
-  KI_BLAST_L  = "KI_BLAST_L",
-  KI_BLAST_R  = "KI_BLAST_R",
+  KI_BLAST_L = "KI_BLAST_L",
+  KI_BLAST_R = "KI_BLAST_R",
   CHARGED_KI_BLAST_L = "CHARGED_KI_BLAST_L",
   CHARGED_KI_BLAST_R = "CHARGED_KI_BLAST_R",
 }
 
 export interface HandJoints {
-  wrist:      { x: number; y: number; z: number };
-  indexTip:   { x: number; y: number; z: number };
-  middleTip:  { x: number; y: number; z: number };
-  ringTip:    { x: number; y: number; z: number };
-  littleTip:  { x: number; y: number; z: number };
-  thumbTip:   { x: number; y: number; z: number };
+  wrist: { x: number; y: number; z: number };
+  indexTip: { x: number; y: number; z: number };
+  middleTip: { x: number; y: number; z: number };
+  ringTip: { x: number; y: number; z: number };
+  littleTip: { x: number; y: number; z: number };
+  thumbTip: { x: number; y: number; z: number };
 }
 
 // Nombres de joints en la API WebXR Hand Tracking (estándar W3C)
 const JOINT_NAMES = {
-  wrist:     "wrist",
-  thumbTip:  "thumb-tip",
-  indexTip:  "index-finger-tip",
+  wrist: "wrist",
+  thumbTip: "thumb-tip",
+  indexTip: "index-finger-tip",
   middleTip: "middle-finger-tip",
-  ringTip:   "ring-finger-tip",
+  ringTip: "ring-finger-tip",
   littleTip: "little-finger-tip",
 } as const;
 
@@ -66,8 +66,8 @@ export function extractHandJoints(hand: any): HandJoints | null {
       if (typeof hand.getJointMesh === "function") {
         const mesh = hand.getJointMesh(name);
         if (mesh) {
-           mesh.computeWorldMatrix(true);
-           pos = mesh.getAbsolutePosition();
+          mesh.computeWorldMatrix(true);
+          pos = mesh.getAbsolutePosition();
         }
       }
 
@@ -75,8 +75,8 @@ export function extractHandJoints(hand: any): HandJoints | null {
       if (!pos && hand._jointMeshes instanceof Map) {
         const mesh = hand._jointMeshes.get(name);
         if (mesh) {
-           mesh.computeWorldMatrix(true);
-           pos = mesh.getAbsolutePosition();
+          mesh.computeWorldMatrix(true);
+          pos = mesh.getAbsolutePosition();
         }
       }
 
@@ -84,8 +84,8 @@ export function extractHandJoints(hand: any): HandJoints | null {
       if (!pos && Array.isArray(hand.jointMeshes)) {
         const mesh = hand.jointMeshes[fallbackIdx];
         if (mesh) {
-           mesh.computeWorldMatrix(true);
-           pos = mesh.getAbsolutePosition();
+          mesh.computeWorldMatrix(true);
+          pos = mesh.getAbsolutePosition();
         }
       }
 
@@ -93,9 +93,9 @@ export function extractHandJoints(hand: any): HandJoints | null {
       if (!pos && hand.joints && typeof hand.joints === "object") {
         const j = hand.joints[name] ?? hand.joints[fallbackIdx];
         if (j) {
-           if (typeof j.getAbsolutePosition === "function") pos = j.getAbsolutePosition();
-           else if (j.position) pos = j.position;
-           else if (j.x !== undefined) pos = j;
+          if (typeof j.getAbsolutePosition === "function") pos = j.getAbsolutePosition();
+          else if (j.position) pos = j.position;
+          else if (j.x !== undefined) pos = j;
         }
       }
 
@@ -105,11 +105,11 @@ export function extractHandJoints(hand: any): HandJoints | null {
   };
 
   const joints: HandJoints = {
-    wrist:     get(JOINT_NAMES.wrist,     0),
-    thumbTip:  get(JOINT_NAMES.thumbTip,  4),
-    indexTip:  get(JOINT_NAMES.indexTip,  8),
+    wrist: get(JOINT_NAMES.wrist, 0),
+    thumbTip: get(JOINT_NAMES.thumbTip, 4),
+    indexTip: get(JOINT_NAMES.indexTip, 8),
     middleTip: get(JOINT_NAMES.middleTip, 12),
-    ringTip:   get(JOINT_NAMES.ringTip,   16),
+    ringTip: get(JOINT_NAMES.ringTip, 16),
     littleTip: get(JOINT_NAMES.littleTip, 20),
   };
 
@@ -150,26 +150,26 @@ export enum StaticPose {
 
 // Mapeo de strings de powers.json a StaticPose
 const POSE_STRING_MAP: Record<string, StaticPose> = {
-  "hands_clasped_at_waist":         StaticPose.PALMS_HIP_RIGHT,
-  "palms_forward_push":            StaticPose.PALMS_FORWARD_STACKED,
-  "hands_left_shoulder_crossed":   StaticPose.HANDS_LEFT_SHOULDER,
-  "arms_extended_horizontally":    StaticPose.ARMS_HORIZONTAL,
-  "palms_forward_together":        StaticPose.PALMS_TOGETHER,
-  "arms_raised_to_sky":            StaticPose.ARMS_UP,
-  "arms_throw_forward":             StaticPose.ARMS_THROW,
-  "arms_crossed_chest_look_up":    StaticPose.ARMS_CROSSED_CHEST,
-  "arms_spread_wide_roar":         StaticPose.ARMS_SPREAD,
-  "palm_forward_aim":              StaticPose.PALM_AIM,
-  "clench_fist":                   StaticPose.FIST_CLENCH,
-  "fist_forward":                  StaticPose.FIST_FORWARD_R,
-  "palm_stop":                     StaticPose.PALM_STOP_R
+  "hands_clasped_at_waist": StaticPose.PALMS_HIP_RIGHT,
+  "palms_forward_push": StaticPose.PALMS_FORWARD_STACKED,
+  "hands_left_shoulder_crossed": StaticPose.HANDS_LEFT_SHOULDER,
+  "arms_extended_horizontally": StaticPose.ARMS_HORIZONTAL,
+  "palms_forward_together": StaticPose.PALMS_TOGETHER,
+  "arms_raised_to_sky": StaticPose.ARMS_UP,
+  "arms_throw_forward": StaticPose.ARMS_THROW,
+  "arms_crossed_chest_look_up": StaticPose.ARMS_CROSSED_CHEST,
+  "arms_spread_wide_roar": StaticPose.ARMS_SPREAD,
+  "palm_forward_aim": StaticPose.PALM_AIM,
+  "clench_fist": StaticPose.FIST_CLENCH,
+  "fist_forward": StaticPose.FIST_FORWARD_R,
+  "palm_stop": StaticPose.PALM_STOP_R
 };
 
 const Combos: Record<string, StaticPose[]> = {
-  "RECHARGING":   [StaticPose.FISTS_HIGH,       StaticPose.FISTS_SIDES],
-  "KAMEHAMEHA":   [StaticPose.PALMS_HIP_RIGHT,  StaticPose.PALMS_FORWARD_STACKED],
-  "KI_BLAST_L":   [StaticPose.PALM_STOP_L,      StaticPose.PALM_THRUST_L],
-  "KI_BLAST_R":   [StaticPose.PALM_STOP_R,      StaticPose.PALM_THRUST_R],
+  "RECHARGING": [StaticPose.FISTS_HIGH, StaticPose.FISTS_SIDES],
+  "KAMEHAMEHA": [StaticPose.PALMS_HIP_RIGHT, StaticPose.PALMS_FORWARD_STACKED],
+  "KI_BLAST_L": [StaticPose.PALM_STOP_L, StaticPose.PALM_THRUST_L],
+  "KI_BLAST_R": [StaticPose.PALM_STOP_R, StaticPose.PALM_THRUST_R],
   "CHARGED_KI_BLAST_L": [StaticPose.FIST_FORWARD_L, StaticPose.PALM_STOP_L],
   "CHARGED_KI_BLAST_R": [StaticPose.FIST_FORWARD_R, StaticPose.PALM_STOP_R]
 };
@@ -177,7 +177,7 @@ const Combos: Record<string, StaticPose[]> = {
 import powersConfig from "../models/powers.json";
 
 export class GestureRecognizer {
-  private leftHandJoints:  HandJoints | null = null;
+  private leftHandJoints: HandJoints | null = null;
   private rightHandJoints: HandJoints | null = null;
   private currentGesture: GestureType = GestureType.IDLE;
   private frameCount = 0;
@@ -198,11 +198,11 @@ export class GestureRecognizer {
   private allowedPowers: string[] = [];
 
   private gestureCooldownMs: Record<GestureType | string, number> = {
-    [GestureType.IDLE]:       0,
-    [GestureType.ATTACKING]:  600,
-    [GestureType.CHARGING]:   200,
-    [GestureType.BLOCKING]:   150,
-    [GestureType.PARRYING]:   400,
+    [GestureType.IDLE]: 0,
+    [GestureType.ATTACKING]: 600,
+    [GestureType.CHARGING]: 200,
+    [GestureType.BLOCKING]: 150,
+    [GestureType.PARRYING]: 400,
     [GestureType.RECHARGING]: 200,
     [GestureType.RECHARGE_PREP]: 0,
     "KAMEHAMEHA": 1000,
@@ -215,19 +215,19 @@ export class GestureRecognizer {
   private leftVelocityZ: number = 0;
   private rightVelocityZ: number = 0;
 
-  constructor(_scene?: any) {}
+  constructor(_scene?: any) { }
 
   updateHandJoints(hand: "left" | "right", joints: HandJoints): void {
     if (hand === "left") {
-       if (this.leftHandJoints) {
-           this.leftVelocityZ = joints.wrist.z - this.leftHandJoints.wrist.z;
-       }
-       this.leftHandJoints = joints;
+      if (this.leftHandJoints) {
+        this.leftVelocityZ = joints.wrist.z - this.leftHandJoints.wrist.z;
+      }
+      this.leftHandJoints = joints;
     } else {
-       if (this.rightHandJoints) {
-           this.rightVelocityZ = joints.wrist.z - this.rightHandJoints.wrist.z;
-       }
-       this.rightHandJoints = joints;
+      if (this.rightHandJoints) {
+        this.rightVelocityZ = joints.wrist.z - this.rightHandJoints.wrist.z;
+      }
+      this.rightHandJoints = joints;
     }
     this.frameCount++;
     if (this.frameCount % 2 === 0) this.recognizeGesture();
@@ -243,42 +243,42 @@ export class GestureRecognizer {
 
     // 1. RECHARGE_P1
     if (isFistL && isFistR && L.wrist.y > 1.0 && R.wrist.y > 1.0) {
-       poses.push(StaticPose.FISTS_HIGH);
+      poses.push(StaticPose.FISTS_HIGH);
     }
 
     // 2. RECHARGE_P2: Subir límite superior a 1.50m por ergonomía
     const xDist = Math.abs(L.wrist.x - R.wrist.x);
     if (isFistL && isFistR && xDist >= 0.30 && L.wrist.y <= 1.50 && R.wrist.y <= 1.50) {
-       poses.push(StaticPose.FISTS_SIDES);
+      poses.push(StaticPose.FISTS_SIDES);
     }
 
     // 3. KAMEHAMEHA_P1
     if (!isFistL && !isFistR && L.wrist.x > 0.05 && R.wrist.x > 0.05 && L.wrist.y < 1.3 && R.wrist.y < 1.3) {
-       poses.push(StaticPose.PALMS_HIP_RIGHT);
+      poses.push(StaticPose.PALMS_HIP_RIGHT);
     }
 
     // 4. KAMEHAMEHA_P2: Más tolerante
     const rightAboveLeft = R.wrist.y > L.wrist.y;
     const yDist = Math.abs(R.wrist.y - L.wrist.y);
     const closeXZ = Math.abs(L.wrist.x - R.wrist.x) < 0.35 && Math.abs(L.wrist.z - R.wrist.z) < 0.35;
-    const forwardPush = L.wrist.z > 0.3 && R.wrist.z > 0.3; 
+    const forwardPush = L.wrist.z > 0.3 && R.wrist.z > 0.3;
     if (!isFistL && !isFistR && rightAboveLeft && yDist > 0.02 && closeXZ && forwardPush) {
-       poses.push(StaticPose.PALMS_FORWARD_STACKED);
+      poses.push(StaticPose.PALMS_FORWARD_STACKED);
     }
 
     // 5. THRUSTS (Ataques rápidos)
-    // Se requiere aceleración > 0.012 y un desplazamiento mínimo de 9cm desde el inicio
-    if (isOpenL && this.leftVelocityZ > 0.012) {
-        const start = this.leftHandStartPos;
-        if (start && this.dist3(L.wrist, start) > 0.09) {
-            poses.push(StaticPose.PALM_THRUST_L);
-        }
+    // Se requiere aceleración > 0.02 y un desplazamiento mínimo de 15cm desde el inicio
+    if (isOpenL && this.leftVelocityZ > 0.02) {
+      const start = this.leftHandStartPos;
+      if (start && this.dist3(L.wrist, start) > 0.15) {
+        poses.push(StaticPose.PALM_THRUST_L);
+      }
     }
-    if (isOpenR && this.rightVelocityZ > 0.012) {
-        const start = this.rightHandStartPos;
-        if (start && this.dist3(R.wrist, start) > 0.09) {
-            poses.push(StaticPose.PALM_THRUST_R);
-        }
+    if (isOpenR && this.rightVelocityZ > 0.02) {
+      const start = this.rightHandStartPos;
+      if (start && this.dist3(R.wrist, start) > 0.15) {
+        poses.push(StaticPose.PALM_THRUST_R);
+      }
     }
 
     // 6. FIST FORWARD (Carga de Ki Blast)
@@ -313,7 +313,7 @@ export class GestureRecognizer {
     }
     // Final Explosion Prep: brazos cruzados en el pecho
     if (Math.abs(L.wrist.x - R.wrist.x) < 0.2 && L.wrist.y > 1.2 && L.wrist.y < 1.6) {
-       poses.push(StaticPose.ARMS_CROSSED_CHEST);
+      poses.push(StaticPose.ARMS_CROSSED_CHEST);
     }
     // Hakai Prep: apuntar mano palma abierta
     if (isOpenR && R.wrist.z > 0.5) {
@@ -351,14 +351,14 @@ export class GestureRecognizer {
     const isFistR = this.isFist(R);
 
     if (this.activeCombo) {
-        const isLeftCombo = this.activeCombo.endsWith("_L") || this.activeCombo === "KAMEHAMEHA";
-        const isRightCombo = this.activeCombo.endsWith("_R") || this.activeCombo === "KAMEHAMEHA";
+      const isLeftCombo = this.activeCombo.endsWith("_L") || this.activeCombo === "KAMEHAMEHA";
+      const isRightCombo = this.activeCombo.endsWith("_R") || this.activeCombo === "KAMEHAMEHA";
 
-        if ((isLeftCombo && isFistL) || (isRightCombo && isFistR)) {
-            this.cancelCombo("Mano cerrada detectada");
-            this.setGesture(GestureType.IDLE);
-            return;
-        }
+      if ((isLeftCombo && isFistL) || (isRightCombo && isFistR)) {
+        this.cancelCombo("Mano cerrada detectada");
+        this.setGesture(GestureType.IDLE);
+        return;
+      }
     }
 
     const cooldown = this.gestureCooldownMs[this.currentGesture] || 0;
@@ -366,9 +366,9 @@ export class GestureRecognizer {
 
     // BLOQUEO PER-HAND PARA KI BLASTS
     if (this.activeCombo === null) {
-        // No bloqueamos el inicio de combos aquí, lo haremos al intentar disparar
+      // No bloqueamos el inicio de combos aquí, lo haremos al intentar disparar
     }
-    
+
     // 1. Extraer TODAS las Poses Estáticas Atómicas detectadas en este frame
     const detectedPoses = this.evaluateValidPoses(L, R);
 
@@ -397,7 +397,7 @@ export class GestureRecognizer {
             this.activeCombo = comboName;
             this.comboStep = 1;
             this.comboStartTime = now;
-            
+
             // Graba la posición inicial de las manos para medir desplazamiento físico posterior
             this.leftHandStartPos = { ...L.wrist };
             this.rightHandStartPos = { ...R.wrist };
@@ -408,31 +408,31 @@ export class GestureRecognizer {
         // En un combo activo, revisar si la pose esperada está entre las detectadas
         const sequence = this.dynamicCombos[this.activeCombo];
         const expectedNextPose = sequence[this.comboStep];
-        
+
         if (detectedPoses.includes(expectedNextPose)) {
           // Validar charge_time para la Fase 2 (firing) de ataques especiales
           const id = this.activeCombo.toLowerCase();
           const powerData = (powersConfig as any)[id];
-          
+
           if (this.comboStep === 1 && powerData?.charge_time) {
-              const elapsed = (now - this.comboStartTime) / 1000;
-              if (elapsed < powerData.charge_time) {
-                  // Aun no ha cargado lo suficiente para disparar
-                  return;
-              }
+            const elapsed = (now - this.comboStartTime) / 1000;
+            if (elapsed < powerData.charge_time) {
+              // Aun no ha cargado lo suficiente para disparar
+              return;
+            }
           }
 
           this.comboStep++;
           this.consecutiveWrongPoseCount = 0;
           console.log(`[Combo Engine] Avanzando ${this.activeCombo} -> Paso ${this.comboStep}/${sequence.length}`);
-          
+
           if (this.comboStep === sequence.length) {
             console.log(`[Combo Engine] ¡¡COMBO COMPLETADO!! => ${this.activeCombo}`);
             this.setGesture(this.activeCombo as GestureType);
             if (this.activeCombo.startsWith("KI_BLAST")) {
-                this.cancelCombo("Trigger completado");
+              this.cancelCombo("Trigger completado");
             } else {
-                this.lastSpecialEndTime = now;
+              this.lastSpecialEndTime = now;
             }
             return;
           }
@@ -440,7 +440,7 @@ export class GestureRecognizer {
           // Si ninguna de las poses detectadas es ni la esperada ni la anterior del mismo combo...
           this.consecutiveWrongPoseCount++;
           if (this.consecutiveWrongPoseCount >= 3) {
-             this.cancelCombo("Nueva pose detectada (Interrupción)");
+            this.cancelCombo("Nueva pose detectada (Interrupción)");
           }
         } else {
           this.consecutiveWrongPoseCount = 0;
@@ -462,7 +462,7 @@ export class GestureRecognizer {
         this.setGesture(this.activeCombo as GestureType);
         return;
       }
-      
+
       // Emitir PREP states si estamos en iteraciones intermedias
       if (this.activeCombo === "RECHARGING" && this.comboStep === 1) {
         this.setGesture(GestureType.RECHARGE_PREP);
@@ -493,7 +493,7 @@ export class GestureRecognizer {
   public setAllowedPowers(powers: string[]): void {
     this.allowedPowers = powers;
     this.dynamicCombos = { ...Combos }; // Reiniciar con básicos
-    
+
     const powersDict = powersConfig as Record<string, any>;
     for (const id of powers) {
       const details = powersDict[id];
@@ -510,8 +510,8 @@ export class GestureRecognizer {
 
   private setGesture(g: GestureType | string): void {
     if (this.currentGesture !== g) {
-       this.currentGesture = g as GestureType;
-       this.lastGestureTime = Date.now();
+      this.currentGesture = g as GestureType;
+      this.lastGestureTime = Date.now();
     }
   }
 
@@ -521,15 +521,15 @@ export class GestureRecognizer {
 
   getLeftHandJoints() { return this.leftHandJoints; }
   getRightHandJoints() { return this.rightHandJoints; }
-  
+
   getActiveCombo(): string | null { return this.activeCombo; }
   getComboStep(): number { return this.comboStep; }
 
   private isFist(hand: HandJoints): boolean {
-    const threshold = 0.14; 
+    const threshold = 0.14;
     // Evaluamos sólamente índice y medio, ya que el pulgar/meñique de Quest nativo suele alejarse
-    return this.dist3(hand.indexTip, hand.wrist) < threshold && 
-           this.dist3(hand.middleTip, hand.wrist) < threshold;
+    return this.dist3(hand.indexTip, hand.wrist) < threshold &&
+      this.dist3(hand.middleTip, hand.wrist) < threshold;
   }
 
   private dist3(a: { x: number; y: number; z: number }, b: { x: number; y: number; z: number }): number {
@@ -539,12 +539,12 @@ export class GestureRecognizer {
 
   public reset(hand?: "left" | "right" | "both"): void {
     if (!hand || hand === "both") {
-        this.handLockL = true;
-        this.handLockR = true;
+      this.handLockL = true;
+      this.handLockR = true;
     } else if (hand === "left") {
-        this.handLockL = true;
+      this.handLockL = true;
     } else {
-        this.handLockR = true;
+      this.handLockR = true;
     }
     this.currentGesture = GestureType.IDLE;
     this.cancelCombo("Reset explicito (Per-Hand Lock)");
