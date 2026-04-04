@@ -477,7 +477,7 @@ export class CombatSystem {
     }, 800);
   }
 
-  public cancelCharge(): void {
+  private cancelCharge(): void {
     this.stopChargeInterval();
     this.isChargingNormal = false;
     this.activeSpecial = null;
@@ -567,10 +567,9 @@ export class CombatSystem {
         return;
       }
 
-      // Actualizar efectos de carga dinámicos (Phase 14/16/19)
-      // Usamos el charge_time real de powers.json para el crecimiento visual
-      const pData = (powersConfig as any)[type.toLowerCase()];
-      this.vfx.updateChargeEffect(elapsed, type, this.activeSpecialOrigin as any, pData?.charge_time || 2.5);
+      // Actualizar efectos de carga dinámicos (Phase 14/16)
+      // Pasamos la posición actualizada y el tiempo objetivo
+      this.vfx.updateChargeEffect(elapsed, type, this.activeSpecialOrigin as any, minLevel.timeMin);
 
       this.emit();
     }, 100);

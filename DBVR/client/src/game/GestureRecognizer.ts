@@ -267,11 +267,11 @@ export class GestureRecognizer {
       poses.push(StaticPose.PALMS_HIP_RIGHT);
     }
 
-    // 4. KAMEHAMEHA_P2: Más tolerante (Phase 19)
+    // 4. KAMEHAMEHA_P2: Más tolerante
     const rightAboveLeft = R.wrist.y > L.wrist.y;
     const yDist = Math.abs(R.wrist.y - L.wrist.y);
-    const closeXZ = Math.abs(L.wrist.x - R.wrist.x) < 0.45 && Math.abs(L.wrist.z - R.wrist.z) < 0.45;
-    const forwardPush = L.wrist.z > 0.22 && R.wrist.z > 0.22;
+    const closeXZ = Math.abs(L.wrist.x - R.wrist.x) < 0.35 && Math.abs(L.wrist.z - R.wrist.z) < 0.35;
+    const forwardPush = L.wrist.z > 0.3 && R.wrist.z > 0.3;
     if (!isFistL && !isFistR && rightAboveLeft && yDist > 0.02 && closeXZ && forwardPush) {
       poses.push(StaticPose.PALMS_FORWARD_STACKED);
     }

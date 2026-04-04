@@ -342,8 +342,8 @@ export class VFXManager {
       return;
     }
 
-    // Crear esfera de carga más pequeña inicialmente
-    this.chargeMesh = MeshBuilder.CreateSphere("charge", { diameter: 0.3 }, this.scene);
+    // Crear esfera de carga alrededor de la mano o posición centrada
+    this.chargeMesh = MeshBuilder.CreateSphere("charge", { diameter: 0.15 }, this.scene);
     this.chargeMesh.position = position || new Vector3(0.3, 1.4, 0.5);
 
     // Luz de carga
@@ -423,10 +423,10 @@ export class VFXManager {
     }
     
     if (this.chargeMesh) {
-        // La esfera crece de 0.05 a 1.2 (un poco más grande que antes para drama)
-        const baseScale = 0.05 + (1.15 * progress);
+        // La esfera crece de 0.1 a 1.0 durante targetTime (Phase 16)
+        const baseScale = 0.2 + (0.8 * progress);
         // Pequeño jitter/pulso adicional si ya está cargado
-        const pulse = progress >= 1.0 ? (Math.sin(elapsed * 10) * 0.1) : 0;
+        const pulse = progress >= 1.0 ? (Math.sin(elapsed * 10) * 0.05) : 0;
         const s = baseScale + pulse;
         this.chargeMesh.scaling.set(s, s, s);
     }

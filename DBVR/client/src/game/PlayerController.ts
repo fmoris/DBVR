@@ -244,13 +244,6 @@ export class PlayerController {
     }
 
     switch (gesture) {
-      case "IDLE": {
-        if (stats.combatState === "charging_special") {
-            this.combat.cancelCharge();
-            this.vrHud?.showToast("Carga Cancelada", "#ff4444", 1500);
-        }
-        break;
-      }
       case "ATTACKING": {
         const time = performance.now();
         if (time - this.lastBasicAttackTime > 600) {
