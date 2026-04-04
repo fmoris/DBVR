@@ -15,3 +15,5 @@
 - Corregir bugs de WebXR de forma prioritaria (problemas de visualización en Quest 3, joints de manos, etc.).
 - Proponer mejoras estéticas (VFX premium, HUDs 3D elegantes, efectos cinematográficos de cámara lenta).
 - Asegurarse de que las mecánicas sean fieles al universo Dragon Ball (usando el skill de Dragon Ball).
+- Todo lo que me hables y muestres tiene que estar en español.
+- Todo la información mostrada agrega los skills que utilizaste

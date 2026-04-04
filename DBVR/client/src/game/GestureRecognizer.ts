@@ -23,6 +23,10 @@ export enum GestureType {
   KI_BLAST_R = "KI_BLAST_R",
   CHARGED_KI_BLAST_L = "CHARGED_KI_BLAST_L",
   CHARGED_KI_BLAST_R = "CHARGED_KI_BLAST_R",
+  KI_CHARGE_PREP_L = "KI_CHARGE_PREP_L",
+  KI_CHARGE_PREP_R = "KI_CHARGE_PREP_R",
+  GENKIDAMA_PREP = "GENKIDAMA_PREP",
+  GENKIDAMA_FIRE = "GENKIDAMA_FIRE",
 }
 
 export interface HandJoints {
@@ -145,7 +149,17 @@ export enum StaticPose {
   ARMS_CROSSED_CHEST = "ARMS_CROSSED_CHEST",
   ARMS_SPREAD = "ARMS_SPREAD",
   PALM_AIM = "PALM_AIM",
-  FIST_CLENCH = "FIST_CLENCH"
+  FIST_CLENCH = "FIST_CLENCH",
+  // Nuevas poses para Ki Blast 2-Fases
+  KI_PREP = "KI_PREP",
+  KI_FIRE_L = "KI_FIRE_L",
+  KI_FIRE_R = "KI_FIRE_R",
+  KI_CHARGE_PREP_L = "KI_CHARGE_PREP_L",
+  KI_CHARGE_PREP_R = "KI_CHARGE_PREP_R",
+  KI_CHARGE_FIRE_L = "KI_CHARGE_FIRE_L",
+  KI_CHARGE_FIRE_R = "KI_CHARGE_FIRE_R",
+  GENKIDAMA_PREP_POSE = "GENKIDAMA_PREP_POSE",
+  GENKIDAMA_FIRE_POSE = "GENKIDAMA_FIRE_POSE"
 }
 
 // Mapeo de strings de powers.json a StaticPose
@@ -168,10 +182,10 @@ const POSE_STRING_MAP: Record<string, StaticPose> = {
 const Combos: Record<string, StaticPose[]> = {
   "RECHARGING": [StaticPose.FISTS_HIGH, StaticPose.FISTS_SIDES],
   "KAMEHAMEHA": [StaticPose.PALMS_HIP_RIGHT, StaticPose.PALMS_FORWARD_STACKED],
-  "KI_BLAST_L": [StaticPose.PALM_STOP_L, StaticPose.PALM_THRUST_L],
-  "KI_BLAST_R": [StaticPose.PALM_STOP_R, StaticPose.PALM_THRUST_R],
-  "CHARGED_KI_BLAST_L": [StaticPose.FIST_FORWARD_L, StaticPose.PALM_STOP_L],
-  "CHARGED_KI_BLAST_R": [StaticPose.FIST_FORWARD_R, StaticPose.PALM_STOP_R]
+  "KI_BLAST_L": [StaticPose.KI_PREP, StaticPose.KI_FIRE_L],
+  "KI_BLAST_R": [StaticPose.KI_PREP, StaticPose.KI_FIRE_R],
+  "CHARGED_KI_BLAST_R": [StaticPose.KI_CHARGE_PREP_R, StaticPose.KI_CHARGE_FIRE_R],
+  "GENKIDAMA": [StaticPose.GENKIDAMA_PREP_POSE, StaticPose.GENKIDAMA_FIRE_POSE]
 };
 
 import powersConfig from "../models/powers.json";
@@ -180,8 +194,10 @@ export class GestureRecognizer {
   private leftHandJoints: HandJoints | null = null;
   private rightHandJoints: HandJoints | null = null;
   private currentGesture: GestureType = GestureType.IDLE;
+  private lastBasicAttackHand: "left" | "right" | null = null;
   private frameCount = 0;
-  private eyeLevelY: number = 1.6; // Valor por defecto (Phase 15)
+  private eyeLevelY: number = 1.6; 
+  private cameraForward: { x: number, y: number, z: number } = { x: 0, y: 0, z: 1 };
 
   // Estado del Motor de Combos
   private activeCombo: string | null = null;
@@ -243,6 +259,10 @@ export class GestureRecognizer {
     this.eyeLevelY = y;
   }
 
+  public setCameraForward(f: { x: number, y: number, z: number }): void {
+    this.cameraForward = f;
+  }
+
   private evaluateValidPoses(L: HandJoints, R: HandJoints): StaticPose[] {
     const poses: StaticPose[] = [];
     const isFistL = this.isFist(L);
@@ -300,18 +320,72 @@ export class GestureRecognizer {
     if (isOpenL) poses.push(StaticPose.PALM_STOP_L);
     if (isOpenR) poses.push(StaticPose.PALM_STOP_R);
 
-    // 8. ESPECIALES
-    // Genkidama Prep: brazos al cielo (Basado en altura de ojos Phase 15)
-    if (L.wrist.y > this.eyeLevelY && R.wrist.y > this.eyeLevelY) {
-      poses.push(StaticPose.ARMS_UP);
+    // 9. KI BLAST 2-FASES (Phase 1)
+    // KI_PREP: Manos a los hombros, dedos arriba
+    const nearShoulderL = L.wrist.y > this.eyeLevelY - 0.35 && Math.abs(L.wrist.x) > 0.15 && L.wrist.z < 0.25;
+    const nearShoulderR = R.wrist.y > this.eyeLevelY - 0.35 && Math.abs(R.wrist.x) > 0.15 && R.wrist.z < 0.25;
+    
+    if (isOpenL && isOpenR && nearShoulderL && nearShoulderR) {
+        poses.push(StaticPose.KI_PREP);
     }
-    // Genkidama Fire: brazos lanzados adelante
-    if (L.wrist.y < 1.4 && R.wrist.y < 1.4 && L.wrist.z > 0.4 && R.wrist.z > 0.4) {
-      poses.push(StaticPose.ARMS_THROW);
+
+    // KI_FIRE: Una mano extendida, la otra en el pecho
+    const isExtendedL = L.wrist.z > 0.42;
+    const isExtendedR = R.wrist.z > 0.42;
+    const isAtChestL = L.wrist.z < 0.25 && L.wrist.y < this.eyeLevelY - 0.2 && L.wrist.y > 0.8;
+    const isAtChestR = R.wrist.z < 0.25 && R.wrist.y < this.eyeLevelY - 0.2 && R.wrist.y > 0.8;
+
+    if (isOpenL && isExtendedL && isAtChestR && this.leftVelocityZ > 0.01) {
+        poses.push(StaticPose.KI_FIRE_L);
+    }
+    if (isOpenR && isExtendedR && isAtChestL && this.rightVelocityZ > 0.01) {
+        poses.push(StaticPose.KI_FIRE_R);
+    }
+
+    // 10. KI BLAST CHARGE (Phase 1)
+    // Una mano extendida (dedos arriba), otra debajo del estómago (Y < 0.75m)
+    const isAtStomachL = L.wrist.y < 0.75;
+    const isAtStomachR = R.wrist.y < 0.75;
+
+    if (isOpenL && isExtendedL && isAtStomachR) {
+        poses.push(StaticPose.KI_CHARGE_PREP_L);
+    }
+    if (isOpenR && isExtendedR && isAtStomachL) {
+        poses.push(StaticPose.KI_CHARGE_PREP_R);
+    }
+
+    // Trigger de disparo cargado: Movimiento brusco (Z o Y) mientras se mantiene la extensión
+    const suddenMoveL = Math.abs(this.leftVelocityZ) > 0.015 || Math.abs(L.wrist.y - (this.leftHandJoints?.wrist.y ?? L.wrist.y)) > 0.015;
+    const suddenMoveR = Math.abs(this.rightVelocityZ) > 0.015 || Math.abs(R.wrist.y - (this.rightHandJoints?.wrist.y ?? R.wrist.y)) > 0.015;
+
+    if (isExtendedL && suddenMoveL) {
+        poses.push(StaticPose.KI_CHARGE_FIRE_L);
+    }
+    if (isExtendedR && suddenMoveR) {
+        poses.push(StaticPose.KI_CHARGE_FIRE_R);
+    }
+
+    // 11. GENKIDAMA (Rediseñada)
+    const isLookingUp = this.cameraForward.y > 0.75; // Mirando casi 90 grados al cielo
+    
+    // Genkidama Prep: Brazos arriba, manos abiertas, dedos hacia atrás
+    const handsHigh = L.wrist.y > this.eyeLevelY + 0.2 && R.wrist.y > this.eyeLevelY + 0.2;
+    // "Dedos atrás" relativo al cuerpo: indexTip.z es menor que wrist.z (hacia atrás del jugador)
+    const fingersBackL = L.indexTip.z < L.wrist.z - 0.05;
+    const fingersBackR = R.indexTip.z < R.wrist.z - 0.05;
+
+    if (handsHigh && isOpenL && isOpenR && fingersBackL && fingersBackR && isLookingUp) {
+        poses.push(StaticPose.GENKIDAMA_PREP_POSE);
+    }
+
+    // Genkidama Fire: Brazos bajando rectos hacia el frente
+    const armsForward = L.wrist.z > 0.35 && R.wrist.z > 0.35 && L.wrist.y < 1.4 && R.wrist.y < 1.4;
+    if (armsForward) {
+        poses.push(StaticPose.GENKIDAMA_FIRE_POSE);
     }
 
     return poses;
-  }
+}
 
   private recognizeGesture(): void {
     const now = Date.now();
@@ -391,8 +465,12 @@ export class GestureRecognizer {
             }
 
             // Anti-spam para Ki Blasts si acabamos de lanzar un especial
-            if (comboName.startsWith("KI_BLAST") && now - this.lastSpecialEndTime < 800) {
-              continue;
+            if (comboName.startsWith("KI_BLAST")) {
+              if (now - this.lastSpecialEndTime < 800) continue;
+              
+              // Alternancia forzada: no permitir la misma mano dos veces seguidas
+              if (comboName === "KI_BLAST_L" && this.lastBasicAttackHand === "left") continue;
+              if (comboName === "KI_BLAST_R" && this.lastBasicAttackHand === "right") continue;
             }
 
             console.log(`[Combo Engine] Iniciando combo: ${comboName}`);
@@ -419,7 +497,13 @@ export class GestureRecognizer {
           if (this.comboStep === 1 && powerData?.charge_time) {
             const elapsed = (now - this.comboStartTime) / 1000;
             if (elapsed < powerData.charge_time) {
-              // Aun no ha cargado lo suficiente para disparar
+              // Si se detecta la pose final antes de tiempo, CANCELAR
+              if (detectedPoses.includes(sequence[sequence.length - 1])) {
+                 console.warn(`[Combo Engine] DISPARO PREMATURO: ${this.activeCombo}. Cancelando...`);
+                 this.cancelCombo("Disparo prematuro");
+                 this.setGesture("SPECIAL_CANCEL" as GestureType);
+                 return;
+              }
               return;
             }
           }
@@ -432,6 +516,7 @@ export class GestureRecognizer {
             console.log(`[Combo Engine] ¡¡COMBO COMPLETADO!! => ${this.activeCombo}`);
             this.setGesture(this.activeCombo as GestureType);
             if (this.activeCombo.startsWith("KI_BLAST")) {
+              this.lastBasicAttackHand = this.activeCombo === "KI_BLAST_L" ? "left" : "right";
               this.cancelCombo("Trigger completado");
             } else {
               this.lastSpecialEndTime = now;
@@ -472,6 +557,14 @@ export class GestureRecognizer {
       }
       if (this.activeCombo === "KAMEHAMEHA" && this.comboStep === 1) {
         this.setGesture("KAMEHAMEHA_PREP" as GestureType);
+        return;
+      }
+      if (this.activeCombo === "CHARGED_KI_BLAST_L" && this.comboStep === 1) {
+        this.setGesture(GestureType.KI_CHARGE_PREP_L);
+        return;
+      }
+      if (this.activeCombo === "CHARGED_KI_BLAST_R" && this.comboStep === 1) {
+        this.setGesture(GestureType.KI_CHARGE_PREP_R);
         return;
       }
     }

@@ -426,9 +426,16 @@ export class CombatSystem {
     this.stopChargeInterval();
     this.chargeInterval = setInterval(() => {
       this.stats.chargeTime += 0.1;
+      
+      // Actualizar VFX progresivo (Phase 16)
+      if (this.stats.chargeTime > 0.3) {
+        // Obtenemos posición de manos si es posible o usamos una por defecto
+        this.vfx.updateChargeEffect(this.stats.chargeTime, "normal", undefined, 2.0);
+      }
+
       // Consumir KI extra gradualmente despues del primer segundo
       if (this.stats.chargeTime > 1) {
-        this.stats.playerKi = Math.max(0, this.stats.playerKi - KI_COSTS.chargedAttack.perSecond * 0.1);
+        this.stats.playerKi = Math.max(0, this.stats.playerKi - 3); // Costo gradual
       }
       if (this.stats.playerKi <= 0) {
         this.cancelCharge();
@@ -499,7 +506,17 @@ export class CombatSystem {
 
   triggerSpecial(attackName: string, origin?: { x: number, y: number, z: number }): boolean {
     const id = attackName.toLowerCase();
+    const power = (powersConfig as any)[id];
+
     if (this.activeSpecial?.toLowerCase() === id) {
+      // Verificar tiempo minimo (Phase 17 - Regla de Cancelación Prematura)
+      const elapsed = this.stats.chargeTime;
+      if (power && power.charge_time && elapsed < power.charge_time) {
+          this.log(`¡FALLO! Liberación prematura de ${attackName.toUpperCase()}`, "#ff4444");
+          this.cancelSpecial();
+          return false;
+      }
+      
       this.log(`Lanzando ${attackName.toUpperCase()}!`, "#00ff88");
       return this.launchSpecial(id, origin);
     } else if (this.stats.combatState === "neutral") {
@@ -507,6 +524,21 @@ export class CombatSystem {
       return this.beginSpecialCharge(id, origin);
     }
     return false;
+  }
+
+  /**
+   * Cancela el ataque especial actual, deteniendo VFX y reseteando estado.
+   */
+  public cancelSpecial(): void {
+    if (this.stats.combatState === "charging_special" || this.isChargingSpecial || this.activeSpecial) {
+        this.stopChargeInterval();
+        this.activeSpecial = null;
+        this.stats.chargeTime = 0;
+        this.stats.specialType = null;
+        this.vfx.showChargeEffect(false);
+        this.setState("neutral");
+        this.emit();
+    }
   }
 
   /**
@@ -772,7 +804,6 @@ export class CombatSystem {
        const defenderNP = this.stats.enemyNP;
        const diff = attackerNP - defenderNP;
        
-       // Si el atacante es mucho más fuerte (diff > 0), el tiempo es más rápido (scale alto)
        const timeScale = 0.35 + Math.min(0.35, Math.max(-0.2, diff / 50000));
        const duration = 1200 * (1 - Math.min(0.5, Math.max(-0.5, diff / 50000)));
        
@@ -780,15 +811,14 @@ export class CombatSystem {
     }
 
     this.emit();
-    this.log(`Fuego de Ki! (Cargado: ${isCharged ? "SÍ" : "NO"})`, "#00ccff");
 
     setTimeout(() => {
-      if (this.stats.combatState === "attacking") {
+      if (this.stats.combatState === "attacking" && this.stats.currentAttack === "ki_blast") {
         this.setState("neutral");
         this.stats.currentAttack = null;
         this.emit();
       }
-    }, 400);
+    }, 200); // Reducido de 400 a 200 para permitir mayor cadencia
 
     return true;
   }

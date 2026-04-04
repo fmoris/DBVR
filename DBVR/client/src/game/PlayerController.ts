@@ -11,6 +11,7 @@ import { InputManager } from "./InputManager";
 import { VRHud } from "./VRHud";
 import powersData from "../models/powers.json";
 import gokuConfig from "../models/goku.json";
+import { GestureType } from "./GestureRecognizer";
 
 export interface PlayerControllerConfig {
     scene: Scene;
@@ -36,10 +37,9 @@ export class PlayerController {
   private lastBasicAttackTime: number = 0;
   private leftChargePower: number = 1.0;
   private rightChargePower: number = 1.0; 
-  private leftChargeStartKi: number = 0;
-  private rightChargeStartKi: number = 0;
   private lastChargeUpdateTime: number = 0;
   private lastChargedFireTime: number = 0; 
+  private chargeStartTime: number = 0;
   private lastReportedGesture: string = "IDLE";
   private handTrackingActive = false;
 
@@ -52,13 +52,11 @@ export class PlayerController {
   }
 
   public setup(): void {
-    // Inicializar aura aquí si es necesario, o pasarla desde fuera
     this.playerAura = this.vfx.createAura("player_aura", Vector3.Zero());
     
     this.leftPalmMesh = this.scene.getMeshByName("leftHand") as Mesh;
     this.rightPalmMesh = this.scene.getMeshByName("rightHand") as Mesh;
 
-    // Suscribirse a mensajes del sistema de combate para mostrarlos en el HUD
     this.combat.onMessage((msg, color) => {
         this.vrHud?.showToast(msg, color, 3000);
     });
@@ -71,7 +69,6 @@ export class PlayerController {
     const wasActive = this.handTrackingActive;
     this.handTrackingActive = !!(lJoints || rJoints);
 
-    // Sync hand meshes (Desktop/Simulator)
     if (this.handTrackingActive) {
       if (!wasActive && this.leftPalmMesh) {
          this.scene.stopAnimation(this.leftPalmMesh);
@@ -81,15 +78,8 @@ export class PlayerController {
       if (this.rightPalmMesh && rJoints) this.rightPalmMesh.position.copyFromFloats(rJoints.wrist.x, rJoints.wrist.y, rJoints.wrist.z);
     }
 
-    // Process charging logic
     this.updateChargingLogic();
-
-    // Aura Update
     this.updateAura(cameraPosition);
-
-    // If not in XR but hand tracking active, process gestures
-    // This part normally depends on XR state, but we can pass it or check it if we have access to XRManager later
-    // For now, let's assume Game.ts calls processGestures if needed or we check a simplified condition
   }
 
   private updateChargingLogic(): void {
@@ -102,25 +92,40 @@ export class PlayerController {
     if (now - this.lastChargeUpdateTime > 100) {
       this.lastChargeUpdateTime = now;
       const stats = this.combat.getStats();
-      
-      if (activeCombo?.startsWith("CHARGED") && comboStep === 1) {
-        let chargePower = activeCombo === "CHARGED_KI_BLAST_L" ? this.leftChargePower : this.rightChargePower;
-        let startKi = activeCombo === "CHARGED_KI_BLAST_L" ? this.leftChargeStartKi : this.rightChargeStartKi;
-        
-        if (startKi === 0) {
-            if (activeCombo === "CHARGED_KI_BLAST_L") this.leftChargeStartKi = stats.playerKi;
-            else this.rightChargeStartKi = stats.playerKi;
-            startKi = stats.playerKi;
-        }
+      const isChargingNew = activeCombo?.startsWith("CHARGED") && comboStep === 1;
 
-        if (stats.playerKi > startKi * 0.8 && chargePower < 3.5 && this.combat.consumeKi(4)) {
-            if (activeCombo === "CHARGED_KI_BLAST_L") this.leftChargePower += 0.2;
-            else this.rightChargePower += 0.2;
-            this.vrHud?.showToast(`CARGANDO: x${(chargePower+0.2).toFixed(1)}`, "#ff8800", 0);
+      if (isChargingNew && activeCombo) {
+        const L = G.getLeftHandJoints();
+        const R = G.getRightHandJoints();
+        let chargePos = Vector3.Zero();
+        if (activeCombo.endsWith("_L") && L) chargePos = new Vector3(L.wrist.x, L.wrist.y, L.wrist.z);
+        else if (R) chargePos = new Vector3(R.wrist.x, R.wrist.y, R.wrist.z);
+
+        if (this.chargeStartTime === 0) {
+            this.chargeStartTime = now;
+            this.vfx.showChargeEffect(true, "charged", chargePos);
+        }
+        
+        const elapsed = (now - this.chargeStartTime) / 1000;
+        this.vfx.updateChargeEffect(elapsed, "charged", chargePos, 2.5);
+
+        const chargePower = activeCombo === "CHARGED_KI_BLAST_L" ? this.leftChargePower : this.rightChargePower;
+        const kiToConsume = Math.max(0.5, stats.playerKi * 0.015);
+        
+        if (stats.playerKi > 5 && chargePower < 5.0 && this.combat.consumeKi(kiToConsume)) {
+            if (activeCombo === "CHARGED_KI_BLAST_L") this.leftChargePower += 0.15;
+            else this.rightChargePower += 0.15;
+            
+            const currentP = activeCombo === "CHARGED_KI_BLAST_L" ? this.leftChargePower : this.rightChargePower;
+            this.vrHud?.showToast(`CARGANDO KI: x${currentP.toFixed(1)}`, "#ffaa00", 0);
         }
       } else {
-        if (gesture !== "CHARGED_KI_BLAST_L") { this.leftChargePower = 1.0; this.leftChargeStartKi = 0; }
-        if (gesture !== "CHARGED_KI_BLAST_R") { this.rightChargePower = 1.0; this.rightChargeStartKi = 0; }
+        if (this.chargeStartTime !== 0) {
+            this.chargeStartTime = 0;
+            this.vfx.showChargeEffect(false);
+        }
+        if (gesture !== GestureType.KI_CHARGE_PREP_L && gesture !== GestureType.CHARGED_KI_BLAST_L) this.leftChargePower = 1.0;
+        if (gesture !== GestureType.KI_CHARGE_PREP_R && gesture !== GestureType.CHARGED_KI_BLAST_R) this.rightChargePower = 1.0;
       }
     }
   }
@@ -133,7 +138,7 @@ export class PlayerController {
     const activeCombo = G.getActiveCombo();
     const isPlayerCharging = stats.combatState === "slowMotion" || 
                            activeCombo?.startsWith("CHARGED") || 
-                           G.getCurrentGesture() === "RECHARGING";
+                           G.getCurrentGesture() === GestureType.RECHARGING;
 
     this.playerAura.emitter = new Vector3(cameraPosition.x, cameraPosition.y - 0.5, cameraPosition.z);
     
@@ -146,7 +151,9 @@ export class PlayerController {
   public processGestures(cameraForward: Vector3): void {
     const G = this.inputManager.getGestureRecognizer();
     
-    // Phase 15: Sincronizar altura de ojos para detección ergonómica
+    // Phase 17: Sincronizar forward para detección de Genkidama
+    G.setCameraForward(cameraForward);
+
     if (this.scene.activeCamera) {
         G.setEyeLevelY(this.scene.activeCamera.globalPosition.y);
     }
@@ -161,16 +168,21 @@ export class PlayerController {
             "BLOCKING": { label: "🛡️ BLOQUEO ACTIVO", color: "#00ff88" },
             "RECHARGING": { label: "⚡ RECARGANDO KI...", color: "#cc44ff" },
             "KAMEHAMEHA": { label: "¡KAMEHAMEHA!", color: "#00ccff" },
+            "GENKIDAMA": { label: "¡GENKIDAMA!", color: "#00ffff" },
             "KI_BLAST_L": { label: "¡KI BLAST (IZQ)!", color: "#00ccff" },
             "KI_BLAST_R": { label: "¡KI BLAST (DER)!", color: "#00ccff" },
             "CHARGED_KI_BLAST_L": { label: "¡CARGA KI BLAST (IZQ)!", color: "#ff8800" },
             "CHARGED_KI_BLAST_R": { label: "¡CARGA KI BLAST (DER)!", color: "#ff8800" },
-            "RECHARGE_PREP": { label: "Preparando Recarga...", color: "#aa44ff" }
+            "SPECIAL_CANCEL": { label: "❌ CARGA ABORTADA", color: "#ff4444" }
         };
         const info = gestureLabels[gesture];
         if (info) {
             this.vrHud?.showToast(info.label, info.color, 1500);
         }
+    }
+    
+    if (gesture === "SPECIAL_CANCEL" as any) {
+        this.combat.cancelSpecial();
     }
     
     if (gestureChanged && this.lastReportedGesture === "RECHARGE_PREP" && gesture === "IDLE") {
@@ -181,43 +193,35 @@ export class PlayerController {
         this.vrHud?.showToast("Fin de Recarga", "#aaaaaa", 1500);
     }
     
-    this.lastReportedGesture = gesture;
+    this.lastReportedGesture = Array.isArray(gesture) ? gesture[0] : gesture;
 
-    // Phase 12: Unified Special Attack Logic
     const stats = this.combat.getStats();
     let midpoint: Vector3 | undefined = undefined;
     const L = G.getLeftHandJoints();
     const R = G.getRightHandJoints();
 
     if (L && R) {
-        midpoint = new Vector3(
-            (L.wrist.x + R.wrist.x) / 2,
-            (L.wrist.y + R.wrist.y) / 2,
-            (L.wrist.z + R.wrist.z) / 2
-        );
+        midpoint = new Vector3((L.wrist.x + R.wrist.x) / 2, (L.wrist.y + R.wrist.y) / 2, (L.wrist.z + R.wrist.z) / 2);
     } else if (R) {
         midpoint = new Vector3(R.wrist.x, R.wrist.y, R.wrist.z);
     } else if (L) {
         midpoint = new Vector3(L.wrist.x, L.wrist.y, L.wrist.z);
     }
 
-    // Phase 14: Seguimiento en tiempo real
     if (stats.combatState === "charging_special" && midpoint) {
         this.combat.updateSpecialChargeOrigin(midpoint);
         this.frameCount++;
         
-        // Indicador visual de carga mínima (cada 500ms para no saturar toasts)
         const powerId = stats.specialType || "";
         const ct = (powersData as any)[powerId]?.charge_time || 3.0;
         const progress = Math.min(100, Math.floor((stats.chargeTime / ct) * 100));
         
-        if (this.frameCount % 30 === 0) { // ~cada 500ms si el frameCount actualiza rápido
+        if (this.frameCount % 30 === 0) {
             const icon = progress >= 100 ? "🔥" : "⏳";
             this.vrHud?.showToast(`${icon} CARGA: ${progress}%`, progress >= 100 ? "#00ff00" : "#ffff00", 600);
         }
     }
 
-    // Auto-trigger PREP if detected
     if (gesture.endsWith("_PREP")) {
         const powerId = gesture.replace("_PREP", "").toLowerCase();
         if (stats.combatState !== "charging_special" || stats.specialType !== powerId) {
@@ -225,21 +229,21 @@ export class PlayerController {
         }
     }
 
-    // Auto-trigger FIRE if detected (for canonical powers from powers.json)
     const isSpecialPower = !gesture.endsWith("_PREP") && 
                           !gesture.startsWith("KI_BLAST") && 
                           gesture !== "ATTACKING" && 
                           gesture !== "RECHARGING" && 
                           gesture !== "IDLE" &&
                           gesture !== "BLOCKING" &&
-                          gesture !== "CHARGING";
+                          gesture !== "CHARGING" &&
+                          !gesture.startsWith("KI_CHARGE");
 
     if (isSpecialPower) {
         const powerId = gesture.toLowerCase();
         if (stats.combatState === "charging_special" && stats.specialType === powerId) {
             this.combat.triggerSpecial(powerId, midpoint);
             G.reset("both");
-            return; // Ya terminamos el procesamiento para este frame
+            return;
         }
     }
 
@@ -259,13 +263,13 @@ export class PlayerController {
       case "KI_BLAST_L":
       case "KI_BLAST_R": {
         const time = performance.now();
-        if (time - this.lastChargedFireTime < 500 || time - this.lastKiBlastTime < 400) break;
+        if (time - this.lastChargedFireTime < 300 || time - this.lastKiBlastTime < 150) break;
         this.lastKiBlastTime = time;
         const hand = gesture === "KI_BLAST_L" ? G.getLeftHandJoints() : G.getRightHandJoints();
         if (hand) {
           this.combat.launchKiBlast(hand.wrist, cameraForward, 1.0);
           this.combat.applyVoiceBonus("ki_blast");
-          this.inputManager.getGestureRecognizer().reset(gesture === "KI_BLAST_L" ? "left" : "right");
+          G.reset(gesture === "KI_BLAST_L" ? "left" : "right");
         }
         break;
       }
@@ -277,13 +281,11 @@ export class PlayerController {
           this.combat.launchKiBlast(hand.wrist, cameraForward, power);
           this.combat.applyVoiceBonus("ki_blast");
           this.lastChargedFireTime = performance.now();
-          this.inputManager.getGestureRecognizer().reset(gesture === "CHARGED_KI_BLAST_L" ? "left" : "right");
+          G.reset(gesture === "CHARGED_KI_BLAST_L" ? "left" : "right");
         }
         break;
       }
     }
-    
-    // Notify debug overlay through some means or let Game.ts handle it
   }
 
   public dispose(): void {
