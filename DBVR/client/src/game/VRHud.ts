@@ -167,84 +167,142 @@ export class VRHud {
 
   /** Panel izquierdo — stats del jugador */
   private buildPlayerPanel(): void {
-    const { mesh, adt } = this.createPanel("vrHud-player", 0.52, 0.35, 512);
+    const { mesh, adt } = this.createPanel("vrHud-player", 0.75, 0.35, 512);
     this.playerPanel = mesh;
     this.playerADT = adt;
 
-    const bg = this.makePanelBg(adt, "rgba(0,10,30,0.88)", "#0055aa");
+    const bg = this.makePanelBg(adt, "rgba(0,15,40,0.95)", "rgba(0,200,255,0.7)");
 
-    // Título
-    const title = new TextBlock("p-title", "JUGADOR");
-    title.color = "#00ccff";
-    title.fontSize = 26;
-    title.fontStyle = "bold";
-    title.heightInPixels = 36;
-    title.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
-    title.paddingLeftInPixels = 14;
-    bg.addControl(title);
-    title.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-    title.top = "10px";
+    // StackPanel horizontal: avatar + barras
+    const mainStack = new StackPanel("p-main-stack");
+    mainStack.isVertical = false;
+    mainStack.width = "100%";
+    mainStack.height = "100%";
+    mainStack.spacing = 12;
+    mainStack.paddingLeftInPixels = 12;
+    mainStack.paddingRightInPixels = 12;
+    mainStack.paddingTopInPixels = 10;
+    mainStack.paddingBottomInPixels = 10;
+    mainStack.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+    mainStack.verticalAlignment = Control.VERTICAL_ALIGNMENT_CENTER;
+    bg.addControl(mainStack);
 
-    // Barra NP
-    const npGroup = this.makeBarGroup(bg, "NP", 0, "#00ccff");
+    // Avatar circular (Goku)
+    this.playerAvatarImage = this.createAvatarCircle(mainStack, gokuBaseImg, "#00ccff");
+
+    // StackPanel vertical para barras
+    const barsStack = new StackPanel("p-bars-stack");
+    barsStack.isVertical = true;
+    barsStack.width = "70%";
+    barsStack.height = "100%";
+    barsStack.spacing = 8;
+    mainStack.addControl(barsStack);
+
+    // Fila NP
+    const npGroup = this.makeBarGroupForStack(barsStack, "NP", "#00ff88");
     this.playerNPBar = npGroup.fill;
     this.playerNPText = npGroup.valueText;
 
-    // Barra KI
-    const kiGroup = this.makeBarGroup(bg, "KI", 42, "#cc44ff");
+    // Fila KI
+    const kiGroup = this.makeBarGroupForStack(barsStack, "KI", "#00ccff");
     this.playerKIBar = kiGroup.fill;
     this.playerKIText = kiGroup.valueText;
 
-    // Rango NP o Rango General
-    const rankText = new TextBlock("p-rank", "NORMAL");
-    rankText.color = "#00ff88";
-    rankText.fontSize = 20;
-    rankText.heightInPixels = 28;
-    rankText.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
-    rankText.paddingLeftInPixels = 14;
-    rankText.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-    rankText.top = "110px";
-    bg.addControl(rankText);
-    this.playerNPRank = rankText;
+    // Fila ESTADO
+    const estadoRow = new StackPanel("p-estado-row");
+    estadoRow.isVertical = false;
+    estadoRow.width = "100%";
+    estadoRow.heightInPixels = 24;
+    estadoRow.spacing = 8;
+    barsStack.addControl(estadoRow);
+
+    const estadoLabel = new TextBlock("p-estado-label", "ESTADO");
+    estadoLabel.color = "#00ff88";
+    estadoLabel.fontSize = 14;
+    estadoLabel.fontStyle = "bold";
+    estadoLabel.width = "60px";
+    estadoLabel.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+    estadoRow.addControl(estadoLabel);
+
+    this.playerEstadoText = new TextBlock("p-estado-value", "NEUTRAL");
+    this.playerEstadoText.color = "#00ff88";
+    this.playerEstadoText.fontSize = 14;
+    this.playerEstadoText.fontStyle = "bold";
+    this.playerEstadoText.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+    estadoRow.addControl(this.playerEstadoText);
+
+    // Guardar referencia a rango para compatibilidad
+    this.playerNPRank = this.playerEstadoText;
   }
 
   /** Panel derecho — stats del enemigo */
   private buildEnemyPanel(): void {
-    const { mesh, adt } = this.createPanel("vrHud-enemy", 0.52, 0.35, 512);
+    const { mesh, adt } = this.createPanel("vrHud-enemy", 0.75, 0.35, 512);
     this.enemyPanel = mesh;
     this.enemyADT = adt;
 
-    const bg = this.makePanelBg(adt, "rgba(30,5,5,0.88)", "#aa1100");
+    const bg = this.makePanelBg(adt, "rgba(40,5,5,0.95)", "rgba(255,60,60,0.7)");
 
-    const title = new TextBlock("e-title", "ENEMIGO");
-    title.color = "#ff4444";
-    title.fontSize = 26;
-    title.fontStyle = "bold";
-    title.heightInPixels = 36;
-    title.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
-    title.paddingLeftInPixels = 14;
-    title.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-    title.top = "10px";
-    bg.addControl(title);
+    // StackPanel horizontal: avatar + barras
+    const mainStack = new StackPanel("e-main-stack");
+    mainStack.isVertical = false;
+    mainStack.width = "100%";
+    mainStack.height = "100%";
+    mainStack.spacing = 12;
+    mainStack.paddingLeftInPixels = 12;
+    mainStack.paddingRightInPixels = 12;
+    mainStack.paddingTopInPixels = 10;
+    mainStack.paddingBottomInPixels = 10;
+    mainStack.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+    mainStack.verticalAlignment = Control.VERTICAL_ALIGNMENT_CENTER;
+    bg.addControl(mainStack);
 
-    const npGroup = this.makeBarGroup(bg, "NP", 0, "#ff4444");
+    // Avatar circular (Vegeta)
+    this.enemyAvatarImage = this.createAvatarCircle(mainStack, vegetaBaseImg, "#ff4444");
+
+    // StackPanel vertical para barras
+    const barsStack = new StackPanel("e-bars-stack");
+    barsStack.isVertical = true;
+    barsStack.width = "70%";
+    barsStack.height = "100%";
+    barsStack.spacing = 8;
+    mainStack.addControl(barsStack);
+
+    // Fila NP
+    const npGroup = this.makeBarGroupForStack(barsStack, "NP", "#ff4444");
     this.enemyNPBar = npGroup.fill;
     this.enemyNPText = npGroup.valueText;
 
-    const kiGroup = this.makeBarGroup(bg, "KI", 42, "#ff6600");
+    // Fila KI
+    const kiGroup = this.makeBarGroupForStack(barsStack, "KI", "#ff6600");
     this.enemyKIBar = kiGroup.fill;
     this.enemyKIText = kiGroup.valueText;
 
-    const rankText = new TextBlock("e-rank", "NORMAL");
-    rankText.color = "#ff8800";
-    rankText.fontSize = 20;
-    rankText.heightInPixels = 28;
-    rankText.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
-    rankText.paddingLeftInPixels = 14;
-    rankText.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-    rankText.top = "110px";
-    bg.addControl(rankText);
-    this.enemyNPRank = rankText;
+    // Fila ESTADO
+    const estadoRow = new StackPanel("e-estado-row");
+    estadoRow.isVertical = false;
+    estadoRow.width = "100%";
+    estadoRow.heightInPixels = 24;
+    estadoRow.spacing = 8;
+    barsStack.addControl(estadoRow);
+
+    const estadoLabel = new TextBlock("e-estado-label", "ESTADO");
+    estadoLabel.color = "#ff4444";
+    estadoLabel.fontSize = 14;
+    estadoLabel.fontStyle = "bold";
+    estadoLabel.width = "60px";
+    estadoLabel.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+    estadoRow.addControl(estadoLabel);
+
+    this.enemyEstadoText = new TextBlock("e-estado-value", "NEUTRAL");
+    this.enemyEstadoText.color = "#ff4444";
+    this.enemyEstadoText.fontSize = 14;
+    this.enemyEstadoText.fontStyle = "bold";
+    this.enemyEstadoText.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+    estadoRow.addControl(this.enemyEstadoText);
+
+    // Guardar referencia a rango para compatibilidad
+    this.enemyNPRank = this.enemyEstadoText;
   }
 
   /** Panel superior — botones de ATAQUE */
@@ -1026,3 +1084,50 @@ export class VRHud {
     row.addControl(lbl);
   }
 }
+
+  /** Crea un grupo barra de progreso + valor para StackPanel */
+  private makeBarGroupForStack(
+    parent: StackPanel,
+    label: string,
+    fillColor: string
+  ): { fill: Rectangle; valueText: TextBlock } {
+    // Contenedor horizontal para barra + valor
+    const barRow = new StackPanel(`${label}-bar-row`);
+    barRow.isVertical = false;
+    barRow.width = "100%";
+    barRow.heightInPixels = 20;
+    barRow.spacing = 4;
+    parent.addControl(barRow);
+
+    // Fondo de la barra
+    const barBg = new Rectangle(`${label}-bar-bg`);
+    barBg.width = "85%";
+    barBg.heightInPixels = 14;
+    barBg.cornerRadius = 4;
+    barBg.background = "rgba(0,0,0,0.5)";
+    barBg.thickness = 1;
+    barBg.color = "rgba(0,200,255,0.3)";
+    barRow.addControl(barBg);
+
+    // Relleno de la barra
+    const fill = new Rectangle(`${label}-fill`);
+    fill.width = "100%";
+    fill.heightInPixels = 14;
+    fill.cornerRadius = 4;
+    fill.background = fillColor;
+    fill.thickness = 0;
+    fill.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+    barBg.addControl(fill);
+
+    // Valor numérico
+    const val = new TextBlock(`${label}-val`, "100");
+    val.isVisible = true;
+    val.color = fillColor;
+    val.fontSize = 12;
+    val.fontStyle = "bold";
+    val.width = "15%";
+    val.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
+    barRow.addControl(val);
+
+    return { fill, valueText: val };
+  }
