@@ -93,6 +93,8 @@ export class VRHud {
   private defensePanel!: Mesh;
   private statusPanel!: Mesh;
   private debugPanel!: Mesh;
+  private powersGuidePanel!: Mesh;
+  private hudRoot: Mesh | null = null;
 
   // ADTs
   private playerADT!: AdvancedDynamicTexture;
@@ -130,6 +132,7 @@ export class VRHud {
   private defenseRow: StackPanel | null = null;
   private attackTitle: TextBlock | null = null;
   private defenseTitle: TextBlock | null = null;
+  private powersStack: StackPanel | null = null;
   private toastTimeout: any = null;
   private statusBuffer: string[] = [];
 
@@ -153,6 +156,7 @@ export class VRHud {
     this.buildDefensePanel();
     this.buildStatusPanel();
     this.buildDebugPanel();
+    this.buildPowersGuidePanel();
   }
 
   /** Panel izquierdo — stats del jugador */
@@ -358,7 +362,7 @@ export class VRHud {
 
   /** Panel de debug para hand tracking — posición fija a la derecha */
   private buildDebugPanel(): void {
-    const { mesh, adt } = this.createPanel("vrHud-debug", 0.55, 0.45, 1024);
+    const { mesh, adt } = this.createPanel("vrHud-debug", 0.55, 0.3, 1024);
     this.debugPanel = mesh;
     this.debugADT = adt;
 
@@ -414,8 +418,8 @@ export class VRHud {
 
     this.debugLeftHandText = new TextBlock("dbg-left", "No detectada");
     this.debugLeftHandText.color = "#aabbcc";
-    this.debugLeftHandText.fontSize = 12;
-    this.debugLeftHandText.heightInPixels = 60;
+    this.debugLeftHandText.fontSize = 15;
+    this.debugLeftHandText.heightInPixels = 75;
     this.debugLeftHandText.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
     this.debugLeftHandText.textWrapping = true;
     stack.addControl(this.debugLeftHandText);
@@ -440,8 +444,8 @@ export class VRHud {
 
     this.debugRightHandText = new TextBlock("dbg-right", "No detectada");
     this.debugRightHandText.color = "#aabbcc";
-    this.debugRightHandText.fontSize = 12;
-    this.debugRightHandText.heightInPixels = 60;
+    this.debugRightHandText.fontSize = 15;
+    this.debugRightHandText.heightInPixels = 75;
     this.debugRightHandText.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
     this.debugRightHandText.textWrapping = true;
     stack.addControl(this.debugRightHandText);
@@ -466,11 +470,151 @@ export class VRHud {
 
     this.debugGestureText = new TextBlock("dbg-gesture", "NINGUNO");
     this.debugGestureText.color = "#ffffff";
-    this.debugGestureText.fontSize = 16;
+    this.debugGestureText.fontSize = 20;
     this.debugGestureText.fontStyle = "bold";
-    this.debugGestureText.heightInPixels = 24;
+    this.debugGestureText.heightInPixels = 28;
     this.debugGestureText.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
     stack.addControl(this.debugGestureText);
+  }
+
+  /** Panel izquierdo lejano — Guía de movimientos (Phase 18) */
+  private buildPowersGuidePanel(): void {
+    const { mesh, adt } = this.createPanel("vrHud-powers", 0.70, 0.75, 1200);
+    this.powersGuidePanel = mesh;
+
+    const bg = this.makePanelBg(adt, "rgba(5, 15, 10, 0.92)", "#00ff88");
+
+    // Título
+    const title = new TextBlock("guide-title", "📜 GUÍA DE MOVIMIENTOS");
+    title.color = "#00ff88";
+    title.fontSize = 20;
+    title.fontStyle = "bold";
+    title.heightInPixels = 30;
+    title.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_CENTER;
+    title.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    title.top = "10px";
+    bg.addControl(title);
+
+    // Contenedor para lista de poderes
+    const stack = new StackPanel("guide-stack");
+    stack.isVertical = true;
+    stack.width = "94%";
+    stack.height = "85%";
+    stack.top = "45px";
+    stack.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    stack.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_CENTER;
+    stack.spacing = 6;
+    bg.addControl(stack);
+    this.powersStack = stack;
+    
+    this.renderPowersList();
+  }
+
+  private renderPowersList(filterPower?: string): void {
+    if (!this.powersStack) return;
+    this.powersStack.getDescendants().forEach(c => c.dispose());
+
+    const allowedPowers = gokuConfig.transformations[0].powers || [];
+    const powersDict = powersConfig as Record<string, any>;
+
+    const gestureLabelMap: Record<string, string> = {
+        "hands_clasped_at_waist": "Manos en la cintura",
+        "palms_forward_push": "Empujón frontal",
+        "arms_extended_horizontally": "Brazos en T",
+        "palms_forward_together": "Manos juntas",
+        "arms_raised_to_sky": "Brazos al cielo (Que se vean al mirar arriba)",
+        "arms_throw_forward": "Lanzar al frente",
+        "palm_forward_aim": "Apuntar palma",
+        "clench_fist": "Cerrar puño",
+        "hands_left_shoulder_crossed": "Manos en hombro izquierdo",
+        "ki_prep": "Manos juntas al pecho",
+        "ki_fire": "Brazo estirado al frente",
+        "ki_charge_prep": "Mano estirada (Otra relajada)",
+        "ki_charge_fire": "Movimiento brusco (sacudón)",
+        "recharge_p1": "Puños arriba (tensión)",
+        "recharge_p2": "Brazos a los costados"
+    };
+
+    // 1. ATAQUES BÁSICOS
+    const basicMoves = [
+        { id: "KI_BLAST", name: "Ataque de Ki Rápido", p: "ki_prep", f: "ki_fire", cost: "10 KI", time: "Instant" },
+        { id: "CHARGED_KI_BLAST", name: "Ataque de Ki Cargado", p: "ki_charge_prep", f: "ki_charge_fire", cost: "1.5% Ki tick", time: "Variable" },
+        { id: "RECHARGE", name: "Recargar Ki", p: "recharge_p1", f: "recharge_p2", cost: "0 KI", time: "Continuo" }
+    ];
+
+    if (!filterPower) {
+        for (const b of basicMoves) {
+            const powerContainer = new Rectangle(`p-guide-${b.id}`);
+            powerContainer.width = "100%";
+            powerContainer.heightInPixels = 105;
+            powerContainer.thickness = 0;
+            this.powersStack.addControl(powerContainer);
+
+            const pTitle = new TextBlock(`pt-${b.id}`, b.name.toUpperCase());
+            pTitle.color = "#00ff88";
+            pTitle.fontSize = 24;
+            pTitle.fontStyle = "bold";
+            pTitle.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+            pTitle.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+            powerContainer.addControl(pTitle);
+
+            const pGestures = new TextBlock(`pg-${b.id}`, `Pasos: ${gestureLabelMap[b.p]} -> ${gestureLabelMap[b.f]}`);
+            pGestures.color = "#aaaaaa";
+            pGestures.fontSize = 18;
+            pGestures.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+            pGestures.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+            pGestures.top = "38px";
+            powerContainer.addControl(pGestures);
+
+            const pCost = new TextBlock(`pc-${b.id}`, `Costo: ${b.cost} | Tipo: ${b.time}`);
+            pCost.color = "#00ccff";
+            pCost.fontSize = 16;
+            pCost.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+            pCost.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+            pCost.top = "68px";
+            powerContainer.addControl(pCost);
+        }
+    }
+
+    // 2. ATAQUES ESPECIALES (Dinamicos de powers.json)
+    for (const k of allowedPowers) {
+      if (filterPower && k.toLowerCase() !== filterPower.toLowerCase()) continue;
+
+      const d = powersDict[k];
+      if (!d) continue;
+
+      const powerContainer = new Rectangle(`p-guide-${k}`);
+      powerContainer.width = "100%";
+      powerContainer.heightInPixels = 120; // Un poco mas alto
+      powerContainer.thickness = 0;
+      powerContainer.paddingBottomInPixels = 10;
+      powerContainer.background = filterPower ? "rgba(0,255,136,0.1)" : "transparent";
+      this.powersStack.addControl(powerContainer);
+
+      const pTitle = new TextBlock(`pt-${k}`, (d.name || k).toUpperCase());
+      pTitle.color = filterPower ? "#00ff88" : "#ffffff";
+      pTitle.fontSize = 24;
+      pTitle.fontStyle = "bold";
+      pTitle.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+      pTitle.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+      powerContainer.addControl(pTitle);
+
+      const pGestures = new TextBlock(`pg-${k}`, `Pasos: ${gestureLabelMap[d.vr_gestures?.preparation] || "???"} -> ${gestureLabelMap[d.vr_gestures?.firing] || "???"}`);
+      pGestures.color = "#aaaaaa";
+      pGestures.fontSize = 18;
+      pGestures.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+      pGestures.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+      pGestures.top = "38px";
+      powerContainer.addControl(pGestures);
+      
+      const pCost = new TextBlock(`pc-${k}`, `Ki: ${d.ki_cost || "40+"} | Carga: ${d.charge_time || "N/A"}s`);
+      pCost.color = "#ff8800";
+      pCost.fontSize = 16;
+      pCost.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
+      pCost.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+      pCost.top = "68px";
+      powerContainer.addControl(pCost);
+    }
   }
 
   /** Panel de estado — bullet time, alerta de ataque, historial de acciones */
@@ -597,55 +741,75 @@ export class VRHud {
    * Remueve el anclaje a la cabeza para prevenir Motion Sickness.
    */
   attachToXRCamera(xrCamera: any): void {
-    // Desligar completamente de la cámara para mantener el HUD fijo en el mundo
-    [this.playerPanel, this.enemyPanel, this.attackPanel, this.defensePanel, this.statusPanel, this.debugPanel].forEach(m => {
-      m.parent = null;
+    // 1. Obtener la posición y rotación actual de la cámara para "congelar" el HUD ahí
+    const forward = xrCamera.getForwardRay().direction;
+    const pos = xrCamera.globalPosition.clone();
+    
+    // Limpiar root previo si existe
+    if (this.hudRoot) {
+        this.hudRoot.dispose();
+    }
+
+    // Crear un contenedor invisible que mire hacia donde mira el jugador AHORA
+    this.hudRoot = MeshBuilder.CreateBox("hudRoot", { size: 0.01 }, this.scene);
+    this.hudRoot.isVisible = false;
+    this.hudRoot.position = pos;
+    // Alineamos el root con la cámara pero ignoramos el "tilt" (parche para horizonte estable)
+    this.hudRoot.lookAt(pos.add(new Vector3(forward.x, 0, forward.z)));
+
+    const panels = [
+        this.playerPanel, this.enemyPanel, this.attackPanel, 
+        this.defensePanel, this.statusPanel, this.debugPanel,
+        this.powersGuidePanel
+    ];
+
+    panels.forEach(m => {
+      m.parent = this.hudRoot;
     });
 
-    const camPos = xrCamera.globalPosition;
+    // 2. Posicionamiento LOCAL al root (fijo en el mundo desde este momento)
+    // X+: derecha, Y+: arriba, Z+: adelante
+    
+    // Stats laterales (un poco más abiertos)
+    this.playerPanel.position = new Vector3(-1.1, 0.4, 1.4);
+    this.playerPanel.rotation = new Vector3(0, -0.4, 0);
 
-    // Calcular el vector de visión "hacia adelante" del jugador omitiendo el pitch (Y=0)
-    const forward = xrCamera.getDirection(new Vector3(0, 0, 1));
-    forward.y = 0;
-    if (forward.lengthSquared() === 0) forward.z = 1;
-    forward.normalize();
+    this.enemyPanel.position = new Vector3(1.1, 0.4, 1.4);
+    this.enemyPanel.rotation = new Vector3(0, 0.4, 0);
 
-    // Derecha es producto cruz entre Y y Forward
-    const right = Vector3.Cross(Vector3.Up(), forward).normalize();
-    const up = Vector3.Up();
+    // Paneles de acción (arriba y abajo del todo)
+    this.attackPanel.position = new Vector3(0.00, 0.95, 1.4);
+    this.defensePanel.position = new Vector3(0.00, -0.65, 1.4);
 
-    // Función auxiliar para plantar paneles alrededor del jugador
-    const place = (mesh: any, xLocal: number, yLocal: number, zLocal: number) => {
-      mesh.position = camPos
-        .add(right.scale(xLocal))
-        .add(up.scale(yLocal))
-        .add(forward.scale(zLocal));
+    // ESTADO CENTRAL (Se mueve arriba para dar paso a la guía)
+    this.statusPanel.position = new Vector3(0.00, 0.70, 1.3);
 
-      // El HUD mira hacia el jugador (el frente por defecto de un Plano en BJS es +Z local o -Z según ADT)
-      // Con lookAt, el panel girará para enfocarse en la cabeza del jugador
-      mesh.lookAt(camPos, Math.PI);
-    };
+    // GUÍA DE PODERES: Ahora en el centro, encima del de gestos
+    // Height de powersGuide es 0.75m. Height de debug es 0.3m.
+    // Debug en -0.35, su tope es -0.20.
+    // Guide en 0.22, su base es -0.15. (Gap de 0.05m)
+    this.powersGuidePanel.position = new Vector3(0.0, 0.22, 1.3);
+    this.powersGuidePanel.rotation = new Vector3(0, 0, 0);
 
-    // Radios de distancia local (X, Y relativo al visor, Z)
-    place(this.playerPanel, -0.85, 0.40, 1.3);
-    place(this.enemyPanel, 0.85, 0.40, 1.3);
-
-    place(this.attackPanel, 0.00, 0.75, 1.4);
-    place(this.defensePanel, 0.00, -0.60, 1.4);
-
-    place(this.statusPanel, 0.00, 0.35, 1.25);
-
-    // Debug panel: centrado
-    place(this.debugPanel, 0.00, -0.40, 1.3);
+    // DEBUG DE GESTOS: Centrado inferior
+    this.debugPanel.position = new Vector3(0.00, -0.35, 1.3);
 
     this.show();
   }
 
   /** Desenlaza el HUD de la cámara */
   detachFromCamera(): void {
-    [this.playerPanel, this.enemyPanel, this.attackPanel, this.defensePanel, this.statusPanel, this.debugPanel].forEach(m => {
+    [
+        this.playerPanel, this.enemyPanel, this.attackPanel, 
+        this.defensePanel, this.statusPanel, this.debugPanel,
+        this.powersGuidePanel
+    ].forEach(m => {
       m.parent = null;
     });
+    if (this.hudRoot) {
+        this.hudRoot.dispose();
+        this.hudRoot = null;
+    }
     this.hide();
   }
 
@@ -653,7 +817,11 @@ export class VRHud {
 
   show(): void {
     this.visible = true;
-    [this.playerPanel, this.enemyPanel, this.attackPanel, this.defensePanel, this.statusPanel, this.debugPanel].forEach(m => {
+    [
+        this.playerPanel, this.enemyPanel, this.attackPanel, 
+        this.defensePanel, this.statusPanel, this.debugPanel,
+        this.powersGuidePanel
+    ].forEach(m => {
       m.setEnabled(true);
     });
     this.update(this.combat.getStats());
@@ -661,7 +829,11 @@ export class VRHud {
 
   hide(): void {
     this.visible = false;
-    [this.playerPanel, this.enemyPanel, this.attackPanel, this.defensePanel, this.statusPanel, this.debugPanel].forEach(m => {
+    [
+        this.playerPanel, this.enemyPanel, this.attackPanel, 
+        this.defensePanel, this.statusPanel, this.debugPanel,
+        this.powersGuidePanel
+    ].forEach(m => {
       m.setEnabled(false);
     });
   }
@@ -726,6 +898,21 @@ export class VRHud {
     this.updateStatus(stats);
     this.updateActionKiCounter(stats);
     this.filterActionsByKi(stats);
+    this.updatePowersGuide(stats);
+  }
+
+  private updatePowersGuide(stats: GameStats): void {
+    // Si estamos en medio de una carga especial, filtrar la lista para mostrar solo ese poder
+    if (stats.combatState === "charging_special" && stats.specialType) {
+        this.renderPowersList(stats.specialType);
+    } else if (this.currentHudType === "normal") {
+        // Volver a mostrar toda la lista si regresamos a neutral
+        // Solo renderizar si el stats.combatState cambió de charging_special a otra cosa
+        // O si simplemente refrescamos (podemos optimizar con un flag anterior)
+        if (this.powersStack && this.powersStack.children.length <= 1) {
+             this.renderPowersList();
+        }
+    }
   }
 
   /** Oculta botones si no hay KI suficiente */

@@ -282,8 +282,10 @@ export class GestureRecognizer {
       poses.push(StaticPose.FISTS_SIDES);
     }
 
-    // 3. KAMEHAMEHA_P1
-    if (!isFistL && !isFistR && L.wrist.x > 0.05 && R.wrist.x > 0.05 && L.wrist.y < 1.3 && R.wrist.y < 1.3) {
+    // 3. KAMEHAMEHA_P1: Añadido chequeo de proximidad entre manos (Phase 18)
+    const handsNearEachOther = this.dist3(L.wrist, R.wrist) < 0.25;
+    if (!isFistL && !isFistR && L.wrist.x > 0.05 && R.wrist.x > 0.05 && 
+        L.wrist.y < 1.3 && R.wrist.y < 1.3 && handsNearEachOther) {
       poses.push(StaticPose.PALMS_HIP_RIGHT);
     }
 
@@ -320,12 +322,15 @@ export class GestureRecognizer {
     if (isOpenL) poses.push(StaticPose.PALM_STOP_L);
     if (isOpenR) poses.push(StaticPose.PALM_STOP_R);
 
-    // 9. KI BLAST 2-FASES (Phase 1)
-    // KI_PREP: Manos a los hombros, dedos arriba
-    const nearShoulderL = L.wrist.y > this.eyeLevelY - 0.35 && Math.abs(L.wrist.x) > 0.15 && L.wrist.z < 0.25;
-    const nearShoulderR = R.wrist.y > this.eyeLevelY - 0.35 && Math.abs(R.wrist.x) > 0.15 && R.wrist.z < 0.25;
+    // 9. KI_PREP Refined: Manos a la altura del pecho (Phase 19)
+    const yChestMin = this.eyeLevelY - 0.55;
+    const yChestMax = this.eyeLevelY - 0.25;
+    const isAtChestHeightL = L.wrist.y > yChestMin && L.wrist.y < yChestMax;
+    const isAtChestHeightR = R.wrist.y > yChestMin && R.wrist.y < yChestMax;
+    // Manos relativamente centradas pero fuera del eje de la cara
+    const isNearChestX = (x: number) => Math.abs(x) > 0.08 && Math.abs(x) < 0.25;
     
-    if (isOpenL && isOpenR && nearShoulderL && nearShoulderR) {
+    if (isOpenL && isOpenR && isAtChestHeightL && isAtChestHeightR && isNearChestX(L.wrist.x) && isNearChestX(R.wrist.x)) {
         poses.push(StaticPose.KI_PREP);
     }
 
@@ -342,15 +347,15 @@ export class GestureRecognizer {
         poses.push(StaticPose.KI_FIRE_R);
     }
 
-    // 10. KI BLAST CHARGE (Phase 1)
-    // Una mano extendida (dedos arriba), otra debajo del estómago (Y < 0.75m)
-    const isAtStomachL = L.wrist.y < 0.75;
-    const isAtStomachR = R.wrist.y < 0.75;
+    // 10. KI BLAST CHARGE Refined: La mano que no dispara puede estar IDLE (Phase 19)
+    // Solo requerimos que la mano de disparo esté extendida y abierta y la otra NO esté estorbando arriba
+    const otherNotUpL = L.wrist.y < this.eyeLevelY - 0.1;
+    const otherNotUpR = R.wrist.y < this.eyeLevelY - 0.1;
 
-    if (isOpenL && isExtendedL && isAtStomachR) {
+    if (isOpenL && isExtendedL && otherNotUpR) {
         poses.push(StaticPose.KI_CHARGE_PREP_L);
     }
-    if (isOpenR && isExtendedR && isAtStomachL) {
+    if (isOpenR && isExtendedR && otherNotUpL) {
         poses.push(StaticPose.KI_CHARGE_PREP_R);
     }
 
@@ -365,16 +370,16 @@ export class GestureRecognizer {
         poses.push(StaticPose.KI_CHARGE_FIRE_R);
     }
 
-    // 11. GENKIDAMA (Rediseñada)
-    const isLookingUp = this.cameraForward.y > 0.75; // Mirando casi 90 grados al cielo
+    // 11. GENKIDAMA Refined: Manos arriba visibles al mirar al cielo (Phase 19)
+    const isLookingUp = this.cameraForward.y > 0.65; // Mirando arriba (ángulo más permisivo)
     
-    // Genkidama Prep: Brazos arriba, manos abiertas, dedos hacia atrás
-    const handsHigh = L.wrist.y > this.eyeLevelY + 0.2 && R.wrist.y > this.eyeLevelY + 0.2;
-    // "Dedos atrás" relativo al cuerpo: indexTip.z es menor que wrist.z (hacia atrás del jugador)
-    const fingersBackL = L.indexTip.z < L.wrist.z - 0.05;
-    const fingersBackR = R.indexTip.z < R.wrist.z - 0.05;
+    // Al mirar arriba, "Z" positivo está delante de los ojos del jugador 
+    // y "Y" alto significa por encima del visor
+    const handsHigh = L.wrist.y > this.eyeLevelY + 0.15 && R.wrist.y > this.eyeLevelY + 0.15;
+    // Deben estar visibles en el FOV (frente a la cámara inclinada)
+    const visibleInFov = L.wrist.z > 0.05 && R.wrist.z > 0.05;
 
-    if (handsHigh && isOpenL && isOpenR && fingersBackL && fingersBackR && isLookingUp) {
+    if (isLookingUp && handsHigh && isOpenL && isOpenR && visibleInFov) {
         poses.push(StaticPose.GENKIDAMA_PREP_POSE);
     }
 
@@ -443,9 +448,9 @@ export class GestureRecognizer {
         this.isWaitingForPoseBreakR = false;
     }
 
-    // Filter by allowed powers (suppress lint)
-    if (this.frameCount % 100 === 0 && this.allowedPowers.length > 0) {
-      console.log(`[GestureRecognizer] Monitoring: ${this.allowedPowers.join(", ")}`);
+    // Log de estados permitidos (Phase 18: Menos ruidoso)
+    if (this.frameCount % 300 === 0 && this.allowedPowers.length > 0) {
+      console.log(`[GestureRecognizer] Active Powers: ${this.allowedPowers.join(", ")}`);
     }
 
     if (detectedPoses.length > 0) {
@@ -515,8 +520,8 @@ export class GestureRecognizer {
           if (this.comboStep === sequence.length) {
             console.log(`[Combo Engine] ¡¡COMBO COMPLETADO!! => ${this.activeCombo}`);
             this.setGesture(this.activeCombo as GestureType);
-            if (this.activeCombo.startsWith("KI_BLAST")) {
-              this.lastBasicAttackHand = this.activeCombo === "KI_BLAST_L" ? "left" : "right";
+            if (this.activeCombo.startsWith("KI_BLAST") || this.activeCombo.startsWith("CHARGED_KI_BLAST")) {
+              this.lastBasicAttackHand = this.activeCombo.endsWith("_L") ? "left" : "right";
               this.cancelCombo("Trigger completado");
             } else {
               this.lastSpecialEndTime = now;

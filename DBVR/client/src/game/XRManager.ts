@@ -138,6 +138,13 @@ export class XRManager {
         if (this.xr?.baseExperience.state !== 2) return;
 
         const G = this.inputManager.getGestureRecognizer();
+        const xrCamera = this.xr?.baseExperience.camera;
+        
+        if (xrCamera) {
+          G.setEyeLevelY(xrCamera.globalPosition.y);
+          G.setCameraForward(xrCamera.getForwardRay().direction);
+        }
+
         let lJointsXR = leftHand ? extractHandJoints(leftHand) : null;
         let rJointsXR = rightHand ? extractHandJoints(rightHand) : null;
 
@@ -148,12 +155,13 @@ export class XRManager {
         if (lJointsXR) G.updateHandJoints("left", lJointsXR);
         if (rJointsXR) G.updateHandJoints("right", rJointsXR);
 
-        if (lJointsXR && rJointsXR) {
-          this.playerController.processGestures(this.engineManager.getCamera().getForwardRay().direction);
-        }
-
         const lJointsActual = G.getLeftHandJoints();
         const rJointsActual = G.getRightHandJoints();
+
+        if (lJointsActual && rJointsActual) {
+          this.playerController.processGestures(xrCamera?.getForwardRay().direction || this.engineManager.getCamera().getForwardRay().direction);
+        }
+
         const gesture = G.getCurrentGesture();
         const apiSource = leftHand || rightHand ? "onHandAdded" : "waiting...";
 

@@ -75,24 +75,18 @@ export class InputManager {
       if (!this.started) return;
       
       switch (e.key.toLowerCase()) {
-        case "a": actions.onBasicAttack(); break;
-        case "w": 
-          if (actions.isInChargingState()) {
-            actions.onChargeRelease();
-          } else {
-            actions.onChargeStart();
-          }
-          break;
+        case "a": this.simulator.playKiBlastSequence(); break;
+        case "w": this.simulator.playChargedKiBlastSequence(); break;
         case "s": actions.onBlock(); break;
         case "d": actions.onDodge(); break;
-        case "1": actions.onSpecial("kamehameha"); break;
-        case "2": actions.onSpecial("finalFlash"); break;
-        case "v": actions.onEnterVR(); break;
-        
-        // Simulator shortcuts
+        case "r":
         case "k": this.simulator.playRechargeSequence(); break;
         case "i": this.simulator.playKiBlastSequence("left"); break;
         case "o": this.simulator.playKiBlastSequence("right"); break;
+        case "1": this.simulator.triggerSpecialPhased("kamehameha"); break;
+        case "2": this.simulator.triggerSpecialPhased("finalflash"); break;
+        case "3": this.simulator.triggerSpecialPhased("genkidama"); break;
+        case "v": actions.onEnterVR(); break;
       }
     });
   }
