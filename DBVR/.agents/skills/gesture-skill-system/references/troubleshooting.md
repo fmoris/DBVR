@@ -139,6 +139,26 @@ for (let i = 0; i < localStorage.length; i++) {
 
 ---
 
+### 7. "Error in concat2D: Shape of tensors[1] (N, 16) does not match (M, 1152)"
+
+**Causa**: Mezcla de datos con distintas dimensiones. Generalmente ocurre al intentar cargar datos **LEGACY** de `localStorage` que usaban 1152 features (formato windowed antiguo) junto a los nuevos (16 o 46 features).
+
+**Diagnóstico**: Verificar las dimensiones de los datos guardados.
+
+**Solución**: Implementar una validación de dimensiones antes de añadir ejemplos al clasificador y purgar la clave si se detecta un mismatch crítico.
+
+```javascript
+// En el loop de carga de localStorage
+const features = flattened[0].length;
+if (features === 1152) {
+    console.error("Detectados datos legacy de 1152 features. Purgando...");
+    localStorage.removeItem(`gss_model_${characterId}`);
+    return;
+}
+```
+
+---
+
 ## Verificación rápida del estado del sistema
 
 ```javascript
