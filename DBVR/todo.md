@@ -15,20 +15,16 @@
 
 ---
 
-## PARTE 0 — Reconocimiento de Gestos (Quest 3)
-- [ ] Gesto: mano extendida hacia adelante, palma abierta (GestureType.ATTACKING)
-- [ ] Gesto: puno cerrado (GestureType.CHARGING) → abrir para lanzar
-- [ ] Gesto de lanzamiento: abrir el puno (soltar)
-- [ ] Secuencia Kamehameha: ambas manos juntas al costado (GestureType.CHARGING)
-- [ ] Secuencia Kamehameha: empujar ambas manos hacia adelante (lanzamiento)
-- [ ] Secuencia Final Flash: brazos extendidos a los lados (posicion en cruz)
-- [ ] Secuencia Final Flash: juntar las manos frente al pecho (concentracion)
-- [ ] Secuencia Final Flash: empujar ambas manos hacia adelante (lanzamiento)
-- [ ] Gesto Bloqueo: GestureType.BLOCKING (brazos cruzados)
-- [ ] Gesto Esquive: GestureType.PARRYING (esquiva lateral/ruptura)
-- [ ] Gesto Desvio: Gesto de redirección (timing preciso)
-- [ ] Gesto de recarga activa: GestureType.RECHARGING
-- [ ] Mapear gestos de manos a acciones del juego (GestureRecognizer v2, joints W3C)
+## PARTE 0 — Reconocimiento de Gestos Inteligente (GSS)
+- [x] Implementar GestureSkillSystem (GSS) basado en KNN + TensorFlow.js
+- [x] Extracción de features normalizados (16 features para WristOnly, 46 para Fingers)
+- [x] Sistema de entrenamiento sesión-por-sesión (Historia 3D)
+- [x] Migración de datos 2D a 3D (Refactoring)
+- [x] Validación de dimensiones en carga (purga de legacy 1152 features)
+- [x] Definir estados FSM para ataques canon (Kamehameha, Genkidama)
+- [ ] Implementar Árbol de Fases con ramificación compartida (ej: Ki Charge -> Ataque/Transf)
+- [ ] Entrenar gestos de transformación para Super Saiyan y otros rangos
+- [x] Mapear gestos de manos a acciones del juego (Superando GestureRecognizer v2)
 
 ---
 

@@ -115,16 +115,13 @@ Al cumplir una o más condiciones:
 - Si falla → derrota épica.
 - Si logra salvarse → posible activación de comeback del defensor.
 
-## 6. Controles (WebXR Hand Tracking)
+## 6. Controles (GestureSkillSystem - GSS)
+- Todos los ataques, defensas y cargas se ejecutan mediante el **GSS** (KNN + Phase Tree).
+- **Estándar de Poses**:
+  - **16 Features (WristOnly)**: Para carga de Ki y lanzamientos amplios.
+  - **46 Features (WristAndFingertips)**: Para técnicas que requieren forma de mano específica (ej: Kaioken, Super Kamehameha).
+- El sistema utiliza **Entrenamiento de 3 Pasos**: Gesto → Carga (Phase 1) → Lanzamiento (Phase 2).
 
-- Todos los ataques, defensas, cargas y lanzamientos se ejecutan mediante **gestos reales** de manos.
-- El bullet-time permite al jugador tener tiempo suficiente para realizar gestos complejos (incluyendo carga + lanzamiento).
-
-## 7. Pendientes / Secciones a expandir
-
-- Lista completa de personajes y sus valores base de NP/KI.
-- Tabla detallada de gestos (JSON) para cada tipo de ataque y defensa.
-- Sistema de progresión entre peleas.
-- UI / HUD (barras de KI y NP, indicador visual de carga de superataques, momentum).
-- Balanceo numérico exacto de la fórmula de NP.
-- Mecánica precisa del comeback.
+## 7. Referencias Técnicas
+- Ver `.agents/skills/gesture-skill-system/SKILL.md` para la implementación del motor.
+- Ver `todo.md` (Parte 0) para el progreso actual de los gestos implementados.

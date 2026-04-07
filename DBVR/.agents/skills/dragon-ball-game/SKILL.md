@@ -229,9 +229,17 @@ const transformar = (personaje, formaObjetivo) => {
     descripcion: forma.descripcionVisual
   });
   
+```javascript
   return true;
 }
 ```
+
+### VR Gesture Mechanics (GSS Integration)
+En experiencias VR (como DBVR), los ataques se disparan mediante el **GestureSkillSystem**:
+- **Kamehameha**: Fase de Carga (`wristOnly`) -> Fase de Disparo (empuje rápido).
+- **Genkidama**: Fase de Carga (brazos arriba, `wristOnly`) -> Fase de Disparo (un solo brazo o ambos hacia adelante).
+- **Ki Blast**: Gesto rápido de palma abierta o puño lanzando (`wristOnly`).
+- **Transformaciones**: Gesto de "Power Up" sostenido (Aura Charging) + Gesto específico de la forma.
 
 ---
 

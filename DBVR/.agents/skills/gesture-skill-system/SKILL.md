@@ -62,14 +62,14 @@ copiar-pegar**, no explicaciones genéricas.
 GestureSkillSystem
 ├── KNNClassifier (TF.js)          ← uno por personaje activo
 ├── XRHandsContext                 ← datos de manos por frame
-├── FeatureExtractors              ← wristOnly / wrist+fingers / fullHand
-├── GesturePhaseTree               ← árbol de decisión por personaje
+├── FeatureExtractors              ← wristOnly (16) / wristAndFingertips (46)
+├── GesturePhaseTree               ← FSM + árbol de decisión por personaje
 │   ├── Nodo Idle
 │   ├── Nodo Carga
 │   └── Nodos de ataque (hojas)
-├── FSM (Finite State Machine)     ← maneja estados: idle→carga→disparo→cooldown
-├── ChargeSystem                   ← detecta Ki Blast rápido vs cargado
-└── TrainingMode                   ← captura ejemplos directamente en headset
+├── DimensionValidation            ← Rechaza legacy (1152 features) o mismatch
+├── SessionHistory (3D)            ← Entrenamiento sesión-por-sesión (localStorage)
+└── DataAugmentation               ← Espejo y rotación de samples
 ```
 
 ### Decisiones de diseño clave
@@ -164,6 +164,11 @@ Algunos tienen 4 si el gesto inicial es ambiguo con otro ataque.
 | `maxWaitMs` | Timeout antes de resetear al idle | 2000–8000ms |
 | `confidenceThreshold` | Umbral KNN para avanzar | 0.65–0.80 |
 | `quickVelocity` | Velocidad mínima para blast rápido | 0.6–1.2 m/s |
+| `dim_wristOnly` | Contador de features para muñecas | **16** |
+| `dim_fingers` | Contador de features para muñecas + dedos | **46** |
+
+### 4. Validación de Dimensiones
+**REGLA CRÍTICA:** Nunca mezclar extractores en un mismo label. El sistema purgará automáticamente cualquier dato de `localStorage` que tenga **1152 features** (formato antiguo/windowed).
 
 ### 4. Detectar colisiones entre ataques
 Si dos ataques del mismo personaje empiezan con el mismo gesto, agregar un nodo

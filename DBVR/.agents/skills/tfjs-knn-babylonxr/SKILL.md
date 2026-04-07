@@ -405,17 +405,16 @@ KNN especializado, y el camino recorrido define el ataque.
 
 ### Features para Ki (sin necesitar dedos)
 
-Para Ki attacks solo necesitas la **posición y movimiento de las muñecas**,
-no los 25 joints de los dedos. El vector de features tiene 17 valores:
+Para Ki attacks usamos la **posición y movimiento de las muñecas**, no los 25 joints de los dedos. El vector de features estándar en este proyecto tiene **16 valores**:
 
 ```
 [ lRel.x, lRel.y, lRel.z,    // posición mano izq relativa al midpoint
   rRel.x, rRel.y, rRel.z,    // posición mano der relativa al midpoint
   distancia_entre_manos,      // qué tan separadas están
   alturaIzq, alturaDer,       // altura relativa a la cabeza del jugador
-  velIzq, velDer,             // velocidad de cada mano (magnitud)
-  lDir.x, lDir.y, lDir.z,    // dirección de movimiento mano izq
-  rDir.x, rDir.y, rDir.z ]   // dirección de movimiento mano der
+  velRelIzq, velRelDer,       // velocidad relativa al centro
+  lDir.x, lDir.y, lDir.z,     // dirección de movimiento mano izq
+  rDir.x, rDir.y ]            // dirección de movimiento mano der (solo x, y)
 ```
 
 ### Labels que entrena cada nodo del árbol

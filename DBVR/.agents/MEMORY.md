@@ -15,15 +15,14 @@ Recuerdos curados de DBVR (Dragon Ball VR).
 - **Fase Inicial:** Configuración de Vite/TS, escena básica, tRPC, base de datos Drizzle, servidor con replay en S3.
 - **Gestos de Ki:** Implementación de Kamehameha, Final Flash y Ataque Básico (GestureType).
 - **WebXR (Quest 3):** Solución de problemas críticos de visualización de HUD/Overlay en VR mediante `dom-overlay`.
-- **Detección de Manos:** Refactorizado `GestureRecognizer` para usar la API W3C joints por nombre (Quest 3 compatible).
-- **HUD VR:** Creación de `VRHud.ts` usando AdvancedDynamicTexture de Babylon para mostrar NP/KI en planos 3D atados a la cabeza.
-- **Diseño Refinado:** Codificación de la "Ciencia del Juego" en `DESIGN.md` (NP, Cadenas de Melee, Super Poderes de 2 pasos).
-- **Victoria y Comeback:** Definición de 3 rutas de victoria y mecánicas de remontada.
+- **Hito GSS:** Migración completa del motor de gestos a `GestureSkillSystem` (GSS) basado en KNN. Eliminación de código heurístico legacy.
+- **Entrenamiento 3D:** Implementación de persistencia sesión-por-sesión (historia 3D) en `localStorage`, permitiendo calibración personal robusta.
+- **Validación de Datos:** Sistema de purga automática de datos antiguos (1152 features) para asegurar compatibilidad con el estándar actual (16/46 features).
 
 ## Lecciones Aprendidas
 - **Z-Index en WebXR:** El overlay del DOM para VR requiere `position: fixed` y `pointer-events: none` por defecto para no bloquear la interacción 3D o en el menú.
-- **Joints de Manos:** Nunca confiar en los índices numéricos de los joints; siempre usar los nombres W3C (`THUMB_METACARPAL`, etc.) para máxima compatibilidad entre headsets.
-- **Diferencial de Poder:** La mecánica de NP (0-100) donde la victoria ocurre con una diferencia de 50 puntos crea una tensión dramática fiel al anime.
+- **Features Estándar:** El sistema funciona mejor con vectores fijos: **16 features** para movimientos de Ki (`wristOnly`) y **46 features** cuando la forma de la mano importa (`wristAndFingertips`).
+- **Data Augmentation:** El mirroring y jittering son esenciales para que gestos entrenados con una sola mano funcionen en ambas y sean tolerantes al ruido.
 
 ## Próximos Pasos (Meta-Nivel)
 1. **Parte 2: Combate Melee.** Transición a cámara lenta al activarse, sombras de golpes para el defensor, detección de puntos de impacto.
