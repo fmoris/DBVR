@@ -132,6 +132,7 @@ export class CombatSystem {
   private messageListeners: Array<(msg: string, color?: string) => void> = [];
   
   private rechargeIntervalRef: ReturnType<typeof setInterval> | null = null;
+  public mirrorMode = false;
 
   // Estado de carga especial
   private activeSpecial: SpecialAttackType | null = null;
@@ -195,7 +196,7 @@ export class CombatSystem {
   }
 
   private log(msg: string, color: string = "white"): void {
-    console.log(`[Combat] ${msg}`);
+    // console.log(`[Combat] ${msg}`);
     this.messageListeners.forEach(l => l(msg, color));
   }
 
@@ -530,7 +531,7 @@ export class CombatSystem {
    * Cancela el ataque especial actual, deteniendo VFX y reseteando estado.
    */
   public cancelSpecial(): void {
-    if (this.stats.combatState === "charging_special" || this.isChargingSpecial || this.activeSpecial) {
+    if (this.stats.combatState === "charging_special" || this.activeSpecial) {
         this.stopChargeInterval();
         this.activeSpecial = null;
         this.stats.chargeTime = 0;

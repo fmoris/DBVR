@@ -53,8 +53,8 @@ export class Game {
     const scene = this.engineManager.getScene();
     this.vfx = new VFXManager(scene);
     this.combat = new CombatSystem(scene, this.vfx, gokuConfig, vegetaConfig);
-    this.inputManager = new InputManager(scene);
-    this.vrHud = new VRHud(scene, this.combat);
+    this.inputManager = new InputManager();
+    this.vrHud = new VRHud(scene, this.combat, this.inputManager);
     this.hud = new HUD(this.xrOverlay, this.combat);
     this.resultScreen = new ResultScreen(this.xrOverlay);
     this.debugOverlay = new GestureDebugOverlay(this.xrOverlay, scene);
@@ -66,7 +66,8 @@ export class Game {
     this.xrManager = new XRManager({
         scene, xrOverlay: this.xrOverlay, inputManager: this.inputManager, 
         playerController: this.playerController, vrHud: this.vrHud, 
-        hud: this.hud, debugOverlay: this.debugOverlay, engineManager: this.engineManager
+        hud: this.hud, debugOverlay: this.debugOverlay,
+        envManager: this.envManager
     });
 
     this.inputManager.setup(gokuConfig.transformations?.[0]?.powers || []);
@@ -88,7 +89,10 @@ export class Game {
     
     this.hud.show();
     this.canvas.focus();
-    this.inputManager.start();
+    this.inputManager.start().then(() => {
+        this.vrHud.renderPowersList();
+    });
+    this.setupGSSListeners(); // Nueva vinculación
     this.engineManager.runRenderLoop();
 
     scene.registerBeforeRender(() => this.updateFrame());
@@ -105,10 +109,6 @@ export class Game {
       this.vfx.updateAura(this.enemyAura, (stats.enemyKi / 100) * 100, stats.combatState === "slowMotion", stats.enemyNP, eColor);
     }
 
-    const inXR = this.xrManager.getXR()?.baseExperience?.state === 2;
-    if (!inXR && this.inputManager.getGestureRecognizer().getLeftHandJoints()) {
-      this.playerController.processGestures(camera.getForwardRay().direction);
-    }
   }
 
   private setupGameOverHandler(): void {
@@ -134,7 +134,7 @@ export class Game {
         return;
     }
     this.inputManager.onVoiceCommand((command, transcript) => {
-       console.log(`[Game] Voice Command detected: ${command} ("${transcript}")`);
+       // console.log(`[Game] Voice Command detected: ${command} ("${transcript}")`);
        if (this.started && command) { 
            this.combat.triggerSpecial(command); 
            this.combat.applyVoiceBonus(command); 
@@ -142,13 +142,13 @@ export class Game {
        }
     });
 
-    this.inputManager.onVoiceStatus((active, transcript) => {
-        if (transcript) console.log(`[Game] Voice Status: ${active}, Transcript: "${transcript}"`);
+    this.inputManager.onVoiceStatus((_active, transcript) => {
+        // if (transcript) console.log(`[Game] Voice Status: ${_active}, Transcript: "${transcript}"`);
         this.hud.showVoiceTranscript(transcript);
     });
 
     this.inputManager.onSpeech((transcript) => {
-        console.log(`[Game] Raw Speech detected: "${transcript}"`);
+        // console.log(`[Game] Raw Speech detected: "${transcript}"`);
         if (!this.started) return;
         
         // Notificar actividad para recarga
@@ -182,6 +182,49 @@ export class Game {
         onEnterVR: () => this.enterVR(),
         isInChargingState: () => this.combat.isInChargingState()
     });
+  }
+
+  private setupGSSListeners(): void {
+    const gss = this.inputManager.getGSS();
+    
+    gss.onAttack = (name, power, hand, character) => {
+        if (!this.started) return;
+
+        // Mapeo de ataques GSS -> CombatSystem
+        if (name === "kamehameha" || name === "galick_gun" || name === "final_flash" || name === "genkidama") {
+            // Ya cargado por FSM, procedemos a disparar
+            this.combat.triggerSpecial(name); 
+        } 
+        else if (name === "ki_blast_quick" || name === "ki_blast_charged") {
+            const h = (hand === "both" || hand === "right") ? "right" : "left";
+            const ctx = this.inputManager.getLastContext();
+            const wrist = h === "left" ? ctx?.leftWrist : ctx?.rightWrist;
+            if (wrist) {
+                const multiplier = name === "ki_blast_quick" ? 1.0 : (1.0 + power);
+                this.combat.launchKiBlast(wrist.absolutePosition, this.engineManager.getCamera().getForwardRay().direction, multiplier);
+            }
+        }
+
+        this.vrHud?.showToast(`ATAQUE GSS: ${name.toUpperCase()} (${character})`, "#00ff88", 1500);
+    };
+
+    gss.onPhaseChange = (from, to) => {
+        if (to === "kame_charge" || to.includes("charge")) {
+             // Sincronizar inicio de carga en CombatSystem si no ha empezado
+             const attack = to === "kame_charge" ? "kamehameha" : "charged_ki_blast";
+             if (this.combat.getStats().combatState === "neutral") {
+                 this.combat.triggerSpecial(attack);
+             }
+        } else if (to === "idle" && from.includes("charge")) {
+            // Cancelado en GSS -> Cancelar en Combat
+            this.combat.cancelSpecial();
+        }
+    };
+
+    gss.onChargeUpdate = (_name, _ratio) => {
+        // Opcional: Actualizar VFX de carga en tiempo real con el ratio del GSS
+        // this.combat.updateChargeRatio(_ratio);
+    };
   }
 
   async enterVR(): Promise<void> { await this.xrManager.enterVR(); }

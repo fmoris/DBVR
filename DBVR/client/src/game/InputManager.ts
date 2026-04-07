@@ -1,45 +1,45 @@
-import { Scene } from "@babylonjs/core";
-import { GestureRecognizer } from "./GestureRecognizer";
 import { VoiceRecognizer, VoiceCommand } from "./VoiceRecognizer";
-import { GestureSimulator } from "./GestureSimulator";
+import { GestureSkillSystem, XRHandsContext } from "./GestureSkillSystem";
+import { GOKU_CONFIG } from "./CharacterConfigs";
 
 export class InputManager {
-  private gestureRecognizer: GestureRecognizer;
   private voiceRecognizer: VoiceRecognizer;
-  private simulator: GestureSimulator;
+  private gestureSkillSystem: GestureSkillSystem;
   private started = false;
+  private _lastContext: XRHandsContext | null = null;
 
-  constructor(scene: Scene) {
-    this.gestureRecognizer = new GestureRecognizer(scene);
+  constructor() {
     this.voiceRecognizer = new VoiceRecognizer();
-    this.simulator = new GestureSimulator(this.gestureRecognizer);
+    this.gestureSkillSystem = new GestureSkillSystem(null); // XR se asigna luego
+    this.gestureSkillSystem.registerCharacter(GOKU_CONFIG);
   }
 
   public setup(allowedPowers: string[]): void {
     this.voiceRecognizer.setAllowedPowers(allowedPowers);
-    this.gestureRecognizer.setAllowedPowers(allowedPowers);
   }
 
-  public start(): void {
+  public async start(): Promise<void> {
     this.started = true;
     this.voiceRecognizer.start();
-    console.log("[InputManager] Voice recognition active.");
+    await this.gestureSkillSystem.init("goku").catch(e => console.error("[InputManager] Error init GSS:", e));
+    console.log("[InputManager] Voice recognition & GSS active.");
   }
 
   public stop(): void {
     this.voiceRecognizer.stop();
   }
 
-  public getGestureRecognizer(): GestureRecognizer {
-    return this.gestureRecognizer;
-  }
 
   public getVoiceRecognizer(): VoiceRecognizer {
     return this.voiceRecognizer;
   }
 
-  public getSimulator(): GestureSimulator {
-    return this.simulator;
+  public getGSS(): GestureSkillSystem {
+    return this.gestureSkillSystem;
+  }
+
+  public getLastContext(): XRHandsContext | null {
+    return this._lastContext;
   }
 
   public onVoiceCommand(callback: (command: string, transcript: string) => void): void {
@@ -75,24 +75,17 @@ export class InputManager {
       if (!this.started) return;
       
       switch (e.key.toLowerCase()) {
-        case "a": this.simulator.playKiBlastSequence(); break;
-        case "w": this.simulator.playChargedKiBlastSequence(); break;
         case "s": actions.onBlock(); break;
         case "d": actions.onDodge(); break;
-        case "r":
-        case "k": this.simulator.playRechargeSequence(); break;
-        case "i": this.simulator.playKiBlastSequence("left"); break;
-        case "o": this.simulator.playKiBlastSequence("right"); break;
-        case "1": this.simulator.triggerSpecialPhased("kamehameha"); break;
-        case "2": this.simulator.triggerSpecialPhased("finalflash"); break;
-        case "3": this.simulator.triggerSpecialPhased("genkidama"); break;
         case "v": actions.onEnterVR(); break;
       }
     });
   }
 
-  public update(): void {
-    // Logic that needs to run every frame for inputs
+  public update(ctx: XRHandsContext): void {
+    if (!this.started) return;
+    this._lastContext = ctx;
+    this.gestureSkillSystem.update(ctx);
   }
 
   public dispose(): void {

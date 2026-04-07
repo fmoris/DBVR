@@ -88,5 +88,15 @@
       "firing": "clench_fist"
     },
     "charge_time": 1.0
+  },
+  "kaioken": {
+    "type": "especial",
+    "description": "Multiplicador de poder que envuelve al usuario en un aura roja intensa",
+    "voice_prompts": ["kaioken", "kaioken aumentado", "kaio ken"],
+    "vr_gestures": {
+      "preparation": "arms_crossed_chest",
+      "firing": "kaioken"
+    },
+    "charge_time": 1.0
   }
 }

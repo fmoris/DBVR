@@ -33,8 +33,10 @@ import {
   Control,
   Image,
   Ellipse,
+  ScrollViewer,
 } from "@babylonjs/gui";
 import { CombatSystem, GameStats } from "./CombatSystem";
+import { InputManager } from "./InputManager";
 import powersConfig from "../models/powers.json";
 import gokuConfig from "../models/goku.json";
 import gokuBaseImg from "../asstets/images/rosters/goku_base.png";
@@ -85,6 +87,7 @@ function getNPColor(np: number): string {
 export class VRHud {
   private scene: Scene;
   private combat: CombatSystem;
+  private inputManager: InputManager;
 
   // Meshes de los paneles
   private playerPanel!: Mesh;
@@ -138,9 +141,10 @@ export class VRHud {
 
   private visible = false;
 
-  constructor(scene: Scene, combat: CombatSystem) {
+  constructor(scene: Scene, combat: CombatSystem, inputManager: InputManager) {
     this.scene = scene;
     this.combat = combat;
+    this.inputManager = inputManager;
     this.buildPanels();
     this.hide(); // oculto hasta que se entre en VR
     // Suscribirse a cambios de stats
@@ -362,7 +366,7 @@ export class VRHud {
 
   /** Panel de debug para hand tracking — posición fija a la derecha */
   private buildDebugPanel(): void {
-    const { mesh, adt } = this.createPanel("vrHud-debug", 0.55, 0.3, 1024);
+    const { mesh, adt } = this.createPanel("vrHud-debug", 0.55, 0.4, 1024);
     this.debugPanel = mesh;
     this.debugADT = adt;
 
@@ -383,7 +387,7 @@ export class VRHud {
     const stack = new StackPanel("dbg-stack");
     stack.isVertical = true;
     stack.width = "94%";
-    stack.height = "85%";
+    stack.height = "90%";
     stack.top = "30px";
     stack.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
     stack.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_CENTER;
@@ -472,7 +476,7 @@ export class VRHud {
     this.debugGestureText.color = "#ffffff";
     this.debugGestureText.fontSize = 20;
     this.debugGestureText.fontStyle = "bold";
-    this.debugGestureText.heightInPixels = 28;
+    this.debugGestureText.heightInPixels = 56;
     this.debugGestureText.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
     stack.addControl(this.debugGestureText);
   }
@@ -495,47 +499,110 @@ export class VRHud {
     title.top = "10px";
     bg.addControl(title);
 
-    // Contenedor para lista de poderes
+    // Botón de Modo Espejo (Phase 21)
+    const mirrorBtn = Button.CreateSimpleButton("mirror-btn", "MODO ESPEJO: OFF");
+    mirrorBtn.width = "200px";
+    mirrorBtn.height = "40px";
+    mirrorBtn.color = "white";
+    mirrorBtn.background = "#333333";
+    mirrorBtn.cornerRadius = 10;
+    mirrorBtn.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    mirrorBtn.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
+    mirrorBtn.top = "10px";
+    mirrorBtn.left = "-10px"; // En lugar de .right
+    mirrorBtn.onPointerClickObservable.add(() => {
+        // @ts-ignore
+        const combat = this.combat;
+        if (combat) {
+            combat.mirrorMode = !combat.mirrorMode;
+            // @ts-ignore
+            if (mirrorBtn.textBlock) mirrorBtn.textBlock.text = `MODO ESPEJO: ${combat.mirrorMode ? "ON" : "OFF"}`;
+            mirrorBtn.background = combat.mirrorMode ? "#00ff88" : "#333333";
+            mirrorBtn.color = combat.mirrorMode ? "black" : "white";
+        }
+    });
+    bg.addControl(mirrorBtn);
+
+    // Botón de Exportar JSON (Para guardar permanentemente en el proyecto)
+    const exportBtn = Button.CreateSimpleButton("export-btn", "📥 EXPORTAR JSON");
+    exportBtn.width = "200px";
+    exportBtn.height = "40px";
+    exportBtn.color = "white";
+    exportBtn.background = "#004488";
+    exportBtn.cornerRadius = 10;
+    exportBtn.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    exportBtn.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
+    exportBtn.top = "60px"; // Debajo del mirrorBtn
+    exportBtn.left = "-10px";
+    exportBtn.onPointerClickObservable.add(() => {
+        const gss = this.inputManager.getGSS();
+        gss.exportModel();
+        this.statusText.text = "¡MODELO EXPORTADO!\nRevisa tus descargas.";
+        this.statusBg.isVisible = true;
+        this.statusBg.background = "rgba(0, 100, 200, 0.8)";
+        setTimeout(() => { this.statusBg.isVisible = false; }, 3000);
+    });
+    bg.addControl(exportBtn);
+
+    // Contenedor ScrollViewer para lista de poderes
+    const viewer = new ScrollViewer("guide-viewer");
+    viewer.width = "96%";
+    viewer.height = "85%";
+    viewer.top = "45px";
+    viewer.thickness = 0;
+    viewer.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+    viewer.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_CENTER;
+    viewer.barSize = 10;
+    viewer.barColor = "#00ff88"; // Scrollbar en color temático
+    bg.addControl(viewer);
+
     const stack = new StackPanel("guide-stack");
     stack.isVertical = true;
-    stack.width = "94%";
-    stack.height = "85%";
-    stack.top = "45px";
+    stack.width = "100%";
+    stack.adaptHeightToChildren = true; // CRECE CON EL CONTENIDO
     stack.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-    stack.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_CENTER;
     stack.spacing = 6;
-    bg.addControl(stack);
+    viewer.addControl(stack);
     this.powersStack = stack;
     
     this.renderPowersList();
   }
 
-  private renderPowersList(filterPower?: string): void {
+  public renderPowersList(filterPower?: string): void {
     if (!this.powersStack) return;
     this.powersStack.getDescendants().forEach(c => c.dispose());
 
-    const allowedPowers = gokuConfig.transformations[0].powers || [];
+    const gss = this.inputManager.getGSS();
+    const activeChar = gss.activeCharacter;
+    const characterId = activeChar?.id || "goku";
+    this.statusText.text = `SISTEMA GSS: ${characterId.toUpperCase()}`; // Usar characterId para dar feedback
+    
+    // Fallback a gokuConfig solo si no hay personaje activo en GSS
+    const allowedPowers = activeChar?.timing ? Object.keys(activeChar.timing).filter(k => k !== 'kiBlast') : (gokuConfig.transformations[0].powers || []);
     const powersDict = powersConfig as Record<string, any>;
 
     const gestureLabelMap: Record<string, string> = {
-        "hands_clasped_at_waist": "Manos en la cintura",
-        "palms_forward_push": "Empujón frontal",
-        "arms_extended_horizontally": "Brazos en T",
-        "palms_forward_together": "Manos juntas",
-        "arms_raised_to_sky": "Brazos al cielo (Que se vean al mirar arriba)",
-        "arms_throw_forward": "Lanzar al frente",
-        "palm_forward_aim": "Apuntar palma",
-        "clench_fist": "Cerrar puño",
-        "hands_left_shoulder_crossed": "Manos en hombro izquierdo",
-        "ki_prep": "Manos juntas al pecho",
-        "ki_fire": "Brazo estirado al frente",
-        "ki_charge_prep": "Mano estirada (Otra relajada)",
-        "ki_charge_fire": "Movimiento brusco (sacudón)",
-        "recharge_p1": "Puños arriba (tensión)",
-        "recharge_p2": "Brazos a los costados"
+        "hands_clasped_at_waist": "Carga el Ki: Manos juntas cerca de tu cintura/lateral",
+        "palms_forward_push": "¡Dispara!: Empuje frontal con palmas abiertas",
+        "arms_extended_horizontally": "Brazos en T: Extiéndelos a los costados horizontalmente",
+        "palms_forward_together": "Poder Máximo: Manos juntas al frente (Final Flash prep)",
+        "arms_raised_to_sky": "Reunir Energía: Manos al cielo (Gathering)",
+        "arms_throw_forward": "Lanzamiento: Baja los brazos con fuerza hacia adelante",
+        "palm_forward_aim": "Apunta: Una mano extendida hacia el enemigo (Hakai prep)",
+        "clench_fist": "Ejecutar: Cierra el puño con fuerza",
+        "hands_left_shoulder_crossed": "Hombro Izquierdo: Manos cruzadas (Galick prep)",
+        "ki_prep": "Mano lista: Mano semi-abierta al frente",
+        "ki_fire": "Disparo rápido: Empuje corto y veloz",
+        "ki_charge_prep": "Carga concentrada: Brazo estirado cubriendo el pecho",
+        "ki_charge_fire": "Ráfaga potente: Sacudida frontal",
+        "recharge_p1": "Máximo Poder: Puños cerrados cerca de la cara",
+        "recharge_p2": "Grito de Guerra: Abre los brazos con fuerza lateral",
+        "palms_forward_push_wide": "¡Super Disparo!: Empuje masivo con ambas manos",
+        "arms_crossed_chest": "Preparación: Cruzar brazos en X frente al pecho",
+        "kaioken": "¡KAIOKEN!: Grito de aumento de poder y aura roja"
     };
 
-    // 1. ATAQUES BÁSICOS
+    // 1. ATAQUES BÁSICOS Y ESTADOS
     const basicMoves = [
         { id: "KI_BLAST", name: "Ataque de Ki Rápido", p: "ki_prep", f: "ki_fire", cost: "10 KI", time: "Instant" },
         { id: "CHARGED_KI_BLAST", name: "Ataque de Ki Cargado", p: "ki_charge_prep", f: "ki_charge_fire", cost: "1.5% Ki tick", time: "Variable" },
@@ -573,6 +640,47 @@ export class VRHud {
             pCost.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
             pCost.top = "68px";
             powerContainer.addControl(pCost);
+
+            // Botones de calibración (Phase 20+)
+            const calStack = new StackPanel(`cal-stack-${b.id}`);
+            calStack.isVertical = false;
+            calStack.width = "280px";
+            calStack.height = "40px";
+            calStack.spacing = 6;
+            calStack.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
+            calStack.verticalAlignment = Control.VERTICAL_ALIGNMENT_CENTER;
+            powerContainer.addControl(calStack);
+
+            const gss = this.inputManager.getGSS();
+            const count1 = gss.getGestureCount(this.getLabelForPower(b.id, "PREP"));
+            const count2 = gss.getGestureCount(this.getLabelForPower(b.id, "FIRE"));
+
+            const calBtn1 = Button.CreateSimpleButton(`cal1-${b.id}`, `F1: ${count1}`);
+            calBtn1.width = "85px";
+            calBtn1.height = "35px";
+            calBtn1.color = "white";
+            calBtn1.background = "#4444aa";
+            calBtn1.cornerRadius = 5;
+            calBtn1.onPointerClickObservable.add(() => this.startCalibration(b.id, "PREP"));
+            calStack.addControl(calBtn1);
+
+            const calBtn2 = Button.CreateSimpleButton(`cal2-${b.id}`, `F2: ${count2}`);
+            calBtn2.width = "85px";
+            calBtn2.height = "35px";
+            calBtn2.color = "white";
+            calBtn2.background = "#6666cc";
+            calBtn2.cornerRadius = 5;
+            calBtn2.onPointerClickObservable.add(() => this.startCalibration(b.id, "FIRE"));
+            calStack.addControl(calBtn2);
+
+            const resetBtn = Button.CreateSimpleButton(`res-${b.id}`, "RESET");
+            resetBtn.width = "75px";
+            resetBtn.height = "35px";
+            resetBtn.color = "white";
+            resetBtn.background = "#660000";
+            resetBtn.cornerRadius = 5;
+            resetBtn.onPointerClickObservable.add(() => this.resetCalibration(b.id));
+            calStack.addControl(resetBtn);
         }
     }
 
@@ -614,7 +722,118 @@ export class VRHud {
       pCost.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
       pCost.top = "68px";
       powerContainer.addControl(pCost);
+
+      // Botones de calibración (Phase 20+)
+      const calStack = new StackPanel(`cal-stack-${k}`);
+      calStack.isVertical = false;
+      calStack.width = "280px";
+      calStack.height = "40px";
+      calStack.spacing = 6;
+      calStack.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
+      calStack.verticalAlignment = Control.VERTICAL_ALIGNMENT_CENTER;
+      powerContainer.addControl(calStack);
+
+      const gss = this.inputManager.getGSS();
+      const count1 = gss.getGestureCount(this.getLabelForPower(k, "PREP"));
+      const count2 = gss.getGestureCount(this.getLabelForPower(k, "FIRE"));
+
+      const calBtn1 = Button.CreateSimpleButton(`cal1-${k}`, `F1: ${count1}`);
+      calBtn1.width = "85px";
+      calBtn1.height = "35px";
+      calBtn1.color = "white";
+      calBtn1.background = "#aa4400";
+      calBtn1.cornerRadius = 5;
+      calBtn1.onPointerClickObservable.add(() => this.startCalibration(k, "PREP"));
+      calStack.addControl(calBtn1);
+
+      const calBtn2 = Button.CreateSimpleButton(`cal2-${k}`, `F2: ${count2}`);
+      calBtn2.width = "85px";
+      calBtn2.height = "35px";
+      calBtn2.color = "white";
+      calBtn2.background = "#cc6622";
+      calBtn2.cornerRadius = 5;
+      calBtn2.onPointerClickObservable.add(() => this.startCalibration(k, "FIRE"));
+      calStack.addControl(calBtn2);
+
+      const resetBtn = Button.CreateSimpleButton(`res-${k}`, "RESET");
+      resetBtn.width = "75px";
+      resetBtn.height = "35px";
+      resetBtn.color = "white";
+      resetBtn.background = "#660000";
+      resetBtn.cornerRadius = 5;
+      resetBtn.onPointerClickObservable.add(() => this.resetCalibration(k));
+      calStack.addControl(resetBtn);
     }
+  }
+
+  private getLabelForPower(powerId: string, phase: "PREP" | "FIRE"): string {
+      const pId = powerId.toLowerCase();
+      if (pId === "kamehameha") {
+          return (phase === "PREP") ? "kamehameha_preparation" : "kamehameha_firing";
+      } else if (pId === "genkidama") {
+          return (phase === "PREP") ? "genkidama_preparation" : "genkidama_firing";
+      } else if (pId === "ki_blast") {
+          return (phase === "PREP") ? "ki_prep" : "ki_fire";
+      } else if (pId === "charged_ki_blast") {
+          return (phase === "PREP") ? "ki_charge_prep" : "ki_charge_fire";
+      } else if (pId === "recharge") {
+          return (phase === "PREP") ? "recharge_p1" : "recharge_p2";
+      } else if (pId === "stance") {
+          return "stance";
+      } else {
+          // Fallback genérico si es técnica nueva o ataque dinámico
+          const power = (powersConfig as any)[pId];
+          return (power && power.vr_gestures) 
+            ? ((phase === "PREP") ? power.vr_gestures.preparation : power.vr_gestures.firing)
+            : `${pId}_${phase.toLowerCase()}`;
+      }
+  }
+
+  private resetCalibration(powerId: string): void {
+      const gss = this.inputManager.getGSS();
+      if (!gss) return;
+
+      // Resetear el modelo del personaje actual
+      localStorage.removeItem(`gss_model_${powerId.toLowerCase()}`); 
+      // Notificar al usuario — en una versión real llamaríamos a un método de reset en GSS
+      this.statusText.text = `¡MODELO DE ${powerId.toUpperCase()} RESETEADO!\nReinicia la app para limpiar memoria.`;
+      
+      this.statusBg.isVisible = true;
+      this.statusBg.background = "rgba(100, 100, 100, 0.7)";
+      setTimeout(() => { this.statusBg.isVisible = false; }, 2000);
+  }
+
+  private async startCalibration(powerId: string, phase: "PREP" | "FIRE"): Promise<void> {
+      const gss = this.inputManager.getGSS();
+      if (!gss) return;
+
+      const label = this.getLabelForPower(powerId, phase);
+
+      this.statusBg.isVisible = true;
+      this.statusBg.background = "rgba(40, 40, 150, 0.8)";
+      
+      for (let i = 5; i > 0; i--) {
+          this.statusText.text = `PREPARA ${label.toUpperCase()}\nGRABANDO EN ${i}...`;
+          await new Promise(r => setTimeout(r, 1000));
+      }
+
+      this.statusBg.background = "rgba(255, 0, 0, 0.7)";
+      this.statusText.text = `¡GRABANDO ${label.toUpperCase()}!\nMantén la postura...`;
+
+      // Iniciar entrenamiento en GSS
+      gss.startTraining(label, "wristOnly");
+
+      // Capturar durante 2 segundos (~20 frames con el throttle del update)
+      await new Promise(r => setTimeout(r, 2000));
+
+      gss.stopTraining();
+      this.statusText.text = `SESION GUARDADA\n(${label})`;
+      this.statusBg.background = "rgba(0, 255, 0, 0.6)";
+
+      // Refrescar para ver el contador actualizado
+      this.renderPowersList();
+
+      setTimeout(() => { this.statusBg.isVisible = false; }, 2000);
   }
 
   /** Panel de estado — bullet time, alerta de ataque, historial de acciones */
@@ -779,7 +998,7 @@ export class VRHud {
 
     // Paneles de acción (arriba y abajo del todo)
     this.attackPanel.position = new Vector3(0.00, 0.95, 1.4);
-    this.defensePanel.position = new Vector3(0.00, -0.65, 1.4);
+    this.defensePanel.position = new Vector3(0.00, -0.72, 1.4);
 
     // ESTADO CENTRAL (Se mueve arriba para dar paso a la guía)
     this.statusPanel.position = new Vector3(0.00, 0.70, 1.3);
@@ -792,7 +1011,7 @@ export class VRHud {
     this.powersGuidePanel.rotation = new Vector3(0, 0, 0);
 
     // DEBUG DE GESTOS: Centrado inferior
-    this.debugPanel.position = new Vector3(0.00, -0.35, 1.3);
+    this.debugPanel.position = new Vector3(0.00, -0.38, 1.3);
 
     this.show();
   }
@@ -1088,19 +1307,14 @@ export class VRHud {
       this.debugRightHandText.text = "No detectada";
     }
 
-    // Gesto
-    this.debugGestureText.text = gesture || "NINGUNO";
-    // Color según el gesto
-    const gestureColors: Record<string, string> = {
-      "ATTACKING": "#ff4444",
-      "CHARGING": "#ffcc00",
-      "BLOCKING": "#44ff44",
-      "RECHARGING": "#cc44ff",
-      "RECHARGE_PREP": "#ff8800",
-      "PARRYING": "#44ccff",
-      "IDLE": "#aaaaaa",
-    };
-    this.debugGestureText.color = gestureColors[gesture] || "#ffffff";
+    // Gesto e info del GSS (Phase 21+)
+    const gss = this.inputManager.getGSS();
+    if (gss) {
+        const charId = gss.activeCharacter?.id || "unknown";
+        this.debugGestureText.text = `PERSONAJE: ${charId.toUpperCase()}\nESTADO: ${gss.currentState.toUpperCase()}`;
+    } else {
+        this.debugGestureText.text = gesture || "NINGUNO";
+    }
   }
 
   showToast(message: string, color: string = "white", duration: number = 4000): void {

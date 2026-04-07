@@ -13,7 +13,9 @@
       "url": "goku/goku_base.glb",
       "powers": [
         "kamehameha",
-        "genkidama"
+        "genkidama",
+        "super_kamehameha",
+        "kaioken"
       ],
       "props": {
         "multiplier": 1.0,

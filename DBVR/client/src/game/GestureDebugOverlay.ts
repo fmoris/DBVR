@@ -1,27 +1,24 @@
 /**
  * GestureDebugOverlay
- * Panel de debug en pantalla para diagnosticar el hand tracking en Meta Quest 3.
- * Muestra en tiempo real estadísticas de manos tanto en DOM normal como en un Mesh 3D para VR.
+ * Panel de debug en pantalla para diagnosticar el hand tracking.
+ * Sincronizado con el GestureSkillSystem (GSS).
  */
 
 import { Scene, MeshBuilder, Mesh, Vector3 } from "@babylonjs/core";
 import { AdvancedDynamicTexture, TextBlock, Control, Rectangle } from "@babylonjs/gui";
-import { GestureType, HandJoints } from "./GestureRecognizer";
 
-const GESTURE_COLORS: Record<GestureType, string> = {
-  [GestureType.IDLE]: "#aaaaaa",
-  [GestureType.ATTACKING]: "#ff4444",
-  [GestureType.CHARGING]: "#ffcc00",
-  [GestureType.BLOCKING]: "#44ff44",
-  [GestureType.PARRYING]: "#44aaff",
-  [GestureType.RECHARGING]: "#cc44ff",
-  [GestureType.RECHARGE_PREP]: "#ff88ff",
-  [GestureType.KAMEHAMEHA]: "#00e5ff",
-  [GestureType.KAMEHAMEHA_PREP]: "#00aacc",
-  [GestureType.KI_BLAST_L]: "#eeff00",
-  [GestureType.KI_BLAST_R]: "#eeff00",
-  [GestureType.CHARGED_KI_BLAST_L]: "#ff00ff",
-  [GestureType.CHARGED_KI_BLAST_R]: "#ff00ff",
+const GESTURE_COLORS: Record<string, string> = {
+  "idle": "#aaaaaa",
+  "charging": "#ffcc00",
+  "charging_special": "#ff8800",
+  "blocking": "#44ff44",
+  "recharging": "#cc44ff",
+  "attack": "#ff4444",
+  "ki_blast": "#00e5ff",
+  "kamehameha": "#00e5ff",
+  "galick_gun": "#cc44ff",
+  "final_flash": "#ffff00",
+  "genkidama": "#00ffff"
 };
 
 export class GestureDebugOverlay {
@@ -36,13 +33,8 @@ export class GestureDebugOverlay {
   private xrCamera: any = null;
 
   private handTrackingActive = false;
-  private leftJoints: HandJoints | null = null;
-  private rightJoints: HandJoints | null = null;
-  private currentGesture: GestureType = GestureType.IDLE;
-  private prevLeftZ = 0;
-  private prevRightZ = 0;
+  private currentGesture: string = "idle";
   private gestureLog: string[] = [];
-
   private handApiSource = "desconocido";
 
   constructor(private parent: HTMLElement, private scene: Scene) {
@@ -57,7 +49,7 @@ export class GestureDebugOverlay {
       border: 2px solid rgba(0, 200, 255, 0.8);
       border-radius: 8px;
       padding: 12px 18px;
-      font-family: var(--font-body, monospace);
+      font-family: monospace;
       font-size: 13px;
       color: #00ccff;
       min-width: 340px;
@@ -100,13 +92,8 @@ export class GestureDebugOverlay {
   attachToXRCamera(camera: any): void {
     this.xrCamera = camera;
     this.vrPlane.parent = camera;
-    
-    // Posicionar en la mitad derecha de la pantalla (local a la cámara)
     this.vrPlane.position = new Vector3(0.65, 0.0, 1.2);
-    
-    // Leve rotación para que mire hacia el centro
     this.vrPlane.rotation = new Vector3(0, 0.25, 0);
-
     if (this.visible) this.vrPlane.isVisible = true;
   }
 
@@ -121,20 +108,8 @@ export class GestureDebugOverlay {
     this.syncVisibility();
   }
 
-  show(): void {
-    this.visible = true;
-    this.syncVisibility();
-  }
-
-  hide(): void {
-    this.visible = false;
-    this.syncVisibility();
-  }
-
   private syncVisibility(): void {
     const isXR = this.xrCamera !== null;
-    
-    // Ocultar la versión HTML si estamos en VR, para no tapar la pantalla del HUD principal
     this.panel.style.display = (this.visible && !isXR) ? "block" : "none";
     this.vrPlane.isVisible = this.visible && isXR;
     
@@ -145,38 +120,25 @@ export class GestureDebugOverlay {
     }
   }
 
-  isVisible(): boolean { return this.visible; }
-
   update(opts: {
     handTrackingActive: boolean;
-    leftJoints: HandJoints | null;
-    rightJoints: HandJoints | null;
-    gesture: GestureType;
+    gesture: string;
     handApiSource?: string;
     success?: boolean;
+    leftJoints?: any; // Ignored for now to clean up legacy
+    rightJoints?: any;
   }): void {
     if (opts.handApiSource) this.handApiSource = opts.handApiSource;
-    this.prevLeftZ  = this.leftJoints?.wrist.z  ?? opts.leftJoints?.wrist.z  ?? 0;
-    this.prevRightZ = this.rightJoints?.wrist.z ?? opts.rightJoints?.wrist.z ?? 0;
-
     this.handTrackingActive = opts.handTrackingActive;
-    this.leftJoints         = opts.leftJoints;
-    this.rightJoints        = opts.rightJoints;
 
-    // Loguear si el gesto cambia O si es una ejecución exitosa (para ver spam de ataques si se quiere)
     const gestureChanged = opts.gesture !== this.currentGesture;
-    const actionSuccess = opts.success === true;
-
-    if (gestureChanged || (actionSuccess && opts.gesture !== "IDLE")) {
+    if (gestureChanged || opts.success) {
       const ts = new Date().toLocaleTimeString("es", { hour12: false });
-      const status = opts.success ? "OK" : "Ignorado";
+      const status = opts.success ? "OK" : "State";
       const entry = `[${ts}] ${opts.gesture} (${status})`;
       
-      // Evitar saturar el log con "IDLE" o "Ignorado" repetidos si no hay cambio
-      if (gestureChanged || actionSuccess) {
-         this.gestureLog.unshift(entry);
-         if (this.gestureLog.length > 15) this.gestureLog.pop();
-      }
+      this.gestureLog.unshift(entry);
+      if (this.gestureLog.length > 15) this.gestureLog.pop();
     }
     this.currentGesture = opts.gesture;
   }
@@ -187,69 +149,36 @@ export class GestureDebugOverlay {
     this.frameId = requestAnimationFrame(() => this.renderLoop());
   }
 
-  private fmt(v: number): string {
-    return v.toFixed(3).padStart(7);
-  }
-
-  private dist3(a: HandJoints["wrist"], b: HandJoints["wrist"]): number {
-    const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
-    return Math.sqrt(dx * dx + dy * dy + dz * dz);
-  }
-
   private render(): void {
-    const L = this.leftJoints;
-    const R = this.rightJoints;
-
-    const wristDist = L && R ? this.dist3(L.wrist, R.wrist).toFixed(3) : "---";
-    const pushL  = L ? (this.prevLeftZ  - L.wrist.z).toFixed(3) : "---";
-    const pushR  = R ? (this.prevRightZ - R.wrist.z).toFixed(3) : "---";
-
     // ─── DOM UPDATE ───
     if (this.panel.style.display !== "none") {
       const htStatus = this.handTrackingActive ? `<span style="color:#00ff88">● ACTIVO</span>` : `<span style="color:#ff4444">● SIN DATOS</span>`;
-      const gestureColor = GESTURE_COLORS[this.currentGesture];
-      const gestureLabel = `<span style="color:${gestureColor};font-weight:bold">${this.currentGesture}</span>`;
-
-      const lRow = L ? `x:${this.fmt(L.wrist.x)} y:${this.fmt(L.wrist.y)} z:${this.fmt(L.wrist.z)}` : `<span style="color:#ff4444">sin datos</span>`;
-      const rRow = R ? `x:${this.fmt(R.wrist.x)} y:${this.fmt(R.wrist.y)} z:${this.fmt(R.wrist.z)}` : `<span style="color:#ff4444">sin datos</span>`;
-      const lIdx = L ? `x:${this.fmt(L.indexTip.x)} y:${this.fmt(L.indexTip.y)} z:${this.fmt(L.indexTip.z)}` : "---";
-      const rIdx = R ? `x:${this.fmt(R.indexTip.x)} y:${this.fmt(R.indexTip.y)} z:${this.fmt(R.indexTip.z)}` : "---";
-      const logRows = this.gestureLog.length ? this.gestureLog.map(l => `<div style="color:#aaa;font-size:10px">${l}</div>`).join("") : `<div style="color:#444">— sin cambios —</div>`;
+      const color = GESTURE_COLORS[this.currentGesture] || "#00ccff";
+      const gestureLabel = `<span style="color:${color};font-weight:bold">${this.currentGesture}</span>`;
+      const logRows = this.gestureLog.map(l => `<div style="color:#aaa;font-size:10px">${l}</div>`).join("");
 
       this.panel.innerHTML = `
         <div style="display:flex;justify-content:space-between;margin-bottom:6px;border-bottom:1px solid #0a2a4a;padding-bottom:4px;">
-          <span style="letter-spacing:2px;font-size:10px;color:#0088aa">GESTURE DEBUG</span>
+          <span style="letter-spacing:2px;font-size:10px;color:#0088aa">GSS DEBUG</span>
           <span style="font-size:10px">[G] toggle</span>
         </div>
-        <div style="margin-bottom:4px">Hand Tracking: ${htStatus}</div>
-        <div style="margin-bottom:4px;font-size:10px;color:#aaa">API usada: <span style="color:#ffcc44">${this.handApiSource}</span></div>
-        <div style="margin-bottom:6px">Gesto actual: ${gestureLabel}</div>
-        <div style="display:grid;grid-template-columns:60px 1fr;gap:2px 8px;margin-bottom:6px;font-size:10px;">
-          <span style="color:#0088aa">L.wrist</span><span>${lRow}</span>
-          <span style="color:#ff8844">R.wrist</span><span>${rRow}</span>
-          <span style="color:#0088aa">L.index</span><span>${lIdx}</span>
-          <span style="color:#ff8844">R.index</span><span>${rIdx}</span>
-          <span style="color:#aaa">dist</span><span>${wristDist} m</span>
-          <span style="color:#aaa">push L/R</span><span>${pushL} / ${pushR}</span>
-        </div>
-        <div style="border-top:1px solid #0a2a4a;padding-top:4px;font-size:10px;color:#0088aa;margin-bottom:2px">Historial de gestos:</div>
-        ${logRows}
+        <div>Hand Tracking: ${htStatus}</div>
+        <div style="font-size:10px;color:#aaa">Source: <span style="color:#ffcc44">${this.handApiSource}</span></div>
+        <div style="margin-top:4px">Gesto/Estado: ${gestureLabel}</div>
+        <div style="border-top:1px solid #0a2a4a;margin-top:8px;padding-top:4px;font-size:10px;color:#0088aa">Log:</div>
+        <div style="max-height:150px;overflow-y:hidden">${logRows}</div>
       `;
     }
 
     // ─── VR TEXT UPDATE ───
     if (this.vrPlane.isVisible) {
       const status = this.handTrackingActive ? "ACTIVO" : "SIN DATOS";
-      const vrLogs = this.gestureLog.length ? this.gestureLog.slice(0, 10).join("\n") : "--";
+      const vrLogs = this.gestureLog.slice(0, 10).join("\n");
       
-      this.vrText.text = `=== GESTURE DEBUG ===\n` +
+      this.vrText.text = `=== GSS DEBUG ===\n` +
           `Status: ${status}\n` +
           `API: ${this.handApiSource}\n` +
           `Gesture: ${this.currentGesture}\n\n` +
-          `L Wrist: ${L ? `x:${this.fmt(L.wrist.x)} y:${this.fmt(L.wrist.y)} z:${this.fmt(L.wrist.z)}` : "None"}\n` +
-          `R Wrist: ${R ? `x:${this.fmt(R.wrist.x)} y:${this.fmt(R.wrist.y)} z:${this.fmt(R.wrist.z)}` : "None"}\n` +
-          `Wrist Dist: ${wristDist} m\n` +
-          `Push Speed: L=${pushL} R=${pushR}\n\n` +
           `Log:\n${vrLogs}`;
     }
   }

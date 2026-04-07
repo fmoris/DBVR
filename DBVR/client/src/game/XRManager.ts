@@ -2,15 +2,16 @@ import {
   Scene,
   WebXRFeatureName,
   WebXRDefaultExperience,
-  WebXRHandTracking
+  WebXRHandTracking,
+  WebXRHandJoint
 } from "@babylonjs/core";
 import { InputManager } from "./InputManager";
 import { PlayerController } from "./PlayerController";
 import { VRHud } from "./VRHud";
 import { HUD } from "./HUD";
 import { GestureDebugOverlay } from "./GestureDebugOverlay";
-import { extractHandJoints } from "./GestureRecognizer";
-import { GameEngine } from "./GameEngine";
+import { XRHandsContext } from "./GestureSkillSystem";
+import { EnvironmentManager } from "./EnvironmentManager";
 
 export interface XRManagerConfig {
     scene: Scene;
@@ -20,7 +21,7 @@ export interface XRManagerConfig {
     vrHud: VRHud;
     hud: HUD;
     debugOverlay: GestureDebugOverlay;
-    engineManager: GameEngine;
+    envManager: EnvironmentManager;
 }
 
 export class XRManager {
@@ -31,7 +32,7 @@ export class XRManager {
   private vrHud: VRHud;
   private hud: HUD;
   private debugOverlay: GestureDebugOverlay;
-  private engineManager: GameEngine;
+  private envManager: EnvironmentManager;
 
   private xr: WebXRDefaultExperience | null = null;
 
@@ -43,7 +44,7 @@ export class XRManager {
     this.vrHud = config.vrHud;
     this.hud = config.hud;
     this.debugOverlay = config.debugOverlay;
-    this.engineManager = config.engineManager;
+    this.envManager = config.envManager;
   }
 
   public async init(): Promise<void> {
@@ -68,6 +69,7 @@ export class XRManager {
       this.xr = await this.scene.createDefaultXRExperienceAsync(xrConfig);
       if (!this.xr) return;
 
+      this.inputManager.getGSS().setXRExperience(this.xr);
       this.setupXRExperience();
       this.setupHandTracking();
       console.log("[XRManager] WebXR inicializado correctamente");
@@ -79,7 +81,12 @@ export class XRManager {
   private setupXRExperience(): void {
     if (!this.xr) return;
 
-    try { this.xr.baseExperience.featuresManager.disableFeature(WebXRFeatureName.POINTER_SELECTION); } catch(e){}
+    try { 
+      this.xr.baseExperience.featuresManager.enableFeature(WebXRFeatureName.POINTER_SELECTION, "latest", {
+        xrInput: this.xr.input,
+        enablePointerSelectionOnAllControllers: true
+      });
+    } catch(e){}
     try { this.xr.baseExperience.featuresManager.disableFeature(WebXRFeatureName.TELEPORTATION); } catch(e){}
 
     this.xr.baseExperience.onStateChangedObservable.add((state: number) => {
@@ -97,7 +104,6 @@ export class XRManager {
         this.hud?.show?.();
       }
       
-      // Update hand palm visibility handled by meshes in Game/PlayerController
       const leftMesh = this.scene.getMeshByName("leftHand");
       const rightMesh = this.scene.getMeshByName("rightHand");
       if (leftMesh) leftMesh.isVisible = !inXR;
@@ -124,56 +130,66 @@ export class XRManager {
 
       handTracking.onHandAddedObservable?.add((hand: any) => {
         const hnd = hand.xrController?.inputSource?.handedness ?? hand.handedness;
+        console.log(`[XRManager] Mano DETECTADA: ${hnd}`);
         if (hnd === "left") leftHand = hand;
         if (hnd === "right") rightHand = hand;
       });
 
       handTracking.onHandRemovedObservable?.add((hand: any) => {
         const hnd = hand.xrController?.inputSource?.handedness ?? hand.handedness;
+        console.log(`[XRManager] Mano PERDIDA: ${hnd}`);
         if (hnd === "left") leftHand = null;
         if (hnd === "right") rightHand = null;
       });
 
       this.scene.registerBeforeRender(() => {
-        if (this.xr?.baseExperience.state !== 2) return;
-
-        const G = this.inputManager.getGestureRecognizer();
         const xrCamera = this.xr?.baseExperience.camera;
-        
-        if (xrCamera) {
-          G.setEyeLevelY(xrCamera.globalPosition.y);
-          G.setCameraForward(xrCamera.getForwardRay().direction);
-        }
+        if (!xrCamera) return;
 
-        let lJointsXR = leftHand ? extractHandJoints(leftHand) : null;
-        let rJointsXR = rightHand ? extractHandJoints(rightHand) : null;
+        const ctx: XRHandsContext = {
+            leftWrist: leftHand?.getJointMesh(WebXRHandJoint.WRIST) || leftHand?.getJointMesh("wrist"),
+            rightWrist: rightHand?.getJointMesh(WebXRHandJoint.WRIST) || rightHand?.getJointMesh("wrist"),
+            leftHand: leftHand,
+            rightHand: rightHand,
+            headPos: xrCamera.globalPosition,
+            deltaTimeMs: this.scene.getEngine().getDeltaTime()
+        };
 
-        if (this.inputManager.getSimulator().isActive()) {
-          lJointsXR = null; rJointsXR = null;
-        }
-
-        if (lJointsXR) G.updateHandJoints("left", lJointsXR);
-        if (rJointsXR) G.updateHandJoints("right", rJointsXR);
-
-        const lJointsActual = G.getLeftHandJoints();
-        const rJointsActual = G.getRightHandJoints();
-
-        if (lJointsActual && rJointsActual) {
-          this.playerController.processGestures(xrCamera?.getForwardRay().direction || this.engineManager.getCamera().getForwardRay().direction);
-        }
-
-        const gesture = G.getCurrentGesture();
-        const apiSource = leftHand || rightHand ? "onHandAdded" : "waiting...";
+        this.inputManager.update(ctx);
+        const gss = this.inputManager.getGSS();
+        const currentGesture = gss.currentState;
+        const handTrackingActive = !!(ctx.leftWrist || ctx.rightWrist);
 
         this.debugOverlay?.update({
-          handTrackingActive: !!(lJointsActual || rJointsActual),
-          leftJoints: lJointsActual,
-          rightJoints: rJointsActual,
-          gesture,
-          handApiSource: apiSource,
+          handTrackingActive,
+          leftJoints: null,
+          rightJoints: null,
+          gesture: currentGesture,
+          handApiSource: leftHand || rightHand ? "WebXR Hands" : "waiting...",
         });
 
-        this.vrHud?.updateHandTrackingDebug(!!leftHand, !!rightHand, lJointsActual, rJointsActual, gesture, apiSource);
+        this.vrHud?.updateHandTrackingDebug(
+            !!leftHand, !!rightHand, 
+            null, null, 
+            currentGesture, 
+            leftHand || rightHand ? "WebXR Hands" : "waiting..."
+        );
+
+        if (ctx.leftWrist && ctx.rightWrist) {
+            const headPos = xrCamera.globalPosition;
+            const headRot = xrCamera.rotationQuaternion;
+            
+            if (headRot) {
+                const combat = this.playerController["combat"];
+                this.envManager.updateEnemyMirror(
+                    combat?.mirrorMode || false,
+                    headPos,
+                    headRot,
+                    ctx.leftWrist.absolutePosition,
+                    ctx.rightWrist.absolutePosition
+                );
+            }
+        }
       });
     }
   }
