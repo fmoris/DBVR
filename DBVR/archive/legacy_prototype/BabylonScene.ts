@@ -1,5 +1,5 @@
 import * as BABYLON from "@babylonjs/core";
-import { WebXRManager } from "./WebXRManager";
+import { XRManager as WebXRManager } from "../../client/src/systems/xr/XRManager";
 
 export interface GameState {
   playerKi: number;
@@ -71,8 +71,8 @@ export class BabylonScene {
 
   private async initializeWebXR(): Promise<void> {
     try {
-      this.webXRManager = new WebXRManager(this.scene);
-      const success = await this.webXRManager.initializeWebXR();
+      this.webXRManager = new WebXRManager({ scene: this.scene } as any);
+      const success = await this.webXRManager.init();
       
       if (success) {
         console.log("✅ WebXR disponible - Botón VR aparecerá automáticamente");

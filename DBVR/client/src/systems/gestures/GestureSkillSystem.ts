@@ -7,8 +7,8 @@ import { WebXRHandJoint, AbstractMesh, Vector3, WebXRHand } from '@babylonjs/cor
 // =====================================================================
 
 export interface XRHandsContext {
-    leftWrist: AbstractMesh;
-    rightWrist: AbstractMesh;
+    leftWrist: AbstractMesh | undefined;
+    rightWrist: AbstractMesh | undefined;
     leftHand?: WebXRHand;
     rightHand?: WebXRHand;
     headPos: Vector3;
@@ -49,6 +49,9 @@ export class GestureSkillSystem {
     private _classifying: boolean = false;
     private _frameCount: number = 0;
     private readonly CLASSIFY_EVERY: number = 4;
+
+    private _stateDebounce: { state: string; until: number } | null = null;
+    private readonly STATE_DEBOUNCE_MS: number = 150;
 
     private _characters: Map<string, CharacterConfig> = new Map();
 
@@ -137,10 +140,14 @@ export class GestureSkillSystem {
                         continue;
                     }
 
-                    const tensor = tf.tensor2d(allSamples);
-                    this.classifier!.addExample(tensor, label);
-                    console.log(`   - ${label}: ${flattened.length} muestras base -> [${tensor.shape}] con aumento.`);
-                    tensor.dispose();
+                    try {
+                        const tensor = tf.tensor2d(allSamples);
+                        this.classifier!.addExample(tensor, label);
+                        console.log(`   - ${label}: ${flattened.length} muestras base -> [${tensor.shape}] con aumento.`);
+                        tensor.dispose();
+                    } catch (err) {
+                        console.error(`[GSS] ❌ Error al añadir ejemplos para "${label}":`, err);
+                    }
                 }
             } catch (e) {
                 console.warn(`[GSS] Error cargando modelo personal para ${characterId}:`, e);
@@ -161,31 +168,47 @@ export class GestureSkillSystem {
         if (!this.classifier) return;
         const currentDataset = this.classifier.getClassifierDataset();
 
+        // Validación previa de consistencia de dimensiones
         for (const [label, examples] of Object.entries(data)) {
             if (!examples || examples.length === 0) continue;
 
-            const tensor = tf.tensor2d(examples);
-            console.log(`[GSS] Integrando default '${label}': [${tensor.shape}]`);
+            const features = examples[0]?.length;
+            if (!features || (features !== 16 && features !== 46)) {
+                console.warn(`[GSS] ⚠️ Dimensiones inválidas en defaultData para "${label}": ${features} features. Se esperaba 16 o 46. Saltando.`);
+                continue;
+            }
 
-            if (currentDataset[label]) {
-                const oldTensor = currentDataset[label];
-                if (oldTensor.shape[1] !== tensor.shape[1]) {
-                    console.warn(`[GSS] ⚠️ Mismatch de dimensiones para ${label}: Clasificador(${oldTensor.shape[1]}) vs JSON(${tensor.shape[1]}). Saltando.`);
-                    tensor.dispose();
-                    continue;
-                }
-                
-                try {
+            const inconsistent = examples.find(e => e.length !== features);
+            if (inconsistent) {
+                console.error(`[GSS] ❌ Dimensión inconsistente en "${label}": se esperaba ${features}, se encontró ${inconsistent.length}. Saltando.`);
+                continue;
+            }
+        }
+
+        for (const [label, examples] of Object.entries(data)) {
+            if (!examples || examples.length === 0) continue;
+
+            try {
+                const tensor = tf.tensor2d(examples);
+                console.log(`[GSS] Integrando default '${label}': [${tensor.shape}]`);
+
+                if (currentDataset[label]) {
+                    const oldTensor = currentDataset[label];
+                    if (oldTensor.shape[1] !== tensor.shape[1]) {
+                        console.warn(`[GSS] ⚠️ Mismatch de dimensiones para ${label}: Clasificador(${oldTensor.shape[1]}) vs JSON(${tensor.shape[1]}). Saltando.`);
+                        tensor.dispose();
+                        continue;
+                    }
+
                     const newTensor = tf.concat([oldTensor, tensor], 0);
                     currentDataset[label] = newTensor;
                     oldTensor.dispose();
                     tensor.dispose();
-                } catch (err) {
-                    console.error(`[GSS] ❌ Error al concatenar "${label}":`, err);
-                    tensor.dispose();
+                } else {
+                    currentDataset[label] = tensor;
                 }
-            } else {
-                currentDataset[label] = tensor;
+            } catch (err) {
+                console.error(`[GSS] ❌ Error al procesar "${label}":`, err);
             }
         }
 
@@ -272,11 +295,12 @@ export class GestureSkillSystem {
     // ─────────────────────────────────────────────────────────────────
 
     public async update(ctx: XRHandsContext) {
-        if (!ctx.leftWrist || !ctx.rightWrist || !this.activeCharacter || !this.classifier) return;
+        if (!this.activeCharacter || !this.classifier) return;
 
         const now = performance.now();
-        const lPos = ctx.leftWrist.absolutePosition.clone();
-        const rPos = ctx.rightWrist.absolutePosition.clone();
+        // Wrist positions can be null if not tracked
+        const lPos = ctx.leftWrist?.absolutePosition.clone() || null;
+        const rPos = ctx.rightWrist?.absolutePosition.clone() || null;
 
         if (this.trainingMode) {
             const features = this._extract(ctx, this._trainingExtractor);
@@ -337,7 +361,18 @@ export class GestureSkillSystem {
     public setState(next: string) {
         const prev = this.currentState;
         if (prev !== next) {
+            const now = performance.now();
+
+            // Prevenir flickering: si es la misma transición reversa en <150ms, ignorar
+            if (this._stateDebounce &&
+                this._stateDebounce.state === next &&
+                now < this._stateDebounce.until) {
+                console.log(`[GSS] ⏸ Estado: ${prev} → ${next} ignorado (debounce)`);
+                return;
+            }
+
             this.currentState = next;
+            this._stateDebounce = { state: prev, until: now + this.STATE_DEBOUNCE_MS };
             console.log(`[GSS] Estado: ${prev} → ${next}`);
             this.onPhaseChange(prev, next);
         }
@@ -379,7 +414,8 @@ export class GestureSkillSystem {
     }
 
     private _getWristVelocity(hand: 'left' | 'right', ctx: XRHandsContext): number {
-        const pos = hand === 'left' ? ctx.leftWrist.absolutePosition : ctx.rightWrist.absolutePosition;
+        const pos = hand === 'left' ? ctx.leftWrist?.absolutePosition : ctx.rightWrist?.absolutePosition;
+        if (!pos) return 0;
         const prev = hand === 'left' ? this._prevLeftPos : this._prevRightPos;
         if (!prev) return 0;
         const delta = pos.subtract(prev);
@@ -470,6 +506,21 @@ export class GestureSkillSystem {
         return this._sessionHistory[label]?.length || 0;
     }
 
+    /**
+     * Retorna todas las sesiones grabadas para un movimiento específico
+     */
+    public getSessions(label: string): number[][][] {
+        return this._sessionHistory[label] || [];
+    }
+
+    /**
+     * Retorna una única sesión específica grabada para un movimiento
+     */
+    public getSession(label: string, index: number): number[][] | null {
+        const sessions = this.getSessions(label);
+        return sessions[index] || null;
+    }
+
     public saveModel() {
         if (!this.activeCharacter || !this.classifier) return;
         localStorage.setItem(`gss_model_${this.activeCharacter.id}`, JSON.stringify(this._sessionHistory));
@@ -486,6 +537,37 @@ export class GestureSkillSystem {
         a.click();
         URL.revokeObjectURL(url);
         console.log(`[GSS] 📥 Modelo exportado: gestures-${this.activeCharacter.id}.json`);
+    }
+
+    public removeLabel(label: string) {
+        if (!this.classifier || !this.activeCharacter) return;
+        
+        // 1. Eliminar de la historia 3D
+        if (this._sessionHistory[label]) {
+            delete this._sessionHistory[label];
+        }
+
+        // 2. Eliminar de la memoria física del clasificador (Instantáneo)
+        try {
+            this.classifier.clearClass(label);
+            console.log(`[GSS] 🗑️ Etiqueta "${label}" eliminada del clasificador.`);
+        } catch (e) {
+            console.warn(`[GSS] No se pudo limpiar la clase "${label}" (quizás no existía):`, e);
+        }
+
+        // 3. Persistir cambios en LocalStorage
+        this.saveModel();
+    }
+
+    public getMetrics() {
+        const dataset = this.classifier?.getClassifierDataset();
+        return {
+            classCount: dataset ? Object.keys(dataset).length : 0,
+            totalSamples: Object.values(this._sessionHistory).reduce((sum, arr) => sum + arr.length, 0),
+            sessionCounts: Object.fromEntries(
+                Object.entries(this._sessionHistory).map(([label, sessions]) => [label, sessions.length])
+            ),
+        };
     }
 
     public dispose() {

@@ -344,7 +344,11 @@ export class VFXManager {
 
     // Crear esfera de carga alrededor de la mano o posición centrada
     this.chargeMesh = MeshBuilder.CreateSphere("charge", { diameter: 0.15 }, this.scene);
-    this.chargeMesh.position = position || new Vector3(0.3, 1.4, 0.5);
+    if (position) {
+        this.chargeMesh.position.copyFrom(position);
+    } else {
+        this.chargeMesh.position.set(0.3, 1.4, 0.5);
+    }
 
     // Luz de carga
     this.chargeLight = new PointLight("chargeLight", this.chargeMesh.position, this.scene);

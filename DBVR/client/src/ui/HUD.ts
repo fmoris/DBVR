@@ -1,8 +1,8 @@
-import { CombatSystem, GameStats, CombatState } from "./CombatSystem";
+import { CombatSystem, GameStats, CombatState } from "../systems/combat/CombatSystem";
 import powersConfig from "../models/powers.json";
 import gokuConfig from "../models/goku.json";
-import gokuBaseImg from "../asstets/images/rosters/goku_base.png";
-import vegetaBaseImg from "../asstets/images/rosters/vegeta_base.png";
+import gokuBaseImg from "../assets/images/rosters/goku_base.png";
+import vegetaBaseImg from "../assets/images/rosters/vegeta_base.png";
 
 const STATE_LABELS: Record<CombatState, string> = {
   neutral: "Neutral",
@@ -62,11 +62,57 @@ export class HUD {
       top:0; left:0;
       width:100%; height:100%;
       pointer-events:none;
-      font-family:var(--font-body, sans-serif);
+      font-family: 'Inter', sans-serif;
       user-select:none;
       display:none;
       z-index:100;
+      overflow: hidden;
     `;
+    
+    // Inyectar estilos globales para animaciones y fuentes si no existen
+    if (!document.getElementById("hud-premium-styles")) {
+        const style = document.createElement("style");
+        style.id = "hud-premium-styles";
+        style.textContent = `
+            @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+            
+            .hud-glass {
+                background: rgba(0, 20, 40, 0.7) !important;
+                backdrop-filter: blur(8px);
+                border: 2px solid rgba(0, 200, 255, 0.4) !important;
+                box-shadow: 0 0 20px rgba(0, 150, 255, 0.2), inset 0 0 10px rgba(0, 100, 255, 0.1) !important;
+            }
+            .hud-glass-red {
+                background: rgba(40, 5, 5, 0.7) !important;
+                backdrop-filter: blur(8px);
+                border: 2px solid rgba(255, 60, 60, 0.4) !important;
+                box-shadow: 0 0 20px rgba(255, 50, 50, 0.2), inset 0 0 10px rgba(200, 0, 0, 0.1) !important;
+            }
+            .hud-scanlines {
+                position: relative;
+            }
+            .hud-scanlines::after {
+                content: "";
+                position: absolute;
+                inset: 0;
+                background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%), 
+                            linear-gradient(90deg, rgba(255, 0, 0, 0.02), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.02));
+                background-size: 100% 3px, 3px 100%;
+                pointer-events: none;
+                z-index: 10;
+                opacity: 0.4;
+            }
+            @keyframes hud-glow {
+                0% { opacity: 0.8; }
+                50% { opacity: 1; }
+                100% { opacity: 0.8; }
+            }
+            .hud-pulse {
+                animation: hud-glow 2s infinite ease-in-out;
+            }
+        `;
+        document.head.appendChild(style);
+    }
     this.parent.appendChild(this.container);
     this.buildDOM();
     this.combat.onStatsChange((stats) => this.update(stats));
@@ -245,11 +291,6 @@ export class HUD {
 
     // Colores del tema
     const borderColor = isBlue ? "rgba(0,200,255,0.7)" : "rgba(255,60,60,0.7)";
-    const glowColor = isBlue ? "rgba(0,150,255,0.3)" : "rgba(255,50,50,0.3)";
-    const glowInner = isBlue ? "rgba(0,100,200,0.12)" : "rgba(180,0,0,0.12)";
-    const bgGradient = isBlue
-      ? "linear-gradient(135deg,rgba(0,15,40,0.95) 0%,rgba(0,30,70,0.90) 100%)"
-      : "linear-gradient(135deg,rgba(40,5,5,0.95) 0%,rgba(70,10,10,0.90) 100%)";
     const accentLine = isBlue ? "rgba(0,200,255,0.8)" : "rgba(255,80,80,0.8)";
     const avatarBorder = isBlue ? "#00ccff" : "#ff4444";
     const avatarGlow = isBlue ? "rgba(0,200,255,0.5)" : "rgba(255,60,60,0.5)";
@@ -279,18 +320,15 @@ export class HUD {
     const avatarImg = `<img id="${side}-avatar-img" src="${avatarSrc}" alt="" style="width:100%;height:100%;object-fit:cover;object-position:top center;border-radius:50%;display:block;" />`;
 
     return `
-      <div style="
+      <div class="hud-glass${!isBlue ? "-red" : ""} hud-scanlines" style="
         position:relative;
         display:flex;
         flex-direction:row;
         align-items:center;
         gap:0;
-        background:${bgGradient};
-        border:2px solid ${borderColor};
         border-radius:14px;
         padding:14px 18px 14px 14px;
-        min-width:300px;
-        box-shadow:0 0 32px ${glowColor}, 0 0 8px ${glowColor}, inset 0 0 20px ${glowInner};
+        min-width:320px;
       ">
 
         <!-- Linea decorativa superior -->
@@ -358,11 +396,11 @@ export class HUD {
               border-radius:3px; overflow:hidden;
               box-shadow:inset 0 0 6px rgba(0,0,0,0.5);
             ">
-              <div id="${npBarId}" style="
+              <div id="${npBarId}" class="hud-pulse" style="
                 height:100%; width:100%;
                 background:${npBarGrad};
-                box-shadow:0 0 10px ${npBarGlow}, 0 0 4px ${npBarGlow};
-                transition:width 0.2s ease;
+                box-shadow:0 0 12px ${npBarGlow};
+                transition:width 0.4s cubic-bezier(0.1, 0.7, 0.1, 1);
                 border-radius:2px;
               "></div>
             </div>

@@ -1,6 +1,6 @@
-import { VoiceRecognizer, VoiceCommand } from "./VoiceRecognizer";
-import { GestureSkillSystem, XRHandsContext } from "./GestureSkillSystem";
-import { GOKU_CONFIG } from "./CharacterConfigs";
+import { VoiceRecognizer, VoiceCommand } from "../gestures/VoiceRecognizer";
+import { GestureSkillSystem, XRHandsContext } from "../gestures/GestureSkillSystem";
+import { GOKU_CONFIG } from "../combat/CharacterConfigs";
 
 export class InputManager {
   private voiceRecognizer: VoiceRecognizer;

@@ -1,8 +1,10 @@
-import { Scene } from "@babylonjs/core";
-import { VFXManager, AttackType } from "./VFXManager";
-import powersConfig from "../models/powers.json";
-import gokuConfig from "../models/goku.json";
-import vegetaConfig from "../models/vegeta.json";
+import { Scene, Observer, Vector3 } from "@babylonjs/core";
+import { VFXManager, AttackType } from "../vfx/VFXManager";
+import powersConfig from "../../models/powers.json";
+import gokuConfig from "../../models/goku.json";
+import vegetaConfig from "../../models/vegeta.json";
+import * as CombatUtils from "./CombatUtils";
+import { CombatAI } from "./CombatAI";
 
 export type CombatState =
   | "neutral"
@@ -57,13 +59,7 @@ const DAMAGE = {
   chargedAttack: { base: 20, perSecond: 10 },
 };
 
-export interface ChargeLevel {
-  label: string;
-  timeMin: number;
-  timeMax: number;
-  ki: number;
-  damage: number;
-}
+export interface ChargeLevel extends CombatUtils.ChargeLevel {}
 
 // Niveles de carga para ataques especiales generados dinámicamente
 const SPECIAL_LEVELS: Record<string, ChargeLevel[]> = {};
@@ -80,25 +76,7 @@ for (const [key, details] of Object.entries(powersDict)) {
   }
 }
 
-// Factor de daño segun NP del atacante (mas NP = mas daño)
-function npDamageFactor(np: number): number {
-  // Escala real: 10,000 NP -> x2 daño. 100,000 NP -> x11 daño.
-  return 1.0 + (np / 10000);
-}
-
-function getChargeLevel(
-  type: string,
-  elapsed: number
-): ChargeLevel | null {
-  const levels = SPECIAL_LEVELS[type.toLowerCase()];
-  if (!levels) return null;
-  // Buscar el nivel mas alto alcanzado
-  let reached: ChargeLevel | null = null;
-  for (const level of levels) {
-    if (elapsed >= level.timeMin) reached = level;
-  }
-  return reached;
-}
+// Las utilidades se han movido a CombatUtils.ts
 
 export class CombatSystem {
   private stats: GameStats = {
@@ -123,15 +101,17 @@ export class CombatSystem {
   };
 
   private listeners: StatsListener[] = [];
-  private regenInterval: ReturnType<typeof setInterval> | null = null;
-  private slowMotionTimeout: ReturnType<typeof setTimeout> | null = null;
-  private chargeInterval: ReturnType<typeof setInterval> | null = null;
-  private enemyAIInterval: ReturnType<typeof setTimeout> | null = null;
-  private enemyRegenInterval: ReturnType<typeof setInterval> | null = null;
   private gameOverCallbacks: Array<(winner: "player" | "enemy") => void> = [];
   private messageListeners: Array<(msg: string, color?: string) => void> = [];
   
-  private rechargeIntervalRef: ReturnType<typeof setInterval> | null = null;
+  // Referencia a la IA
+  private enemyAI: CombatAI | null = null;
+  
+  // Observador de Babylon para el bucle de juego (Phase 16)
+  private sceneObserver: Observer<Scene> | null = null;
+  private lastUpdateTime: number = 0;
+  private slowMotionTimeout: ReturnType<typeof setTimeout> | null = null;
+  
   public mirrorMode = false;
 
   // Estado de carga especial
@@ -148,7 +128,7 @@ export class CombatSystem {
   private lastVoiceTriggerTime = 0;
 
   // Soporte para posiciones dinámicas de ataques especiales (Phase 12)
-  private activeSpecialOrigin: { x: number; y: number; z: number } | null = null;
+  private activeSpecialOrigin: Vector3 | undefined = undefined;
 
   private playerHeight: number = 1.75;
   private enemyHeight: number = 1.64;
@@ -174,13 +154,81 @@ export class CombatSystem {
       this.log(`Enemigo: ${this.enemyName} (NP: ${this.stats.enemyNP})`, "#ff4444");
     }
 
-    this.startKiRegen();
-    // La IA se inicia solo si está habilitada (el usuario pidió desactivarla)
-    const aiEnabled = false; 
+    // Inicializar IA (desactivada si así se pide)
+    const aiEnabled = true; 
     if (aiEnabled) {
-      this.startEnemyAI();
+      this.enemyAI = new CombatAI(this);
+      this.enemyAI.start();
     }
-    this.startEnemyKiRegen();
+
+    // Suscribirse al bucle de renderizado
+    this.sceneObserver = this.scene.onBeforeRenderObservable.add(() => this.update());
+    this.lastUpdateTime = Date.now();
+  }
+
+  /**
+   * Bucle principal de lógica de combate (Phase 16)
+   * Reemplaza a todos los setInteral para mayor precisión.
+   */
+  private update(): void {
+    if (this.stats.gameOver) return;
+
+    const now = Date.now();
+    const dt = (now - this.lastUpdateTime) / 1000; // Delta time en segundos
+    this.lastUpdateTime = now;
+
+    // 1. Regeneración de Ki (Jugador)
+    if (this.stats.combatState === "neutral") {
+      // 4 Ki por segundo (2 cada 0.5s anterior)
+      const regenRate = 4;
+      this.stats.playerKi = Math.min(this.stats.maxKi, this.stats.playerKi + regenRate * dt);
+    }
+
+    // 2. Regeneración de Ki (Enemigo)
+    // 7.5 Ki por segundo (3 cada 0.4s anterior)
+    const enemyRegenRate = 7.5;
+    this.stats.enemyKi = Math.min(this.stats.enemyMaxKi, this.stats.enemyKi + enemyRegenRate * dt);
+
+    // 3. Prototipo de carga (Ataque Cargado Normal)
+    if (this.stats.combatState === "charging" && this.isChargingNormal) {
+      this.stats.chargeTime += dt;
+      if (this.stats.chargeTime > 0.3) {
+        this.vfx.updateChargeEffect(this.stats.chargeTime, "normal", undefined, 2.0);
+      }
+      if (this.stats.chargeTime > 1.0) {
+        this.stats.playerKi = Math.max(0, this.stats.playerKi - 30 * dt); // 30 Ki por segundo
+      }
+      if (this.stats.playerKi <= 0) this.cancelCharge();
+    }
+
+    // 4. Carga de Ataque Especial
+    if (this.stats.combatState === "charging_special" && this.activeSpecial) {
+      const id = this.activeSpecial.toLowerCase();
+      const maxLevel = SPECIAL_LEVELS[id][2];
+      const kiPerSec = maxLevel.ki / maxLevel.timeMin;
+      
+      this.stats.chargeTime += dt;
+      this.stats.playerKi = Math.max(0, this.stats.playerKi - kiPerSec * dt);
+
+      const minLevel = SPECIAL_LEVELS[id][0];
+      if (this.stats.playerKi <= 0 && this.stats.chargeTime < minLevel.timeMin) {
+        this.log("Ki Agotado: Carga Fallida", "#ff4444");
+        this.cancelCharge();
+      } else {
+        this.vfx.updateChargeEffect(this.stats.chargeTime, this.activeSpecial, this.activeSpecialOrigin, minLevel.timeMin);
+      }
+    }
+
+    // 5. Recarga Activa (Jugador)
+    if (this.stats.combatState === "recharging") {
+      const isGritando = (now - this.lastVoiceActivity) < 1500;
+      const kiGainSec = isGritando ? 60 : 25; // Equivale a kiGain 12 y 5 cada 200ms
+      
+      this.stats.playerKi = Math.min(this.stats.maxKi, this.stats.playerKi + kiGainSec * dt);
+      if (this.stats.playerKi >= this.stats.maxKi) this.stopRecharge();
+    }
+
+    this.emit();
   }
 
   onGameOver(callback: (winner: "player" | "enemy") => void): void {
@@ -209,78 +257,11 @@ export class CombatSystem {
     this.emit();
   }
 
-  private stopChargeInterval(): void {
-    if (this.chargeInterval) {
-      clearInterval(this.chargeInterval);
-      this.chargeInterval = null;
-    }
-  }
 
-  private startKiRegen(): void {
-    this.regenInterval = setInterval(() => {
-      if (this.stats.combatState === "neutral") {
-        this.stats.playerKi = Math.min(this.stats.maxKi, this.stats.playerKi + 2);
-        this.emit();
-      }
-    }, 500);
-  }
+  // Los métodos de regeneración legacy han sido eliminados.
+  // La lógica ahora reside en el método update().
 
-
-  // ============================================
-  // IA DEL ENEMIGO
-  // ============================================
-  private startEnemyKiRegen(): void {
-    this.enemyRegenInterval = setInterval(() => {
-      if (this.stats.gameOver) return;
-      this.stats.enemyKi = Math.min(this.stats.enemyMaxKi, this.stats.enemyKi + 3);
-      this.emit();
-    }, 400);
-  }
-
-  private startEnemyAI(): void {
-    const scheduleNextAttack = () => {
-      if (this.stats.gameOver) return;
-      // Intervalo aleatorio entre 3 y 6 segundos
-      const delay = 3000 + Math.random() * 3000;
-      this.enemyAIInterval = setTimeout(() => {
-        this.enemyDoAttack();
-        scheduleNextAttack();
-      }, delay);
-    };
-    // Primera accion despues de 2 segundos
-    setTimeout(() => scheduleNextAttack(), 2000);
-  }
-
-  private enemyDoAttack(): void {
-    if (this.stats.gameOver) return;
-    if (this.stats.isSlowMotion) return;
-
-    // Elegir ataque segun KI disponible y nivel de NP del enemigo
-    const roll = Math.random();
-    const enemyNP = this.stats.enemyNP;
-    
-    const vegetaPowers = vegetaConfig.transformations[0].powers || [];
-    const randomSpecial = vegetaPowers.length > 0 ? vegetaPowers[Math.floor(Math.random() * vegetaPowers.length)] : "charged";
-
-    // Enemigo fuerte usa ataques especiales con mas frecuencia
-    if (enemyNP >= 60 && this.stats.enemyKi >= 60 && roll < 0.35) {
-      this.enemyLaunchSpecial(randomSpecial);
-    } else if (this.stats.enemyKi >= 20 && roll < 0.7) {
-      this.enemyLaunchBasic();
-    } else {
-      // Recarga de KI del enemigo (accion visible pero no es un ataque)
-      this.stats.enemyAttacking = false; 
-      this.stats.enemyAttackName = "Recargando KI";
-      this.stats.enemyAttackType = null;
-      this.emit();
-      setTimeout(() => {
-        this.stats.enemyAttackName = "";
-        this.emit();
-      }, 800);
-    }
-  }
-
-  private enemyLaunchBasic(): void {
+  public enemyLaunchBasic(): void {
     const kiCost = 20;
     if (this.stats.enemyKi < kiCost) return;
     this.stats.enemyKi -= kiCost;
@@ -291,7 +272,7 @@ export class CombatSystem {
 
     // Calcular dano del enemigo
     const baseDamage = 8 + Math.random() * 12; // 8-20
-    const factor = npDamageFactor(this.stats.enemyNP);
+    const factor = CombatUtils.npDamageFactor(this.stats.enemyNP);
     const damage = baseDamage * factor;
 
     // Proyectil del enemigo (viene desde el frente)
@@ -310,7 +291,7 @@ export class CombatSystem {
     }, 700);
   }
 
-  private enemyLaunchSpecial(type: string): void {
+  public enemyLaunchSpecial(type: string): void {
     const powerConfig = (powersConfig as any)[type];
     const kiCost = 60; // Consumo estandar AI
     if (this.stats.enemyKi < kiCost) return;
@@ -323,7 +304,7 @@ export class CombatSystem {
     this.emit();
 
     const baseDamage = 45;
-    const factor = npDamageFactor(this.stats.enemyNP);
+    const factor = CombatUtils.npDamageFactor(this.stats.enemyNP);
     const damage = baseDamage * factor;
 
     if (type === "kamehameha" || type === "galick_gun") {
@@ -366,10 +347,22 @@ export class CombatSystem {
     }, 1200);
   }
 
+  /** Acción de recarga disparada por la IA */
+  public enemyTriggerRecharge(): void {
+    this.stats.enemyAttacking = false; 
+    this.stats.enemyAttackName = "Recargando KI";
+    this.stats.enemyAttackType = null;
+    this.emit();
+    setTimeout(() => {
+      this.stats.enemyAttackName = "";
+      this.emit();
+    }, 800);
+  }
+
   private onEnemyAttackImpact(damage: number): void {
     if (this.stats.gameOver) return;
     const isDefending = this.stats.combatState === "defending";
-    const damageReduction = this.getPowerLevelDamageReduction(this.stats.playerNP);
+    const damageReduction = CombatUtils.getPowerLevelDamageReduction(this.stats.playerNP);
     const finalDamage = isDefending ? damage * 0.3 : damage * (1 - damageReduction);
 
     // El jugador PIERDE NP al ser golpeado
@@ -423,31 +416,11 @@ export class CombatSystem {
     this.stats.chargeTime = 0;
     this.setState("charging");
     this.vfx.showChargeEffect(true);
-
-    this.stopChargeInterval();
-    this.chargeInterval = setInterval(() => {
-      this.stats.chargeTime += 0.1;
-      
-      // Actualizar VFX progresivo (Phase 16)
-      if (this.stats.chargeTime > 0.3) {
-        // Obtenemos posición de manos si es posible o usamos una por defecto
-        this.vfx.updateChargeEffect(this.stats.chargeTime, "normal", undefined, 2.0);
-      }
-
-      // Consumir KI extra gradualmente despues del primer segundo
-      if (this.stats.chargeTime > 1) {
-        this.stats.playerKi = Math.max(0, this.stats.playerKi - 3); // Costo gradual
-      }
-      if (this.stats.playerKi <= 0) {
-        this.cancelCharge();
-      }
-    }, 100);
     return true;
   }
 
   releaseChargedAttack(): void {
     if (this.stats.combatState !== "charging" || !this.isChargingNormal) return;
-    this.stopChargeInterval();
 
     const chargeTime = Math.max(0.5, Math.min(3, this.stats.chargeTime));
     const damage = DAMAGE.chargedAttack.base + Math.max(0, chargeTime - 1) * DAMAGE.chargedAttack.perSecond;
@@ -486,12 +459,12 @@ export class CombatSystem {
   }
 
   private cancelCharge(): void {
-    this.stopChargeInterval();
     this.isChargingNormal = false;
     this.activeSpecial = null;
     this.stats.chargeTime = 0;
     this.stats.specialType = null;
     this.vfx.showChargeEffect(false);
+    this.activeSpecialOrigin = undefined;
     this.setState("neutral");
     this.emit();
   }
@@ -505,7 +478,7 @@ export class CombatSystem {
   // Gestos VR: primer gesto inicia, segundo gesto lanza
   // ============================================
 
-  triggerSpecial(attackName: string, origin?: { x: number, y: number, z: number }): boolean {
+  triggerSpecial(attackName: string, origin?: Vector3): boolean {
     const id = attackName.toLowerCase();
     const power = (powersConfig as any)[id];
 
@@ -532,7 +505,6 @@ export class CombatSystem {
    */
   public cancelSpecial(): void {
     if (this.stats.combatState === "charging_special" || this.activeSpecial) {
-        this.stopChargeInterval();
         this.activeSpecial = null;
         this.stats.chargeTime = 0;
         this.stats.specialType = null;
@@ -546,13 +518,14 @@ export class CombatSystem {
    * Actualiza el origen de la carga en tiempo real (Phase 14)
    * Útil para que la esfera siga las manos en VR.
    */
-  public updateSpecialChargeOrigin(origin: { x: number, y: number, z: number }): void {
+  public updateSpecialChargeOrigin(origin: Vector3): void {
     if (this.stats.combatState === "charging_special") {
-        this.activeSpecialOrigin = origin;
+        if (!this.activeSpecialOrigin) this.activeSpecialOrigin = new Vector3();
+        this.activeSpecialOrigin.copyFrom(origin);
     }
   }
 
-  private beginSpecialCharge(type: string, origin?: { x: number, y: number, z: number }): boolean {
+  private beginSpecialCharge(type: string, origin?: Vector3): boolean {
     const id = type.toLowerCase();
     // Validar si el poder está habilitado para este personaje/transformación
     if (!this.availablePowers.some(p => p.toLowerCase() === id)) {
@@ -566,70 +539,33 @@ export class CombatSystem {
 
     this.activeSpecial = type;
     this.specialChargeStart = Date.now();
-    this.activeSpecialOrigin = origin || { x: 0.3, y: this.playerHeight * 0.7, z: 0.5 };
+    this.activeSpecialOrigin = origin ? origin.clone() : new Vector3(0.3, this.playerHeight * 0.7, 0.5);
     this.stats.chargeTime = 0;
     this.stats.specialType = type;
     this.setState("charging_special");
-    this.vfx.showChargeEffect(true, type, this.activeSpecialOrigin as any);
+    this.vfx.showChargeEffect(true, type, this.activeSpecialOrigin);
 
-    // KI se consume de forma gradual: el costo total del nivel maximo repartido en su tiempo
-    // Kamehameha max: 80 KI en 8s = 1 KI/100ms
-    // Final Flash max: 120 KI en 10s = 1.2 KI/100ms
-    const maxLevel = SPECIAL_LEVELS[type][2];
-    const maxTime = maxLevel.timeMin; // tiempo para llegar al maximo
-    const kiPerTick = (maxLevel.ki / maxTime) * 0.1; // KI por cada 100ms
-
-    this.stopChargeInterval();
-    this.chargeInterval = setInterval(() => {
-      const elapsed = (Date.now() - this.specialChargeStart) / 1000;
-      this.stats.chargeTime = elapsed;
-
-      // Consumir KI progresivamente
-      this.stats.playerKi = Math.max(0, this.stats.playerKi - kiPerTick);
-
-      // Auto-cancelar si se queda sin KI antes del nivel minimo
-      const minLevel = SPECIAL_LEVELS[type][0];
-      if (this.stats.playerKi <= 0) {
-        if (elapsed < minLevel.timeMin) {
-            this.log("Ki Agotado: Carga Fallida", "#ff4444");
-            this.cancelCharge();
-        } else {
-            // Si ya pasó el mínimo, solo dejamos de cargar (se congela el tiempo)
-            // No auto-lanzamos por petición del usuario (Phase 14)
-        }
-        return;
-      }
-
-      // Actualizar efectos de carga dinámicos (Phase 14/16)
-      // Pasamos la posición actualizada y el tiempo objetivo
-      this.vfx.updateChargeEffect(elapsed, type, this.activeSpecialOrigin as any, minLevel.timeMin);
-
-      this.emit();
-    }, 100);
     return true;
   }
 
-  private launchSpecial(type: string, origin?: { x: number, y: number, z: number }): boolean {
-    if (this.activeSpecial !== type) return false;
-    this.stopChargeInterval();
-
+  private launchSpecial(type: string, origin?: Vector3): boolean {
     const elapsed = (Date.now() - this.specialChargeStart) / 1000;
 
     // Determinar nivel de carga alcanzado
-    const level = getChargeLevel(type, elapsed);
+    const level = CombatUtils.getChargeLevel(SPECIAL_LEVELS[type.toLowerCase()], elapsed);
     if (!level) {
       this.cancelCharge();
       return false;
     }
 
     // Calcular daño final con factor de NP
-    const damage = level.damage * npDamageFactor(this.stats.playerNP);
+    const damage = level.damage * CombatUtils.npDamageFactor(this.stats.playerNP);
 
     // Si pasaron un origen en el lanzamiento, lo usamos, sino el que guardamos al cargar
-    const finalOrigin = origin || this.activeSpecialOrigin || { x: 0, y: this.playerHeight * 0.7, z: 0.3 };
+    const finalOrigin = origin || this.activeSpecialOrigin || new Vector3(0, this.playerHeight * 0.7, 0.3);
 
     this.activeSpecial = null;
-    this.activeSpecialOrigin = null;
+    this.activeSpecialOrigin = undefined;
     this.stats.chargeTime = 0;
     this.stats.specialType = null;
     this.setState("attacking");
@@ -844,32 +780,10 @@ export class CombatSystem {
 
     this.log(`Iniciando recarga de KI...`, "#cc44ff");
 
-    this.rechargeIntervalRef = setInterval(() => {
-      // Bono de Voz: si hubo actividad de voz reciente, recarga el doble
-      const isGritando = (Date.now() - this.lastVoiceActivity) < 1500;
-      const kiGain = isGritando ? 12 : 5;
-      
-      if (isGritando && Math.random() > 0.8) {
-        this.log("¡RECARGA POTENCIADA POR GRITO! ⚡⚡", "#ffff00");
-      }
-
-      const nextKi = this.stats.playerKi + kiGain;
-      this.stats.playerKi = Math.min(this.stats.maxKi, nextKi);
-      this.emit();
-      
-      if (this.stats.playerKi >= this.stats.maxKi) {
-         this.stopRecharge();
-      }
-    }, 200);
-
     return true;
   }
 
   stopRecharge(): void {
-    if (this.rechargeIntervalRef) {
-       clearInterval(this.rechargeIntervalRef);
-       this.rechargeIntervalRef = null;
-    }
     if (this.stats.combatState === "recharging") {
       this.setState("neutral");
       this.emit();
@@ -882,7 +796,7 @@ export class CombatSystem {
   private onAttackImpact(damage: number): void {
     if (this.stats.gameOver) return;
     const isDefending = this.stats.combatState === "defending";
-    const damageReduction = this.getPowerLevelDamageReduction(this.stats.enemyNP);
+    const damageReduction = CombatUtils.getPowerLevelDamageReduction(this.stats.enemyNP);
     const finalDamage = isDefending ? damage * 0.4 : damage * (1 - damageReduction);
 
     // El defensor PIERDE NP (Salud/Resistencia), el atacante GANA NP (Dominio)
@@ -892,14 +806,6 @@ export class CombatSystem {
     this.log(`¡IMPACTO! -${finalDamage.toFixed(0)} NP AL ENEMIGO`, "#00ff88");
     this.emit();
     this.checkVictoryCondition();
-  }
-
-  private getPowerLevelDamageReduction(np: number): number {
-    if (np >= 70000) return 0.9;
-    if (np >= 30000) return 0.7;
-    if (np >= 10000) return 0.4;
-    if (np >= 3000) return 0.2;
-    return 0;
   }
 
   private checkVictoryCondition(): void {
@@ -926,9 +832,8 @@ export class CombatSystem {
     }
 
     // Detener IA del enemigo
-    if (this.enemyAIInterval) {
-      clearTimeout(this.enemyAIInterval);
-      this.enemyAIInterval = null;
+    if (this.enemyAI) {
+      this.enemyAI.stop();
     }
     this.emit();
     this.gameOverCallbacks.forEach((cb) => cb(winner));
@@ -1031,16 +936,15 @@ export class CombatSystem {
   }
 
   dispose(): void {
-    if (this.regenInterval) clearInterval(this.regenInterval);
-    if (this.enemyRegenInterval) clearInterval(this.enemyRegenInterval);
-    if (this.slowMotionTimeout) clearTimeout(this.slowMotionTimeout);
-    if (this.enemyAIInterval) clearTimeout(this.enemyAIInterval);
-    this.stopChargeInterval();
+    if (this.sceneObserver) {
+      this.scene.onBeforeRenderObservable.remove(this.sceneObserver);
+      this.sceneObserver = null;
+    }
+    if (this.enemyAI) {
+      this.enemyAI.stop();
+    }
   }
 
-  /**
-   * Define qué poderes especiales puede ejecutar el jugador.
-   */
   public setAvailablePowers(powers: string[]): void {
     this.availablePowers = powers;
     this.log(`Poderes: ${powers.join(", ")}`, "#aaaaaa");

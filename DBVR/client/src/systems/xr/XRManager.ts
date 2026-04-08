@@ -3,15 +3,16 @@ import {
   WebXRFeatureName,
   WebXRDefaultExperience,
   WebXRHandTracking,
-  WebXRHandJoint
+  WebXRHandJoint,
+  WebXRHand
 } from "@babylonjs/core";
-import { InputManager } from "./InputManager";
-import { PlayerController } from "./PlayerController";
-import { VRHud } from "./VRHud";
-import { HUD } from "./HUD";
-import { GestureDebugOverlay } from "./GestureDebugOverlay";
-import { XRHandsContext } from "./GestureSkillSystem";
-import { EnvironmentManager } from "./EnvironmentManager";
+import { InputManager } from "../input/InputManager";
+import { PlayerController } from "../input/PlayerController";
+import { VRHud } from "../../ui/VRHud";
+import { HUD } from "../../ui/HUD";
+import { GestureDebugOverlay } from "../gestures/GestureDebugOverlay";
+import { XRHandsContext } from "../gestures/GestureSkillSystem";
+import { EnvironmentManager } from "../vfx/EnvironmentManager";
 
 export interface XRManagerConfig {
     scene: Scene;
@@ -47,16 +48,16 @@ export class XRManager {
     this.envManager = config.envManager;
   }
 
-  public async init(): Promise<void> {
+  public async init(): Promise<boolean> {
     if (!navigator.xr) {
         console.log("[XRManager] navigator.xr no disponible — modo desktop");
-        return;
+        return false;
     }
 
     const supported = await navigator.xr.isSessionSupported("immersive-vr").catch(() => false);
     if (!supported) {
         console.log("[XRManager] immersive-vr no soportado");
-        return;
+        return false;
     }
 
     try {
@@ -67,14 +68,16 @@ export class XRManager {
       };
       
       this.xr = await this.scene.createDefaultXRExperienceAsync(xrConfig);
-      if (!this.xr) return;
+      if (!this.xr) return false;
 
       this.inputManager.getGSS().setXRExperience(this.xr);
       this.setupXRExperience();
       this.setupHandTracking();
       console.log("[XRManager] WebXR inicializado correctamente");
+      return true;
     } catch (e) {
       console.warn("[XRManager] Error al inicializar WebXR:", e);
+      return false;
     }
   }
 
@@ -125,8 +128,8 @@ export class XRManager {
     }
 
     if (handTracking) {
-      let leftHand: any = null;
-      let rightHand: any = null;
+      let leftHand: WebXRHand | null = null;
+      let rightHand: WebXRHand | null = null;
 
       handTracking.onHandAddedObservable?.add((hand: any) => {
         const hnd = hand.xrController?.inputSource?.handedness ?? hand.handedness;
@@ -147,10 +150,10 @@ export class XRManager {
         if (!xrCamera) return;
 
         const ctx: XRHandsContext = {
-            leftWrist: leftHand?.getJointMesh(WebXRHandJoint.WRIST) || leftHand?.getJointMesh("wrist"),
-            rightWrist: rightHand?.getJointMesh(WebXRHandJoint.WRIST) || rightHand?.getJointMesh("wrist"),
-            leftHand: leftHand,
-            rightHand: rightHand,
+            leftWrist: leftHand?.getJointMesh(WebXRHandJoint.WRIST),
+            rightWrist: rightHand?.getJointMesh(WebXRHandJoint.WRIST),
+            leftHand: leftHand || undefined,
+            rightHand: rightHand || undefined,
             headPos: xrCamera.globalPosition,
             deltaTimeMs: this.scene.getEngine().getDeltaTime()
         };
@@ -197,16 +200,31 @@ export class XRManager {
   public async enterVR(): Promise<void> {
     if (this.xr) {
       await this.xr.baseExperience.enterXRAsync('immersive-vr', 'local-floor');
-    } else {
-      let waited = 0;
-      const t = setInterval(async () => {
-        waited += 200;
-        if (this.xr) {
-          clearInterval(t);
-          await this.xr.baseExperience.enterXRAsync('immersive-vr', 'local-floor');
-        } else if (waited >= 8000) clearInterval(t);
-      }, 200);
+      return;
     }
+
+    // Polling con timeout y Promise adecuada
+    return new Promise((resolve, reject) => {
+      const maxWait = 8000;
+      const interval = 200;
+      let waited = 0;
+
+      const check = setInterval(async () => {
+        waited += interval;
+        if (this.xr) {
+          clearInterval(check);
+          try {
+            await this.xr.baseExperience.enterXRAsync('immersive-vr', 'local-floor');
+            resolve();
+          } catch (err) {
+            reject(err);
+          }
+        } else if (waited >= maxWait) {
+          clearInterval(check);
+          reject(new Error('[XRManager] Timeout esperando XR experience'));
+        }
+      }, interval);
+    });
   }
 
   public getXR(): WebXRDefaultExperience | null {

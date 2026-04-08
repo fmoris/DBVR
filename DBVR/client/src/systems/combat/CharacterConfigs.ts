@@ -1,9 +1,9 @@
-import { CharacterConfig, GestureSkillSystem, XRHandsContext } from './GestureSkillSystem';
-import kameGestures from '../models/goku/gestures/kamehameha.json';
-import genkiGestures from '../models/goku/gestures/genkidama.json';
-import kiBlastGestures from '../models/goku/gestures/ki_blast.json';
-import kaiokenGestures from '../models/goku/gestures/kaioken.json';
-import kiChargeGestures from '../models/goku/gestures/ki_charge.json';
+import { CharacterConfig, GestureSkillSystem, XRHandsContext } from '../gestures/GestureSkillSystem';
+import kameGestures from "../../models/goku/gestures/kamehameha.json";
+import genkiGestures from "../../models/goku/gestures/genkidama.json";
+import kiBlastGestures from "../../models/goku/gestures/ki_blast.json";
+import kaiokenGestures from "../../models/goku/gestures/kaioken.json";
+import kiChargeGestures from "../../models/goku/gestures/ki_charge.json";
 
 // =====================================================================
 // UTILS - GSS DATA NORMALIZATION

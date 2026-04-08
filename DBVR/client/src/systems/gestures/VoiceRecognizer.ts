@@ -2,8 +2,8 @@
 // Reconocimiento de voz usando Web Speech API para activar ataques especiales.
 // Integrado dinámicamente con powers.json.
 
-import powersConfig from "../models/powers.json";
-import gokuConfig from "../models/goku.json";
+import powersConfig from "../../models/powers.json";
+import gokuConfig from "../../models/goku.json";
 
 export type VoiceCommand = string | null;
 type VoiceCommandCallback = (command: VoiceCommand, transcript: string) => void;

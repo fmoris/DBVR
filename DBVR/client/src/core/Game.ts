@@ -1,16 +1,16 @@
 import { Vector3, Color4, ParticleSystem } from "@babylonjs/core";
 import "@babylonjs/loaders/glTF";
-import { HUD } from "./HUD";
-import { CombatSystem } from "./CombatSystem";
-import { VFXManager } from "./VFXManager";
-import { InputManager } from "./InputManager";
+import { HUD } from "../ui/HUD";
+import { CombatSystem } from "../systems/combat/CombatSystem";
+import { VFXManager } from "../systems/vfx/VFXManager";
+import { InputManager } from "../systems/input/InputManager";
 import { GameEngine } from "./GameEngine";
-import { EnvironmentManager } from "./EnvironmentManager";
-import { ResultScreen } from "./ResultScreen";
-import { VRHud } from "./VRHud";
-import { GestureDebugOverlay } from "./GestureDebugOverlay";
-import { PlayerController } from "./PlayerController";
-import { XRManager } from "./XRManager";
+import { EnvironmentManager } from "../systems/vfx/EnvironmentManager";
+import { ResultScreen } from "../ui/ResultScreen";
+import { VRHud } from "../ui/VRHud";
+import { GestureDebugOverlay } from "../systems/gestures/GestureDebugOverlay";
+import { PlayerController } from "../systems/input/PlayerController";
+import { XRManager } from "../systems/xr/XRManager";
 import gokuConfig from "../models/goku.json";
 import vegetaConfig from "../models/vegeta.json";
 
@@ -187,7 +187,7 @@ export class Game {
   private setupGSSListeners(): void {
     const gss = this.inputManager.getGSS();
     
-    gss.onAttack = (name, power, hand, character) => {
+    gss.onAttack = (name: string, power: number, hand: 'left' | 'right' | 'both', character: string) => {
         if (!this.started) return;
 
         // Mapeo de ataques GSS -> CombatSystem
@@ -208,7 +208,7 @@ export class Game {
         this.vrHud?.showToast(`ATAQUE GSS: ${name.toUpperCase()} (${character})`, "#00ff88", 1500);
     };
 
-    gss.onPhaseChange = (from, to) => {
+    gss.onPhaseChange = (from: string, to: string) => {
         if (to === "kame_charge" || to.includes("charge")) {
              // Sincronizar inicio de carga en CombatSystem si no ha empezado
              const attack = to === "kame_charge" ? "kamehameha" : "charged_ki_blast";
@@ -221,7 +221,7 @@ export class Game {
         }
     };
 
-    gss.onChargeUpdate = (_name, _ratio) => {
+    gss.onChargeUpdate = (_name: string, _ratio: number) => {
         // Opcional: Actualizar VFX de carga en tiempo real con el ratio del GSS
         // this.combat.updateChargeRatio(_ratio);
     };

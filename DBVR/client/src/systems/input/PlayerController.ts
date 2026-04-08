@@ -5,11 +5,11 @@ import {
   Mesh,
   Scene
 } from "@babylonjs/core";
-import { CombatSystem } from "./CombatSystem";
-import { VFXManager } from "./VFXManager";
+import { CombatSystem } from "../combat/CombatSystem";
+import { VFXManager } from "../vfx/VFXManager";
 import { InputManager } from "./InputManager";
-import { VRHud } from "./VRHud";
-import gokuConfig from "../models/goku.json";
+import { VRHud } from "../../ui/VRHud";
+import gokuConfig from "../../models/goku.json";
 
 export interface PlayerControllerConfig {
     scene: Scene;

@@ -1,7 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "Bash(unzip -o metaquest-webxr.skill -d metaquest-webxr)"
+      "Bash(unzip -o metaquest-webxr.skill -d metaquest-webxr)",
+      "Bash(claude plugin:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(dir /s /b \"caveman*\")",
+      "Bash(findstr -i \"\\\\.skill\")",
+      "Bash(dir /s /b \"%APPDATA%\\\\Claude\\\\plugins\")"
     ]
   }
 }

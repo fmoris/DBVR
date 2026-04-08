@@ -1,5 +1,5 @@
-import { Game } from "./game/Game";
-import { StartScreen } from "./game/StartScreen";
+import { Game } from "./core/Game";
+import { StartScreen } from "./ui/StartScreen";
 
 const app = document.getElementById("app")!;
 app.style.cssText = "position:relative;width:100%;height:100%;overflow:hidden;background:#000;";

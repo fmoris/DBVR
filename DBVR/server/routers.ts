@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { COOKIE_NAME } from "@shared/const";
-import { getSessionCookieOptions } from "./_core/cookies";
-import { systemRouter } from "./_core/systemRouter";
-import { protectedProcedure, publicProcedure, router } from "./_core/trpc";
+import { getSessionCookieOptions } from "./core/cookies";
+import { systemRouter } from "./core/systemRouter";
+import { protectedProcedure, publicProcedure, router } from "./core/trpc";
 import { storagePut, storageGet } from "./storage";
 import {
   getOrCreatePlayerStats,
