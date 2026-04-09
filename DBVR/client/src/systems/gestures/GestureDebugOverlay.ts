@@ -36,6 +36,8 @@ export class GestureDebugOverlay {
   private currentGesture: string = "idle";
   private gestureLog: string[] = [];
   private handApiSource = "desconocido";
+  private leftJoints: any = null;
+  private rightJoints: any = null;
 
   constructor(private parent: HTMLElement, private scene: Scene) {
     // ─── 1. DOM OVERLAY (Desktop) ───
@@ -125,9 +127,11 @@ export class GestureDebugOverlay {
     gesture: string;
     handApiSource?: string;
     success?: boolean;
-    leftJoints?: any; // Ignored for now to clean up legacy
+    leftJoints?: any;
     rightJoints?: any;
   }): void {
+    this.leftJoints = opts.leftJoints;
+    this.rightJoints = opts.rightJoints;
     if (opts.handApiSource) this.handApiSource = opts.handApiSource;
     this.handTrackingActive = opts.handTrackingActive;
 
@@ -157,6 +161,12 @@ export class GestureDebugOverlay {
       const gestureLabel = `<span style="color:${color};font-weight:bold">${this.currentGesture}</span>`;
       const logRows = this.gestureLog.map(l => `<div style="color:#aaa;font-size:10px">${l}</div>`).join("");
 
+      const formatJ = (j: any) => {
+        if (!j) return "N/D";
+        const w = j.wrist;
+        return w ? `X:${w.x.toFixed(2)} Y:${w.y.toFixed(2)} Z:${w.z.toFixed(2)}` : "N/D";
+      };
+
       this.panel.innerHTML = `
         <div style="display:flex;justify-content:space-between;margin-bottom:6px;border-bottom:1px solid #0a2a4a;padding-bottom:4px;">
           <span style="letter-spacing:2px;font-size:10px;color:#0088aa">GSS DEBUG</span>
@@ -164,6 +174,8 @@ export class GestureDebugOverlay {
         </div>
         <div>Hand Tracking: ${htStatus}</div>
         <div style="font-size:10px;color:#aaa">Source: <span style="color:#ffcc44">${this.handApiSource}</span></div>
+        <div style="font-size:10px;color:rgba(0,200,255,0.7)">L: ${formatJ(this.leftJoints)}</div>
+        <div style="font-size:10px;color:rgba(255,150,0,0.7)">R: ${formatJ(this.rightJoints)}</div>
         <div style="margin-top:4px">Gesto/Estado: ${gestureLabel}</div>
         <div style="border-top:1px solid #0a2a4a;margin-top:8px;padding-top:4px;font-size:10px;color:#0088aa">Log:</div>
         <div style="max-height:150px;overflow-y:hidden">${logRows}</div>

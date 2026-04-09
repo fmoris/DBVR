@@ -121,7 +121,7 @@ export class XRManager {
     try {
       handTracking = this.xr.baseExperience.featuresManager.enableFeature(
         WebXRFeatureName.HAND_TRACKING, "latest",
-        { xrInput: this.xr.input, jointMeshes: { disableDefaultHandMesh: true, enablePhysics: false } }
+        { xrInput: this.xr.input, jointMeshes: { disableDefaultHandMesh: false, enablePhysics: false } }
       ) as WebXRHandTracking;
     } catch (e) {
       console.warn("[XRManager] Hand tracking no disponible:", e);
@@ -131,16 +131,29 @@ export class XRManager {
       let leftHand: WebXRHand | null = null;
       let rightHand: WebXRHand | null = null;
 
+      // 1. Detectar manos ya existentes al momento de habilitar el feature
+      const existingHands = (handTracking as any).hands;
+      if (existingHands) {
+          if (existingHands.left) { 
+              leftHand = existingHands.left; 
+              console.log("[XRManager] Mano IZQUIERDA pre-existente detectada");
+          }
+          if (existingHands.right) { 
+              rightHand = existingHands.right; 
+              console.log("[XRManager] Mano DERECHA pre-existente detectada");
+          }
+      }
+
       handTracking.onHandAddedObservable?.add((hand: any) => {
-        const hnd = hand.xrController?.inputSource?.handedness ?? hand.handedness;
-        console.log(`[XRManager] Mano DETECTADA: ${hnd}`);
+        const hnd = hand.handedness || hand.xrController?.inputSource?.handedness;
+        console.log(`[XRManager] Mano DETECTADA por evento: ${hnd}`);
         if (hnd === "left") leftHand = hand;
         if (hnd === "right") rightHand = hand;
       });
 
       handTracking.onHandRemovedObservable?.add((hand: any) => {
-        const hnd = hand.xrController?.inputSource?.handedness ?? hand.handedness;
-        console.log(`[XRManager] Mano PERDIDA: ${hnd}`);
+        const hnd = hand.handedness || hand.xrController?.inputSource?.handedness;
+        console.log(`[XRManager] Mano PERDIDA por evento: ${hnd}`);
         if (hnd === "left") leftHand = null;
         if (hnd === "right") rightHand = null;
       });
@@ -163,17 +176,27 @@ export class XRManager {
         const currentGesture = gss.currentState;
         const handTrackingActive = !!(ctx.leftWrist || ctx.rightWrist);
 
+        const leftJoints = leftHand ? {
+            wrist: leftHand.getJointMesh(WebXRHandJoint.WRIST)?.absolutePosition,
+            indexTip: leftHand.getJointMesh(WebXRHandJoint.INDEX_FINGER_TIP)?.absolutePosition
+        } : null;
+
+        const rightJoints = rightHand ? {
+            wrist: rightHand.getJointMesh(WebXRHandJoint.WRIST)?.absolutePosition,
+            indexTip: rightHand.getJointMesh(WebXRHandJoint.INDEX_FINGER_TIP)?.absolutePosition
+        } : null;
+
         this.debugOverlay?.update({
           handTrackingActive,
-          leftJoints: null,
-          rightJoints: null,
+          leftJoints,
+          rightJoints,
           gesture: currentGesture,
           handApiSource: leftHand || rightHand ? "WebXR Hands" : "waiting...",
         });
 
         this.vrHud?.updateHandTrackingDebug(
             !!leftHand, !!rightHand, 
-            null, null, 
+            leftJoints, rightJoints, 
             currentGesture, 
             leftHand || rightHand ? "WebXR Hands" : "waiting..."
         );

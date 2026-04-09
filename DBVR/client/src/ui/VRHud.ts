@@ -60,6 +60,7 @@ export class VRHud {
   private debugPanel: DebugPanel;
   private powersGuidePanel: PowersGuidePanel;
   private hudRoot: Mesh | null = null;
+  private currentlyRenderedAttack: string | undefined = "NONE";
 
   private currentHudType: "normal" | "defense" | "melee" | null = null;
   private visible = false;
@@ -72,6 +73,9 @@ export class VRHud {
     this.statusPanel = new StatusPanel(scene);
     this.debugPanel = new DebugPanel(scene);
     this.powersGuidePanel = new PowersGuidePanel(scene, combat, inputManager);
+    this.powersGuidePanel.onModelRepaired = () => {
+        this.showToast("🧱 MODELO REPARADO", "#00ff88", 3000);
+    };
 
     this.playerPanel.updateAvatar(gokuBaseImg);
     this.enemyPanel.updateAvatar(vegetaBaseImg);
@@ -213,10 +217,12 @@ export class VRHud {
   }
 
   private updatePowersGuide(stats: GameStats): void {
-    if (stats.combatState === "charging_special" && stats.specialType) {
-        this.powersGuidePanel.renderPowersList(stats.specialType, (id, ph) => this.startCalibration(id, ph), (id) => this.resetCalibration(id));
-    } else if (this.currentHudType === "normal" && this.powersGuidePanel.getChildrenCount() <= 1) {
-        this.powersGuidePanel.renderPowersList(undefined, (id, ph) => this.startCalibration(id, ph), (id) => this.resetCalibration(id));
+    const targetAttack = (stats.combatState === "charging_special") ? (stats.specialType ?? undefined) : undefined;
+    
+    // Solo renderizar si el ataque cambió o la lista está vacía
+    if (this.currentlyRenderedAttack !== targetAttack || this.powersGuidePanel.getChildrenCount() <= 1) {
+        this.currentlyRenderedAttack = targetAttack;
+        this.powersGuidePanel.renderPowersList(targetAttack, (id, ph) => this.startCalibration(id, ph), (id) => this.resetCalibration(id));
     }
   }
 
@@ -326,6 +332,7 @@ export class VRHud {
       this.statusPanel.setStatusText(`SESION GUARDADA\n(${label})`);
       this.statusPanel.setStatusBgBackground("rgba(0, 255, 0, 0.6)");
 
+      this.currentlyRenderedAttack = undefined;
       this.powersGuidePanel.renderPowersList(undefined, (id, ph) => this.startCalibration(id, ph), (id) => this.resetCalibration(id));
       setTimeout(() => this.statusPanel.setStatusBgVisible(false), 2000);
   }
@@ -342,6 +349,7 @@ export class VRHud {
       this.statusPanel.setStatusBgVisible(true);
       this.statusPanel.setStatusBgBackground("rgba(100, 100, 100, 0.7)");
       
+      this.currentlyRenderedAttack = undefined;
       this.powersGuidePanel.renderPowersList(undefined, (id, ph) => this.startCalibration(id, ph), (id) => this.resetCalibration(id));
       setTimeout(() => this.statusPanel.setStatusBgVisible(false), 2000);
   }

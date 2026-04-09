@@ -3,35 +3,35 @@ import { GestureSkillSystem, XRHandsContext } from "../gestures/GestureSkillSyst
 import { GOKU_CONFIG } from "../combat/CharacterConfigs";
 
 export class InputManager {
-  private voiceRecognizer: VoiceRecognizer;
+  private voiceRecognizer?: VoiceRecognizer;
   private gestureSkillSystem: GestureSkillSystem;
   private started = false;
   private _lastContext: XRHandsContext | null = null;
 
   constructor() {
-    this.voiceRecognizer = new VoiceRecognizer();
+    // this.voiceRecognizer = new VoiceRecognizer(); // Pausado
     this.gestureSkillSystem = new GestureSkillSystem(null); // XR se asigna luego
     this.gestureSkillSystem.registerCharacter(GOKU_CONFIG);
   }
 
   public setup(allowedPowers: string[]): void {
-    this.voiceRecognizer.setAllowedPowers(allowedPowers);
+    // this.voiceRecognizer.setAllowedPowers(allowedPowers); // Pausado
   }
 
   public async start(): Promise<void> {
     this.started = true;
-    this.voiceRecognizer.start();
+    // this.voiceRecognizer.start(); // Pausado
     await this.gestureSkillSystem.init("goku").catch(e => console.error("[InputManager] Error init GSS:", e));
-    console.log("[InputManager] Voice recognition & GSS active.");
+    console.log("[InputManager] GSS active. (Voice recognition paused)");
   }
 
   public stop(): void {
-    this.voiceRecognizer.stop();
+    // this.voiceRecognizer.stop(); // Pausado
   }
 
 
-  public getVoiceRecognizer(): VoiceRecognizer {
-    return this.voiceRecognizer;
+  public getVoiceRecognizer(): VoiceRecognizer | null {
+    return null; // this.voiceRecognizer;
   }
 
   public getGSS(): GestureSkillSystem {
@@ -43,19 +43,21 @@ export class InputManager {
   }
 
   public onVoiceCommand(callback: (command: string, transcript: string) => void): void {
+    /* Pausado
     this.voiceRecognizer.onCommand((command: VoiceCommand, transcript: string) => {
         if (command) {
             callback(command as string, transcript);
         }
     });
+    */
   }
 
   public onVoiceStatus(callback: (active: boolean, transcript: string) => void): void {
-    this.voiceRecognizer.onStatus(callback);
+    // this.voiceRecognizer.onStatus(callback); // Pausado
   }
 
   public onSpeech(callback: (transcript: string) => void): void {
-    this.voiceRecognizer.onSpeech(callback);
+    // this.voiceRecognizer.onSpeech(callback); // Pausado
   }
 
   /**
@@ -89,6 +91,6 @@ export class InputManager {
   }
 
   public dispose(): void {
-    this.voiceRecognizer.stop();
+    // this.voiceRecognizer.stop(); // Pausado
   }
 }

@@ -15,6 +15,7 @@ import gokuConfig from "../../models/goku.json";
 
 export class PowersGuidePanel extends HUDPanel {
     private powersStack!: StackPanel;
+    public onModelRepaired?: () => void;
 
     constructor(scene: Scene, private combat: CombatSystem, private inputManager: InputManager) {
         super(scene, {
@@ -77,6 +78,25 @@ export class PowersGuidePanel extends HUDPanel {
             // Emitir evento o llamar a callback para mostrar toast?
         });
         this.rootRect.addControl(exportBtn);
+        // Reset Button (Aggressive Repair)
+        const repairBtn = Button.CreateSimpleButton("repair-btn", "🧹 REPARAR MODELO");
+        repairBtn.width = "200px";
+        repairBtn.height = "40px";
+        repairBtn.color = "white";
+        repairBtn.background = "#880000";
+        repairBtn.cornerRadius = 10;
+        repairBtn.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+        repairBtn.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
+        repairBtn.top = "110px";
+        repairBtn.left = "-10px";
+        repairBtn.onPointerClickObservable.add(() => {
+            const gss = this.inputManager.getGSS();
+            gss.fullReset();
+            // Refrescar lista después de reset a través del HUD
+            this.renderPowersList(); 
+            if (this.onModelRepaired) this.onModelRepaired();
+        });
+        this.rootRect.addControl(repairBtn);
 
         const viewer = new ScrollViewer("guide-viewer");
         viewer.width = "96%";
@@ -189,9 +209,9 @@ export class PowersGuidePanel extends HUDPanel {
         // Buttons
         const calStack = new StackPanel(`cal-stack-${id}`);
         calStack.isVertical = false;
-        calStack.width = "280px";
-        calStack.height = "40px";
-        calStack.spacing = 6;
+        calStack.width = "320px";
+        calStack.height = "50px";
+        calStack.spacing = 8;
         calStack.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
         calStack.verticalAlignment = Control.VERTICAL_ALIGNMENT_CENTER;
         container.addControl(calStack);
@@ -199,9 +219,9 @@ export class PowersGuidePanel extends HUDPanel {
         const count1 = this.inputManager.getGSS().getGestureCount(this.getLabelForPower(id, "PREP"));
         const count2 = this.inputManager.getGSS().getGestureCount(this.getLabelForPower(id, "FIRE"));
 
-        const btn1 = this.createCalBtn(`cal1-${id}`, `F1: ${count1}`, "#aa4400", () => onCal && onCal(id, "PREP"));
-        const btn2 = this.createCalBtn(`cal2-${id}`, `F2: ${count2}`, "#cc6622", () => onCal && onCal(id, "FIRE"));
-        const btnR = this.createCalBtn(`res-${id}`, "RESET", "#660000", () => onReset && onReset(id), 75);
+        const btn1 = this.createCalBtn(`cal1-${id}`, `F1: ${count1}`, "#aa4400", () => onCal && onCal(id, "PREP"), 100);
+        const btn2 = this.createCalBtn(`cal2-${id}`, `F2: ${count2}`, "#cc6622", () => onCal && onCal(id, "FIRE"), 100);
+        const btnR = this.createCalBtn(`res-${id}`, "RESET", "#660000", () => onReset && onReset(id), 85);
 
         calStack.addControl(btn1);
         calStack.addControl(btn2);
@@ -211,7 +231,7 @@ export class PowersGuidePanel extends HUDPanel {
     private createCalBtn(name: string, text: string, bg: string, action: () => void, width: number = 85): Button {
         const btn = Button.CreateSimpleButton(name, text);
         btn.widthInPixels = width;
-        btn.height = "35px";
+        btn.height = "42px";
         btn.color = "white";
         btn.background = bg;
         btn.cornerRadius = 5;

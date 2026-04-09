@@ -50,7 +50,7 @@ export class StatsPanel extends HUDPanel {
         // Stats Stack
         const statsStack = new StackPanel("stats-stack");
         statsStack.isVertical = true;
-        statsStack.width = "70%";
+        statsStack.width = "250px"; // Fixed pixels for horizontal parent
         statsStack.height = "100%";
         statsStack.spacing = 8;
         mainStack.addControl(statsStack);
@@ -87,6 +87,7 @@ export class StatsPanel extends HUDPanel {
         this.estadoText.color = isPlayer ? "#00ff88" : "#ff4444";
         this.estadoText.fontSize = 14;
         this.estadoText.fontStyle = "bold";
+        this.estadoText.width = "180px"; // Fixed pixels for horizontal parent
         this.estadoText.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
         estadoRow.addControl(this.estadoText);
     }
@@ -133,7 +134,7 @@ export class StatsPanel extends HUDPanel {
         parent.addControl(row);
 
         const barBg = new Rectangle(`${label}-bg`);
-        barBg.width = "85%";
+        barBg.width = "210px"; // Fixed pixels for horizontal parent
         barBg.heightInPixels = 16; // Un poco más gruesa
         barBg.cornerRadius = 4;
         barBg.background = "rgba(0,0,0,0.6)";
@@ -156,7 +157,7 @@ export class StatsPanel extends HUDPanel {
         val.color = color;
         val.fontSize = 12;
         val.fontStyle = "bold";
-        val.width = "15%";
+        val.width = "40px"; // Fixed pixels for horizontal parent
         val.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
         row.addControl(val);
 

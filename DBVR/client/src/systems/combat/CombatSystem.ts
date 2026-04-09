@@ -221,7 +221,7 @@ export class CombatSystem {
 
     // 5. Recarga Activa (Jugador)
     if (this.stats.combatState === "recharging") {
-      const isGritando = (now - this.lastVoiceActivity) < 1500;
+      const isGritando = false; // (now - this.lastVoiceActivity) < 1500; // Pausado
       const kiGainSec = isGritando ? 60 : 25; // Equivale a kiGain 12 y 5 cada 200ms
       
       this.stats.playerKi = Math.min(this.stats.maxKi, this.stats.playerKi + kiGainSec * dt);
@@ -904,13 +904,17 @@ export class CombatSystem {
     this.emit();
   }
 
-  public registerVoiceActivity(): void {
-    this.lastVoiceActivity = Date.now();
+  public registerVoiceActivity(command: string | null = null): void {
+    // this.lastVoiceActivity = Date.now(); // Pausado
+    if (command) {
+      // this.lastVoiceTrigger = command;
+      // this.lastVoiceTriggerTime = Date.now();
+    }
   }
 
-  public registerVoiceTrigger(id: string): void {
-    this.lastVoiceTrigger = id;
-    this.lastVoiceTriggerTime = Date.now();
+  public registerVoiceTrigger(command: string): void {
+    // this.lastVoiceTrigger = command; // Pausado
+    // this.lastVoiceTriggerTime = Date.now();
   }
 
   // ============================================

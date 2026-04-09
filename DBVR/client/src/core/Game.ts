@@ -129,8 +129,9 @@ export class Game {
 
   private setupVoiceRecognition(): void {
     console.log("[Game] Setting up voice recognition...");
-    if (!this.inputManager.getVoiceRecognizer().isAvailable()) {
-        console.warn("[Game] Voice recognition NOT available.");
+    const recognizer = this.inputManager.getVoiceRecognizer();
+    if (!recognizer || !recognizer.isAvailable()) {
+        console.warn("[Game] Voice recognition NOT available or disabled.");
         return;
     }
     this.inputManager.onVoiceCommand((command, transcript) => {
