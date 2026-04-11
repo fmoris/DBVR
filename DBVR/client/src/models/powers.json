@@ -7,6 +7,10 @@
       "preparation": "hands_clasped_at_waist",
       "firing": "palms_forward_push"
     },
+    "training_data": {
+      "images_path": "models/imagesTraining/Kamehameha",
+      "phases": ["charge", "firing"]
+    },
     "charge_time": 2.5
   },
   "genkidama": {

@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DBVR Offline Image Trainer</title>
+    <style>
+        body { font-family: sans-serif; background: #111; color: #fff; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .log { background: #000; color: #0f0; font-family: monospace; padding: 10px; height: 300px; overflow-y: auto; border: 1px solid #333; margin-bottom: 20px;}
+        canvas { border: 2px solid #555; max-width: 100%; width: 400px; border-radius: 8px; display: block; margin: 0 auto; margin-bottom: 30px;}
+        button { background: #007bff; color: white; border: none; padding: 10px 20px; cursor: pointer; border-radius: 5px; font-size: 16px; font-weight: bold;}
+        button:hover { background: #0056b3; }
+        button:disabled { background: #555; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Entrenador de Modelos ML para DBVR</h1>
+        <p>Este sistema leerá las imágenes locales y extraerá los vectores 3D usando TensorFlow PoseDetection.</p>
+        
+        <button id="start-btn">Inciar Entrenamiento con Imágenes</button>
+        <button id="download-btn" disabled>Descargar goku_pretrained.json</button>
+        
+        <br><br>
+        <div id="log-container" class="log">Esperando...</div>
+
+        <canvas id="offscreen-canvas"></canvas>
+    </div>
+
+    <!-- Scripts de Vite -->
+    <script type="module" src="/src/trainer/OfflineTrainer.ts"></script>
+</body>
+</html>

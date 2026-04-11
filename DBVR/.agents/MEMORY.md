@@ -23,6 +23,7 @@ Recuerdos curados de DBVR (Dragon Ball VR).
 - **Z-Index en WebXR:** El overlay del DOM para VR requiere `position: fixed` y `pointer-events: none` por defecto para no bloquear la interacción 3D o en el menú.
 - **Features Estándar:** El sistema funciona mejor con vectores fijos: **16 features** para movimientos de Ki (`wristOnly`) y **46 features** cuando la forma de la mano importa (`wristAndFingertips`).
 - **Data Augmentation:** El mirroring y jittering son esenciales para que gestos entrenados con una sola mano funcionen en ambas y sean tolerantes al ruido.
+- **Conectividad WebXR (Link):** El modo "Escritorio Remoto" NO transmite datos de Hand Tracking. Para capturar gestos en el PC, se requiere **Meta Quest Link (Cable o Air Link)** y configurar Oculus como el **OpenXR Runtime** activo.
 
 ## Próximos Pasos (Meta-Nivel)
 1. **Parte 2: Combate Melee.** Transición a cámara lenta al activarse, sombras de golpes para el defensor, detección de puntos de impacto.

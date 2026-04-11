@@ -117,7 +117,7 @@ export class PowersGuidePanel extends HUDPanel {
         viewer.addControl(this.powersStack);
     }
 
-    public renderPowersList(filterPower?: string, startCalibration?: (id: string, phase: "PREP" | "FIRE") => void, resetCalibration?: (id: string) => void): void {
+    public renderPowersList(filterPower?: string, startCalibration?: (id: string, phase: "PREP" | "FIRE") => void, resetCalibration?: (id: string) => void, simulateGesture?: (id: string) => void): void {
         this.powersStack.getDescendants().forEach(c => c.dispose());
 
         const gss = this.inputManager.getGSS();
@@ -155,7 +155,7 @@ export class PowersGuidePanel extends HUDPanel {
 
         if (!filterPower) {
             for (const b of basicMoves) {
-                this.addPowerItem(b.id, b.name, gestureLabelMap[b.p], gestureLabelMap[b.f], b.cost, b.time, startCalibration, resetCalibration);
+                this.addPowerItem(b.id, b.name, gestureLabelMap[b.p], gestureLabelMap[b.f], b.cost, b.time, startCalibration, resetCalibration, simulateGesture);
             }
         }
 
@@ -169,11 +169,11 @@ export class PowersGuidePanel extends HUDPanel {
             const cost = `Ki: ${d.ki_cost || "40+"}`;
             const time = `Carga: ${d.charge_time || "N/A"}s`;
 
-            this.addPowerItem(k, d.name || k, prepLabel, fireLabel, cost, time, startCalibration, resetCalibration, !!filterPower);
+            this.addPowerItem(k, d.name || k, prepLabel, fireLabel, cost, time, startCalibration, resetCalibration, simulateGesture, !!filterPower);
         }
     }
 
-    private addPowerItem(id: string, name: string, prep: string, fire: string, cost: string, type: string, onCal?: any, onReset?: any, highlighted: boolean = false): void {
+    private addPowerItem(id: string, name: string, prep: string, fire: string, cost: string, type: string, onCal?: any, onReset?: any, onSimulate?: any, highlighted: boolean = false): void {
         const container = new Rectangle(`p-guide-${id}`);
         container.width = "100%";
         container.heightInPixels = 120;
@@ -209,7 +209,7 @@ export class PowersGuidePanel extends HUDPanel {
         // Buttons
         const calStack = new StackPanel(`cal-stack-${id}`);
         calStack.isVertical = false;
-        calStack.width = "320px";
+        calStack.width = "400px";
         calStack.height = "50px";
         calStack.spacing = 8;
         calStack.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
@@ -219,13 +219,15 @@ export class PowersGuidePanel extends HUDPanel {
         const count1 = this.inputManager.getGSS().getGestureCount(this.getLabelForPower(id, "PREP"));
         const count2 = this.inputManager.getGSS().getGestureCount(this.getLabelForPower(id, "FIRE"));
 
-        const btn1 = this.createCalBtn(`cal1-${id}`, `F1: ${count1}`, "#aa4400", () => onCal && onCal(id, "PREP"), 100);
-        const btn2 = this.createCalBtn(`cal2-${id}`, `F2: ${count2}`, "#cc6622", () => onCal && onCal(id, "FIRE"), 100);
-        const btnR = this.createCalBtn(`res-${id}`, "RESET", "#660000", () => onReset && onReset(id), 85);
+        const btn1 = this.createCalBtn(`cal1-${id}`, `F1: ${count1}`, "#aa4400", () => onCal && onCal(id, "PREP"), 85);
+        const btn2 = this.createCalBtn(`cal2-${id}`, `F2: ${count2}`, "#cc6622", () => onCal && onCal(id, "FIRE"), 85);
+        const btnR = this.createCalBtn(`res-${id}`, "RESET", "#660000", () => onReset && onReset(id), 75);
+        const btnS = this.createCalBtn(`sim-${id}`, "👁️ SIM", "#0055ff", () => onSimulate && onSimulate(id), 90);
 
         calStack.addControl(btn1);
         calStack.addControl(btn2);
         calStack.addControl(btnR);
+        calStack.addControl(btnS);
     }
 
     private createCalBtn(name: string, text: string, bg: string, action: () => void, width: number = 85): Button {

@@ -17,6 +17,7 @@ import { ActionPanel } from "./components/ActionPanel";
 import { StatusPanel } from "./components/StatusPanel";
 import { DebugPanel } from "./components/DebugPanel";
 import { PowersGuidePanel } from "./components/PowersGuidePanel";
+import { GestureSimulator } from "../systems/gestures/GestureSimulator";
 
 const STATE_LABELS: Record<string, string> = {
   neutral: "Neutral",
@@ -59,6 +60,7 @@ export class VRHud {
   private statusPanel: StatusPanel;
   private debugPanel: DebugPanel;
   private powersGuidePanel: PowersGuidePanel;
+  private gestureSimulator: GestureSimulator;
   private hudRoot: Mesh | null = null;
   private currentlyRenderedAttack: string | undefined = "NONE";
 
@@ -79,10 +81,12 @@ export class VRHud {
 
     this.playerPanel.updateAvatar(gokuBaseImg);
     this.enemyPanel.updateAvatar(vegetaBaseImg);
+    
+    this.gestureSimulator = new GestureSimulator(scene);
 
     this.hide();
     this.combat.onStatsChange((stats) => this.update(stats));
-    this.powersGuidePanel.renderPowersList(undefined, (id, ph) => this.startCalibration(id, ph), (id) => this.resetCalibration(id));
+    this.powersGuidePanel.renderPowersList(undefined, (id, ph) => this.startCalibration(id, ph), (id) => this.resetCalibration(id), (id) => this.simulateGesture(id));
   }
 
   public attachToXRCamera(xrCamera: any): void {
@@ -222,12 +226,12 @@ export class VRHud {
     // Solo renderizar si el ataque cambió o la lista está vacía
     if (this.currentlyRenderedAttack !== targetAttack || this.powersGuidePanel.getChildrenCount() <= 1) {
         this.currentlyRenderedAttack = targetAttack;
-        this.powersGuidePanel.renderPowersList(targetAttack, (id, ph) => this.startCalibration(id, ph), (id) => this.resetCalibration(id));
+        this.powersGuidePanel.renderPowersList(targetAttack, (id, ph) => this.startCalibration(id, ph), (id) => this.resetCalibration(id), (id) => this.simulateGesture(id));
     }
   }
 
-  public renderPowersList(attackId?: string, onCalib?: (id: string, ph: "PREP" | "FIRE") => void, onReset?: (id: string) => void): void {
-    this.powersGuidePanel.renderPowersList(attackId, onCalib, onReset);
+  public renderPowersList(attackId?: string, onCalib?: (id: string, ph: "PREP" | "FIRE") => void, onReset?: (id: string) => void, onSimulate?: (id: string) => void): void {
+    this.powersGuidePanel.renderPowersList(attackId, onCalib, onReset, onSimulate);
   }
 
   private refreshActions(type: "normal" | "defense" | "melee", stats: any): void {
@@ -242,8 +246,14 @@ export class VRHud {
       this.attackPanel.setTitle("⚔ ATAQUES");
       this.defensePanel.setTitle("🛡 COMPLEMENTO");
 
-      this.attackPanel.addAction("A", "Atacar", "#00ff88", "#003322", () => c.launchBasicAttack(), 8);
-      this.attackPanel.addAction("W", "Cargar", "#ffcc00", "#332200", () => c.startChargedAttack(), 20);
+      this.attackPanel.addAction("A", "Atacar", "#00ff88", "#003322", () => {
+          c.launchBasicAttack();
+          this.simulateGesture("ki_blast", true);
+      }, 8);
+      this.attackPanel.addAction("W", "Cargar", "#ffcc00", "#332200", () => {
+          c.startChargedAttack();
+          this.simulateGesture("charged_ki_blast", true);
+      }, 20);
 
       const allowedPowers = gokuConfig.transformations[0].powers || [];
       const powersDict = powersConfig as Record<string, any>;
@@ -252,11 +262,17 @@ export class VRHud {
         const d = powersDict[k];
         if (d && (d.type === "ofensiva" || d.type === "especial")) {
           const color = k === "kamehameha" ? "#00ccff" : "#ff4400";
-          this.attackPanel.addAction(`${kIdx}`, d.name || k, color, "#331100", () => c.triggerSpecial(k), 40);
+          this.attackPanel.addAction(`${kIdx}`, d.name || k, color, "#331100", () => {
+              c.triggerSpecial(k);
+              this.simulateGesture(k, true);
+          }, 40);
           kIdx++;
         }
       }
-      this.defensePanel.addAction("R", "Recargar KI", "#cc44ff", "#220033", () => c.rechargeKi(), 0);
+      this.defensePanel.addAction("R", "Recargar KI", "#cc44ff", "#220033", () => {
+          c.rechargeKi();
+          this.simulateGesture("recharge", true);
+      }, 0);
     }
     else if (type === "defense") {
       this.attackPanel.setEnabled(false);
@@ -333,7 +349,7 @@ export class VRHud {
       this.statusPanel.setStatusBgBackground("rgba(0, 255, 0, 0.6)");
 
       this.currentlyRenderedAttack = undefined;
-      this.powersGuidePanel.renderPowersList(undefined, (id, ph) => this.startCalibration(id, ph), (id) => this.resetCalibration(id));
+      this.powersGuidePanel.renderPowersList(undefined, (id, ph) => this.startCalibration(id, ph), (id) => this.resetCalibration(id), (id) => this.simulateGesture(id));
       setTimeout(() => this.statusPanel.setStatusBgVisible(false), 2000);
   }
 
@@ -350,7 +366,7 @@ export class VRHud {
       this.statusPanel.setStatusBgBackground("rgba(100, 100, 100, 0.7)");
       
       this.currentlyRenderedAttack = undefined;
-      this.powersGuidePanel.renderPowersList(undefined, (id, ph) => this.startCalibration(id, ph), (id) => this.resetCalibration(id));
+      this.powersGuidePanel.renderPowersList(undefined, (id, ph) => this.startCalibration(id, ph), (id) => this.resetCalibration(id), (id) => this.simulateGesture(id));
       setTimeout(() => this.statusPanel.setStatusBgVisible(false), 2000);
   }
 
@@ -368,11 +384,34 @@ export class VRHud {
         : `${pId}_${phase.toLowerCase()}`;
   }
 
+  private simulateGesture(powerId: string, instant: boolean = false): void {
+      const labelPrep = this.getLabelForPower(powerId, "PREP");
+      const labelFire = this.getLabelForPower(powerId, "FIRE");
+
+      const origin = this.hudRoot ? this.hudRoot.position.clone() : new Vector3(0, 1.4, 0);
+      const rot = this.hudRoot ? { y: this.hudRoot.rotation.y } : { y: 0 };
+      
+      if (!instant) {
+          this.statusPanel.setStatusText(`SIMULANDO DENTRO DE 1s:\n${powerId.toUpperCase()}`);
+          this.statusPanel.setStatusBgVisible(true);
+          this.statusPanel.setStatusBgBackground("rgba(0, 100, 255, 0.7)");
+          
+          setTimeout(() => {
+              this.statusPanel.setStatusBgVisible(false);
+              this.gestureSimulator.playGestureSequence(labelPrep, labelFire, origin, rot);
+          }, 1000);
+      } else {
+          this.gestureSimulator.playGestureSequence(labelPrep, labelFire, origin, rot);
+      }
+  }
+
   public dispose(): void {
     [
         this.playerPanel, this.enemyPanel, this.attackPanel, 
         this.defensePanel, this.statusPanel, this.debugPanel,
         this.powersGuidePanel
     ].forEach(p => p.dispose());
+    
+    if (this.gestureSimulator) this.gestureSimulator.dispose();
   }
 }
