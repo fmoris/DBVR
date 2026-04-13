@@ -49,7 +49,7 @@ export const GOKU_CONFIG: CharacterConfig = {
         'super_kame_charge': 0.80,
         'ki_blast_ready': 0.65,
         'kaioken_ready': 0.85,
-        'recharging': 0.70
+        'recharging': 0.85
     },
     timing: {
         kamehameha: { minChargeMs: 1250, maxChargeMs: 2500, releaseVelocity: 1.0 },
@@ -98,7 +98,7 @@ export const GOKU_CONFIG: CharacterConfig = {
                 } else if (gesture === g.kiblast_prep) {
                     this.setState('ki_blast_ready');
                     this.startCharge('ki_blast', this.getActiveHand(ctx), now);
-                } else if (gesture === g.recharge) {
+                } else if (gesture === g.recharge && _confidence > 0.85) { // Umbral alto para evitar falsos positivos
                     this.setState('recharging');
                 }
                 break;

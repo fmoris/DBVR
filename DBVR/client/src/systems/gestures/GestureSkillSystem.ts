@@ -49,7 +49,10 @@ export class GestureSkillSystem {
     private _classifying: boolean = false;
     private _frameCount: number = 0;
     private readonly CLASSIFY_EVERY: number = 4;
-
+ 
+    public lastValidGestureTime: number = 0;
+    public gracePeriodMs: number = 800;
+ 
     private _stateDebounce: { state: string; until: number } | null = null;
     private readonly STATE_DEBOUNCE_MS: number = 150;
 
@@ -99,18 +102,47 @@ export class GestureSkillSystem {
         this._prevRightPos = null;
         this._sessionHistory = {};
 
-        // 1. Cargar historia desde localStorage
-        const saved = localStorage.getItem(`gss_model_${characterId}`);
-        if (saved) {
-            try {
-                const data = JSON.parse(saved);
-                for (const [label, entry] of Object.entries(data)) {
-                    this._sessionHistory[label] = (Array.isArray((entry as any)[0]) && !Array.isArray((entry as any)[0][0]))
-                        ? [entry as number[][]]
-                        : entry as number[][][];
+        // 1. Intentar cargar desde el Servidor (Prioridad)
+        let loadedFromRemote = false;
+        try {
+            console.log(`[GSS] 📥 Buscando modelo remoto para "${characterId}"...`);
+            window.dispatchEvent(new CustomEvent('gss-remote-load-start', { detail: { id: characterId } }));
+            
+            const response = await fetch(`/api/gestures/latest/${characterId}`);
+            if (response.ok) {
+                const result = await response.json();
+                if (result.model) {
+                    this._sessionHistory = result.model;
+                    loadedFromRemote = true;
+                    console.log(`[GSS] ✅ Modelo remoto cargado exitosamente: ${result.filename}`);
+                    window.dispatchEvent(new CustomEvent('gss-remote-load-success', { detail: { filename: result.filename } }));
+                    
+                    // Sincronizar localStorage con la versión del servidor
+                    localStorage.setItem(`gss_model_${characterId}`, JSON.stringify(this._sessionHistory));
                 }
-            } catch (e) {
-                console.warn(`[GSS] Error parseando localStorage para ${characterId}:`, e);
+            } else {
+                console.warn(`[GSS] Sin modelo remoto para ${characterId} (Status: ${response.status}).`);
+            }
+        } catch (e) {
+            console.error(`[GSS] Error en carga remota para ${characterId}:`, e);
+            window.dispatchEvent(new CustomEvent('gss-remote-load-error', { detail: { error: e } }));
+        }
+
+        // 2. Fallback a LocalStorage si no hubo carga remota
+        if (!loadedFromRemote) {
+            const saved = localStorage.getItem(`gss_model_${characterId}`);
+            if (saved) {
+                try {
+                    const data = JSON.parse(saved);
+                    for (const [label, entry] of Object.entries(data)) {
+                        this._sessionHistory[label] = (Array.isArray((entry as any)[0]) && !Array.isArray((entry as any)[0][0]))
+                            ? [entry as number[][]]
+                            : entry as number[][][];
+                    }
+                    console.log(`[GSS] 💾 Modelo cargado desde LocalStorage.`);
+                } catch (e) {
+                    console.warn(`[GSS] Error parseando localStorage para ${characterId}:`, e);
+                }
             }
         }
 
@@ -288,16 +320,32 @@ export class GestureSkillSystem {
             const result = await classifier.predictClass(tensor, 3);
             gesture = result.label;
             confidence = (result.confidences as any)[gesture] ?? 0;
+            
+            // Actualizar tiempo de último gesto válido
+            const threshold = this.activeCharacter.thresholds[this.currentState] || 0.75;
+            if (confidence >= threshold && gesture !== 'none') {
+                this.lastValidGestureTime = now;
+            }
         } finally {
             tensor.dispose();
             this._classifying = false;
         }
 
         const threshold = this.activeCharacter.thresholds[this.currentState] || 0.75;
-        if (confidence >= threshold) {
-            this._tickFSM(gesture, confidence, ctx, now);
-        } else {
+        
+        // Lógica de Gracia: si el gesto es inválido pero estamos en periodo de gracia,
+        // nos quedamos en el último gesto válido para que la FSM no se rompa.
+        if (confidence < threshold || gesture === 'none') {
+            const timeSinceValid = now - this.lastValidGestureTime;
+            if (this.currentState !== 'idle' && timeSinceValid < this.gracePeriodMs) {
+                // Mantenemos el estado actual "artificialmente" enviando un placeholder
+                // que la FSM trate como "continuar" o simplemente no enviamos 'none'
+                // Enviamos 'none' pero con una bandera o simplemente ignoramos el tick
+                return; 
+            }
             this._tickFSM('none', 0, ctx, now);
+        } else {
+            this._tickFSM(gesture, confidence, ctx, now);
         }
 
         this._prevLeftPos = lPos;
@@ -519,10 +567,66 @@ export class GestureSkillSystem {
         return sessions[index] || null;
     }
 
-    public saveModel() {
+    public async saveModel() {
         if (!this.activeCharacter || !this.classifier) return;
+        
+        // 1. Guardado local
         localStorage.setItem(`gss_model_${this.activeCharacter.id}`, JSON.stringify(this._sessionHistory));
-        console.log(`[GSS] 💾 Modelo (historia 3D) guardado: ${this.activeCharacter.id}`);
+        console.log(`[GSS] 💾 Modelo (historia 3D) guardado localmente: ${this.activeCharacter.id}`);
+        
+        // Dispatch event for HUD notification
+        window.dispatchEvent(new CustomEvent('gss-saved-local', { detail: { id: this.activeCharacter.id } }));
+
+        // 2. Sincronización automática con servidor
+        if (this.validateModel()) {
+            await this.syncWithServer();
+        } else {
+            console.warn("[GSS] ⚠️ Modelo no válido para sincronización (pocos datos)");
+        }
+    }
+
+    private validateModel(): boolean {
+        // Al menos una etiqueta con al menos un par de sesiones
+        const labels = Object.keys(this._sessionHistory);
+        if (labels.length === 0) return false;
+
+        let totalFrames = 0;
+        for (const label of labels) {
+            const sessions = this._sessionHistory[label];
+            for (const session of sessions) {
+                totalFrames += session.length;
+            }
+        }
+
+        return totalFrames >= 10; // Mínimo 10 frames totales en toda la historia
+    }
+
+    private async syncWithServer() {
+        if (!this.activeCharacter) return;
+        
+        const characterId = this.activeCharacter.id;
+        window.dispatchEvent(new CustomEvent('gss-sync-start', { detail: { id: characterId } }));
+
+        try {
+            console.log(`[GSS] ☁️ Sincronizando modelo "${characterId}" con el servidor...`);
+            const response = await fetch('/api/gestures/sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    characterId,
+                    model: this._sessionHistory
+                })
+            });
+
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            const result = await response.json();
+            
+            console.log(`[GSS] ✅ Sincronización exitosa: ${result.filename}`);
+            window.dispatchEvent(new CustomEvent('gss-sync-success', { detail: { filename: result.filename } }));
+        } catch (error) {
+            console.error("[GSS] ❌ Error en sincronización:", error);
+            window.dispatchEvent(new CustomEvent('gss-sync-error', { detail: { error } }));
+        }
     }
 
     public exportModel() {

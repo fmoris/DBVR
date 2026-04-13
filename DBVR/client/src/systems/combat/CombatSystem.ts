@@ -141,8 +141,8 @@ export class CombatSystem {
     this.enemyHeight = enemyConfig?.height_m || (vegetaConfig as any).height_m || 1.64;
     
     this.setAvailablePowers(playerConfig?.transformations?.[0]?.powers || gokuConfig.transformations?.[0]?.powers || []);
-    this.stats.playerKi = 30; // Inicio al 30%
-    this.stats.enemyKi = 30;
+    this.stats.playerKi = 50; // Inicio al 50% para facilitar pruebas
+    this.stats.enemyKi = 50;
     if (playerConfig) {
       this.playerName = playerConfig.name || "Goku";
       this.stats.playerNP = playerConfig.base_power || 10000;
@@ -179,14 +179,13 @@ export class CombatSystem {
 
     // 1. Regeneración de Ki (Jugador)
     if (this.stats.combatState === "neutral") {
-      // 4 Ki por segundo (2 cada 0.5s anterior)
-      const regenRate = 4;
+      // Regeneración base desactivada para pruebas de gestos
+      const regenRate = 0;
       this.stats.playerKi = Math.min(this.stats.maxKi, this.stats.playerKi + regenRate * dt);
     }
 
-    // 2. Regeneración de Ki (Enemigo)
-    // 7.5 Ki por segundo (3 cada 0.4s anterior)
-    const enemyRegenRate = 7.5;
+    // 2. Regeneración de Ki (Enemigo) - Desactivada para pruebas
+    const enemyRegenRate = 0;
     this.stats.enemyKi = Math.min(this.stats.enemyMaxKi, this.stats.enemyKi + enemyRegenRate * dt);
 
     // 3. Prototipo de carga (Ataque Cargado Normal)
@@ -774,11 +773,14 @@ export class CombatSystem {
       this.cancelCharge();
     }
 
-    if (this.stats.combatState !== "neutral") return false;
+    const alreadyRecharging = this.stats.combatState === "recharging";
+    if (this.stats.combatState !== "neutral" && !alreadyRecharging) return false;
     if (this.stats.enemyAttacking) return false;
-    this.setState("recharging");
-
-    this.log(`Iniciando recarga de KI...`, "#cc44ff");
+    
+    if (!alreadyRecharging) {
+        this.setState("recharging");
+        this.log(`Iniciando recarga de KI...`, "#cc44ff");
+    }
 
     return true;
   }

@@ -87,6 +87,41 @@ export class VRHud {
     this.hide();
     this.combat.onStatsChange((stats) => this.update(stats));
     this.powersGuidePanel.renderPowersList(undefined, (id, ph) => this.startCalibration(id, ph), (id) => this.resetCalibration(id), (id) => this.simulateGesture(id));
+
+    this.setupEventListeners();
+  }
+
+  private setupEventListeners(): void {
+    window.addEventListener('gss-saved-local', (e: any) => {
+        this.showToast(`💾 GESTO GUARDADO: ${e.detail.id.toUpperCase()}`, "#00ff88", 4000);
+    });
+
+    window.addEventListener('gss-sync-start', (e: any) => {
+        this.showToast(`☁️ SINCRONIZANDO CON SERVIDOR...`, "#ffcc00", 0);
+    });
+
+    window.addEventListener('gss-sync-success', (e: any) => {
+        this.showToast(`✅ SINCRONIZACIÓN EXITOSA`, "#00ff88", 5000);
+        this.showToast(`📄 ARCHIVO: ${e.detail.filename}`, "#aaaaaa", 5000);
+    });
+
+    window.addEventListener('gss-sync-error', (e: any) => {
+        this.showToast(`❌ ERROR DE SINCRONIZACIÓN`, "#ff4444", 6000);
+    });
+
+    window.addEventListener('gss-remote-load-start', (e: any) => {
+        this.showToast(`📥 CARGANDO MODELO REMOTO: ${e.detail.id.toUpperCase()}...`, "#00ccff", 0);
+    });
+
+    window.addEventListener('gss-remote-load-success', (e: any) => {
+        this.showToast(`✅ MODELO REMOTO CARGADO`, "#00ff88", 5000);
+        this.showToast(`📄 ARCHIVO: ${e.detail.filename}`, "#aaaaaa", 5000);
+    });
+
+    window.addEventListener('gss-remote-load-error', (e: any) => {
+        this.showToast(`⚠️ NO SE PUDO CARGAR MODELO REMOTO`, "#ffff00", 5000);
+        this.showToast(`💾 USANDO RESPALDO LOCAL`, "#aaaaaa", 5000);
+    });
   }
 
   public attachToXRCamera(xrCamera: any): void {
@@ -117,9 +152,14 @@ export class VRHud {
 
     this.attackPanel.position = new Vector3(0.00, 0.95, 1.4);
     this.defensePanel.position = new Vector3(0.00, -0.72, 1.4);
-    this.statusPanel.position = new Vector3(0.00, 0.70, 1.3);
-    this.powersGuidePanel.position = new Vector3(0.0, 0.22, 1.3);
-    this.debugPanel.position = new Vector3(0.00, -0.38, 1.3);
+    
+    // StatusPanel un poco más alto para acomodar el log
+    this.statusPanel.position = new Vector3(0.00, 0.75, 1.3);
+    this.powersGuidePanel.position = new Vector3(1.15, 0.22, 1.3);
+    this.powersGuidePanel.rotation = new Vector3(0, 0.45, 0);
+
+    this.debugPanel.position = new Vector3(1.15, -0.38, 1.3);
+    this.debugPanel.rotation = new Vector3(0, 0.45, 0);
 
     this.show();
   }
@@ -340,12 +380,15 @@ export class VRHud {
 
       this.statusPanel.setStatusBgBackground("rgba(255, 0, 0, 0.7)");
       this.statusPanel.setStatusText(`¡GRABANDO ${label.toUpperCase()}!\nMantén la postura...`);
+      this.showToast(`🔴 INICIANDO CAPTURA DE: ${label}`, "#ff4444", 2000);
 
       gss.startTraining(label, "wristOnly");
+      this.showToast(`🔴 GRABANDO: ${label.toUpperCase()}`, "#ff4444", 2000);
+      
       await new Promise(r => setTimeout(r, 2000));
       gss.stopTraining();
       
-      this.statusPanel.setStatusText(`SESION GUARDADA\n(${label})`);
+      this.showToast(`🟢 FASE COMPLETADA: ${label}`, "#00ff88", 3000);
       this.statusPanel.setStatusBgBackground("rgba(0, 255, 0, 0.6)");
 
       this.currentlyRenderedAttack = undefined;

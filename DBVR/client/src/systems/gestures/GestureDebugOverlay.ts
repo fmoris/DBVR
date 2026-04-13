@@ -129,6 +129,8 @@ export class GestureDebugOverlay {
     success?: boolean;
     leftJoints?: any;
     rightJoints?: any;
+    graceActive?: boolean;
+    graceTimeLeft?: number;
   }): void {
     this.leftJoints = opts.leftJoints;
     this.rightJoints = opts.rightJoints;
@@ -145,6 +147,8 @@ export class GestureDebugOverlay {
       if (this.gestureLog.length > 15) this.gestureLog.pop();
     }
     this.currentGesture = opts.gesture;
+    (this as any).graceActive = opts.graceActive;
+    (this as any).graceTimeLeft = opts.graceTimeLeft;
   }
 
   private renderLoop(): void {
@@ -167,6 +171,10 @@ export class GestureDebugOverlay {
         return w ? `X:${w.x.toFixed(2)} Y:${w.y.toFixed(2)} Z:${w.z.toFixed(2)}` : "N/D";
       };
 
+      const graceStatus = (this as any).graceActive 
+        ? `<span style="color:#ff8800;font-weight:bold"> [GRACIA: ${(this as any).graceTimeLeft}ms]</span>` 
+        : "";
+
       this.panel.innerHTML = `
         <div style="display:flex;justify-content:space-between;margin-bottom:6px;border-bottom:1px solid #0a2a4a;padding-bottom:4px;">
           <span style="letter-spacing:2px;font-size:10px;color:#0088aa">GSS DEBUG</span>
@@ -176,7 +184,7 @@ export class GestureDebugOverlay {
         <div style="font-size:10px;color:#aaa">Source: <span style="color:#ffcc44">${this.handApiSource}</span></div>
         <div style="font-size:10px;color:rgba(0,200,255,0.7)">L: ${formatJ(this.leftJoints)}</div>
         <div style="font-size:10px;color:rgba(255,150,0,0.7)">R: ${formatJ(this.rightJoints)}</div>
-        <div style="margin-top:4px">Gesto/Estado: ${gestureLabel}</div>
+        <div style="margin-top:4px">Gesto/Estado: ${gestureLabel}${graceStatus}</div>
         <div style="border-top:1px solid #0a2a4a;margin-top:8px;padding-top:4px;font-size:10px;color:#0088aa">Log:</div>
         <div style="max-height:150px;overflow-y:hidden">${logRows}</div>
       `;
