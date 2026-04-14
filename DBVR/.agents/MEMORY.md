@@ -18,12 +18,14 @@ Recuerdos curados de DBVR (Dragon Ball VR).
 - **Hito GSS:** Migración completa del motor de gestos a `GestureSkillSystem` (GSS) basado en KNN. Eliminación de código heurístico legacy.
 - **Entrenamiento 3D:** Implementación de persistencia sesión-por-sesión (historia 3D) en `localStorage`, permitiendo calibración personal robusta.
 - **Validación de Datos:** Sistema de purga automática de datos antiguos (1152 features) para asegurar compatibilidad con el estándar actual (16/46 features).
+- **Calibración VR:** Nuevo sistema `VRCalibrationSystem` con guías visuales (`CalibrationGhost`) y referencias de poses para asegurar capturas precisas en Quest 3.
 
 ## Lecciones Aprendidas
 - **Z-Index en WebXR:** El overlay del DOM para VR requiere `position: fixed` y `pointer-events: none` por defecto para no bloquear la interacción 3D o en el menú.
 - **Features Estándar:** El sistema funciona mejor con vectores fijos: **16 features** para movimientos de Ki (`wristOnly`) y **46 features** cuando la forma de la mano importa (`wristAndFingertips`).
 - **Data Augmentation:** El mirroring y jittering son esenciales para que gestos entrenados con una sola mano funcionen en ambas y sean tolerantes al ruido.
 - **Conectividad WebXR (Link):** El modo "Escritorio Remoto" NO transmite datos de Hand Tracking. Para capturar gestos en el PC, se requiere **Meta Quest Link (Cable o Air Link)** y configurar Oculus como el **OpenXR Runtime** activo.
+- **Calibración Visual:** El uso de un "Fantasma" (`CalibrationGhost`) de manos ayuda al usuario a posicionarse correctamente, reduciendo drásticamente el ruido en el entrenamiento KNN.
 
 ## Próximos Pasos (Meta-Nivel)
 1. **Parte 2: Combate Melee.** Transición a cámara lenta al activarse, sombras de golpes para el defensor, detección de puntos de impacto.
