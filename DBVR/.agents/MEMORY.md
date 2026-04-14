@@ -19,6 +19,7 @@ Recuerdos curados de DBVR (Dragon Ball VR).
 - **Entrenamiento 3D:** Implementación de persistencia sesión-por-sesión (historia 3D) en `localStorage`, permitiendo calibración personal robusta.
 - **Validación de Datos:** Sistema de purga automática de datos antiguos (1152 features) para asegurar compatibilidad con el estándar actual (16/46 features).
 - **Calibración VR:** Nuevo sistema `VRCalibrationSystem` con guías visuales (`CalibrationGhost`) y referencias de poses para asegurar capturas precisas en Quest 3.
+- **Audio y Estabilidad:** Implementación de `AudioManager` para audio reactivo al Ki y corrección del flujo de activación WebXR, eliminando errores de permisos al entrar en VR.
 
 ## Lecciones Aprendidas
 - **Z-Index en WebXR:** El overlay del DOM para VR requiere `position: fixed` y `pointer-events: none` por defecto para no bloquear la interacción 3D o en el menú.

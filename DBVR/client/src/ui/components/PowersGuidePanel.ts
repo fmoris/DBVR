@@ -23,12 +23,12 @@ export class PowersGuidePanel extends HUDPanel {
     private _onSimulate?: (id: string) => void;
     private _onResetPositions?: () => void;
 
-    constructor(scene: Scene, private combat: CombatSystem, private inputManager: InputManager) {
+    constructor(scene: Scene, _combat: CombatSystem, private inputManager: InputManager) {
         super(scene, {
             name: "vrHud-powers",
-            width: 0.70,
-            height: 0.75,
-            resolution: 1200,
+            width: 0.90,
+            height: 0.80,
+            resolution: 1400,
         });
 
         const bg = this.makePanelBg("rgba(5, 15, 10, 0.75)", "#00ff88");
@@ -46,63 +46,7 @@ export class PowersGuidePanel extends HUDPanel {
         title.top = "10px";
         this.rootRect.addControl(title);
 
-        // Mirror Button
-        const mirrorBtn = Button.CreateSimpleButton("mirror-btn", "MODO ESPEJO: OFF");
-        mirrorBtn.width = "200px";
-        mirrorBtn.height = "40px";
-        mirrorBtn.color = "white";
-        mirrorBtn.background = "#333333";
-        mirrorBtn.cornerRadius = 10;
-        mirrorBtn.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-        mirrorBtn.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
-        mirrorBtn.top = "10px";
-        mirrorBtn.left = "-10px";
-        mirrorBtn.onPointerClickObservable.add(() => {
-            if (this.combat) {
-                this.combat.mirrorMode = !this.combat.mirrorMode;
-                mirrorBtn.textBlock!.text = `MODO ESPEJO: ${this.combat.mirrorMode ? "ON" : "OFF"}`;
-                mirrorBtn.background = this.combat.mirrorMode ? "#00ff88" : "#333333";
-                mirrorBtn.color = this.combat.mirrorMode ? "black" : "white";
-            }
-        });
-        this.rootRect.addControl(mirrorBtn);
 
-        // Export Button
-        const exportBtn = Button.CreateSimpleButton("export-btn", "📥 EXPORTAR JSON");
-        exportBtn.width = "200px";
-        exportBtn.height = "40px";
-        exportBtn.color = "white";
-        exportBtn.background = "#004488";
-        exportBtn.cornerRadius = 10;
-        exportBtn.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-        exportBtn.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
-        exportBtn.top = "60px";
-        exportBtn.left = "-10px";
-        exportBtn.onPointerClickObservable.add(() => {
-            const gss = this.inputManager.getGSS();
-            gss.exportModel();
-            // Emitir evento o llamar a callback para mostrar toast?
-        });
-        this.rootRect.addControl(exportBtn);
-        // Reset Button (Aggressive Repair)
-        const repairBtn = Button.CreateSimpleButton("repair-btn", "🧹 REPARAR MODELO");
-        repairBtn.width = "200px";
-        repairBtn.height = "40px";
-        repairBtn.color = "white";
-        repairBtn.background = "#880000";
-        repairBtn.cornerRadius = 10;
-        repairBtn.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-        repairBtn.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
-        repairBtn.top = "110px";
-        repairBtn.left = "-10px";
-        repairBtn.onPointerClickObservable.add(() => {
-            const gss = this.inputManager.getGSS();
-            gss.fullReset();
-            // Refrescar lista después de reset a través del HUD
-            this.renderPowersList(); 
-            if (this.onModelRepaired) this.onModelRepaired();
-        });
-        this.rootRect.addControl(repairBtn);
 
         const viewer = new ScrollViewer("guide-viewer");
         viewer.width = "96%";
@@ -204,7 +148,7 @@ export class PowersGuidePanel extends HUDPanel {
             resetBtn.background = "#4444aa";
             resetBtn.cornerRadius = 10;
             resetBtn.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-            resetBtn.onPointerClickObservable.add(() => {
+            resetBtn.onPointerDownObservable.add(() => {
                 onResetPos();
             });
             this.powersStack.addControl(resetBtn);
@@ -214,7 +158,7 @@ export class PowersGuidePanel extends HUDPanel {
     private addPowerItem(id: string, name: string, prep: string, fire: string, cost: string, type: string, onCal?: any, onReset?: any, onSimulate?: any, highlighted: boolean = false): void {
         const container = new Rectangle(`p-guide-${id}`);
         container.width = "100%";
-        container.heightInPixels = 120;
+        container.heightInPixels = 160;
         container.thickness = 0;
         container.paddingBottomInPixels = 10;
         container.background = highlighted ? "rgba(0,255,136,0.1)" : "transparent";
@@ -251,7 +195,7 @@ export class PowersGuidePanel extends HUDPanel {
         calStack.height = "50px";
         calStack.spacing = 8;
         calStack.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
-        calStack.verticalAlignment = Control.VERTICAL_ALIGNMENT_CENTER;
+        calStack.verticalAlignment = Control.VERTICAL_ALIGNMENT_BOTTOM;
         container.addControl(calStack);
 
         const count1 = this.inputManager.getGSS().getGestureCount(this.getLabelForPower(id, "PREP"));
@@ -279,7 +223,10 @@ export class PowersGuidePanel extends HUDPanel {
         btn.color = "white";
         btn.background = bg;
         btn.cornerRadius = 5;
-        btn.onPointerClickObservable.add(action);
+        // Usamos PointerDown en lugar de Click porque en VR el pequeño movimiento del control
+        // al apretar el gatillo a menudo se interpreta como un "arrastre" (drag) por el ScrollViewer,
+        // lo que anula el evento onPointerClickObservable.
+        btn.onPointerDownObservable.add(action);
         return btn;
     }
 
