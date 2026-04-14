@@ -9,5 +9,6 @@
       "Bash(findstr -i \"\\\\.skill\")",
       "Bash(dir /s /b \"%APPDATA%\\\\Claude\\\\plugins\")"
     ]
-  }
+  },
+  "prefersReducedMotion": false
 }

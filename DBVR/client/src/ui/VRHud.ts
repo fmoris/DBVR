@@ -18,6 +18,8 @@ import { StatusPanel } from "./components/StatusPanel";
 import { DebugPanel } from "./components/DebugPanel";
 import { PowersGuidePanel } from "./components/PowersGuidePanel";
 import { GestureSimulator } from "../systems/gestures/GestureSimulator";
+import { VRCalibrationSystem } from "../systems/gestures/VRCalibrationSystem";
+import { PoseManager } from "../systems/gestures/PoseReferences";
 
 const STATE_LABELS: Record<string, string> = {
   neutral: "Neutral",
@@ -61,10 +63,11 @@ export class VRHud {
   private debugPanel: DebugPanel;
   private powersGuidePanel: PowersGuidePanel;
   private gestureSimulator: GestureSimulator;
+  private calibrationSystem: VRCalibrationSystem;
   private hudRoot: Mesh | null = null;
   private currentlyRenderedAttack: string | undefined = "NONE";
 
-  private currentHudType: "normal" | "defense" | "melee" | null = null;
+  private currentHudType: "normal" | "defense" | "melee" | "recharging" | null = null;
   private visible = false;
 
   constructor(private scene: Scene, private combat: CombatSystem, private inputManager: InputManager) {
@@ -83,10 +86,27 @@ export class VRHud {
     this.enemyPanel.updateAvatar(vegetaBaseImg);
     
     this.gestureSimulator = new GestureSimulator(scene);
+    this.calibrationSystem = new VRCalibrationSystem(scene, this.inputManager.getGSS());
+    this.calibrationSystem.onStatusChange = (status) => this.statusPanel.setStatusText(status);
 
     this.hide();
     this.combat.onStatsChange((stats) => this.update(stats));
-    this.powersGuidePanel.renderPowersList(undefined, (id, ph) => this.startCalibration(id, ph), (id) => this.resetCalibration(id), (id) => this.simulateGesture(id));
+    
+    // Bucle de actualización para sistemas que requieren alta frecuencia (Calibración)
+    scene.onBeforeRenderObservable.add(() => {
+        const ctx = this.inputManager.getLastContext();
+        if (ctx && this.calibrationSystem.isActive()) {
+            this.calibrationSystem.update(ctx);
+        }
+    });
+
+    this.powersGuidePanel.renderPowersList(
+        undefined, 
+        (id: string, ph: "PREP" | "FIRE") => this.startCalibration(id, ph), 
+        (id: string) => this.resetCalibration(id), 
+        (id: string) => this.simulateGesture(id),
+        () => this.resetVRPositions()
+    );
 
     this.setupEventListeners();
   }
@@ -96,7 +116,7 @@ export class VRHud {
         this.showToast(`💾 GESTO GUARDADO: ${e.detail.id.toUpperCase()}`, "#00ff88", 4000);
     });
 
-    window.addEventListener('gss-sync-start', (e: any) => {
+    window.addEventListener('gss-sync-start', () => {
         this.showToast(`☁️ SINCRONIZANDO CON SERVIDOR...`, "#ffcc00", 0);
     });
 
@@ -105,7 +125,7 @@ export class VRHud {
         this.showToast(`📄 ARCHIVO: ${e.detail.filename}`, "#aaaaaa", 5000);
     });
 
-    window.addEventListener('gss-sync-error', (e: any) => {
+    window.addEventListener('gss-sync-error', () => {
         this.showToast(`❌ ERROR DE SINCRONIZACIÓN`, "#ff4444", 6000);
     });
 
@@ -118,7 +138,7 @@ export class VRHud {
         this.showToast(`📄 ARCHIVO: ${e.detail.filename}`, "#aaaaaa", 5000);
     });
 
-    window.addEventListener('gss-remote-load-error', (e: any) => {
+    window.addEventListener('gss-remote-load-error', () => {
         this.showToast(`⚠️ NO SE PUDO CARGAR MODELO REMOTO`, "#ffff00", 5000);
         this.showToast(`💾 USANDO RESPALDO LOCAL`, "#aaaaaa", 5000);
     });
@@ -202,9 +222,10 @@ export class VRHud {
   public update(stats: GameStats): void {
     if (!this.visible) return;
 
-    let targetType: "normal" | "defense" | "melee" = "normal";
+    let targetType: "normal" | "defense" | "melee" | "recharging" = "normal";
     if (stats.enemyAttacking) targetType = "defense";
     else if (stats.combatState === "melee") targetType = "melee";
+    else if (stats.combatState === "recharging") targetType = "recharging";
 
     if (this.currentHudType !== targetType) {
       this.refreshActions(targetType, stats);
@@ -266,15 +287,30 @@ export class VRHud {
     // Solo renderizar si el ataque cambió o la lista está vacía
     if (this.currentlyRenderedAttack !== targetAttack || this.powersGuidePanel.getChildrenCount() <= 1) {
         this.currentlyRenderedAttack = targetAttack;
-        this.powersGuidePanel.renderPowersList(targetAttack, (id, ph) => this.startCalibration(id, ph), (id) => this.resetCalibration(id), (id) => this.simulateGesture(id));
+        this.powersGuidePanel.renderPowersList(
+            targetAttack, 
+            (id: string, ph: "PREP" | "FIRE") => this.startCalibration(id, ph), 
+            (id: string) => this.resetCalibration(id), 
+            (id: string) => this.simulateGesture(id),
+            () => this.resetVRPositions()
+        );
     }
   }
 
-  public renderPowersList(attackId?: string, onCalib?: (id: string, ph: "PREP" | "FIRE") => void, onReset?: (id: string) => void, onSimulate?: (id: string) => void): void {
-    this.powersGuidePanel.renderPowersList(attackId, onCalib, onReset, onSimulate);
+  public renderPowersList(
+      attackId?: string, 
+      onCalib?: (id: string, ph: "PREP" | "FIRE") => void, 
+      onReset?: (id: string) => void, 
+      onSimulate?: (id: string) => void,
+      onResetPos?: () => void
+  ): void {
+    this.powersGuidePanel.renderPowersList(attackId, onCalib, onReset, onSimulate, onResetPos);
   }
 
-  private refreshActions(type: "normal" | "defense" | "melee", stats: any): void {
+  private refreshActions(type: "normal" | "defense" | "melee" | "recharging", stats: GameStats): void {
+    if (this.currentHudType === type) return;
+    this.currentHudType = type;
+    
     this.attackPanel.clearActions();
     this.defensePanel.clearActions();
 
@@ -366,34 +402,52 @@ export class VRHud {
   public showToast(msg: string, col: string = "white", dur: number = 4000): void { this.statusPanel.showToast(msg, col, dur); }
   public hideToast(): void { this.statusPanel.hideToast(); }
 
-  private async startCalibration(powerId: string, phase: "PREP" | "FIRE"): Promise<void> {
-      const gss = this.inputManager.getGSS();
+  private startCalibration(powerId: string, phase: "PREP" | "FIRE"): void {
       const label = this.getLabelForPower(powerId, phase);
-
+      
       this.statusPanel.setStatusBgVisible(true);
-      this.statusPanel.setStatusBgBackground("rgba(40, 40, 150, 0.8)");
       
-      for (let i = 5; i > 0; i--) {
-          this.statusPanel.setStatusText(`PREPARA ${label.toUpperCase()}\nGRABANDO EN ${i}...`);
-          await new Promise(r => setTimeout(r, 1000));
+      // Intentar calibración guiada inmersiva
+      const started = this.calibrationSystem.startSession(powerId, phase, label);
+      
+      if (!started) {
+          // Fallback a modo manual con delay de 1.5s
+          this.statusPanel.setStatusText(`PREPARA: ${powerId} (${phase})\nGRABANDO EN 1.5s...`);
+          
+          setTimeout(() => {
+              this.statusPanel.setStatusText(`¡GRABANDO YA!\n(MANTÉN 2 SEGUNDOS)`);
+              this.inputManager.getGSS().startTraining(label);
+              
+              setTimeout(() => {
+                  this.inputManager.getGSS().stopTraining();
+                  this.statusPanel.setStatusText(`CALIBRACIÓN OK:\n${label}`);
+                  setTimeout(() => this.statusPanel.setStatusBgVisible(false), 2000);
+                  this.currentlyRenderedAttack = undefined;
+                  this.powersGuidePanel.renderPowersList(
+                      undefined, 
+                      (id: string, ph: "PREP" | "FIRE") => this.startCalibration(id, ph), 
+                      (id: string) => this.resetCalibration(id), 
+                      (id: string) => this.simulateGesture(id),
+                      () => this.resetVRPositions()
+                  );
+              }, 2000);
+          }, 1500);
       }
+  }
 
-      this.statusPanel.setStatusBgBackground("rgba(255, 0, 0, 0.7)");
-      this.statusPanel.setStatusText(`¡GRABANDO ${label.toUpperCase()}!\nMantén la postura...`);
-      this.showToast(`🔴 INICIANDO CAPTURA DE: ${label}`, "#ff4444", 2000);
-
-      gss.startTraining(label, "wristOnly");
-      this.showToast(`🔴 GRABANDO: ${label.toUpperCase()}`, "#ff4444", 2000);
-      
-      await new Promise(r => setTimeout(r, 2000));
-      gss.stopTraining();
-      
-      this.showToast(`🟢 FASE COMPLETADA: ${label}`, "#00ff88", 3000);
-      this.statusPanel.setStatusBgBackground("rgba(0, 255, 0, 0.6)");
-
-      this.currentlyRenderedAttack = undefined;
-      this.powersGuidePanel.renderPowersList(undefined, (id, ph) => this.startCalibration(id, ph), (id) => this.resetCalibration(id), (id) => this.simulateGesture(id));
-      setTimeout(() => this.statusPanel.setStatusBgVisible(false), 2000);
+  private resetVRPositions(): void {
+      this.calibrationSystem.resetPositions();
+      PoseManager.reset();
+      this.statusPanel.showToast("POSICIONES REINICIADAS", "#00ff88", 2000);
+      // Refrescar para asegurar que los fantasmas se actualicen si están visibles
+      this.currentlyRenderedAttack = undefined; 
+      this.powersGuidePanel.renderPowersList(
+          undefined, 
+          (id: string, ph: "PREP" | "FIRE") => this.startCalibration(id, ph), 
+          (id: string) => this.resetCalibration(id), 
+          (id: string) => this.simulateGesture(id),
+          () => this.resetVRPositions()
+      );
   }
 
   private resetCalibration(powerId: string): void {
@@ -409,7 +463,13 @@ export class VRHud {
       this.statusPanel.setStatusBgBackground("rgba(100, 100, 100, 0.7)");
       
       this.currentlyRenderedAttack = undefined;
-      this.powersGuidePanel.renderPowersList(undefined, (id, ph) => this.startCalibration(id, ph), (id) => this.resetCalibration(id), (id) => this.simulateGesture(id));
+      this.powersGuidePanel.renderPowersList(
+          undefined, 
+          (id: string, ph: "PREP" | "FIRE") => this.startCalibration(id, ph), 
+          (id: string) => this.resetCalibration(id), 
+          (id: string) => this.simulateGesture(id),
+          () => this.resetVRPositions()
+      );
       setTimeout(() => this.statusPanel.setStatusBgVisible(false), 2000);
   }
 
@@ -428,11 +488,22 @@ export class VRHud {
   }
 
   private simulateGesture(powerId: string, instant: boolean = false): void {
+      console.log(`[VRHud] simulateGesture called for: ${powerId}`);
       const labelPrep = this.getLabelForPower(powerId, "PREP");
       const labelFire = this.getLabelForPower(powerId, "FIRE");
 
       const origin = this.hudRoot ? this.hudRoot.position.clone() : new Vector3(0, 1.4, 0);
-      const rot = this.hudRoot ? { y: this.hudRoot.rotation.y } : { y: 0 };
+      
+      // Extraer rotación Y real del Quaternion (lookAt lo usa internamente)
+      let rotY = 0;
+      if (this.hudRoot) {
+          if (this.hudRoot.rotationQuaternion) {
+              rotY = this.hudRoot.rotationQuaternion.toEulerAngles().y;
+          } else {
+              rotY = this.hudRoot.rotation.y;
+          }
+      }
+      const rot = { y: rotY };
       
       if (!instant) {
           this.statusPanel.setStatusText(`SIMULANDO DENTRO DE 1s:\n${powerId.toUpperCase()}`);

@@ -1,4 +1,5 @@
 import { Scene, Mesh, MeshBuilder, Vector3, Animation, StandardMaterial, Color3, EasingFunction, SineEase } from "@babylonjs/core";
+import { POSE_REFERENCES } from "./PoseReferences";
 
 export class GestureSimulator {
     private leftHand: Mesh;
@@ -24,92 +25,21 @@ export class GestureSimulator {
     }
 
     private getPosePositions(pose: string): { left: Vector3, right: Vector3 } {
-        // Base positions relative to a forward-facing player (Z is forward, Y is up, X is right)
-        // Camera average height ~ 1.6m, shoulders around 1.4m. We simulate relative to chest center (0, 1.4, 0)
         const chest = new Vector3(0, 1.4, 0.2);
-        
-        // Default idle
-        let l = chest.add(new Vector3(-0.2, -0.2, 0));
-        let r = chest.add(new Vector3(0.2, -0.2, 0));
+        const ref = POSE_REFERENCES[pose];
 
-        switch (pose) {
-            case "hands_clasped_at_waist":
-                l = chest.add(new Vector3(0.25, -0.3, -0.1));
-                r = chest.add(new Vector3(0.3, -0.3, -0.1));
-                break;
-            case "palms_forward_push":
-                l = chest.add(new Vector3(-0.15, 0.1, 0.6));
-                r = chest.add(new Vector3(0.15, 0.1, 0.6));
-                break;
-            case "palms_forward_together":
-                l = chest.add(new Vector3(-0.05, 0.1, 0.6));
-                r = chest.add(new Vector3(0.05, 0.1, 0.6));
-                break;
-            case "arms_extended_horizontally":
-                l = chest.add(new Vector3(-0.6, 0.1, 0));
-                r = chest.add(new Vector3(0.6, 0.1, 0));
-                break;
-            case "arms_raised_to_sky":
-                l = chest.add(new Vector3(-0.2, 0.6, 0.2));
-                r = chest.add(new Vector3(0.2, 0.6, 0.2));
-                break;
-            case "hands_left_shoulder_crossed":
-                l = chest.add(new Vector3(-0.2, 0.2, -0.1));
-                r = chest.add(new Vector3(-0.1, 0.2, -0.1));
-                break;
-            case "ki_prep":
-                l = chest.add(new Vector3(-0.2, -0.2, 0));
-                r = chest.add(new Vector3(0.2, 0.1, 0.2));
-                break;
-            case "ki_fire":
-                l = chest.add(new Vector3(-0.2, -0.2, 0));
-                r = chest.add(new Vector3(0.1, 0.1, 0.5));
-                break;
-            case "ki_charge_prep":
-                l = chest.add(new Vector3(-0.2, 0.0, 0.1));
-                r = chest.add(new Vector3(0.2, -0.2, 0));
-                break;
-            case "ki_charge_fire":
-                l = chest.add(new Vector3(-0.1, 0.0, 0.5));
-                r = chest.add(new Vector3(0.2, -0.2, 0));
-                break;
-            case "recharge_p1":
-                l = chest.add(new Vector3(-0.2, 0.2, 0.2));
-                r = chest.add(new Vector3(0.2, 0.2, 0.2));
-                break;
-            case "recharge_p2":
-                l = chest.add(new Vector3(-0.4, 0.1, 0.1));
-                r = chest.add(new Vector3(0.4, 0.1, 0.1));
-                break;
-            case "palms_forward_push_wide":
-                l = chest.add(new Vector3(-0.3, 0.1, 0.5));
-                r = chest.add(new Vector3(0.3, 0.1, 0.5));
-                break;
-            case "arms_crossed_chest":
-                l = chest.add(new Vector3(0.15, 0.1, 0.2));
-                r = chest.add(new Vector3(-0.15, 0.1, 0.2));
-                break;
-            // Map canonical JSON names if they differ
-            case "kamehameha_preparation":
-                l = chest.add(new Vector3(0.25, -0.3, -0.1));
-                r = chest.add(new Vector3(0.3, -0.3, -0.1));
-                break;
-            case "kamehameha_firing":
-                l = chest.add(new Vector3(-0.15, 0.1, 0.6));
-                r = chest.add(new Vector3(0.15, 0.1, 0.6));
-                break;
-            case "genkidama_preparation":
-                l = chest.add(new Vector3(-0.2, 0.6, 0.2));
-                r = chest.add(new Vector3(0.2, 0.6, 0.2));
-                break;
-            case "genkidama_firing":
-                l = chest.add(new Vector3(-0.2, 0.1, 0.5));
-                r = chest.add(new Vector3(0.2, 0.1, 0.5));
-                break;
-            default:
-                break; // Use idle
+        if (ref) {
+            return {
+                left: chest.add(ref.left),
+                right: chest.add(ref.right)
+            };
         }
-        return { left: l, right: r };
+
+        // Default fallback
+        return {
+            left: chest.add(new Vector3(-0.2, -0.2, 0)),
+            right: chest.add(new Vector3(0.2, -0.2, 0))
+        };
     }
 
     private playAnimation(mesh: Mesh, startPath: Vector3, endPath: Vector3, callback?: () => void) {
@@ -130,7 +60,11 @@ export class GestureSimulator {
     }
 
     public playGestureSequence(prepLabel: string, fireLabel: string, basePosition: Vector3, baseRotationAngles?: { y: number }) {
-        if (this.isAnimating) return; // Ignore if already animating
+        console.log(`[GestureSimulator] Starting sequence: ${prepLabel} -> ${fireLabel}`);
+        if (this.isAnimating) {
+            console.warn("[GestureSimulator] Already animating, ignoring request.");
+            return;
+        }
         this.isAnimating = true;
 
         this.leftHand.isVisible = true;

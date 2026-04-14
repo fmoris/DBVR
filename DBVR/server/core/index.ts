@@ -12,6 +12,7 @@ import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
 import { networkInterfaces } from "os";
 import { startCaptureServer } from "./gesture_capture.js";
+import selfsigned from "selfsigned";
 
 function getLanIp(): string {
   const nets = networkInterfaces();
@@ -49,51 +50,109 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   const app = express();
 
-  // En desarrollo: HTTPS con certificado autofirmado (requerido por WebXR immersive-vr).
-  // En producción: HTTP simple (el proxy/CDN provee TLS).
-  let server: ReturnType<typeof createHttpServer> | ReturnType<typeof createHttpsServer>;
+  // Debug: Verificar variables de entorno
+  console.log(`[Env] 🌐 OAUTH_SERVER_URL: ${process.env.OAUTH_SERVER_URL || '❌ No definida'}`);
+  if (!process.env.OAUTH_SERVER_URL) {
+    console.warn('[Env] ⚠️ ADVERTENCIA: OAUTH_SERVER_URL no está configurada. El SDK de oAuth fallará.');
+  }
+
+  // Configuración de certificados SSL
+  let sslOptions: any = null;
   let isHttps = false;
-  let sslOptions: any = undefined;
+  const certsDir = path.join(process.cwd(), ".certs");
+  const lanIp = getLanIp();
+  
+  console.log(`[SSL] 🔍 Buscando certificados en: ${certsDir}`);
 
+  if (fs.existsSync(certsDir)) {
+    const certFiles = fs.readdirSync(certsDir);
+    console.log(`[SSL] 📂 Archivos encontrados en .certs/: ${certFiles.join(", ")}`);
 
-  if (process.env.NODE_ENV === "development") {
-    try {
-      const lanIp = getLanIp();
+    let certPath = "";
+    let keyPath = "";
 
-      console.log(`[Server] Generando certificado SSL para: ${lanIp}`);
+    const hasCert = fs.existsSync(path.join(certsDir, "cert.pem"));
+    const hasKey = fs.existsSync(path.join(certsDir, "key.pem"));
+    const hasDev = fs.existsSync(path.join(certsDir, "dev.pem"));
 
-      // selfsigned v5 es async — devuelve Promise<{private, public, cert, fingerprint}>
-      const { generate } = await import("selfsigned");
-      const pems = await generate(
-        [{ name: "commonName", value: lanIp }],
-        {
-          keySize: 2048,
-          algorithm: "sha256",
-          extensions: [
-            {
-              name: "subjectAltName",
-              altNames: [
-                { type: 2, value: "localhost" },
-                { type: 2, value: lanIp },
-                { type: 7, ip: "127.0.0.1" },
-                { type: 7, ip: lanIp },
-              ],
-            },
-          ],
+    if (hasCert && hasKey) {
+      certPath = path.join(certsDir, "cert.pem");
+      keyPath = path.join(certsDir, "key.pem");
+    } else if (hasCert && hasDev) {
+      certPath = path.join(certsDir, "cert.pem");
+      keyPath = path.join(certsDir, "dev.pem");
+    } else if (hasDev && !hasCert) {
+      // En algunos casos dev.pem puede contener todo, pero intentaremos usarlo como ambos
+      certPath = path.join(certsDir, "dev.pem");
+      keyPath = path.join(certsDir, "dev.pem");
+    }
+
+    if (certPath && keyPath) {
+      try {
+        console.log(`[SSL] 📄 Intentando cargar cert: ${certPath}`);
+        console.log(`[SSL] 🔑 Intentando cargar key: ${keyPath}`);
+        
+        const certData = fs.readFileSync(certPath);
+        const keyData = fs.readFileSync(keyPath);
+        
+        if (certData.length === 0 || keyData.length === 0) {
+          throw new Error("Uno de los archivos de certificado está vacío");
         }
-      );
 
-      sslOptions = { key: pems.private, cert: pems.cert };
-      server = createHttpsServer(sslOptions, app);
-
-      isHttps = true;
-      console.log("[Server] HTTPS habilitado — WebXR disponible");
-    } catch (e) {
-      console.warn("[Server] No se pudo crear HTTPS, usando HTTP:", e);
-      server = createHttpServer(app);
+        sslOptions = {
+          key: keyData,
+          cert: certData,
+        };
+        isHttps = true;
+        console.log("[SSL] ✅ Certificados mkcert cargados exitosamente.");
+      } catch (e: any) {
+        console.error(`[SSL] ❌ Error cargando certificados mkcert: ${e.message}`);
+      }
+    } else {
+      console.warn("[SSL] ⚠️ No se encontró una combinación válida de archivos .pem (necesario cert.pem + key.pem o cert.pem + dev.pem)");
     }
   } else {
+    console.warn(`[SSL] 📁 Directorio .certs no encontrado en: ${certsDir}`);
+  }
+
+  // Fallback a selfsigned si no se encontraron o fallaron los certificados de mkcert
+  if (!sslOptions) {
+    console.warn("[SSL] ⚠️ Certificados mkcert no encontrados o inválidos. Generando temporal con selfsigned...");
+    try {
+      const attrs = [{ name: "commonName", value: lanIp }];
+      const notAfterDate = new Date();
+      notAfterDate.setDate(notAfterDate.getDate() + 30);
+      
+      const pems = await selfsigned.generate(attrs, {
+        algorithm: "sha256",
+        notAfterDate: notAfterDate,
+        keySize: 2048,
+        extensions: [
+          {
+            name: "subjectAltName",
+            altNames: [
+              { type: 2, value: "localhost" },
+              { type: 2, value: lanIp },
+              { type: 7, ip: lanIp },
+            ],
+          },
+        ],
+      });
+      sslOptions = { key: pems.private, cert: pems.cert };
+      isHttps = true;
+      console.log("[SSL] 🛠️ Certificado selfsigned generado correctamente.");
+    } catch (e) {
+      console.error("[SSL] ❌ Error fatal generando selfsigned:", e);
+    }
+  }
+
+  let server;
+  if (isHttps && sslOptions) {
+    server = createHttpsServer(sslOptions, app);
+    console.log("[Server] 🛡️ HTTPS habilitado — WebXR disponible");
+  } else {
     server = createHttpServer(app);
+    console.log("[Server] ⚠️ Corriendo en HTTP plano. WebXR NO estará disponible en Quest.");
   }
 
   // Configure body parser with larger size limit for file uploads
@@ -137,6 +196,7 @@ async function startServer() {
       console.error("[Sync] Error guardando gesto:", error);
       res.status(500).json({ error: error.message });
     }
+  });
   // --- GESTURE LATEST ENDPOINT ---
   app.get("/api/gestures/latest/:characterId", async (req, res) => {
     try {

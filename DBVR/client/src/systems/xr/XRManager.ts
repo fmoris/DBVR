@@ -64,21 +64,32 @@ export class XRManager {
 
     try {
       const xrConfig: any = {
-        uiOptions: { sessionMode: "immersive-vr", referenceSpaceType: "local-floor" },
+        uiOptions: { 
+            sessionMode: "immersive-vr", 
+            referenceSpaceType: "local-floor" 
+        },
         optionalFeatures: ["hand-tracking", "dom-overlay"],
         domOverlay: { element: this.xrOverlay },
+        inputOptions: {
+            doNotLoadControllerMeshes: true
+        }
       };
       
       this.xr = await this.scene.createDefaultXRExperienceAsync(xrConfig);
-      if (!this.xr) return false;
+      if (!this.xr) {
+          throw new Error("No se pudo crear la experiencia WebXR predeterminada.");
+      }
 
       this.inputManager.getGSS().setXRExperience(this.xr);
       this.setupXRExperience();
       this.setupHandTracking();
       console.log("[XRManager] WebXR inicializado correctamente");
       return true;
-    } catch (e) {
+    } catch (e: any) {
       console.warn("[XRManager] Error al inicializar WebXR:", e);
+      // Notificar al HUD si es posible
+      const msg = e.message || String(e);
+      window.dispatchEvent(new CustomEvent('xr-init-error', { detail: { message: msg } }));
       return false;
     }
   }

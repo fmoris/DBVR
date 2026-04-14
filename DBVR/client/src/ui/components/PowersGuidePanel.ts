@@ -17,6 +17,12 @@ export class PowersGuidePanel extends HUDPanel {
     private powersStack!: StackPanel;
     public onModelRepaired?: () => void;
 
+    // Callbacks persistentes para evitar pérdida en re-renderings
+    private _onCal?: (id: string, phase: "PREP" | "FIRE") => void;
+    private _onReset?: (id: string) => void;
+    private _onSimulate?: (id: string) => void;
+    private _onResetPositions?: () => void;
+
     constructor(scene: Scene, private combat: CombatSystem, private inputManager: InputManager) {
         super(scene, {
             name: "vrHud-powers",
@@ -117,7 +123,24 @@ export class PowersGuidePanel extends HUDPanel {
         viewer.addControl(this.powersStack);
     }
 
-    public renderPowersList(filterPower?: string, startCalibration?: (id: string, phase: "PREP" | "FIRE") => void, resetCalibration?: (id: string) => void, simulateGesture?: (id: string) => void): void {
+    public renderPowersList(
+        filterPower?: string, 
+        startCalibration?: (id: string, phase: "PREP" | "FIRE") => void, 
+        resetCalibration?: (id: string) => void, 
+        simulateGesture?: (id: string) => void,
+        resetPositions?: () => void
+    ): void {
+        // Guardar callbacks si se proporcionan, si no, usar los guardados
+        if (startCalibration) this._onCal = startCalibration;
+        if (resetCalibration) this._onReset = resetCalibration;
+        if (simulateGesture) this._onSimulate = simulateGesture;
+        if (resetPositions) this._onResetPositions = resetPositions;
+
+        const onCal = this._onCal;
+        const onReset = this._onReset;
+        const onSim = this._onSimulate;
+        const onResetPos = this._onResetPositions;
+
         this.powersStack.getDescendants().forEach(c => c.dispose());
 
         const gss = this.inputManager.getGSS();
@@ -155,7 +178,7 @@ export class PowersGuidePanel extends HUDPanel {
 
         if (!filterPower) {
             for (const b of basicMoves) {
-                this.addPowerItem(b.id, b.name, gestureLabelMap[b.p], gestureLabelMap[b.f], b.cost, b.time, startCalibration, resetCalibration, simulateGesture);
+                this.addPowerItem(b.id, b.name, gestureLabelMap[b.p], gestureLabelMap[b.f], b.cost, b.time, onCal, onReset, onSim);
             }
         }
 
@@ -169,7 +192,22 @@ export class PowersGuidePanel extends HUDPanel {
             const cost = `Ki: ${d.ki_cost || "40+"}`;
             const time = `Carga: ${d.charge_time || "N/A"}s`;
 
-            this.addPowerItem(k, d.name || k, prepLabel, fireLabel, cost, time, startCalibration, resetCalibration, simulateGesture, !!filterPower);
+            this.addPowerItem(k, d.name || k, prepLabel, fireLabel, cost, time, onCal, onReset, onSim, !!filterPower);
+        }
+
+        // Si estamos viendo un detalle, añadir botón de reset de posiciones al final
+        if (filterPower && onResetPos) {
+            const resetBtn = Button.CreateSimpleButton("reset-pos-btn", " 🛠️ REINICIAR POSICIONES VR");
+            resetBtn.width = "400px";
+            resetBtn.height = "50px";
+            resetBtn.color = "white";
+            resetBtn.background = "#4444aa";
+            resetBtn.cornerRadius = 10;
+            resetBtn.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+            resetBtn.onPointerClickObservable.add(() => {
+                onResetPos();
+            });
+            this.powersStack.addControl(resetBtn);
         }
     }
 
@@ -219,10 +257,14 @@ export class PowersGuidePanel extends HUDPanel {
         const count1 = this.inputManager.getGSS().getGestureCount(this.getLabelForPower(id, "PREP"));
         const count2 = this.inputManager.getGSS().getGestureCount(this.getLabelForPower(id, "FIRE"));
 
-        const btn1 = this.createCalBtn(`cal1-${id}`, `F1: ${count1}`, "#aa4400", () => onCal && onCal(id, "PREP"), 85);
-        const btn2 = this.createCalBtn(`cal2-${id}`, `F2: ${count2}`, "#cc6622", () => onCal && onCal(id, "FIRE"), 85);
-        const btnR = this.createCalBtn(`res-${id}`, "RESET", "#660000", () => onReset && onReset(id), 75);
-        const btnS = this.createCalBtn(`sim-${id}`, "👁️ SIM", "#0055ff", () => onSimulate && onSimulate(id), 90);
+        const btn1 = this.createCalBtn(`cal1-${id}`, `F1: ${count1}`, "#aa4400", () => { console.log(`[PGP] Cal1 click: ${id}`); onCal && onCal(id, "PREP"); }, 85);
+        const btn2 = this.createCalBtn(`cal2-${id}`, `F2: ${count2}`, "#cc6622", () => { console.log(`[PGP] Cal2 click: ${id}`); onCal && onCal(id, "FIRE"); }, 85);
+        const btnR = this.createCalBtn(`res-${id}`, "RESET", "#660000", () => { console.log(`[PGP] Reset click: ${id}`); onReset && onReset(id); }, 75);
+        const btnS = this.createCalBtn(`sim-${id}`, "👁️ SIM", "#0055ff", () => { 
+            console.log(`[PGP] Sim click: ${id}`);
+            if (onSimulate) onSimulate(id);
+            else console.warn(`[PGP] Sim callback is UNDEFINED for ${id}`);
+        }, 90);
 
         calStack.addControl(btn1);
         calStack.addControl(btn2);

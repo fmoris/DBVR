@@ -123,7 +123,7 @@ export class CombatSystem {
   private availablePowers: string[] = [];
   
   // Soporte para bonos de Voz (Phase 10)
-  private lastVoiceActivity = 0;
+  // private _lastVoiceActivity = 0; // Unused for now
   private lastVoiceTrigger: string | null = null;
   private lastVoiceTriggerTime = 0;
 
@@ -773,14 +773,11 @@ export class CombatSystem {
       this.cancelCharge();
     }
 
-    const alreadyRecharging = this.stats.combatState === "recharging";
-    if (this.stats.combatState !== "neutral" && !alreadyRecharging) return false;
+    if (this.stats.combatState !== "neutral") return false;
     if (this.stats.enemyAttacking) return false;
     
-    if (!alreadyRecharging) {
-        this.setState("recharging");
-        this.log(`Iniciando recarga de KI...`, "#cc44ff");
-    }
+    this.setState("recharging");
+    this.log(`Iniciando recarga de KI...`, "#cc44ff");
 
     return true;
   }
@@ -914,9 +911,8 @@ export class CombatSystem {
     }
   }
 
-  public registerVoiceTrigger(command: string): void {
-    // this.lastVoiceTrigger = command; // Pausado
-    // this.lastVoiceTriggerTime = Date.now();
+  public registerVoiceTrigger(_command: string): void {
+    // this.lastVoiceTrigger = _command; // Pausado
   }
 
   // ============================================

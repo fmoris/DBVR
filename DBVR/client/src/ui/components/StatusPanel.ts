@@ -67,7 +67,7 @@ export class StatusPanel extends HUDPanel {
         this.updatePanelVisibility();
     }
 
-    public showToast(message: string, color: string = "white", duration: number = 5000): void {
+    public showToast(message: string, _color: string = "white", duration: number = 5000): void {
         this.statusBuffer.push(message);
         if (this.statusBuffer.length > 3) this.statusBuffer.shift();
 

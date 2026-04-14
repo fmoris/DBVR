@@ -26,10 +26,10 @@ export function startCaptureServer(port: number = 8080, sslOptions?: SSLOptions)
   wss.on('connection', (socket) => {
     console.log('[Capture] 🥽 Quest VR connected for joint streaming');
 
-    socket.on('message', (raw) => {
+    socket.on('message', (_raw) => {
       try {
-        const data = JSON.parse(raw.toString());
-        const jointCount = Object.keys(data.joints || {}).length;
+        // const data = JSON.parse(_raw.toString());
+        // const jointCount = Object.keys(data.joints || {}).length;
         // console.log(`[Capture] Received ${data.hand} hand data (${jointCount} joints) at ${data.timestamp.toFixed(2)}ms`);
       } catch (e) {
         console.error('[Capture] Error parsing joint data:', e);

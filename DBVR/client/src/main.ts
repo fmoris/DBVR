@@ -52,12 +52,18 @@ function startGame(): void {
   currentGame.start();
 }
 
+window.addEventListener('xr-init-error', (e: any) => {
+    alert(`❌ ERROR WEBXR:\n${e.detail.message}\n\nRECUERDA: Si estás usando una IP privada, debes aceptar el certificado SSL en el navegador de las Quest 3 antes de entrar.`);
+});
+
 function startGameVR(): void {
   startGame();
   // Pequeño delay para que Babylon inicialice WebXR antes de intentar entrar
   setTimeout(() => {
-    currentGame?.enterVR().catch((err) => {
+    if (!currentGame) return;
+    currentGame.enterVR().catch((err) => {
       console.warn('[VR] No se pudo entrar en modo VR:', err);
+      alert(`⚠️ FALLO AL ENTRAR EN VR:\n${err.message || err}\n\nPosibles causas:\n1. Certificado SSL no aceptado.\n2. Límite de sala (Guardian) no configurado.\n3. Navegador no compatible.`);
     });
   }, 1500);
 }

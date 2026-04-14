@@ -48,15 +48,18 @@ export class GestureSkillSystem {
 
     private _classifying: boolean = false;
     private _frameCount: number = 0;
-    private readonly CLASSIFY_EVERY: number = 4;
+    private readonly CLASSIFY_EVERY: number = 2; // Más frecuente (2 frames en lugar de 4) para mayor fluidez
  
     public lastValidGestureTime: number = 0;
-    public gracePeriodMs: number = 800;
+    public gracePeriodMs: number = 300; // Más responsivo (300ms en lugar de 800ms)
  
     private _stateDebounce: { state: string; until: number } | null = null;
     private readonly STATE_DEBOUNCE_MS: number = 150;
 
     private _characters: Map<string, CharacterConfig> = new Map();
+
+    // Estadísticas de normalización Z-score por dimensión (16 o 46)
+    private _normalizationStats: Record<number, { mean: number[]; std: number[] }> = {};
 
     // Callbacks
     public onAttack: (name: string, power: number, hand: 'left' | 'right' | 'both', character: string) => void = () => { };
@@ -104,11 +107,16 @@ export class GestureSkillSystem {
 
         // 1. Intentar cargar desde el Servidor (Prioridad)
         let loadedFromRemote = false;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000);
+
         try {
             console.log(`[GSS] 📥 Buscando modelo remoto para "${characterId}"...`);
             window.dispatchEvent(new CustomEvent('gss-remote-load-start', { detail: { id: characterId } }));
             
-            const response = await fetch(`/api/gestures/latest/${characterId}`);
+            const response = await fetch(`/api/gestures/latest/${characterId}`, { signal: controller.signal });
+            clearTimeout(timeoutId);
+
             if (response.ok) {
                 const result = await response.json();
                 if (result.model) {
@@ -123,8 +131,13 @@ export class GestureSkillSystem {
             } else {
                 console.warn(`[GSS] Sin modelo remoto para ${characterId} (Status: ${response.status}).`);
             }
-        } catch (e) {
-            console.error(`[GSS] Error en carga remota para ${characterId}:`, e);
+        } catch (e: any) {
+            clearTimeout(timeoutId);
+            if (e.name === 'AbortError') {
+                console.warn(`[GSS] ⏱️ Timeout en carga remota para ${characterId}. Usando datos locales.`);
+            } else {
+                console.error(`[GSS] Error en carga remota para ${characterId}:`, e);
+            }
             window.dispatchEvent(new CustomEvent('gss-remote-load-error', { detail: { error: e } }));
         }
 
@@ -146,47 +159,8 @@ export class GestureSkillSystem {
             }
         }
 
-        // 2. Sincronizar con defaultData (si falta algo o para complementar)
-        let needsSave = false;
-        if (config.defaultData) {
-            for (const [label, examples] of Object.entries(config.defaultData)) {
-                if (!this._sessionHistory[label] || this._sessionHistory[label].length === 0) {
-                    console.log(`[GSS] ✨ Sincronizando gesto por defecto: ${label}`);
-                    this._sessionHistory[label] = [examples];
-                    needsSave = true;
-                }
-            }
-        }
-        if (needsSave) this.saveModel();
-
-        // 3. Inyectar TODO al clasificador en un único lote por etiqueta
-        console.log(`[GSS] 🚀 Consolidando clasificador para "${characterId}"...`);
-        const classifier = this.classifier;
-        if (!classifier) return;
-
-        for (const [label, sessions] of Object.entries(this._sessionHistory)) {
-            const flattened = sessions.flat(1);
-            if (flattened.length === 0) continue;
-
-            const features = flattened[0].length;
-            if (!this._isValidDimension(features)) {
-                console.warn(`[GSS] ⚠️ Saltando "${label}": dimensión inválida (${features}).`);
-                continue;
-            }
-
-            const augmented = this._augmentData(flattened);
-            const allSamples = [...flattened, ...augmented];
-
-            // Insertar todo en el clasificador de una sola vez por cada etiqueta (UNIFICADO)
-            tf.tidy(() => {
-                for (const example of allSamples) {
-                    if (this._isValidDimension(example.length)) {
-                        classifier.addExample(tf.tensor1d(example), label);
-                    }
-                }
-            });
-            console.log(`   - ${label}: ${flattened.length} base -> [${allSamples.length}] total.`);
-        }
+        // 3. Calcular estadísticas y reconstruir clasificador (esto reemplaza la inyección directa)
+        this._recalculateNormalizationStats();
     }
 
     private loadDefaultData() {
@@ -196,6 +170,97 @@ export class GestureSkillSystem {
 
     private _isValidDimension(dim: number): boolean {
         return dim === 16 || dim === 46;
+    }
+
+    // ─────────────────────────────────────────────────────────────────
+    // NORMALIZACIÓN Z-SCORE
+    // ─────────────────────────────────────────────────────────────────
+
+    private _recalculateNormalizationStats() {
+        console.log("[GSS] 📊 Recalculando estadísticas de normalización Z-score...");
+        const dimensions = [16, 46];
+        const newStats: Record<number, { mean: number[]; std: number[] }> = {};
+
+        for (const dim of dimensions) {
+            const allSamples: number[][] = [];
+            // Recolectar todas las muestras de todas las etiquetas para esta dimensión
+            for (const sessions of Object.values(this._sessionHistory)) {
+                for (const session of sessions) {
+                    if (session.length > 0 && session[0].length === dim) {
+                        allSamples.push(...session);
+                    }
+                }
+            }
+
+            if (allSamples.length === 0) continue;
+
+            const n = allSamples.length;
+            const mean = new Array(dim).fill(0);
+            const std = new Array(dim).fill(0);
+
+            // Calcular media
+            for (const sample of allSamples) {
+                for (let i = 0; i < dim; i++) {
+                    mean[i] += sample[i];
+                }
+            }
+            for (let i = 0; i < dim; i++) mean[i] /= n;
+
+            // Calcular desviación estándar
+            for (const sample of allSamples) {
+                for (let i = 0; i < dim; i++) {
+                    const diff = sample[i] - mean[i];
+                    std[i] += diff * diff;
+                }
+            }
+            for (let i = 0; i < dim; i++) {
+                std[i] = Math.sqrt(std[i] / n);
+                if (std[i] < 0.0001) std[i] = 1.0; // Evitar división por cero si la feature es constante
+            }
+
+            newStats[dim] = { mean, std };
+        }
+
+        this._normalizationStats = newStats;
+        
+        // Re-inyectar datos al clasificador usando la nueva normalización
+        this._rebuildClassifier();
+    }
+
+    private _applyNormalization(features: Float32Array): Float32Array {
+        const dim = features.length;
+        const stats = this._normalizationStats[dim];
+        if (!stats) return features; // Si no hay stats, pasamos raw (fallback)
+
+        const normalized = new Float32Array(dim);
+        for (let i = 0; i < dim; i++) {
+            normalized[i] = (features[i] - stats.mean[i]) / stats.std[i];
+        }
+        return normalized;
+    }
+
+    private _rebuildClassifier() {
+        if (!this.classifier) return;
+        console.log("[GSS] 🚀 Re-construyendo clasificador con datos normalizados...");
+        
+        // Limpiamos el clasificador pero mantenemos la instancia
+        this.classifier.dispose();
+        this.classifier = knnClassifier.create();
+
+        for (const [label, sessions] of Object.entries(this._sessionHistory)) {
+            const flattened = sessions.flat(1);
+            if (flattened.length === 0) continue;
+
+            const augmented = this._augmentData(flattened);
+            const allSamples = [...flattened, ...augmented];
+
+            tf.tidy(() => {
+                for (const example of allSamples) {
+                    const normExample = this._applyNormalization(new Float32Array(example));
+                    this.classifier!.addExample(tf.tensor1d(normExample), label);
+                }
+            });
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -269,8 +334,18 @@ export class GestureSkillSystem {
     }
 
     private _extract(ctx: XRHandsContext, extractorType: ExtractorType = 'wristOnly'): Float32Array | null {
-        if (extractorType === 'wristAndFingertips') return this._extractWristAndFingertips(ctx);
-        return this._extractWristOnly(ctx);
+        let features: Float32Array;
+        if (extractorType === 'wristAndFingertips') {
+            features = this._extractWristAndFingertips(ctx);
+        } else {
+            features = this._extractWristOnly(ctx);
+        }
+
+        // Si estamos entrenando, devolvemos RAW para guardar en _sessionHistory
+        if (this.trainingMode) return features;
+
+        // Si estamos infiriendo, aplicamos normalización Z-score
+        return this._applyNormalization(features);
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -298,7 +373,8 @@ export class GestureSkillSystem {
 
         this._frameCount++;
         if (this._frameCount % this.CLASSIFY_EVERY !== 0) {
-            this._tickFSM('none', 0, ctx, now);
+            // No enviamos 'none' en frames de salto para no romper la FSM.
+            // La FSM solo debe reaccionar a cambios reales de clasificación.
             this._prevLeftPos = lPos;
             this._prevRightPos = rPos;
             return;
@@ -458,58 +534,20 @@ export class GestureSkillSystem {
 
         if (!this._isValidDimension(featureCount)) {
             console.error(`[GSS] 🚨 Error crítico de dimensión al guardar "${label}". frames: ${sampleCount}, features: ${featureCount}. Se esperaba 16 o 46.`);
-            // Si el buffer está corrupto (ej. 8256 features), lo limpiamos y no guardamos
             this.trainingBuffer = [];
             return;
         }
 
-        // 1. Guardar en historia (3D)
+        // 1. Guardar en historia (3D RAW)
         if (!this._sessionHistory[label]) this._sessionHistory[label] = [];
         this._sessionHistory[label].push(newSession);
 
-        // 2. Aumentar datos para el clasificador (Mirroring + Jittering)
-        const augmented = this._augmentData(newSession);
+        // 2. RECALCULAR estadísticas y RECONSTRUIR clasificador
+        // Esto integrará la nueva sesión y re-normalizará TODO el dataset
+        this._recalculateNormalizationStats();
+
+        console.log(`[GSS] ✅ Sesión guardada para "${label}" (${sampleCount} frames). Estadísticas actualizadas.`);
         
-        // 3. Añadir todo al clasificador
-        const allSamples = [...newSession, ...augmented];
-        
-        try {
-            // Verificación final antes de tocar TFJS
-            const dataset = classifier.getClassifierDataset();
-            if (dataset[label]) {
-                const existingDim = dataset[label].shape[1];
-                const existingSamples = dataset[label].shape[0];
-                if (existingDim !== featureCount) {
-                    console.error(`[GSS] ❌ CRITICAL MISMATCH en "${label}": Se intentó añadir ${featureCount} features a una clase que ya tiene ${existingDim} features (${existingSamples} muestras).`);
-                    console.warn(`[GSS] 🔄 LIMPIEZA AUTOMÁTICA ACTIVADA para "${label}"`);
-                    
-                    // Limpieza agresiva y forzar recreación de entrada en el mapa del clasificador
-                    classifier.clearClass(label);
-                    // IMPORTANTE: Después de clearClass, el dataset interno ya no tiene 'label'
-                } else {
-                    console.log(`[GSS] 🔄 Concatenando a "${label}" existente: ${existingSamples} muestras previas.`);
-                }
-            }
-
-            tf.tidy(() => {
-                for (const sample of allSamples) {
-                    classifier.addExample(tf.tensor1d(sample), label);
-                }
-            });
-
-            console.log(`[GSS] ✅ Sesión guardada para "${label}" (${sampleCount} frames -> ${allSamples.length} con aumento)`);
-        } catch (err: any) {
-            console.error(`[GSS] ❌ Error en TFJS al añadir a "${label}":`, err.message);
-            // Si a pesar de todo falla concat2D, es que hay algo corrupto en el baseline
-            if (err.message.includes('concat2D') || err.message.includes('shape')) {
-                console.warn(`[GSS] 🧨 Error de dimensiones detectado en TFJS. Limpiando TODA la clase "${label}".`);
-                const dataset = classifier.getClassifierDataset();
-                if (dataset[label]) {
-                    classifier.clearClass(label);
-                }
-            }
-        }
-
         this.trainingBuffer = [];
         this.saveModel(); // Guardado automático incremental
     }

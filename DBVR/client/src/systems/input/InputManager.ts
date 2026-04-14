@@ -1,9 +1,9 @@
-import { VoiceRecognizer, VoiceCommand } from "../gestures/VoiceRecognizer";
+import { VoiceRecognizer } from "../gestures/VoiceRecognizer";
 import { GestureSkillSystem, XRHandsContext } from "../gestures/GestureSkillSystem";
 import { GOKU_CONFIG } from "../combat/CharacterConfigs";
 
 export class InputManager {
-  private voiceRecognizer?: VoiceRecognizer;
+  // private voiceRecognizer?: VoiceRecognizer;
   private gestureSkillSystem: GestureSkillSystem;
   private started = false;
   private _lastContext: XRHandsContext | null = null;
@@ -14,7 +14,7 @@ export class InputManager {
     this.gestureSkillSystem.registerCharacter(GOKU_CONFIG);
   }
 
-  public setup(allowedPowers: string[]): void {
+  public setup(_allowedPowers: string[]): void {
     // this.voiceRecognizer.setAllowedPowers(allowedPowers); // Pausado
   }
 
@@ -42,7 +42,7 @@ export class InputManager {
     return this._lastContext;
   }
 
-  public onVoiceCommand(callback: (command: string, transcript: string) => void): void {
+  public onVoiceCommand(_callback: (command: string, transcript: string) => void): void {
     /* Pausado
     this.voiceRecognizer.onCommand((command: VoiceCommand, transcript: string) => {
         if (command) {
@@ -52,11 +52,11 @@ export class InputManager {
     */
   }
 
-  public onVoiceStatus(callback: (active: boolean, transcript: string) => void): void {
+  public onVoiceStatus(_callback: (active: boolean, transcript: string) => void): void {
     // this.voiceRecognizer.onStatus(callback); // Pausado
   }
 
-  public onSpeech(callback: (transcript: string) => void): void {
+  public onSpeech(_callback: (transcript: string) => void): void {
     // this.voiceRecognizer.onSpeech(callback); // Pausado
   }
 

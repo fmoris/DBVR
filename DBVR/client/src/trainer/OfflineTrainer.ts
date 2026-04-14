@@ -67,7 +67,7 @@ class OfflineTrainer {
         
         let lx = leftWrist.x; let ly = leftWrist.y; let lz = leftWrist.z || 0.0;
         let rx = rightWrist.x; let ry = rightWrist.y; let rz = rightWrist.z || 0.0;
-        let hx = nose.x; let hy = nose.y; let hz = nose.z || 0.0;
+        let hy = (nose as any).y;
 
         // The math expects coordinates roughly in meters (like in BabylonJS).
         // For images, we can normalize using the shoulder width or just let KNN handle the scale invariant feature representation.

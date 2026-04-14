@@ -1,14 +1,17 @@
 import { defineConfig } from "vite";
 import path from "node:path";
-import basicSsl from "@vitejs/plugin-basic-ssl";
+import mkcert from "vite-plugin-mkcert";
 
 export default defineConfig({
   root: path.resolve(import.meta.dirname, "client"),
   publicDir: path.resolve(import.meta.dirname, "client", "public"),
   plugins: [
-    // Genera certificado TLS compatible con Chrome/Edge para desarrollo local.
-    // Requerido por WebXR (immersive-vr solo funciona en HTTPS o localhost seguro).
-    basicSsl(),
+    // Punto 4: SSL Automático Robusto
+    // Genera certificados confiables para localhost y la red local.
+    mkcert({
+      hosts: ["localhost", "192.168.3.30"],
+      savePath: ".certs", // Ubicación para que el servidor Express los encuentre
+    }),
   ],
   resolve: {
     alias: {
