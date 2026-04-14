@@ -246,33 +246,13 @@ export class XRManager {
   }
 
   public async enterVR(): Promise<void> {
-    if (this.xr) {
-      await this.xr.baseExperience.enterXRAsync('immersive-vr', 'local-floor');
-      return;
+    if (!this.xr) {
+      throw new Error('[XRManager] El sistema WebXR no está inicializado. Llama a init() primero.');
     }
-
-    // Polling con timeout y Promise adecuada
-    return new Promise((resolve, reject) => {
-      const maxWait = 8000;
-      const interval = 200;
-      let waited = 0;
-
-      const check = setInterval(async () => {
-        waited += interval;
-        if (this.xr) {
-          clearInterval(check);
-          try {
-            await this.xr.baseExperience.enterXRAsync('immersive-vr', 'local-floor');
-            resolve();
-          } catch (err) {
-            reject(err);
-          }
-        } else if (waited >= maxWait) {
-          clearInterval(check);
-          reject(new Error('[XRManager] Timeout esperando XR experience'));
-        }
-      }, interval);
-    });
+    
+    // IMPORTANTE: enterXRAsync debe ser llamado directamente en el stack de un evento de usuario.
+    // No usar polling (setInterval) aquí ya que rompe la activación de usuario.
+    await this.xr.baseExperience.enterXRAsync('immersive-vr', 'local-floor');
   }
 
   public getXR(): WebXRDefaultExperience | null {

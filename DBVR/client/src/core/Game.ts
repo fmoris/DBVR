@@ -11,6 +11,7 @@ import { VRHud } from "../ui/VRHud";
 import { GestureDebugOverlay } from "../systems/gestures/GestureDebugOverlay";
 import { PlayerController } from "../systems/input/PlayerController";
 import { XRManager } from "../systems/xr/XRManager";
+import { AudioManager } from "../systems/audio/AudioManager";
 import gokuConfig from "../models/goku.json";
 import vegetaConfig from "../models/vegeta.json";
 
@@ -36,6 +37,7 @@ export class Game {
   private resultScreen!: ResultScreen;
   private vrHud!: VRHud;
   private debugOverlay!: GestureDebugOverlay;
+  private audio!: AudioManager;
   
   private combatStartTime = 0;
   private enemyAura: ParticleSystem | null = null;
@@ -49,7 +51,11 @@ export class Game {
 
   setMenuCallback(cb: () => void): void { this.menuCallback = cb; }
 
-  start(): void {
+  /**
+   * Pre-inicializa la escena, los sistemas y WebXR.
+   * Debe llamarse lo antes posible para que XR esté listo ante el clic del usuario.
+   */
+  async initialize(): Promise<void> {
     const scene = this.engineManager.getScene();
     this.vfx = new VFXManager(scene);
     this.combat = new CombatSystem(scene, this.vfx, gokuConfig, vegetaConfig);
@@ -72,6 +78,8 @@ export class Game {
 
     this.inputManager.setup(gokuConfig.transformations?.[0]?.powers || []);
     this.envManager.setup(MODEL_URLS, vegetaConfig.transformations?.[0]?.url, (vegetaConfig as any).height_m || 1.64);
+    
+    this.audio = new AudioManager(scene);
 
     this.hud.onMenu(() => this.menuCallback?.());
     this.hud.onDebugToggle(() => this.debugOverlay.toggle());
@@ -80,22 +88,31 @@ export class Game {
     this.setupVoiceRecognition();
     this.setupGameOverHandler();
     
-    this.xrManager.init();
+    // Inicializar XR proactivamente
+    await this.xrManager.init();
+    this.setupGSSListeners();
+  }
 
-    this.started = true;
-    this.combatStartTime = Date.now();
-    this.playerController.setup();
-    this.enemyAura = this.vfx.createAura("enemy_aura", Vector3.Zero());
-    
-    this.hud.show();
-    this.canvas.focus();
-    this.inputManager.start().then(() => {
-        this.vrHud.renderPowersList();
-    });
-    this.setupGSSListeners(); // Nueva vinculación
-    this.engineManager.runRenderLoop();
+  /**
+   * Inicia el bucle de renderizado y el temporizador de combate.
+   */
+  start(): void {
+    if (!this.started) {
+        const scene = this.engineManager.getScene();
+        this.started = true;
+        this.combatStartTime = Date.now();
+        this.playerController.setup();
+        this.enemyAura = this.vfx.createAura("enemy_aura", Vector3.Zero());
+        
+        this.hud.show();
+        this.canvas.focus();
+        this.inputManager.start().then(() => {
+            this.vrHud.renderPowersList();
+        });
 
-    scene.registerBeforeRender(() => this.updateFrame());
+        this.engineManager.runRenderLoop();
+        scene.registerBeforeRender(() => this.updateFrame());
+    }
   }
 
   private updateFrame(): void {
@@ -109,6 +126,14 @@ export class Game {
       this.vfx.updateAura(this.enemyAura, (stats.enemyKi / 100) * 100, stats.combatState === "slowMotion", stats.enemyNP, eColor);
     }
 
+    // Actualizar audio de aura del jugador
+    if (this.audio) {
+      const kiRatio = stats.playerKi / stats.maxKi;
+      this.audio.setPlayerAuraVolume(kiRatio);
+      
+      // Asegurar que el audio suena si el juego ya empezó
+      if (this.started) this.audio.playAura();
+    }
   }
 
   private setupGameOverHandler(): void {
@@ -235,6 +260,7 @@ export class Game {
     this.playerController.dispose();
     this.inputManager.dispose();
     this.engineManager.dispose();
+    if (this.audio) this.audio.dispose();
   }
 
   dispose(): void { this.engineManager.dispose(); }

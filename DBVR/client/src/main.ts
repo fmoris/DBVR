@@ -34,21 +34,26 @@ document.body.appendChild(xrOverlay);
 let currentGame: Game | null = null;
 
 function goToMenu(): void {
+  // Inicializar o resetear el juego proactivamente
   if (currentGame) {
     currentGame.disposeAndExit().catch(() => {});
     currentGame = null;
   }
+  
+  // Creamos la instancia del juego inmediatamente para que empiece a cargar assets y XR
+  currentGame = new Game(canvas, xrOverlay);
+  currentGame.setMenuCallback(goToMenu);
+  currentGame.initialize().catch(err => console.warn("[Game] Error en pre-inicialización:", err));
+
   // Desactivar pointer-events del overlay para que el StartScreen sea clickeable
   xrOverlay.style.pointerEvents = "none";
   new StartScreen(app, startGame, startGameVR);
 }
 
 function startGame(): void {
+  if (!currentGame) return;
   // Activar pointer-events en el overlay solo cuando el juego está corriendo
-  // (la spec dom-overlay de WebXR requiere pointer-events:auto, pero bloquea el StartScreen)
   xrOverlay.style.pointerEvents = "auto";
-  currentGame = new Game(canvas, xrOverlay);
-  currentGame.setMenuCallback(goToMenu);
   currentGame.start();
 }
 
@@ -56,16 +61,24 @@ window.addEventListener('xr-init-error', (e: any) => {
     alert(`❌ ERROR WEBXR:\n${e.detail.message}\n\nRECUERDA: Si estás usando una IP privada, debes aceptar el certificado SSL en el navegador de las Quest 3 antes de entrar.`);
 });
 
-function startGameVR(): void {
-  startGame();
-  // Pequeño delay para que Babylon inicialice WebXR antes de intentar entrar
-  setTimeout(() => {
-    if (!currentGame) return;
-    currentGame.enterVR().catch((err) => {
-      console.warn('[VR] No se pudo entrar en modo VR:', err);
-      alert(`⚠️ FALLO AL ENTRAR EN VR:\n${err.message || err}\n\nPosibles causas:\n1. Certificado SSL no aceptado.\n2. Límite de sala (Guardian) no configurado.\n3. Navegador no compatible.`);
-    });
-  }, 1500);
+async function startGameVR(): Promise<void> {
+  if (!currentGame) return;
+  
+  // IMPORTANTE: Para que WebXR acepte la sesión, la llamada debe ser SINCRÓNICA
+  // al evento de activación del usuario. 
+  try {
+    // 1. Activar el overlay
+    xrOverlay.style.pointerEvents = "auto";
+    
+    // 2. Iniciar la lógica de juego
+    currentGame.start();
+    
+    // 3. Entrar en VR inmediatamente (ya debe estar inicializado por initialize())
+    await currentGame.enterVR();
+  } catch (err: any) {
+    console.warn('[VR] No se pudo entrar en modo VR:', err);
+    alert(`⚠️ FALLO AL ENTRAR EN VR:\n${err.message || err}\n\nPosibles causas:\n1. Certificado SSL no aceptado.\n2. Límite de sala (Guardian) no configurado.\n3. Navegador no compatible.`);
+  }
 }
 
 // Arranque inicial
