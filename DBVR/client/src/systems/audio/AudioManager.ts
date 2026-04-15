@@ -1,26 +1,29 @@
-import { Scene, Sound } from "@babylonjs/core";
+import { Scene, Sound, Engine } from "@babylonjs/core";
 // @ts-ignore
-import auraUrl from "../../assets/sfx/Aura loop.mp3?url";
+import auraUrl from "../../assets/sfx/aura_loop.mp3?url";
 
 export class AudioManager {
     private auraSound: Sound | null = null;
     private targetVolume: number = 0;
     private currentVolume: number = 0;
-    private lerpSpeed: number = 0.1; // Suavizado para el volumen
+    private lerpSpeed: number = 0.05; // Más suave aún para evitar clics de audio
+    private isUnlocked: boolean = false;
 
     constructor(private scene: Scene) {
         this.init();
+        this.setupUnlockListeners();
     }
 
     private init(): void {
-        console.log("[AudioManager] Cargando Aura loop:", auraUrl);
+        console.log("[AudioManager] 🔊 Cargando Aura loop:", auraUrl);
         this.auraSound = new Sound(
             "aura_loop",
             auraUrl,
             this.scene,
             () => {
-                console.log("[AudioManager] Aura loop cargado y listo.");
-                if (this.auraSound) {
+                console.log("[AudioManager] ✅ Aura loop decodificado y listo.");
+                // Intentar reproducir de inmediato si ya hubo interacción
+                if (this.auraSound && Engine.audioEngine && Engine.audioEngine.unlocked) {
                     this.auraSound.play();
                 }
             },
@@ -28,29 +31,48 @@ export class AudioManager {
                 loop: true,
                 autoplay: false,
                 volume: 0,
-                streaming: true
+                streaming: false // Cargamos en memoria (33KB) para evitar cortes de red
             }
         );
 
-        // Actualizar volumen suavemente en cada frame
         this.scene.onBeforeRenderObservable.add(() => {
             this.updateVolumes();
         });
     }
 
+    private setupUnlockListeners(): void {
+        const unlock = () => {
+            if (this.isUnlocked) return;
+            this.unlock();
+            window.removeEventListener("click", unlock);
+            window.removeEventListener("touchstart", unlock);
+        };
+        window.addEventListener("click", unlock);
+        window.addEventListener("touchstart", unlock);
+    }
+
     /**
-     * Actualiza el volumen objetivo basado en el ratio de Ki (0.0 a 1.0)
+     * Fuerza el desbloqueo del motor de audio (necesario tras clic de usuario)
      */
+    public unlock(): void {
+        if (this.isUnlocked) return;
+        
+        console.log("[AudioManager] 🔓 Intentando desbloquear AudioEngine...");
+        if (Engine.audioEngine) {
+            Engine.audioEngine.unlock();
+            this.isUnlocked = true;
+            this.playAura();
+        }
+    }
+
     public setPlayerAuraVolume(ratio: number): void {
         // Mapeamos el ratio a un volumen audible. 
-        // 0% Ki = 0 vol, 100% Ki = 0.8 vol (para no saturar)
-        this.targetVolume = Math.max(0, Math.min(0.8, ratio));
+        this.targetVolume = Math.max(0, Math.min(0.7, ratio));
     }
 
     private updateVolumes(): void {
-        if (!this.auraSound) return;
+        if (!this.auraSound || !this.auraSound.isReady()) return;
 
-        // Interpolación lineal simple para que el cambio de volumen no sea brusco
         if (Math.abs(this.currentVolume - this.targetVolume) > 0.001) {
             this.currentVolume += (this.targetVolume - this.currentVolume) * this.lerpSpeed;
             this.auraSound.setVolume(this.currentVolume);
@@ -58,7 +80,7 @@ export class AudioManager {
     }
 
     public playAura(): void {
-        if (this.auraSound && !this.auraSound.isPlaying) {
+        if (this.auraSound && !this.auraSound.isPlaying && this.auraSound.isReady()) {
             this.auraSound.play();
         }
     }

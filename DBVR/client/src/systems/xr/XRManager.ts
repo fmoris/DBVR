@@ -5,7 +5,8 @@ import {
   WebXRHandTracking,
   WebXRHandJoint,
   WebXRHand,
-  Vector3
+  Vector3,
+  Engine
 } from "@babylonjs/core";
 import { InputManager } from "../input/InputManager";
 import { PlayerController } from "../input/PlayerController";
@@ -253,8 +254,12 @@ export class XRManager {
       throw new Error('[XRManager] El sistema WebXR no está inicializado. Llama a init() primero.');
     }
     
+    // Asegurar que el audio se desbloquea en VR tras la interacción del usuario
+    if (Engine.audioEngine) {
+        Engine.audioEngine.unlock();
+    }
+
     // IMPORTANTE: enterXRAsync debe ser llamado directamente en el stack de un evento de usuario.
-    // No usar polling (setInterval) aquí ya que rompe la activación de usuario.
     await this.xr.baseExperience.enterXRAsync('immersive-vr', 'local-floor');
   }
 

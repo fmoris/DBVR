@@ -100,6 +100,8 @@ export class Game {
     if (!this.started) {
         const scene = this.engineManager.getScene();
         this.started = true;
+        if (this.audio) this.audio.unlock(); // Desbloquear audio tras clic en Start
+        
         this.combatStartTime = Date.now();
         this.playerController.setup();
         this.enemyAura = this.vfx.createAura("enemy_aura", Vector3.Zero());
