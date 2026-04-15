@@ -12,6 +12,8 @@ export interface XRHandsContext {
     leftHand?: WebXRHand;
     rightHand?: WebXRHand;
     headPos: Vector3;
+    headForward?: Vector3; // NEW: Dirección de la cabeza (Z local)
+    headRight?: Vector3;   // NEW: Dirección lateral (X local)
     deltaTimeMs: number;
 }
 
@@ -274,27 +276,56 @@ export class GestureSkillSystem {
 
         const lp = ctx.leftWrist.absolutePosition;
         const rp = ctx.rightWrist.absolutePosition;
-        const mid = lp.add(rp).scale(0.5);
-        const lRel = lp.subtract(mid);
-        const rRel = rp.subtract(mid);
+        
+        // --- 1. Definir origen y base local (BODY-CENTRIC) ---
+        // El origen ya no es el punto medio de las manos, sino el PECHO (aprox 25cm abajo de la cabeza)
+        const chest = ctx.headPos.clone();
+        chest.y -= 0.25;
+
+        // Base local: Forward es hacia donde miras, Up es el Y del mundo, Right es perpendicular
+        const forward = ctx.headForward || new Vector3(0, 0, 1);
+        const right = ctx.headRight || new Vector3(1, 0, 0);
+        const up = Vector3.Up();
+
+        // --- 2. Proyectar posiciones de las manos sobre el espacio local del cuerpo ---
+        const lRelWorld = lp.subtract(chest);
+        const rRelWorld = rp.subtract(chest);
+
+        // lLocal: (Right, Up, Forward)
+        const lLocal = new Vector3(
+            Vector3.Dot(lRelWorld, right),
+            Vector3.Dot(lRelWorld, up),
+            Vector3.Dot(lRelWorld, forward)
+        );
+
+        const rLocal = new Float32Array([
+            Vector3.Dot(rRelWorld, right),
+            Vector3.Dot(rRelWorld, up),
+            Vector3.Dot(rRelWorld, forward)
+        ]);
+
         const dist = lp.subtract(rp).length();
-        const lH = lp.y - ctx.headPos.y;
-        const rH = rp.y - ctx.headPos.y;
         const dt = Math.max(ctx.deltaTimeMs, 1) / 1000;
 
-        // Velocidad relativa al centro
-        const lV = lRel.length() / dt;
-        const rV = rRel.length() / dt;
-
-        const lDir = lRel.normalizeToNew();
-        const rDir = rRel.normalizeToNew();
+        // Velocidades locales (magnitud)
+        if (!this._prevLeftPos) this._prevLeftPos = lp.clone();
+        if (!this._prevRightPos) this._prevRightPos = rp.clone();
+        
+        const lV = (lp.subtract(this._prevLeftPos).length()) / dt;
+        const rV = (rp.subtract(this._prevRightPos).length()) / dt;
 
         return new Float32Array([
-            lRel.x, lRel.y, lRel.z,
-            rRel.x, rRel.y, rRel.z,
-            dist, lH, rH, lV, rV,
-            lDir.x, lDir.y, lDir.z,
-            rDir.x, rDir.y,
+            lLocal.x, lLocal.y, lLocal.z,  // 0, 1, 2
+            rLocal[0], rLocal[1], rLocal[2], // 3, 4, 5
+            dist,             // 6
+            lLocal.y,         // 7 (Altura L respecto al pecho)
+            rLocal[1],        // 8 (Altura R respecto al pecho)
+            lV, rV,          // 9, 10
+            lLocal.x / (lLocal.length() || 1), // 11 (Dirección Right L)
+            lLocal.y / (lLocal.length() || 1), // 12
+            lLocal.z / (lLocal.length() || 1), // 13
+            rLocal[0] / (new Vector3(rLocal[0], rLocal[1], rLocal[2]).length() || 1), // 14
+            rLocal[1] / (new Vector3(rLocal[0], rLocal[1], rLocal[2]).length() || 1)  // 15
         ]);
     }
 
@@ -401,6 +432,14 @@ export class GestureSkillSystem {
             const threshold = this.activeCharacter.thresholds[this.currentState] || 0.75;
             if (confidence >= threshold && gesture !== 'none') {
                 this.lastValidGestureTime = now;
+            }
+        } catch (err: any) {
+            // DETECTAMOS INCOMPATIBILIDAD DE MODELO (Shape mismatch o datos viejos)
+            if (err.message && (err.message.includes("shape") || err.message.includes("size"))) {
+                console.warn("[GSS] 🚨 Incompatibilidad de modelo detectada. Aplicando RESET de emergencia...");
+                this.fullReset();
+            } else {
+                console.error("[GSS] Error en clasificación predictiva:", err);
             }
         } finally {
             tensor.dispose();
@@ -562,23 +601,30 @@ export class GestureSkillSystem {
             // Mirroring: si el vector tiene 16 features (wristOnly)
             if (s.length === 16) {
                 const mirrored = [...jittered];
-                // Swap L/R rel pos and negate X
-                // lRel: 0,1,2 | rRel: 3,4,5
-                mirrored[0] = -jittered[3];
-                mirrored[1] =  jittered[4];
-                mirrored[2] =  jittered[5];
-                mirrored[3] = -jittered[0];
-                mirrored[4] =  jittered[1];
-                mirrored[5] =  jittered[2];
-                // Swap Heights
+                // En el nuevo espacio Body-Centric: 
+                // index 0 = Left_Right_Offset, 1 = Up_Offset, 2 = Forward_Offset
+                // Para espejar: Invertimos el signo de Right_Offset (eje 0 y eje 3)
+                // y Swappeamos L con R.
+                
+                mirrored[0] = -jittered[3];  // L_Right = -R_Right
+                mirrored[1] =  jittered[4];  // L_Up = R_Up
+                mirrored[2] =  jittered[5];  // L_Forward = R_Forward
+                
+                mirrored[3] = -jittered[0];  // R_Right = -L_Right
+                mirrored[4] =  jittered[1];  // R_Up = L_Up
+                mirrored[5] =  jittered[2];  // R_Forward = L_Forward
+                
+                // Heights (índices 7 y 8) se swappean
                 mirrored[7] = jittered[8];
                 mirrored[8] = jittered[7];
-                // Swap Velocities
+                
+                // Velocities (9 y 10) se swappean
                 mirrored[9] = jittered[10];
                 mirrored[10] = jittered[9];
-                // Swap Dirs (aprox)
-                mirrored[11] = -jittered[14]; // lDir.x <- -rDir.x
-                mirrored[12] =  jittered[15]; // lDir.y <-  rDir.y
+                
+                // Dirs (en el nuevo espacio local, swappear y negar Right)
+                mirrored[11] = -jittered[14]; // L_dir_Right = -R_dir_Right
+                mirrored[12] =  jittered[15]; // L_dir_Up = R_dir_Up
                 // ...
                 augmented.push(mirrored);
             }

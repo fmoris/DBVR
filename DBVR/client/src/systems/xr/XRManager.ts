@@ -4,7 +4,8 @@ import {
   WebXRDefaultExperience,
   WebXRHandTracking,
   WebXRHandJoint,
-  WebXRHand
+  WebXRHand,
+  Vector3
 } from "@babylonjs/core";
 import { InputManager } from "../input/InputManager";
 import { PlayerController } from "../input/PlayerController";
@@ -183,6 +184,8 @@ export class XRManager {
             leftHand: leftHand || undefined,
             rightHand: rightHand || undefined,
             headPos: xrCamera.globalPosition,
+            headForward: xrCamera.getDirection(Vector3.Forward()),
+            headRight: xrCamera.getDirection(Vector3.Right()),
             deltaTimeMs: this.scene.getEngine().getDeltaTime()
         };
 
