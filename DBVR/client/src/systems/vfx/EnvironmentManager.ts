@@ -24,61 +24,61 @@ export class EnvironmentManager {
   private enemySkeleton?: Skeleton;
   private enemyHeight: number = 1.64;
   private playerRoot?: AbstractMesh;
-  
+
   // IK Controllers for Mirror
   private leftIkController?: BoneIKController;
   private rightIkController?: BoneIKController;
   private leftIkTarget?: AbstractMesh;
   private rightIkTarget?: AbstractMesh;
-  
+
   // Proxy meshes for mirror mode (fallback/debug)
   private enemyLeftProxy?: Mesh;
   private enemyRightProxy?: Mesh;
 
-  constructor(private scene: Scene) {}
+  constructor(private scene: Scene) { }
 
   public setup(models: Record<string, string>, playerUrl?: string, enemyUrl?: string, enemyHeightM: number = 1.64): void {
     this.setupLights();
     this.setupSkyAndGround();
     this.createCanyonRocks();
     this.createPlayerHands();
-    
+
     if (playerUrl && models[playerUrl]) {
-        this.loadPlayerModel(models[playerUrl]);
+      this.loadPlayerModel(models[playerUrl]);
     }
 
     if (enemyUrl && models[enemyUrl]) {
-        this.enemyHeight = enemyHeightM;
-        this.loadEnemyModel(models[enemyUrl], enemyHeightM);
+      this.enemyHeight = enemyHeightM;
+      this.loadEnemyModel(models[enemyUrl], enemyHeightM);
     }
   }
 
   private loadPlayerModel(url: string): void {
-      SceneLoader.ImportMeshAsync("", url, "", this.scene).then((result) => {
-          this.playerRoot = result.meshes[0];
-          this.playerRoot.position = new Vector3(0, -100, 0); // Hide initially until synced
-          // Rotated to look forward (away from camera viewpoint initially).
-          this.playerRoot.rotationQuaternion = Quaternion.Identity(); 
-          
-          // Scale it correctly assuming it's roughly 1.75m but models might be larger. We'll use 1:1 scale for now, assuming standard VRM scale.
-          this.playerRoot.scaling = new Vector3(1, 1, 1);
-          
-          // Ocultar cabezas para que no bloquee la vista desde dentro del casco
-          result.meshes.forEach(m => {
-              const name = m.name.toLowerCase();
-              if (name.includes("head") || name.includes("face") || name.includes("hair") || name.includes("eye") || name.includes("teeth")) {
-                  m.isVisible = false;
-              }
-          });
+    SceneLoader.ImportMeshAsync("", url, "", this.scene).then((result) => {
+      this.playerRoot = result.meshes[0];
+      this.playerRoot.position = new Vector3(0, -100, 0); // Hide initially until synced
+      // Rotated to look forward (away from camera viewpoint initially).
+      this.playerRoot.rotationQuaternion = Quaternion.Identity();
+
+      // Scale it correctly assuming it's roughly 1.75m but models might be larger. We'll use 1:1 scale for now, assuming standard VRM scale.
+      this.playerRoot.scaling = new Vector3(1, 1, 1);
+
+      // Ocultar cabezas para que no bloquee la vista desde dentro del casco
+      result.meshes.forEach(m => {
+        const name = m.name.toLowerCase();
+        if (name.includes("head") || name.includes("face") || name.includes("hair") || name.includes("eye") || name.includes("teeth")) {
+          m.isVisible = false;
+        }
       });
+    });
   }
 
   public getPlayerRoot(): AbstractMesh | undefined {
-      return this.playerRoot;
+    return this.playerRoot;
   }
 
   public getEnemyRoot(): AbstractMesh | undefined {
-      return this.enemyRoot;
+    return this.enemyRoot;
   }
 
   private setupLights(): void {
@@ -108,10 +108,10 @@ export class EnvironmentManager {
   private createCanyonRocks(): void {
     const rockPositions = [
       { x: -30, y: 0, z: 60, w: 8, h: 28, d: 10 },
-      { x: 30,  y: 0, z: 60, w: 8, h: 28, d: 10 },
-      { x: 0,   y: 0, z: 80, w: 20, h: 18, d: 15 },
+      { x: 30, y: 0, z: 60, w: 8, h: 28, d: 10 },
+      { x: 0, y: 0, z: 80, w: 20, h: 18, d: 15 },
       { x: -60, y: 0, z: 20, w: 15, h: 40, d: 20 },
-      { x: 60,  y: 0, z: 20, w: 15, h: 40, d: 20 },
+      { x: 60, y: 0, z: 20, w: 15, h: 40, d: 20 },
     ];
 
     const rockMat = new StandardMaterial("rockMat", this.scene);
@@ -128,14 +128,14 @@ export class EnvironmentManager {
     const fallback = this.scene.getMeshByName("enemy");
     SceneLoader.ImportMeshAsync("", url, "", this.scene).then((result) => {
       if (fallback) fallback.isVisible = false;
-      
+
       this.enemyRoot = result.meshes[0];
       if (result.skeletons && result.skeletons.length > 0) {
-          this.enemySkeleton = result.skeletons[0];
-          console.log(`[Environment] Enemy skeleton found: "${this.enemySkeleton.name}" with ${this.enemySkeleton.bones.length} bones.`);
-          // Log bone names for debugging if needed
-          // console.log("Bones:", this.enemySkeleton.bones.map(b => b.name).join(", "));
-          this.setupIK(this.enemyRoot, this.enemySkeleton);
+        this.enemySkeleton = result.skeletons[0];
+        console.log(`[Environment] Enemy skeleton found: "${this.enemySkeleton.name}" with ${this.enemySkeleton.bones.length} bones.`);
+        // Log bone names for debugging if needed
+        // console.log("Bones:", this.enemySkeleton.bones.map(b => b.name).join(", "));
+        this.setupIK(this.enemyRoot, this.enemySkeleton);
       }
 
       // Calcular altura real del modelo usando bounding box
@@ -143,15 +143,15 @@ export class EnvironmentManager {
       let max = new Vector3(Number.MIN_VALUE, Number.MIN_VALUE, Number.MIN_VALUE);
 
       result.meshes.forEach(m => {
-          if (m instanceof AbstractMesh && m.getBoundingInfo) {
-              const bounds = m.getBoundingInfo().boundingBox;
-              min = Vector3.Minimize(min, bounds.minimumWorld);
-              max = Vector3.Maximize(max, bounds.maximumWorld);
-          }
+        if (m instanceof AbstractMesh && m.getBoundingInfo) {
+          const bounds = m.getBoundingInfo().boundingBox;
+          min = Vector3.Minimize(min, bounds.minimumWorld);
+          max = Vector3.Maximize(max, bounds.maximumWorld);
+        }
       });
 
       const currentHeight = max.y - min.y;
-      
+
       let yOffset = 0;
       if (currentHeight > 0) {
         // Escalar para que coincida exactamente con targetHeightM
@@ -175,66 +175,86 @@ export class EnvironmentManager {
   }
 
   private setupIK(rootMesh: AbstractMesh, skeleton: Skeleton): void {
-      // Find the actual skinned mesh that has the skeleton attached
-      let skinnedMesh = rootMesh.getChildMeshes().find(m => m.skeleton === skeleton) || rootMesh;
-      
-      this.leftIkTarget = MeshBuilder.CreateSphere("leftIkTarget", { diameter: 0.1 }, this.scene);
-      this.leftIkTarget.isVisible = false;
-      this.rightIkTarget = MeshBuilder.CreateSphere("rightIkTarget", { diameter: 0.1 }, this.scene);
-      this.rightIkTarget.isVisible = false;
+    let skinnedMesh = rootMesh.getChildMeshes().find(m => m.skeleton === skeleton) || rootMesh;
 
-      let leftArmBone = skeleton.bones.find(b => 
-          b.name.toLowerCase().includes("leftforearm") || 
-          b.name.toLowerCase().includes("l_forearm") || 
-          b.name.toLowerCase().includes("forearm_l") ||
-          b.name.toLowerCase().includes("left_forearm")
+    this.leftIkTarget = MeshBuilder.CreateSphere("leftIkTarget", { diameter: 0.1 }, this.scene);
+    this.leftIkTarget.isVisible = false;
+    this.rightIkTarget = MeshBuilder.CreateSphere("rightIkTarget", { diameter: 0.1 }, this.scene);
+    this.rightIkTarget.isVisible = false;
+
+    // Buscar antebrazos por nombre (funciona con cualquier modelo humanoid)
+    let leftArmBone = skeleton.bones.find(b =>
+      b.name.toLowerCase().includes("leftforearm") ||
+      b.name.toLowerCase().includes("l_forearm") ||
+      b.name.toLowerCase().includes("forearm_l") ||
+      b.name.toLowerCase().includes("left_forearm")
+    );
+    let rightArmBone = skeleton.bones.find(b =>
+      b.name.toLowerCase().includes("rightforearm") ||
+      b.name.toLowerCase().includes("r_forearm") ||
+      b.name.toLowerCase().includes("forearm_r") ||
+      b.name.toLowerCase().includes("right_forearm")
+    );
+
+    // Fallback para manos si no encuentra antebrazos
+    if (!leftArmBone) {
+      leftArmBone = skeleton.bones.find(b =>
+        b.name.toLowerCase().includes("lefthand") ||
+        b.name.toLowerCase().includes("l_hand") ||
+        b.name.toLowerCase().includes("left_hand")
       );
-      let rightArmBone = skeleton.bones.find(b => 
-          b.name.toLowerCase().includes("rightforearm") || 
-          b.name.toLowerCase().includes("r_forearm") || 
-          b.name.toLowerCase().includes("forearm_r") ||
-          b.name.toLowerCase().includes("right_forearm")
+    }
+    if (!rightArmBone) {
+      rightArmBone = skeleton.bones.find(b =>
+        b.name.toLowerCase().includes("righthand") ||
+        b.name.toLowerCase().includes("r_hand") ||
+        b.name.toLowerCase().includes("right_hand")
       );
+    }
 
-      // Si no encuentra antebrazos, probar con manos (fallback original)
-      if (!leftArmBone) {
-          leftArmBone = skeleton.bones.find(b => 
-            b.name.toLowerCase().includes("lefthand") || b.name.toLowerCase().includes("l_hand") || b.name.toLowerCase().includes("left_hand")
-          );
-      }
-      if (!rightArmBone) {
-          rightArmBone = skeleton.bones.find(b => 
-            b.name.toLowerCase().includes("righthand") || b.name.toLowerCase().includes("r_hand") || b.name.toLowerCase().includes("right_hand")
-          );
-      }
+    // Fallback específico para Dummy: índices CORRECTOS
+    if (!leftArmBone && skeleton.bones.length >= 36) {
+      leftArmBone = skeleton.bones[11];  // mixamorig:LeftForeArm
+      rightArmBone = skeleton.bones[35]; // mixamorig:RightForeArm
+      console.warn("[IK] Usando fallback de índices para modelo Dummy");
+    }
 
-      // Fallback específico para el modelo clásico "Dude" o similares sin nombres humanos
-      if (!leftArmBone && skeleton.bones.length >= 58) {
-          leftArmBone = skeleton.bones[33]; // Antebrazo/Codo Izquierdo (Dude)
-          rightArmBone = skeleton.bones[14]; // Antebrazo/Codo Derecho (Dude)
-      }
-
-      if (leftArmBone) {
-          this.leftIkController = new BoneIKController(skinnedMesh, leftArmBone, {
-              targetMesh: this.leftIkTarget,
-              poleAngle: Math.PI / 2,
-              bendAxis: new Vector3(0, 0, 1)
-          });
-          this.leftIkController.maxAngle = Math.PI;
-      }
-      if (rightArmBone) {
-          this.rightIkController = new BoneIKController(skinnedMesh, rightArmBone, {
-              targetMesh: this.rightIkTarget,
-              poleAngle: -Math.PI / 2,
-              bendAxis: new Vector3(0, 0, 1)
-          });
-          this.rightIkController.maxAngle = Math.PI;
-      }
-      this.scene.onBeforeRenderObservable.add(() => {
-          if (this.leftIkController) this.leftIkController.update();
-          if (this.rightIkController) this.rightIkController.update();
+    if (!leftArmBone || !rightArmBone) {
+      console.error("[IK] No se pudieron encontrar huesos de brazo", {
+        leftArmBone: leftArmBone?.name,
+        rightArmBone: rightArmBone?.name,
+        totalBones: skeleton.bones.length
       });
+      return;
+    }
+
+    // Prueba C: Eje Y para flexión frontal (Plano X-Z)
+    if (leftArmBone) {
+      // Espejado: Tu mano IZQUIERDA controla el brazo DERECHO del modelo
+      this.leftIkController = new BoneIKController(skinnedMesh, rightArmBone, {
+        targetMesh: this.leftIkTarget,
+        poleAngle: Math.PI / 2,
+        bendAxis: new Vector3(0, 1, 0)
+      });
+      this.leftIkController.maxAngle = Math.PI;
+    }
+
+    if (rightArmBone) {
+      // Espejado: Tu mano DERECHA controla el brazo IZQUIERDO del modelo
+      this.rightIkController = new BoneIKController(skinnedMesh, leftArmBone, {
+        targetMesh: this.rightIkTarget,
+        poleAngle: Math.PI / 2,
+        bendAxis: new Vector3(0, 1, 0)
+      });
+      this.rightIkController.maxAngle = Math.PI;
+    }
+
+    this.scene.onBeforeRenderObservable.add(() => {
+      if (this.leftIkController) this.leftIkController.update();
+      if (this.rightIkController) this.rightIkController.update();
+    });
   }
+
 
   private createPlayerHands(): void {
     const handMat = new StandardMaterial("handMat", this.scene);
@@ -274,9 +294,9 @@ export class EnvironmentManager {
    */
   public updateEnemyMirror(active: boolean, playerHeadPos: Vector3, playerHeadRot: Quaternion, leftHand: Vector3, rightHand: Vector3): void {
     if (!this.enemyRoot || !active) {
-        if (this.enemyLeftProxy) this.enemyLeftProxy.isVisible = false;
-        if (this.enemyRightProxy) this.enemyRightProxy.isVisible = false;
-        return;
+      if (this.enemyLeftProxy) this.enemyLeftProxy.isVisible = false;
+      if (this.enemyRightProxy) this.enemyRightProxy.isVisible = false;
+      return;
     }
 
     if (this.enemyLeftProxy) this.enemyLeftProxy.isVisible = true;
@@ -300,21 +320,21 @@ export class EnvironmentManager {
     // True Mirror: Tu derecha -> Su izquierda visual
     // Usamos las coordenadas LOCALES (body-relative) calculadas arriba
     if (this.leftIkTarget && this.rightIkTarget) {
-        // Altura relativa explícita (Mano - Cabeza)
-        const deltaRY = rightHand.y - playerHeadPos.y;
-        const deltaLY = leftHand.y - playerHeadPos.y;
+      // Altura relativa explícita (Mano - Cabeza)
+      const deltaRY = rightHand.y - playerHeadPos.y;
+      const deltaLY = leftHand.y - playerHeadPos.y;
 
-        this.leftIkTarget.position = new Vector3(
-            this.enemyRoot.position.x + localR.x, 
-            enemyRefPoint.y + deltaRY, 
-            this.enemyRoot.position.z - localR.z
-        );
-        
-        this.rightIkTarget.position = new Vector3(
-            this.enemyRoot.position.x + localL.x, 
-            enemyRefPoint.y + deltaLY, 
-            this.enemyRoot.position.z - localL.z
-        );
+      this.leftIkTarget.position = new Vector3(
+        this.enemyRoot.position.x + localR.x,
+        enemyRefPoint.y + deltaRY,
+        this.enemyRoot.position.z - localR.z
+      );
+
+      this.rightIkTarget.position = new Vector3(
+        this.enemyRoot.position.x + localL.x,
+        enemyRefPoint.y + deltaLY,
+        this.enemyRoot.position.z - localL.z
+      );
     }
 
     // Proxies visuales para debug
@@ -322,9 +342,9 @@ export class EnvironmentManager {
     if (this.enemyRightProxy && this.rightIkTarget) this.enemyRightProxy.position = this.rightIkTarget.position;
   }
   public getIkTargets(): { left: AbstractMesh, right: AbstractMesh } | null {
-      if (this.leftIkTarget && this.rightIkTarget) {
-          return { left: this.leftIkTarget, right: this.rightIkTarget };
-      }
-      return null;
+    if (this.leftIkTarget && this.rightIkTarget) {
+      return { left: this.leftIkTarget, right: this.rightIkTarget };
+    }
+    return null;
   }
 }

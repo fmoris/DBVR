@@ -65,9 +65,16 @@ export class AudioManager {
         }
     }
 
-    public setPlayerAuraVolume(ratio: number): void {
-        // Mapeamos el ratio a un volumen audible. 
-        this.targetVolume = Math.max(0, Math.min(0.7, ratio));
+    public setPlayerAuraVolume(ratio: number, combatState: string = "neutral"): void {
+        const isCharging = combatState === "recharging" || combatState === "charging" || combatState === "charging_special";
+        if (isCharging) {
+            // Boost volume dramatically when powering up/recharging
+            this.targetVolume = 0.8;
+        } else {
+            // Mapeamos el ratio a un volumen audible. Base mínima si hay ki.
+            const baseVol = ratio > 0.3 ? 0.05 : 0; 
+            this.targetVolume = Math.max(baseVol, Math.min(0.4, ratio * 0.4));
+        }
     }
 
     private updateVolumes(): void {

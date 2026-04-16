@@ -19,10 +19,13 @@ import vegetaConfig from "../models/vegeta.json";
 import gokuBaseUrl from "../models/goku/goku_base.glb?url";
 // @ts-ignore
 import vegetaBaseUrl from "../models/vegeta/vegeta_base.glb?url";
+// @ts-ignore
+import passiveMarkerManUrl from "../models/passive_marker_man.glb?url";
 
 const MODEL_URLS: Record<string, string> = {
   "goku/goku_base.glb": gokuBaseUrl,
   "vegeta/vegeta_base.glb": vegetaBaseUrl,
+  "passive_marker_man.glb": passiveMarkerManUrl
 };
 
 export class Game {
@@ -41,6 +44,7 @@ export class Game {
   
   private combatStartTime = 0;
   private enemyAura: ParticleSystem | null = null;
+  private playerAura: ParticleSystem | null = null;
   private started = false;
   private menuCallback: (() => void) | null = null;
 
@@ -77,7 +81,8 @@ export class Game {
     });
 
     this.inputManager.setup(gokuConfig.transformations?.[0]?.powers || []);
-    this.envManager.setup(MODEL_URLS, vegetaConfig.transformations?.[0]?.url, (vegetaConfig as any).height_m || 1.64);
+    const dummyUrl = "passive_marker_man.glb";
+    this.envManager.setup(MODEL_URLS, gokuConfig.transformations?.[0]?.url, dummyUrl, 1.8);
     
     this.audio = new AudioManager(scene);
 
@@ -105,6 +110,7 @@ export class Game {
         this.combatStartTime = Date.now();
         this.playerController.setup();
         this.enemyAura = this.vfx.createAura("enemy_aura", Vector3.Zero());
+        this.playerAura = this.vfx.createAura("player_aura", this.engineManager.getCamera().position);
         
         this.hud.show();
         this.canvas.focus();
@@ -128,10 +134,17 @@ export class Game {
       this.vfx.updateAura(this.enemyAura, (stats.enemyKi / 100) * 100, stats.combatState === "slowMotion", stats.enemyNP, eColor);
     }
 
+    if (this.playerAura) {
+      const isCharging = stats.combatState === "recharging" || stats.combatState === "charging" || stats.combatState === "charging_special";
+      const pColorHex = gokuConfig.transformations?.[0]?.props?.color_palette || "#00ccff";
+      const pColor = Color4.FromHexString(pColorHex.length === 7 ? pColorHex + "cc" : pColorHex);
+      this.vfx.updateAura(this.playerAura, (stats.playerKi / stats.maxKi) * 100, isCharging, stats.playerNP, pColor);
+    }
+
     // Actualizar audio de aura del jugador
     if (this.audio) {
       const kiRatio = stats.playerKi / stats.maxKi;
-      this.audio.setPlayerAuraVolume(kiRatio);
+      this.audio.setPlayerAuraVolume(kiRatio, stats.combatState);
       
       // Asegurar que el audio suena si el juego ya empezó
       if (this.started) this.audio.playAura();
