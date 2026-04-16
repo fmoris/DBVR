@@ -6,7 +6,8 @@ import {
   WebXRHandJoint,
   WebXRHand,
   Vector3,
-  Engine
+  Engine,
+  Quaternion
 } from "@babylonjs/core";
 import { InputManager } from "../input/InputManager";
 import { PlayerController } from "../input/PlayerController";
@@ -39,6 +40,7 @@ export class XRManager {
 
   private xr: WebXRDefaultExperience | null = null;
   private gestureSocket: WebSocket | null = null;
+  private lastSimulatedPower: string | null = null; // Seguimiento para evitar reinicios constantes del SIM
 
 
   constructor(config: XRManagerConfig) {
@@ -179,16 +181,29 @@ export class XRManager {
         const xrCamera = this.xr?.baseExperience.camera;
         if (!xrCamera) return;
 
+        // Horizon Lock: Project forward and right vectors onto the XZ plane to keep body orientation stable
+        // regardless of head pitch (tilt up/down).
+        const forwardWorld = xrCamera.getDirection(Vector3.Forward());
+        const headForward = new Vector3(forwardWorld.x, 0, forwardWorld.z).normalize();
+        
+        // Fallback if orientation is undefined (looking perfectly up/down)
+        if (headForward.length() < 0.001) {
+            headForward.copyFromFloats(0, 0, 1);
+        }
+
+        const headRight = Vector3.Cross(Vector3.Up(), headForward).normalize();
+
         const ctx: XRHandsContext = {
             leftWrist: leftHand?.getJointMesh(WebXRHandJoint.WRIST),
             rightWrist: rightHand?.getJointMesh(WebXRHandJoint.WRIST),
             leftHand: leftHand || undefined,
             rightHand: rightHand || undefined,
             headPos: xrCamera.globalPosition,
-            headForward: xrCamera.getDirection(Vector3.Forward()),
-            headRight: xrCamera.getDirection(Vector3.Right()),
+            headForward,
+            headRight,
             deltaTimeMs: this.scene.getEngine().getDeltaTime()
         };
+
 
         this.inputManager.update(ctx);
         const gss = this.inputManager.getGSS();
@@ -236,13 +251,75 @@ export class XRManager {
             
             if (headRot) {
                 const combat = this.playerController["combat"];
-                this.envManager.updateEnemyMirror(
-                    combat?.mirrorMode || false,
-                    headPos,
-                    headRot,
-                    ctx.leftWrist.absolutePosition,
-                    ctx.rightWrist.absolutePosition
-                );
+                
+                const sim = this.vrHud.getSimulator();
+                const ikTargets = this.envManager.getIkTargets();
+                
+                // Vincular los blancos IK del Dude al simulador si existen y aún no están vinculados
+                if (ikTargets && sim && !sim.customTargets) {
+                    const eRoot = this.envManager.getEnemyRoot();
+                    if (eRoot) {
+                        sim.setExternalTargets(
+                            ikTargets, 
+                            eRoot.position, 
+                            eRoot.rotationQuaternion ? eRoot.rotationQuaternion.toEulerAngles().y : eRoot.rotation.y
+                        );
+                    } else {
+                        sim.setExternalTargets(ikTargets);
+                    }
+                }
+                
+                // Lógica del Simulador
+                const isSimulating = this.vrHud.isSimulating();
+                const targetPower = this.vrHud.targetPowerId();
+
+                if (isSimulating) {
+                    // Si estamos simulando, NO enviamos datos de tracking al espejo
+                    // El simulador ya debería estar moviendo los blancos IK
+                    if (!this.lastSimulatedPower && targetPower) {
+                        this.lastSimulatedPower = targetPower;
+                        console.log(`[XR] Modo Simulación ACTIVO para: ${this.lastSimulatedPower}`);
+                    }
+                } else {
+                    if (this.lastSimulatedPower) {
+                        console.log("[XR] Modo Simulación DETENIDO.");
+                        this.lastSimulatedPower = null;
+                    }
+                    
+                    // Si NO hay simulación activa, usamos el espejo normal (IK tracking del jugador)
+                    this.envManager.updateEnemyMirror(
+                        true, // Siempre activo para entrenar!
+                        headPos,
+                        headRot,
+                        ctx.leftWrist.absolutePosition.clone(),
+                        ctx.rightWrist.absolutePosition.clone()
+                    );
+                }
+
+                const pRoot = this.envManager.getPlayerRoot();
+                if (pRoot) {
+                    pRoot.position.copyFrom(headPos);
+                    // Ajustar la altura visual: el origen del modelo suele estar en los pies.
+                    // Asumimos un offset estandar de -1.55m desde la cámara al piso para el avatar Goku.
+                    pRoot.position.y -= 1.55;
+
+                    // Rotación Lazy: el cuerpo gira sólo si tuerces mucho el cuello
+                    const currentEuler = pRoot.rotationQuaternion ? pRoot.rotationQuaternion.toEulerAngles() : Vector3.Zero();
+                    let bodyYaw = currentEuler.y;
+                    const headYaw = headRot.toEulerAngles().y;
+                    
+                    let diff = headYaw - bodyYaw;
+                    while (diff > Math.PI) diff -= Math.PI * 2;
+                    while (diff < -Math.PI) diff += Math.PI * 2;
+
+                    const deadzone = 0.8; // ~45 grados
+                    if (Math.abs(diff) > deadzone) {
+                        const targetYaw = bodyYaw + (diff > 0 ? (diff - deadzone) : (diff + deadzone));
+                        bodyYaw += (targetYaw - bodyYaw) * 0.15; // Smooth Catch-up
+                    }
+
+                    pRoot.rotationQuaternion = Quaternion.RotationYawPitchRoll(bodyYaw, 0, 0); 
+                }
             }
         }
       });

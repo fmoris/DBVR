@@ -69,6 +69,7 @@ export class VRHud {
 
   private currentHudType: "normal" | "defense" | "melee" | "recharging" | null = null;
   private visible = false;
+  private _targetPowerId: string | null = null;
 
   constructor(private scene: Scene, private combat: CombatSystem, private inputManager: InputManager) {
     this.playerPanel = new StatsPanel(scene, true);
@@ -221,6 +222,18 @@ export class VRHud {
   }
 
   public isVisible(): boolean { return this.visible; }
+  
+  public isSimulating(): boolean { 
+      return this.gestureSimulator.isAnimating; 
+  }
+
+  public targetPowerId(): string | null {
+      return this._targetPowerId;
+  }
+  
+  public getSimulator(): GestureSimulator {
+      return this.gestureSimulator;
+  }
 
   public update(stats: GameStats): void {
     if (!this.visible) return;
@@ -487,6 +500,7 @@ export class VRHud {
 
   private simulateGesture(powerId: string, instant: boolean = false): void {
       console.log(`[VRHud] simulateGesture called for: ${powerId}`);
+      this._targetPowerId = powerId;
       const labelPrep = this.getLabelForPower(powerId, "PREP");
       const labelFire = this.getLabelForPower(powerId, "FIRE");
 

@@ -54,6 +54,10 @@ export class GestureSkillSystem {
  
     public lastValidGestureTime: number = 0;
     public gracePeriodMs: number = 300; // Más responsivo (300ms en lugar de 800ms)
+
+    /** Coordenadas locales respecto al cuerpo (Body-centric) del último frame procesado */
+    public lastLocalL: Vector3 = Vector3.Zero();
+    public lastLocalR: Vector3 = Vector3.Zero();
  
     private _stateDebounce: { state: string; until: number } | null = null;
     private readonly STATE_DEBOUNCE_MS: number = 150;
@@ -95,6 +99,11 @@ export class GestureSkillSystem {
     }
 
     async switchCharacter(characterId: string) {
+        // GUARD: Evitar recargas si ya estamos en este personaje y tenemos datos
+        if (this.activeCharacter && this.activeCharacter.id === characterId && Object.keys(this._sessionHistory).length > 0) {
+            return;
+        }
+
         if (this.classifier) this.classifier.dispose();
         this.classifier = knnClassifier.create();
         
@@ -105,7 +114,7 @@ export class GestureSkillSystem {
         this.currentState = 'idle';
         this._prevLeftPos = null;
         this._prevRightPos = null;
-        this._sessionHistory = {};
+        this._sessionHistory = {}; // Inicializar vacío siempre por seguridad
 
         // 1. Intentar cargar desde el Servidor (Prioridad)
         let loadedFromRemote = false;
@@ -161,8 +170,44 @@ export class GestureSkillSystem {
             }
         }
 
-        // 3. Calcular estadísticas y reconstruir clasificador (esto reemplaza la inyección directa)
+        // 3. Fallback a DefaultData si todo lo anterior falló
+        if (Object.keys(this._sessionHistory).length === 0 && this.activeCharacter?.defaultData) {
+            console.log(`[GSS] 📦 Cargando datos por defecto (CharacterConfig.defaultData) para "${characterId}"...`);
+            for (const [label, entry] of Object.entries(this.activeCharacter.defaultData)) {
+                // El formato de defaultData es 2D (muestras), el de historia es 3D (sesiones)
+                this._sessionHistory[label] = [entry as number[][]];
+            }
+        }
+
+        // 4. Fallback final: Si sigue vacío, inicializar objeto vacío para evitar crashes
+        if (Object.keys(this._sessionHistory).length === 0) {
+            console.warn(`[GSS] ⚠️ No se detectaron modelos para "${characterId}" (remotos, locales o default). Iniciando sistema vacío.`);
+            this._sessionHistory = {};
+        }
+
+        // 5. Asegurar consistencia de dimensiones (Clean & Pad to 46)
+        this._sanitizeHistory();
+
+        // 6. Calcular estadísticas y reconstruir clasificador
         this._recalculateNormalizationStats();
+    }
+
+    private _sanitizeHistory() {
+        console.log("[GSS] 🧼 Sanitizando historia de gestos (Padding a 46)...");
+        for (const [label, sessions] of Object.entries(this._sessionHistory)) {
+            for (let s = 0; s < sessions.length; s++) {
+                const session = sessions[s];
+                for (let f = 0; f < session.length; f++) {
+                    if (session[f].length === 16) {
+                        const padded = new Array(46).fill(0);
+                        for (let i = 0; i < 16; i++) padded[i] = session[f][i];
+                        session[f] = padded;
+                    } else if (session[f].length !== 46) {
+                        console.warn(`[GSS] Frame con dimensión inválida (${session[f].length}) en ${label}. session ${s}, frame ${f}.`);
+                    }
+                }
+            }
+        }
     }
 
     private loadDefaultData() {
@@ -171,7 +216,7 @@ export class GestureSkillSystem {
     }
 
     private _isValidDimension(dim: number): boolean {
-        return dim === 16 || dim === 46;
+        return dim === 46; // Forzamos consistencia a 46 (16 base + 30 tips)
     }
 
     // ─────────────────────────────────────────────────────────────────
@@ -180,7 +225,7 @@ export class GestureSkillSystem {
 
     private _recalculateNormalizationStats() {
         console.log("[GSS] 📊 Recalculando estadísticas de normalización Z-score...");
-        const dimensions = [16, 46];
+        const dimensions = [46]; // Solo usamos 46 para consistencia KNN
         const newStats: Record<number, { mean: number[]; std: number[] }> = {};
 
         for (const dim of dimensions) {
@@ -270,63 +315,66 @@ export class GestureSkillSystem {
     // ─────────────────────────────────────────────────────────────────
 
     private _extractWristOnly(ctx: XRHandsContext): Float32Array {
+        const out = new Float32Array(46).fill(0); // Forzamos 46 para consistencia
+
         if (!ctx.leftWrist || !ctx.rightWrist || !ctx.headPos) {
-            return new Float32Array(16).fill(0);
+            return out;
         }
 
         const lp = ctx.leftWrist.absolutePosition;
         const rp = ctx.rightWrist.absolutePosition;
         
         // --- 1. Definir origen y base local (BODY-CENTRIC) ---
-        // El origen ya no es el punto medio de las manos, sino el PECHO (aprox 25cm abajo de la cabeza)
         const chest = ctx.headPos.clone();
         chest.y -= 0.25;
 
-        // Base local: Forward es hacia donde miras, Up es el Y del mundo, Right es perpendicular
         const forward = ctx.headForward || new Vector3(0, 0, 1);
         const right = ctx.headRight || new Vector3(1, 0, 0);
         const up = Vector3.Up();
 
-        // --- 2. Proyectar posiciones de las manos sobre el espacio local del cuerpo ---
         const lRelWorld = lp.subtract(chest);
         const rRelWorld = rp.subtract(chest);
 
-        // lLocal: (Right, Up, Forward)
         const lLocal = new Vector3(
             Vector3.Dot(lRelWorld, right),
             Vector3.Dot(lRelWorld, up),
             Vector3.Dot(lRelWorld, forward)
         );
 
-        const rLocal = new Float32Array([
+        const rLocal = new Vector3(
             Vector3.Dot(rRelWorld, right),
             Vector3.Dot(rRelWorld, up),
             Vector3.Dot(rRelWorld, forward)
-        ]);
+        );
+
+        this.lastLocalL.copyFrom(lLocal);
+        this.lastLocalR.copyFrom(rLocal);
 
         const dist = lp.subtract(rp).length();
         const dt = Math.max(ctx.deltaTimeMs, 1) / 1000;
 
-        // Velocidades locales (magnitud)
         if (!this._prevLeftPos) this._prevLeftPos = lp.clone();
         if (!this._prevRightPos) this._prevRightPos = rp.clone();
         
         const lV = (lp.subtract(this._prevLeftPos).length()) / dt;
         const rV = (rp.subtract(this._prevRightPos).length()) / dt;
 
-        return new Float32Array([
-            lLocal.x, lLocal.y, lLocal.z,  // 0, 1, 2
-            rLocal[0], rLocal[1], rLocal[2], // 3, 4, 5
-            dist,             // 6
-            lLocal.y,         // 7 (Altura L respecto al pecho)
-            rLocal[1],        // 8 (Altura R respecto al pecho)
-            lV, rV,          // 9, 10
-            lLocal.x / (lLocal.length() || 1), // 11 (Dirección Right L)
-            lLocal.y / (lLocal.length() || 1), // 12
-            lLocal.z / (lLocal.length() || 1), // 13
-            rLocal[0] / (new Vector3(rLocal[0], rLocal[1], rLocal[2]).length() || 1), // 14
-            rLocal[1] / (new Vector3(rLocal[0], rLocal[1], rLocal[2]).length() || 1)  // 15
-        ]);
+        const features = [
+            lLocal.x, lLocal.y, lLocal.z,
+            rLocal.x, rLocal.y, rLocal.z,
+            dist,
+            lLocal.y,
+            rLocal.y,
+            lV, rV,
+            lLocal.x / (lLocal.length() || 1),
+            lLocal.y / (lLocal.length() || 1),
+            lLocal.z / (lLocal.length() || 1),
+            rLocal.x / (rLocal.length() || 1),
+            rLocal.y / (rLocal.length() || 1)
+        ];
+
+        out.set(features);
+        return out;
     }
 
     private _extractWristAndFingertips(ctx: XRHandsContext): Float32Array {
@@ -385,6 +433,9 @@ export class GestureSkillSystem {
 
     public async update(ctx: XRHandsContext) {
         if (!this.activeCharacter || !this.classifier) return;
+
+        // GUARD: Si no hay manos trackeadas, no procesar nada para evitar falsos positivos (Phantom Charge)
+        if (!ctx.leftWrist && !ctx.rightWrist) return;
 
         const now = performance.now();
         // Wrist positions can be null if not tracked
@@ -552,6 +603,7 @@ export class GestureSkillSystem {
         this.trainingBuffer = [];
         this.trainingFrames = 0;
         this._trainingExtractor = extractorType;
+        this.currentState = 'idle'; // Resetear estado FSM para evitar interferencias
         console.log(`[GSS] 🎥 Entrenando: "${label}" [${extractorType}]`);
     }
 
@@ -581,7 +633,10 @@ export class GestureSkillSystem {
         if (!this._sessionHistory[label]) this._sessionHistory[label] = [];
         this._sessionHistory[label].push(newSession);
 
-        // 2. RECALCULAR estadísticas y RECONSTRUIR clasificador
+        // 2. SANITIZAR historia para asegurar que todo sea 46-dim (importante si se mezclan tipos)
+        this._sanitizeHistory();
+
+        // 3. RECALCULAR estadísticas y RECONSTRUIR clasificador
         // Esto integrará la nueva sesión y re-normalizará TODO el dataset
         this._recalculateNormalizationStats();
 
@@ -767,29 +822,21 @@ export class GestureSkillSystem {
     public fullReset() {
         if (!this.activeCharacter) return;
         const id = this.activeCharacter.id;
-        
         console.warn(`[GSS] ❗ REALIZANDO RESET TOTAL para "${id}"...`);
-        
-        // 1. Limpiar Clasificador
+
         if (this.classifier) {
             this.classifier.dispose();
             this.classifier = knnClassifier.create();
         }
 
-        // 2. Limpiar Historia en memoria
+        // 1. Limpiar Historia y LocalStorage
         this._sessionHistory = {};
-
-        // 3. Limpiar LocalStorage
         localStorage.removeItem(`gss_model_${id}`);
         
-        // 4. Recargar datos por defecto
-        if (this.activeCharacter.defaultData) {
-            this.loadDefaultData();
-            // Refrescar via switchCharacter para que se aplique la carga unificada
-            this.switchCharacter(this.activeCharacter.id);
-        }
+        // 2. Recargar (esto disparará la carga de defaultData y sanitización de 46-dim)
+        this.switchCharacter(id);
         
-        console.log(`[GSS] ✅ Reset total completado. El Clasificador ahora está limpio (solo con defaultData).`);
+        console.log(`[GSS] ✅ Reset total completado. El Clasificador ahora está limpio.`);
     }
 
     public dispose() {

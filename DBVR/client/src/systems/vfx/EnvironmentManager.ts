@@ -11,7 +11,9 @@ import {
   SceneLoader,
   AbstractMesh,
   Skeleton,
-  Quaternion
+  Quaternion,
+  BoneIKController,
+  TransformNode
 } from "@babylonjs/core";
 import "@babylonjs/loaders/glTF";
 
@@ -21,6 +23,13 @@ export class EnvironmentManager {
   private enemyRoot?: AbstractMesh;
   private enemySkeleton?: Skeleton;
   private enemyHeight: number = 1.64;
+  private playerRoot?: AbstractMesh;
+  
+  // IK Controllers for Mirror
+  private leftIkController?: BoneIKController;
+  private rightIkController?: BoneIKController;
+  private leftIkTarget?: AbstractMesh;
+  private rightIkTarget?: AbstractMesh;
   
   // Proxy meshes for mirror mode (fallback/debug)
   private enemyLeftProxy?: Mesh;
@@ -28,16 +37,48 @@ export class EnvironmentManager {
 
   constructor(private scene: Scene) {}
 
-  public setup(models: Record<string, string>, vegetaUrl?: string, enemyHeightM: number = 1.64): void {
+  public setup(models: Record<string, string>, playerUrl?: string, enemyUrl?: string, enemyHeightM: number = 1.64): void {
     this.setupLights();
     this.setupSkyAndGround();
     this.createCanyonRocks();
     this.createPlayerHands();
     
-    if (vegetaUrl && models[vegetaUrl]) {
-        this.enemyHeight = enemyHeightM;
-        this.loadEnemyModel(models[vegetaUrl], enemyHeightM);
+    if (playerUrl && models[playerUrl]) {
+        this.loadPlayerModel(models[playerUrl]);
     }
+
+    if (enemyUrl && models[enemyUrl]) {
+        this.enemyHeight = enemyHeightM;
+        this.loadEnemyModel(models[enemyUrl], enemyHeightM);
+    }
+  }
+
+  private loadPlayerModel(url: string): void {
+      SceneLoader.ImportMeshAsync("", url, "", this.scene).then((result) => {
+          this.playerRoot = result.meshes[0];
+          this.playerRoot.position = new Vector3(0, -100, 0); // Hide initially until synced
+          // Rotated to look forward (away from camera viewpoint initially).
+          this.playerRoot.rotationQuaternion = Quaternion.Identity(); 
+          
+          // Scale it correctly assuming it's roughly 1.75m but models might be larger. We'll use 1:1 scale for now, assuming standard VRM scale.
+          this.playerRoot.scaling = new Vector3(1, 1, 1);
+          
+          // Ocultar cabezas para que no bloquee la vista desde dentro del casco
+          result.meshes.forEach(m => {
+              const name = m.name.toLowerCase();
+              if (name.includes("head") || name.includes("face") || name.includes("hair") || name.includes("eye") || name.includes("teeth")) {
+                  m.isVisible = false;
+              }
+          });
+      });
+  }
+
+  public getPlayerRoot(): AbstractMesh | undefined {
+      return this.playerRoot;
+  }
+
+  public getEnemyRoot(): AbstractMesh | undefined {
+      return this.enemyRoot;
   }
 
   private setupLights(): void {
@@ -91,7 +132,10 @@ export class EnvironmentManager {
       this.enemyRoot = result.meshes[0];
       if (result.skeletons && result.skeletons.length > 0) {
           this.enemySkeleton = result.skeletons[0];
-          console.log(`[Environment] Enemy skeleton found with ${this.enemySkeleton.bones.length} bones.`);
+          console.log(`[Environment] Enemy skeleton found: "${this.enemySkeleton.name}" with ${this.enemySkeleton.bones.length} bones.`);
+          // Log bone names for debugging if needed
+          // console.log("Bones:", this.enemySkeleton.bones.map(b => b.name).join(", "));
+          this.setupIK(this.enemyRoot, this.enemySkeleton);
       }
 
       // Calcular altura real del modelo usando bounding box
@@ -108,23 +152,88 @@ export class EnvironmentManager {
 
       const currentHeight = max.y - min.y;
       
+      let yOffset = 0;
       if (currentHeight > 0) {
         // Escalar para que coincida exactamente con targetHeightM
         const finalScale = targetHeightM / currentHeight;
         this.enemyRoot.scaling = new Vector3(finalScale, finalScale, finalScale);
-        console.log(`[Environment] Enemy height: ${currentHeight.toFixed(2)}m -> Scaled to: ${this.enemyHeight}m (Factor: ${finalScale.toFixed(4)})`);
+        yOffset = -min.y * finalScale; // Ajustar por si el pivot está en el medio del cuerpo
+        console.log(`[Environment] Enemy height: ${currentHeight.toFixed(2)}m -> Scaled to: ${targetHeightM}m (Factor: ${finalScale.toFixed(4)})`);
       } else {
         // Fallback si no hay altura (raro)
         this.enemyRoot.scaling = new Vector3(1, 1, 1);
       }
 
       if (this.enemyRoot) {
-        this.enemyRoot.position = new Vector3(0, 0, 15); // A 15 metros del jugador
+        this.enemyRoot.position = new Vector3(0, yOffset, 3); // A 3 metros de distancia para verse como espejo cercano
+        this.enemyRoot.rotationQuaternion = null; // Forza usar Euler para Alien
         this.enemyRoot.rotation = new Vector3(0, Math.PI, 0); // Cara al jugador
       }
 
       this.createEnemyProxies();
     });
+  }
+
+  private setupIK(rootMesh: AbstractMesh, skeleton: Skeleton): void {
+      // Find the actual skinned mesh that has the skeleton attached
+      let skinnedMesh = rootMesh.getChildMeshes().find(m => m.skeleton === skeleton) || rootMesh;
+      
+      this.leftIkTarget = MeshBuilder.CreateSphere("leftIkTarget", { diameter: 0.1 }, this.scene);
+      this.leftIkTarget.isVisible = false;
+      this.rightIkTarget = MeshBuilder.CreateSphere("rightIkTarget", { diameter: 0.1 }, this.scene);
+      this.rightIkTarget.isVisible = false;
+
+      let leftArmBone = skeleton.bones.find(b => 
+          b.name.toLowerCase().includes("leftforearm") || 
+          b.name.toLowerCase().includes("l_forearm") || 
+          b.name.toLowerCase().includes("forearm_l") ||
+          b.name.toLowerCase().includes("left_forearm")
+      );
+      let rightArmBone = skeleton.bones.find(b => 
+          b.name.toLowerCase().includes("rightforearm") || 
+          b.name.toLowerCase().includes("r_forearm") || 
+          b.name.toLowerCase().includes("forearm_r") ||
+          b.name.toLowerCase().includes("right_forearm")
+      );
+
+      // Si no encuentra antebrazos, probar con manos (fallback original)
+      if (!leftArmBone) {
+          leftArmBone = skeleton.bones.find(b => 
+            b.name.toLowerCase().includes("lefthand") || b.name.toLowerCase().includes("l_hand") || b.name.toLowerCase().includes("left_hand")
+          );
+      }
+      if (!rightArmBone) {
+          rightArmBone = skeleton.bones.find(b => 
+            b.name.toLowerCase().includes("righthand") || b.name.toLowerCase().includes("r_hand") || b.name.toLowerCase().includes("right_hand")
+          );
+      }
+
+      // Fallback específico para el modelo clásico "Dude" o similares sin nombres humanos
+      if (!leftArmBone && skeleton.bones.length >= 58) {
+          leftArmBone = skeleton.bones[33]; // Antebrazo/Codo Izquierdo (Dude)
+          rightArmBone = skeleton.bones[14]; // Antebrazo/Codo Derecho (Dude)
+      }
+
+      if (leftArmBone) {
+          this.leftIkController = new BoneIKController(skinnedMesh, leftArmBone, {
+              targetMesh: this.leftIkTarget,
+              poleAngle: Math.PI / 2,
+              bendAxis: new Vector3(0, 0, 1)
+          });
+          this.leftIkController.maxAngle = Math.PI;
+      }
+      if (rightArmBone) {
+          this.rightIkController = new BoneIKController(skinnedMesh, rightArmBone, {
+              targetMesh: this.rightIkTarget,
+              poleAngle: -Math.PI / 2,
+              bendAxis: new Vector3(0, 0, 1)
+          });
+          this.rightIkController.maxAngle = Math.PI;
+      }
+      this.scene.onBeforeRenderObservable.add(() => {
+          if (this.leftIkController) this.leftIkController.update();
+          if (this.rightIkController) this.rightIkController.update();
+      });
   }
 
   private createPlayerHands(): void {
@@ -134,10 +243,12 @@ export class EnvironmentManager {
     this.leftPalmMesh = MeshBuilder.CreateBox("leftHand", { width: 0.22, height: 0.06, depth: 0.28 }, this.scene);
     this.leftPalmMesh.position = new Vector3(-0.52, 1.12, 0.55);
     this.leftPalmMesh.material = handMat;
+    this.leftPalmMesh.isVisible = false; // Hiding debug box
 
     this.rightPalmMesh = MeshBuilder.CreateBox("rightHand", { width: 0.22, height: 0.06, depth: 0.28 }, this.scene);
     this.rightPalmMesh.position = new Vector3(0.52, 1.12, 0.55);
     this.rightPalmMesh.material = handMat;
+    this.rightPalmMesh.isVisible = false; // Hiding debug box
   }
 
   public getPlayerHands(): { left?: Mesh, right?: Mesh } {
@@ -183,28 +294,37 @@ export class EnvironmentManager {
     relR.rotateByQuaternionToRef(invHeadRot, localR);
 
     // Vegeta está mirando al jugador (rotado 180 grados en Y)
-    // Su centro de hombros estimado está a ~1.4m de altura
-    const enemyRefPoint = this.enemyRoot.position.add(new Vector3(0, this.enemyHeight * 0.85, 0));
+    // El punto de referencia son los hombros (estimado a ~82% de su altura)
+    const enemyRefPoint = this.enemyRoot.position.add(new Vector3(0, this.enemyHeight * 0.82, 0));
 
-    // Aplicar a Vegeta (invirtiendo X para que sea un espejo)
-    // Si muevo mi mano derecha a MI derecha, Vegeta mueve su mano "izquierda" a SU izquierda (que es mi derecha visual)
-    const mirrorL = new Vector3(-localL.x, localL.y, -localL.z); 
-    const mirrorR = new Vector3(-localR.x, localR.y, -localR.z);
+    // True Mirror: Tu derecha -> Su izquierda visual
+    // Usamos las coordenadas LOCALES (body-relative) calculadas arriba
+    if (this.leftIkTarget && this.rightIkTarget) {
+        // Altura relativa explícita (Mano - Cabeza)
+        const deltaRY = rightHand.y - playerHeadPos.y;
+        const deltaLY = leftHand.y - playerHeadPos.y;
 
-    const worldL = enemyRefPoint.add(mirrorL);
-    const worldR = enemyRefPoint.add(mirrorR);
-
-    if (this.enemyLeftProxy) this.enemyLeftProxy.position = worldL;
-    if (this.enemyRightProxy) this.enemyRightProxy.position = worldR;
-
-    // Intentar mover huesos si hay esqueleto
-    if (this.enemySkeleton) {
-        // Nombres comunes de Mixamo/Vroid
-        const leftHandBone = this.enemySkeleton.bones.find(b => b.name.toLowerCase().includes("lefthand") || b.name.toLowerCase().includes("l_hand"));
-        const rightHandBone = this.enemySkeleton.bones.find(b => b.name.toLowerCase().includes("righthand") || b.name.toLowerCase().includes("r_hand"));
-
-        if (leftHandBone) leftHandBone.setAbsolutePosition(worldL, this.enemyRoot);
-        if (rightHandBone) rightHandBone.setAbsolutePosition(worldR, this.enemyRoot);
+        this.leftIkTarget.position = new Vector3(
+            this.enemyRoot.position.x + localR.x, 
+            enemyRefPoint.y + deltaRY, 
+            this.enemyRoot.position.z - localR.z
+        );
+        
+        this.rightIkTarget.position = new Vector3(
+            this.enemyRoot.position.x + localL.x, 
+            enemyRefPoint.y + deltaLY, 
+            this.enemyRoot.position.z - localL.z
+        );
     }
+
+    // Proxies visuales para debug
+    if (this.enemyLeftProxy && this.leftIkTarget) this.enemyLeftProxy.position = this.leftIkTarget.position;
+    if (this.enemyRightProxy && this.rightIkTarget) this.enemyRightProxy.position = this.rightIkTarget.position;
+  }
+  public getIkTargets(): { left: AbstractMesh, right: AbstractMesh } | null {
+      if (this.leftIkTarget && this.rightIkTarget) {
+          return { left: this.leftIkTarget, right: this.rightIkTarget };
+      }
+      return null;
   }
 }
