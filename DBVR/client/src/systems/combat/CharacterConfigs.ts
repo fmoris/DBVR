@@ -1,10 +1,5 @@
 import { CharacterConfig, GestureSkillSystem, XRHandsContext } from '../gestures/GestureSkillSystem';
 import { Vector3 } from '@babylonjs/core';
-import kameGestures from "../../models/goku/gestures/kamehameha.json";
-import genkiGestures from "../../models/goku/gestures/genkidama.json";
-import kiBlastGestures from "../../models/goku/gestures/ki_blast.json";
-import kaiokenGestures from "../../models/goku/gestures/kaioken.json";
-import kiChargeGestures from "../../models/goku/gestures/ki_charge.json";
 
 // =====================================================================
 // UTILS - GSS DATA NORMALIZATION
@@ -59,13 +54,16 @@ export const GOKU_CONFIG: CharacterConfig = {
         kaioken: { minChargeMs: 1000, maxChargeMs: 2000, releaseVelocity: 0.5 },
         kiBlast: { quickThresholdMs: 200, chargeStartMs: 800, quickVelocity: 0.8 },
     },
-    defaultData: {
-        ...flattenGestures(kameGestures),
-        ...flattenGestures(genkiGestures),
-        ...flattenGestures(kiBlastGestures),
-        ...flattenGestures(kaiokenGestures),
-        ...flattenGestures(kiChargeGestures)
-    },
+    gestureIds: [
+        'kamehameha_preparation',
+        'kamehameha_firing',
+        'genkidama_preparation',
+        'genkidama_firing',
+        'ki_prep',
+        'ki_fire',
+        'recharge_prep',
+        'recharge_active'
+    ],
     fsmHandler: function(this: GestureSkillSystem, gesture: string, _confidence: number, ctx: XRHandsContext, now: number) {
         const g = {
             kame_prep:   'kamehameha_preparation',
@@ -78,7 +76,8 @@ export const GOKU_CONFIG: CharacterConfig = {
             // Usamos las etiquetas con cientos de frames (ki_prep/ki_fire) en lugar de las de 10 frames
             kiblast_prep: 'ki_prep',
             kiblast_fire: 'ki_fire',
-            recharge:    'recharge' // El handler ahora buscará coincidencias parciales o múltiples
+            recharge_prep: 'recharge_prep',
+            recharge_active: 'recharge_active'
         };
 
         const t = this.activeCharacter?.timing;
@@ -112,8 +111,8 @@ export const GOKU_CONFIG: CharacterConfig = {
                         this.setState('ki_blast_ready');
                         this.startCharge('ki_blast', activeHand, now);
                     }
-                } else if (gesture.startsWith('recharge') && _confidence > 0.85) {
-                    // Recharge: Manos en mitad inferior del torso (y < -0.2) en lugar de medir el radio a los ojos
+                } else if (gesture === g.recharge_prep && _confidence > 0.85) {
+                    // Recharge: Manos en mitad inferior del torso (y < -0.2)
                     const isHandsLow = gss.lastLocalL.y < -0.2 && gss.lastLocalR.y < -0.2;
                     if (isHandsLow) {
                         this.setState('recharging');
@@ -124,7 +123,10 @@ export const GOKU_CONFIG: CharacterConfig = {
 
             case 'recharging': {
                 const isHandsLow = gss.lastLocalL.y < -0.2 && gss.lastLocalR.y < -0.2;
-                if (!gesture.startsWith('recharge') || !isHandsLow) {
+                // Aceptamos cualquiera de las dos fases de recharge para mantener el estado
+                const isRecharging = gesture === g.recharge_prep || gesture === g.recharge_active;
+                
+                if (!isRecharging || !isHandsLow) {
                     this.setState('idle');
                 } else {
                     this.fireAttack('recharge', 1.0, 'both');
@@ -198,6 +200,7 @@ export const GOKU_CONFIG: CharacterConfig = {
 // Placeholder para Vegeta
 export const VEGETA_CONFIG: CharacterConfig = {
     id: 'vegeta',
+    gestureIds: ['ki_prep', 'ki_fire', 'recharge'], // Vegeta comparte gestos con Goku
     extractors: { 'idle': 'wristOnly' },
     thresholds: { 'idle': 0.70 },
     fsmHandler: function(this: GestureSkillSystem, _gesture: string, _confidence: number, _ctx: XRHandsContext, _now: number) {

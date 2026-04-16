@@ -171,7 +171,48 @@ async function startServer() {
     })
   );
  
-  // --- GESTURE SYNC ENDPOINT ---
+  // --- MODULAR GESTURE ENDPOINTS ---
+  
+  // Obtener un gesto individual por ID de movimiento
+  app.get("/api/gestures/movement/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const filePath = path.join(process.cwd(), "server", "data", "gestures", `${id}.json`);
+      
+      if (!fs.existsSync(filePath)) {
+        console.warn(`[Gestures] ❌ Movimiento no encontrado: ${id}`);
+        return res.status(404).json({ error: `Gesto "${id}" no encontrado` });
+      }
+
+      const content = fs.readFileSync(filePath, "utf-8");
+      res.json({ id, model: JSON.parse(content) });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Guardar/Sincronizar un gesto individual
+  app.post("/api/gestures/movement/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { model } = req.body; // El cuerpo ahora es directamente el modelo del gesto (historia 3D)
+
+      if (!model) return res.status(400).json({ error: "Falta el modelo del gesto" });
+
+      const dataDir = path.join(process.cwd(), "server", "data", "gestures");
+      if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+
+      const filePath = path.join(dataDir, `${id}.json`);
+      fs.writeFileSync(filePath, JSON.stringify(model, null, 2));
+      
+      console.log(`[Gestures] 💾 Movimiento guardado/actualizado: ${id}.json`);
+      res.json({ success: true, id });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- GESTURE SYNC ENDPOINT (Legacy) ---
   app.post("/api/gestures/sync", async (req, res) => {
     try {
       const { characterId, model } = req.body;

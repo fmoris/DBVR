@@ -22,12 +22,13 @@ export type ExtractorType = 'wristOnly' | 'wristAndFingertips';
 export interface CharacterConfig {
     id: string;
     modelFile?: string;
+    gestureIds?: string[]; // IDs de movimientos a cargar (kamehameha, ki_blast, etc)
     extractors: Record<string, ExtractorType>;
     thresholds: Record<string, number>;
     fsmHandler: (this: GestureSkillSystem, gesture: string, confidence: number, ctx: XRHandsContext, now: number) => void;
     // Tiempos y parámetros específicos de ataques
     timing?: any;
-    defaultData?: Record<string, number[][]>; // Datos de entrenamiento pre-cargados
+    defaultData?: Record<string, number[][]>; // Datos de entrenamiento pre-cargados (Legacy/Fallback)
 }
 
 export class GestureSkillSystem {
@@ -114,67 +115,39 @@ export class GestureSkillSystem {
         this.currentState = 'idle';
         this._prevLeftPos = null;
         this._prevRightPos = null;
-        this._sessionHistory = {}; // Inicializar vacío siempre por seguridad
+        this._sessionHistory = {}; 
 
-        // 1. Intentar cargar desde el Servidor (Prioridad)
-        let loadedFromRemote = false;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 2000);
-
-        try {
-            console.log(`[GSS] 📥 Buscando modelo remoto para "${characterId}"...`);
-            window.dispatchEvent(new CustomEvent('gss-remote-load-start', { detail: { id: characterId } }));
+        // 1. CARGA MODULAR (Prioridad: Archivos individuales por movimiento)
+        if (config.gestureIds && config.gestureIds.length > 0) {
+            console.log(`[GSS] 🧩 Cargando ${config.gestureIds.length} movimientos para "${characterId}"...`);
             
-            const response = await fetch(`/api/gestures/latest/${characterId}`, { signal: controller.signal });
-            clearTimeout(timeoutId);
-
-            if (response.ok) {
-                const result = await response.json();
-                if (result.model) {
-                    this._sessionHistory = result.model;
-                    loadedFromRemote = true;
-                    console.log(`[GSS] ✅ Modelo remoto cargado exitosamente: ${result.filename}`);
-                    window.dispatchEvent(new CustomEvent('gss-remote-load-success', { detail: { filename: result.filename } }));
-                    
-                    // Sincronizar localStorage con la versión del servidor
-                    localStorage.setItem(`gss_model_${characterId}`, JSON.stringify(this._sessionHistory));
-                }
-            } else {
-                console.warn(`[GSS] Sin modelo remoto para ${characterId} (Status: ${response.status}).`);
-            }
-        } catch (e: any) {
-            clearTimeout(timeoutId);
-            if (e.name === 'AbortError') {
-                console.warn(`[GSS] ⏱️ Timeout en carga remota para ${characterId}. Usando datos locales.`);
-            } else {
-                console.error(`[GSS] Error en carga remota para ${characterId}:`, e);
-            }
-            window.dispatchEvent(new CustomEvent('gss-remote-load-error', { detail: { error: e } }));
-        }
-
-        // 2. Fallback a LocalStorage si no hubo carga remota
-        if (!loadedFromRemote) {
-            const saved = localStorage.getItem(`gss_model_${characterId}`);
-            if (saved) {
+            const loadPromises = config.gestureIds.map(async (id) => {
                 try {
-                    const data = JSON.parse(saved);
-                    for (const [label, entry] of Object.entries(data)) {
-                        this._sessionHistory[label] = (Array.isArray((entry as any)[0]) && !Array.isArray((entry as any)[0][0]))
-                            ? [entry as number[][]]
-                            : entry as number[][][];
+                    const response = await fetch(`/api/gestures/movement/${id}`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.model) {
+                            // Merge modular data into session history
+                            for (const [label, sessions] of Object.entries(data.model)) {
+                                this._sessionHistory[label] = sessions as number[][][];
+                            }
+                            console.log(`[GSS] ✅ Movimiento "${id}" cargado.`);
+                        }
+                    } else {
+                        console.warn(`[GSS] ❌ Movimiento "${id}" no encontrado en el servidor.`);
                     }
-                    console.log(`[GSS] 💾 Modelo cargado desde LocalStorage.`);
                 } catch (e) {
-                    console.warn(`[GSS] Error parseando localStorage para ${characterId}:`, e);
+                    console.error(`[GSS] Error cargando movimiento "${id}":`, e);
                 }
-            }
+            });
+
+            await Promise.all(loadPromises);
         }
 
-        // 3. Fallback a DefaultData si todo lo anterior falló
+        // 2. Fallback a DefaultData (Solo si no hay datos modulares)
         if (Object.keys(this._sessionHistory).length === 0 && this.activeCharacter?.defaultData) {
             console.log(`[GSS] 📦 Cargando datos por defecto (CharacterConfig.defaultData) para "${characterId}"...`);
             for (const [label, entry] of Object.entries(this.activeCharacter.defaultData)) {
-                // El formato de defaultData es 2D (muestras), el de historia es 3D (sesiones)
                 this._sessionHistory[label] = [entry as number[][]];
             }
         }
@@ -709,61 +682,38 @@ export class GestureSkillSystem {
     public async saveModel() {
         if (!this.activeCharacter || !this.classifier) return;
         
-        // 1. Guardado local
-        localStorage.setItem(`gss_model_${this.activeCharacter.id}`, JSON.stringify(this._sessionHistory));
-        console.log(`[GSS] 💾 Modelo (historia 3D) guardado localmente: ${this.activeCharacter.id}`);
-        
-        // Dispatch event for HUD notification
-        window.dispatchEvent(new CustomEvent('gss-saved-local', { detail: { id: this.activeCharacter.id } }));
-
-        // 2. Sincronización automática con servidor
-        if (this.validateModel()) {
-            await this.syncWithServer();
+        // Sincronizar solo la última etiqueta entrenada de forma modular
+        if (this.trainingLabel && this._sessionHistory[this.trainingLabel]) {
+            await this.syncMovement(this.trainingLabel);
         } else {
-            console.warn("[GSS] ⚠️ Modelo no válido para sincronización (pocos datos)");
+            console.warn("[GSS] ⚠️ No hay etiqueta de entrenamiento activa para sincronizar.");
         }
     }
 
-    private validateModel(): boolean {
-        // Al menos una etiqueta con al menos un par de sesiones
-        const labels = Object.keys(this._sessionHistory);
-        if (labels.length === 0) return false;
-
-        let totalFrames = 0;
-        for (const label of labels) {
-            const sessions = this._sessionHistory[label];
-            for (const session of sessions) {
-                totalFrames += session.length;
-            }
-        }
-
-        return totalFrames >= 10; // Mínimo 10 frames totales en toda la historia
-    }
-
-    private async syncWithServer() {
+    private async syncMovement(movementId: string) {
         if (!this.activeCharacter) return;
         
-        const characterId = this.activeCharacter.id;
-        window.dispatchEvent(new CustomEvent('gss-sync-start', { detail: { id: characterId } }));
+        // Creamos un mini-modelo que contiene solo este movimiento para el servidor
+        const modelToSync = {
+            [movementId]: this._sessionHistory[movementId]
+        };
+
+        window.dispatchEvent(new CustomEvent('gss-sync-start', { detail: { id: movementId } }));
 
         try {
-            console.log(`[GSS] ☁️ Sincronizando modelo "${characterId}" con el servidor...`);
-            const response = await fetch('/api/gestures/sync', {
+            console.log(`[GSS] ☁️ Sincronizando movimiento "${movementId}"...`);
+            const response = await fetch(`/api/gestures/movement/${movementId}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    characterId,
-                    model: this._sessionHistory
-                })
+                body: JSON.stringify({ model: modelToSync })
             });
 
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-            const result = await response.json();
             
-            console.log(`[GSS] ✅ Sincronización exitosa: ${result.filename}`);
-            window.dispatchEvent(new CustomEvent('gss-sync-success', { detail: { filename: result.filename } }));
+            console.log(`[GSS] ✅ Sincronización modular exitosa: ${movementId}.json`);
+            window.dispatchEvent(new CustomEvent('gss-sync-success', { detail: { movementId } }));
         } catch (error) {
-            console.error("[GSS] ❌ Error en sincronización:", error);
+            console.error("[GSS] ❌ Error en sincronización modular:", error);
             window.dispatchEvent(new CustomEvent('gss-sync-error', { detail: { error } }));
         }
     }
