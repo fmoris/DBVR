@@ -349,7 +349,7 @@ export class CombatSystem {
   /** Acción de recarga disparada por la IA */
   public enemyTriggerRecharge(): void {
     this.stats.enemyAttacking = false; 
-    this.stats.enemyAttackName = "Recargando KI";
+    this.stats.enemyAttackName = "El enemigo recarga KI";
     this.stats.enemyAttackType = null;
     this.emit();
     setTimeout(() => {

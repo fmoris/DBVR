@@ -40,20 +40,20 @@ export class StatusPanel extends HUDPanel {
         // --- 1. Estado Primario (Arriba, Grande) ---
         this.statusText = new TextBlock("primary-status", "");
         this.statusText.color = "cyan";
-        this.statusText.fontSize = 28;
+        this.statusText.fontSize = 42; // Aumentado significativamente
         this.statusText.fontStyle = "bold";
         this.statusText.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_CENTER;
         this.statusText.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-        this.statusText.paddingTop = "10px";
+        this.statusText.paddingTop = "15px";
         this.statusBg.addControl(this.statusText);
 
         // --- 2. Log de Notificaciones (Abajo, Lista) ---
         this.logText = new TextBlock("log-txt", "");
         this.logText.color = "rgba(255,255,255,0.8)";
-        this.logText.fontSize = 18;
+        this.logText.fontSize = 28; // Aumentado para legibilidad VR
         this.logText.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_CENTER;
         this.logText.textVerticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-        this.logText.paddingTop = "70px"; // Debajo del primario
+        this.logText.paddingTop = "85px"; // Bajado para no solapar con el título grande
         this.logText.lineSpacing = "5px";
         this.statusBg.addControl(this.logText);
     }

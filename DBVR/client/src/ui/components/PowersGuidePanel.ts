@@ -26,7 +26,7 @@ export class PowersGuidePanel extends HUDPanel {
     constructor(scene: Scene, _combat: CombatSystem, private inputManager: InputManager) {
         super(scene, {
             name: "vrHud-powers",
-            width: 0.90,
+            width: 0.65,
             height: 0.80,
             resolution: 1400,
         });
@@ -105,19 +105,16 @@ export class PowersGuidePanel extends HUDPanel {
             "hands_left_shoulder_crossed": "Hombro Izquierdo: Manos cruzadas (Galick prep)",
             "ki_prep": "Mano lista: Mano semi-abierta al frente",
             "ki_fire": "Disparo rápido: Empuje corto y veloz",
-            "ki_charge_prep": "Carga concentrada: Brazo estirado cubriendo el pecho",
-            "ki_charge_fire": "Ráfaga potente: Sacudida frontal",
-            "recharge_p1": "Máximo Poder: Puños cerrados cerca de la cara",
-            "recharge_p2": "Grito de Guerra: Abre los brazos con fuerza lateral",
+            "recharge_prep": "Máximo Poder: Puños cerrados cerca de la cara",
+            "recharge_active": "Grito de Guerra: Abre los brazos con fuerza lateral",
             "palms_forward_push_wide": "¡Super Disparo!: Empuje masivo con ambas manos",
             "arms_crossed_chest": "Pared: Brazos en cruz (Shield)",
             "kaioken": "¡KAIOKEN!: Aumento de poder masivo",
         };
 
         const basicMoves = [
-            { id: "KI_BLAST", name: "Ataque de Ki Rápido", p: "ki_prep", f: "ki_fire", cost: "10 KI", time: "Instant" },
-            { id: "CHARGED_KI_BLAST", name: "Ataque de Ki Cargado", p: "ki_charge_prep", f: "ki_charge_fire", cost: "1.5% Ki tick", time: "Variable" },
-            { id: "RECHARGE", name: "Recargar Ki", p: "recharge_p1", f: "recharge_p2", cost: "0 KI", time: "Continuo" }
+            { id: "KI_BLAST", name: "Ataque de Ki", p: "ki_prep", f: "ki_fire", cost: "10 KI", time: "Instant/Charge" },
+            { id: "RECHARGE", name: "Recargar Ki", p: "recharge_prep", f: "recharge_active", cost: "0 KI", time: "Continuo" }
         ];
 
         if (!filterPower) {
@@ -155,60 +152,47 @@ export class PowersGuidePanel extends HUDPanel {
         }
     }
 
-    private addPowerItem(id: string, name: string, prep: string, fire: string, cost: string, type: string, onCal?: any, onReset?: any, onSimulate?: any, highlighted: boolean = false): void {
+    private addPowerItem(id: string, name: string, _prep: string, _fire: string, _cost: string, _type: string, onCal?: any, onReset?: any, onSimulate?: any, highlighted: boolean = false): void {
         const container = new Rectangle(`p-guide-${id}`);
         container.width = "100%";
-        container.heightInPixels = 160;
+        container.heightInPixels = 110; // Reducido al quitar descripciones
         container.thickness = 0;
-        container.paddingBottomInPixels = 10;
+        container.paddingBottomInPixels = 15;
         container.background = highlighted ? "rgba(0,255,136,0.1)" : "transparent";
         this.powersStack.addControl(container);
 
         const pTitle = new TextBlock(`pt-${id}`, name.toUpperCase());
         pTitle.color = highlighted ? "#00ff88" : "#ffffff";
-        pTitle.fontSize = 24;
+        pTitle.fontSize = 32; // Aumentado como se pidió
         pTitle.fontStyle = "bold";
         pTitle.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
-        pTitle.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
+        pTitle.verticalAlignment = Control.VERTICAL_ALIGNMENT_CENTER;
+        pTitle.left = "20px";
         container.addControl(pTitle);
 
-        const pGestures = new TextBlock(`pg-${id}`, `Pasos: ${prep} -> ${fire}`);
-        pGestures.color = "#aaaaaa";
-        pGestures.fontSize = 18;
-        pGestures.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
-        pGestures.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-        pGestures.top = "38px";
-        container.addControl(pGestures);
-        
-        const pInfo = new TextBlock(`pc-${id}`, `${cost} | Tipo: ${type}`);
-        pInfo.color = highlighted ? "#00ff88" : "#ff8800";
-        pInfo.fontSize = 16;
-        pInfo.textHorizontalAlignment = Control.HORIZONTAL_ALIGNMENT_LEFT;
-        pInfo.verticalAlignment = Control.VERTICAL_ALIGNMENT_TOP;
-        pInfo.top = "68px";
-        container.addControl(pInfo);
+        // Ya no renderizamos pGestures ni pInfo como se pidió
 
         // Buttons
         const calStack = new StackPanel(`cal-stack-${id}`);
         calStack.isVertical = false;
-        calStack.width = "400px";
-        calStack.height = "50px";
-        calStack.spacing = 8;
+        calStack.width = "500px"; // Ajustado para el nuevo ancho del panel
+        calStack.height = "65px";
+        calStack.spacing = 10;
         calStack.horizontalAlignment = Control.HORIZONTAL_ALIGNMENT_RIGHT;
-        calStack.verticalAlignment = Control.VERTICAL_ALIGNMENT_BOTTOM;
+        calStack.verticalAlignment = Control.VERTICAL_ALIGNMENT_CENTER;
         container.addControl(calStack);
 
         const count1 = this.inputManager.getGSS().getGestureCount(this.getLabelForPower(id, "PREP"));
         const count2 = this.inputManager.getGSS().getGestureCount(this.getLabelForPower(id, "FIRE"));
 
-        const btn1 = this.createCalBtn(`cal1-${id}`, `F1: ${count1}`, "#aa4400", () => { console.log(`[PGP] Cal1 click: ${id}`); onCal && onCal(id, "PREP"); }, 85);
-        const btn2 = this.createCalBtn(`cal2-${id}`, `F2: ${count2}`, "#cc6622", () => { console.log(`[PGP] Cal2 click: ${id}`); onCal && onCal(id, "FIRE"); }, 85);
-        const btnR = this.createCalBtn(`res-${id}`, "RESET", "#660000", () => { console.log(`[PGP] Reset click: ${id}`); onReset && onReset(id); }, 75);
+        const btn1 = this.createCalBtn(`cal1-${id}`, `F1: ${count1}`, "#aa4400", () => { console.log(`[PGP] Cal1 click: ${id}`); onCal && onCal(id, "PREP"); }, 120);
+        const btn2 = this.createCalBtn(`cal2-${id}`, `F2: ${count2}`, "#cc6622", () => { console.log(`[PGP] Cal2 click: ${id}`); onCal && onCal(id, "FIRE"); }, 120);
+        const btnR = this.createCalBtn(`res-${id}`, "RESET", "#660000", () => { console.log(`[PGP] Reset click: ${id}`); onReset && onReset(id); }, 110);
         const btnS = this.createCalBtn(`sim-${id}`, "👁️ SIM", "#0055ff", () => { 
             console.log(`[PGP] Sim click: ${id}`);
             if (onSimulate) onSimulate(id);
             else console.warn(`[PGP] Sim callback is UNDEFINED for ${id}`);
-        }, 90);
+        }, 120);
 
         calStack.addControl(btn1);
         calStack.addControl(btn2);
@@ -216,13 +200,15 @@ export class PowersGuidePanel extends HUDPanel {
         calStack.addControl(btnS);
     }
 
-    private createCalBtn(name: string, text: string, bg: string, action: () => void, width: number = 85): Button {
+    private createCalBtn(name: string, text: string, bg: string, action: () => void, width: number = 120): Button {
         const btn = Button.CreateSimpleButton(name, text);
         btn.widthInPixels = width;
-        btn.height = "42px";
+        btn.height = "60px"; // Aumentado significativamente
         btn.color = "white";
+        btn.fontSize = 20; // Aumentado para legibilidad VR
+        btn.fontStyle = "bold";
         btn.background = bg;
-        btn.cornerRadius = 5;
+        btn.cornerRadius = 8;
         // Usamos PointerDown en lugar de Click porque en VR el pequeño movimiento del control
         // al apretar el gatillo a menudo se interpreta como un "arrastre" (drag) por el ScrollViewer,
         // lo que anula el evento onPointerClickObservable.
@@ -238,10 +224,8 @@ export class PowersGuidePanel extends HUDPanel {
             return (phase === "PREP") ? "genkidama_preparation" : "genkidama_firing";
         } else if (pId === "ki_blast") {
             return (phase === "PREP") ? "ki_prep" : "ki_fire";
-        } else if (pId === "charged_ki_blast") {
-            return (phase === "PREP") ? "ki_charge_prep" : "ki_charge_fire";
         } else if (pId === "recharge") {
-            return (phase === "PREP") ? "recharge_p1" : "recharge_p2";
+            return (phase === "PREP") ? "recharge_prep" : "recharge_active";
         } else {
             const power = (powersConfig as any)[pId];
             return (power && power.vr_gestures) 

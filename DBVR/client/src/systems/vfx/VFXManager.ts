@@ -407,6 +407,7 @@ export class VFXManager {
   updateChargeEffect(elapsed: number, type: string, position?: Vector3, targetTime: number = 2.0): void {
     const progress = Math.min(1.0, elapsed / targetTime);
     
+    // 1. Sincronización de posición instantánea
     if (this.chargeMesh && position) {
         this.chargeMesh.position.copyFrom(position);
     }
@@ -414,34 +415,39 @@ export class VFXManager {
     if (this.chargeLight) {
         if (position) this.chargeLight.position.copyFrom(position);
         
+        // La luz crece con el progreso
         if (progress >= 1.0) {
             const overCharge = elapsed - targetTime;
-            this.chargeLight.intensity = Math.min(5.0, 1.0 + overCharge * 2.0);
-            this.chargeLight.range = 8 + Math.min(12, overCharge * 4);
+            this.chargeLight.intensity = 1.5 + Math.min(3.5, overCharge * 2.0);
+            this.chargeLight.range = 7 + Math.min(8, overCharge * 4);
         } else {
-            this.chargeLight.intensity = progress * 1.5; // Aumentado para mayor visibilidad
-            this.chargeLight.range = 3 + progress * 4;
+            this.chargeLight.intensity = progress * 1.5; 
+            this.chargeLight.range = 2 + progress * 5;
         }
     }
     
     if (this.chargeMesh) {
-        // Phase 17: La esfera empieza casi invisible (0.01) y crece al 100% (1.2 para especiales grandes)
-        const maxScale = (type === "genkidama" || type === "finalFlash") ? 1.5 : 1.0;
-        const baseScale = 0.01 + (maxScale * progress); 
-        const pulse = progress >= 1.0 ? (Math.sin(elapsed * 12) * 0.1) : 0;
-        const s = baseScale + pulse;
+        // ESCALADO DINÁMICO: La esfera parte pequeña (0.05) y llega a maxScale (1.0 o 1.5)
+        const maxScale = (type === "genkidama" || type === "finalFlash" || type === "super_kamehameha") ? 1.5 : 1.0;
+        
+        // Usar una curva suave para el crecimiento
+        const currentScale = 0.05 + (maxScale - 0.05) * progress;
+        
+        // Pulsación si ya está cargado al máximo
+        const pulse = progress >= 1.0 ? (Math.sin(elapsed * 15) * 0.05) : 0;
+        const s = currentScale + pulse;
         this.chargeMesh.scaling.set(s, s, s);
 
-        // Iluminación progresiva del material (Emisión)
+        // Iluminación del material
         const mat = this.chargeMesh.material as StandardMaterial;
         if (mat) {
-            const intensity = 0.1 + (progress * 0.9); // De tenue a intenso
-            if (type === "kamehameha" || type === "normal") {
-                mat.emissiveColor.set(0.1 * intensity, 0.4 * intensity, 1.0 * intensity);
+            const emissiveIntensity = 0.2 + (progress * 0.8);
+            if (type.includes("kamehameha") || type === "normal") {
+                mat.emissiveColor.set(0.1 * emissiveIntensity, 0.4 * emissiveIntensity, 1.0 * emissiveIntensity);
             } else if (type === "finalFlash" || type === "genkidama") {
-                mat.emissiveColor.set(1.0 * intensity, 0.8 * intensity, 0.2 * intensity);
+                mat.emissiveColor.set(1.0 * emissiveIntensity, 0.8 * emissiveIntensity, 0.2 * emissiveIntensity);
             } else {
-                mat.emissiveColor.set(intensity, intensity * 0.5, 0);
+                mat.emissiveColor.set(emissiveIntensity, emissiveIntensity * 0.5, 0);
             }
         }
     }

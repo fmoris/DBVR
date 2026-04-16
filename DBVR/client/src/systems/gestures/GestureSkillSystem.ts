@@ -71,7 +71,7 @@ export class GestureSkillSystem {
     // Callbacks
     public onAttack: (name: string, power: number, hand: 'left' | 'right' | 'both', character: string) => void = () => { };
     public onPhaseChange: (from: string, to: string) => void = () => { };
-    public onChargeUpdate: (attackName: string, chargeRatio: number) => void = () => { };
+    public onChargeUpdate: (attackName: string, chargeRatio: number, ctx: XRHandsContext) => void = () => { };
     public onCancel: () => void = () => { };
 
 
@@ -541,9 +541,13 @@ export class GestureSkillSystem {
         this.setState('idle');
     }
 
-    public fireAttack(name: string, power: number, hand: 'left' | 'right' | 'both') {
+    public fireAttack(name: string, power: number, hand: 'left' | 'right' | 'both', autoIdle: boolean = true) {
         this.onAttack(name, power, hand, this.activeCharacter?.id || 'unknown');
         this.chargeStartTime = performance.now(); // reset para cooldown/etc
+        
+        if (autoIdle) {
+            this.setState('idle');
+        }
     }
 
     public getActiveHand(ctx: XRHandsContext): 'left' | 'right' {
@@ -779,9 +783,8 @@ export class GestureSkillSystem {
             this.classifier = knnClassifier.create();
         }
 
-        // 1. Limpiar Historia y LocalStorage
+        // 1. Limpiar Historia
         this._sessionHistory = {};
-        localStorage.removeItem(`gss_model_${id}`);
         
         // 2. Recargar (esto disparará la carga de defaultData y sanitización de 46-dim)
         this.switchCharacter(id);

@@ -276,15 +276,17 @@ export class VRHud {
   private updateStatusAndActions(stats: GameStats): void {
     if (stats.isSlowMotion) {
       this.statusPanel.updateStatus("⚡ BULLET TIME", "#cc44ff", "rgba(80,0,120,0.75)", "#cc44ff", 2);
+    } else if (stats.combatState === "charging" || stats.combatState === "charging_special") {
+      const pct = Math.min(100, (stats.chargeTime / 8) * 100);
+      this.statusPanel.updateStatus(`⚡ CARGANDO ${pct.toFixed(0)}%`, "#ffcc00", "rgba(60,40,0,0.75)", "#ffcc00", 2);
+    } else if (stats.combatState === "recharging") {
+      this.statusPanel.updateStatus("⚡ RECARGANDO TU KI", "#00ccff", "rgba(0,40,60,0.75)", "#00ccff", 2);
     } else if (stats.enemyAttackName) {
       const isAttacking = stats.enemyAttacking;
       this.statusPanel.updateStatus((isAttacking ? "⚠ " : "ℹ ") + stats.enemyAttackName, 
         isAttacking ? "#ff2222" : "#00ff88", 
         isAttacking ? "rgba(80,0,0,0.75)" : "rgba(0,60,20,0.75)",
         isAttacking ? "#ff2222" : "#00ff88", 2);
-    } else if (stats.combatState === "charging" || stats.combatState === "charging_special") {
-      const pct = Math.min(100, (stats.chargeTime / 8) * 100);
-      this.statusPanel.updateStatus(`⚡ CARGANDO ${pct.toFixed(0)}%`, "#ffcc00", "rgba(60,40,0,0.75)", "#ffcc00", 2);
     } else {
        this.statusPanel.setStatusText("");
     }
@@ -413,7 +415,7 @@ export class VRHud {
     this.debugPanel.updateDebug(status, statusColor, formatJoints(leftHandActive, leftJoints), formatJoints(rightHandActive, rightJoints), gestureInfo);
   }
 
-  public showToast(msg: string, col: string = "white", dur: number = 4000): void { this.statusPanel.showToast(msg, col, dur); }
+  public showToast(msg: string, col: string = "white", dur: number = 8000): void { this.statusPanel.showToast(msg, col, dur); }
   public hideToast(): void { this.statusPanel.hideToast(); }
 
   private startCalibration(powerId: string, phase: "PREP" | "FIRE"): void {
@@ -489,8 +491,7 @@ export class VRHud {
       if (pId === "kamehameha") return (phase === "PREP") ? "kamehameha_preparation" : "kamehameha_firing";
       if (pId === "genkidama") return (phase === "PREP") ? "genkidama_preparation" : "genkidama_firing";
       if (pId === "ki_blast") return (phase === "PREP") ? "ki_prep" : "ki_fire";
-      if (pId === "charged_ki_blast") return (phase === "PREP") ? "ki_charge_prep" : "ki_charge_fire";
-      if (pId === "recharge") return (phase === "PREP") ? "recharge_p1" : "recharge_p2";
+      if (pId === "recharge") return (phase === "PREP") ? "recharge_prep" : "recharge_active";
       
       const power = (powersConfig as any)[pId];
       return (power && power.vr_gestures) 

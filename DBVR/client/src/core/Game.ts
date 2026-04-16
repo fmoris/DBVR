@@ -12,6 +12,7 @@ import { GestureDebugOverlay } from "../systems/gestures/GestureDebugOverlay";
 import { PlayerController } from "../systems/input/PlayerController";
 import { XRManager } from "../systems/xr/XRManager";
 import { AudioManager } from "../systems/audio/AudioManager";
+import { XRHandsContext } from "../systems/gestures/GestureSkillSystem";
 import gokuConfig from "../models/goku.json";
 import vegetaConfig from "../models/vegeta.json";
 
@@ -250,21 +251,48 @@ export class Game {
     };
 
     gss.onPhaseChange = (from: string, to: string) => {
-        if (to === "kame_charge" || to.includes("charge")) {
+        const isChargingState = (s: string) => s.includes("charge") || s.includes("firing");
+
+        if (isChargingState(to)) {
              // Sincronizar inicio de carga en CombatSystem si no ha empezado
-             const attack = to === "kame_charge" ? "kamehameha" : "charged_ki_blast";
+             const attack = to.includes("kame") ? "kamehameha" : "charged_ki_blast";
              if (this.combat.getStats().combatState === "neutral") {
                  this.combat.triggerSpecial(attack);
              }
-        } else if (to === "idle" && from.includes("charge")) {
+        } else if (to === "idle" && isChargingState(from)) {
             // Cancelado en GSS -> Cancelar en Combat
             this.combat.cancelSpecial();
         }
     };
 
-    gss.onChargeUpdate = (_name: string, _ratio: number) => {
-        // Opcional: Actualizar VFX de carga en tiempo real con el ratio del GSS
-        // this.combat.updateChargeRatio(_ratio);
+    gss.onChargeUpdate = (name: string, ratio: number, ctx: XRHandsContext) => {
+        if (!this.started) return;
+
+        let chargePos: Vector3 | undefined;
+        
+        // 1. Extraer posiciones absolutas de las manos
+        const lPos = ctx.leftWrist?.absolutePosition;
+        const rPos = ctx.rightWrist?.absolutePosition;
+
+        if (name === "kamehameha" || name === "super_kamehameha" || name === "genkidama") {
+            // Posicionar en el centro de ambas manos
+            if (lPos && rPos) {
+                chargePos = Vector3.Center(lPos, rPos);
+            } else {
+                chargePos = lPos || rPos;
+            }
+        } else if (name === "ki_blast_charged") {
+            // Posicionar en la mano que está disparando
+            const hand = gss.lastBlastHand || 'right';
+            chargePos = hand === 'left' ? lPos : rPos;
+        }
+
+        // 2. Sincronizar con el sistema de combate para mover el VFX
+        if (chargePos) {
+            this.combat.updateSpecialChargeOrigin(chargePos);
+            // También podemos forzar un refresco inmediato del escalado/luz si el CombatSystem no lo hace cada frame
+            // this.combat.updateChargeRatio(ratio); 
+        }
     };
   }
 

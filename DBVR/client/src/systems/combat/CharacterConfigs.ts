@@ -31,12 +31,14 @@ export const GOKU_CONFIG: CharacterConfig = {
     id: 'goku',
     extractors: {
         'idle': 'wristOnly',
-        'kame_charge': 'wristOnly',
+        'kame_charge': 'wristAndFingertips', // Mejorado para precisión
         'genki_charge': 'wristOnly',
         'super_kame_charge': 'wristAndFingertips',
         'ki_blast_ready': 'wristOnly',
+        'ki_blast_firing': 'wristAndFingertips', // Fase 2
         'kaioken_ready': 'wristAndFingertips',
-        'recharging': 'wristAndFingertips'
+        'recharge_ready': 'wristOnly', // Fase 1
+        'recharging': 'wristAndFingertips' // Fase 2
     },
     thresholds: {
         'idle': 0.70,
@@ -44,15 +46,17 @@ export const GOKU_CONFIG: CharacterConfig = {
         'genki_charge': 0.75,
         'super_kame_charge': 0.80,
         'ki_blast_ready': 0.65,
+        'ki_blast_firing': 0.85,
         'kaioken_ready': 0.85,
-        'recharging': 0.85
+        'recharge_ready': 0.75,
+        'recharging': 0.90
     },
     timing: {
         kamehameha: { minChargeMs: 1250, maxChargeMs: 2500, releaseVelocity: 1.0 },
         genkidama: { minChargeMs: 2500, maxChargeMs: 5000, releaseVelocity: 1.0 },
         super_kamehameha: { minChargeMs: 1500, maxChargeMs: 3000, releaseVelocity: 1.2 },
         kaioken: { minChargeMs: 1000, maxChargeMs: 2000, releaseVelocity: 0.5 },
-        kiBlast: { quickThresholdMs: 200, chargeStartMs: 800, quickVelocity: 0.8 },
+        kiBlast: { minChargeMs: 1000, maxChargeMs: 1500, quickVelocity: 0.8 },
     },
     gestureIds: [
         'kamehameha_preparation',
@@ -112,35 +116,49 @@ export const GOKU_CONFIG: CharacterConfig = {
                         this.startCharge('ki_blast', activeHand, now);
                     }
                 } else if (gesture === g.recharge_prep && _confidence > 0.85) {
-                    // Recharge: Manos en mitad inferior del torso (y < -0.2)
+                    // Phase 1: Manos en posición, pero aún no cargando
                     const isHandsLow = gss.lastLocalL.y < -0.2 && gss.lastLocalR.y < -0.2;
                     if (isHandsLow) {
-                        this.setState('recharging');
+                        this.setState('recharge_ready');
                     }
+                }
+                break;
+            }
+
+            case 'recharge_ready': {
+                const isHandsLow = gss.lastLocalL.y < -0.2 && gss.lastLocalR.y < -0.2;
+                if (!isHandsLow) {
+                    this.setState('idle');
+                } else if (gesture === g.recharge_active && _confidence > 0.90) {
+                    // Transición a la carga real (Fase 2) - Más estricta para evitar ruido
+                    this.setState('recharging');
                 }
                 break;
             }
 
             case 'recharging': {
                 const isHandsLow = gss.lastLocalL.y < -0.2 && gss.lastLocalR.y < -0.2;
-                // Aceptamos cualquiera de las dos fases de recharge para mantener el estado
-                const isRecharging = gesture === g.recharge_prep || gesture === g.recharge_active;
                 
-                if (!isRecharging || !isHandsLow) {
+                if (!isHandsLow) {
                     this.setState('idle');
+                } else if (gesture === g.recharge_prep) {
+                    // Volver a posición de espera (Pausar carga)
+                    this.setState('recharge_ready');
+                } else if (gesture === g.recharge_active) {
+                    // Carga activa (Fase 2)
+                    this.fireAttack('recharge', 1.0, 'both', false);
                 } else {
-                    this.fireAttack('recharge', 1.0, 'both');
+                    this.setState('idle');
                 }
                 break;
             }
 
             case 'kame_charge': {
                 const ratio = this.getChargeRatio(t?.kamehameha.maxChargeMs || 2500, now);
-                this.onChargeUpdate('kamehameha', ratio);
+                this.onChargeUpdate('kamehameha', ratio, ctx);
                 
                 if (gesture === g.kame_fire && (now - this.chargeStartTime) >= (t?.kamehameha.minChargeMs || 1000)) {
                     this.fireAttack('kamehameha', 1.0 + ratio * 2.0, 'both');
-                    this.setState('idle');
                 } else if (gesture !== g.kame_prep && gesture !== g.kame_fire && gesture !== 'none') {
                     // Si el gesto cambia a algo totalmente distinto, cancelar. 
                     console.log(`[GSS] Carga de KAMEHAMEHA cancelada (Gesto: ${gesture})`);
@@ -151,11 +169,10 @@ export const GOKU_CONFIG: CharacterConfig = {
 
             case 'genki_charge': {
                 const ratio = this.getChargeRatio(t?.genkidama.maxChargeMs || 5000, now);
-                this.onChargeUpdate('genkidama', ratio);
+                this.onChargeUpdate('genkidama', ratio, ctx);
 
                 if (gesture === g.genki_fire && (now - this.chargeStartTime) >= (t?.genkidama.minChargeMs || 2500)) {
                     this.fireAttack('genkidama', 2.0 + ratio * 8.0, 'both');
-                    this.setState('idle');
                 } else if (gesture !== g.genki_prep && gesture !== g.genki_fire && gesture !== 'none') {
                     console.log(`[GSS] Carga de GENKIDAMA cancelada (Gesto: ${gesture})`);
                     this.setState('idle');
@@ -165,11 +182,10 @@ export const GOKU_CONFIG: CharacterConfig = {
 
             case 'super_kame_charge': {
                 const ratio = this.getChargeRatio(t?.super_kamehameha.maxChargeMs || 3000, now);
-                this.onChargeUpdate('super_kamehameha', ratio);
+                this.onChargeUpdate('super_kamehameha', ratio, ctx);
 
                 if (gesture === g.skame_fire && (now - this.chargeStartTime) >= (t?.super_kamehameha.minChargeMs || 1500)) {
                     this.fireAttack('super_kamehameha', 3.0 + ratio * 5.0, 'both');
-                    this.setState('idle');
                 } else if (gesture !== g.skame_prep && gesture !== g.skame_fire && gesture !== 'none') {
                     console.log(`[GSS] Carga de SUPER KAMEHAMEHA cancelada (Gesto: ${gesture})`);
                     this.setState('idle');
@@ -178,21 +194,40 @@ export const GOKU_CONFIG: CharacterConfig = {
             }
 
             case 'ki_blast_ready':
+                // Al detectar el gesto de fuego, empezamos la fase de "mantenimiento" (firing)
                 if (gesture === g.kiblast_fire) {
-                    const elapsed = now - this.chargeStartTime;
-                    const hand = this.lastBlastHand || 'right';
-                    if (elapsed < (t?.kiBlast.quickThresholdMs || 200)) {
-                        this.fireAttack('ki_blast_quick', 0.5, hand);
-                    } else {
-                        const ratio = this.getChargeRatio(t?.kiBlast.chargeStartMs || 800, now);
-                        this.fireAttack('ki_blast_charged', 1.0 + ratio, hand);
-                    }
-                    this.setState('idle');
-                } else if (gesture !== g.kiblast_prep && gesture !== g.kiblast_fire && gesture !== 'none') {
+                    this.setState('ki_blast_firing');
+                    this.startCharge('ki_blast', this.lastBlastHand || 'right', now);
+                } else if (gesture !== g.kiblast_prep && gesture !== 'none') {
                     console.log(`[GSS] Preparación de KI BLAST cancelada (Gesto: ${gesture})`);
                     this.setState('idle');
                 }
                 break;
+
+            case 'ki_blast_firing': {
+                const elapsed = now - this.chargeStartTime;
+                const hand = this.lastBlastHand || 'right';
+                const tBlast = t?.kiBlast;
+
+                // Mientras mantenga el gesto, actualizamos la carga (solo si sobrepasa el umbral de 1s)
+                if (gesture === g.kiblast_fire) {
+                    if (elapsed >= (tBlast?.minChargeMs || 1000)) {
+                        // El ratio de carga para el efecto visual empieza a contar desde el segundo 1
+                        const chargeRatio = Math.min((elapsed - 1000) / ((tBlast?.maxChargeMs || 1500) - 1000), 1.0);
+                        this.onChargeUpdate('ki_blast_charged', chargeRatio, ctx);
+                    }
+                } else {
+                    // DISPARO POR LIBERACIÓN (Release on Loss)
+                    if (elapsed < (tBlast?.minChargeMs || 1000)) {
+                        this.fireAttack('ki_blast_normal', 0.5, hand);
+                    } else {
+                        const chargeRatio = Math.min((elapsed - 1000) / ((tBlast?.maxChargeMs || 1500) - 1000), 1.0);
+                        this.fireAttack('ki_blast_charged', 1.0 + chargeRatio * 1.5, hand);
+                    }
+                    // El auto-idle de fireAttack nos devuelve a base
+                }
+                break;
+            }
         }
     }
 };
@@ -200,7 +235,7 @@ export const GOKU_CONFIG: CharacterConfig = {
 // Placeholder para Vegeta
 export const VEGETA_CONFIG: CharacterConfig = {
     id: 'vegeta',
-    gestureIds: ['ki_prep', 'ki_fire', 'recharge'], // Vegeta comparte gestos con Goku
+    gestureIds: ['ki_prep', 'ki_fire', 'recharge_prep', 'recharge_active'], // Sincronizado
     extractors: { 'idle': 'wristOnly' },
     thresholds: { 'idle': 0.70 },
     fsmHandler: function(this: GestureSkillSystem, _gesture: string, _confidence: number, _ctx: XRHandsContext, _now: number) {
