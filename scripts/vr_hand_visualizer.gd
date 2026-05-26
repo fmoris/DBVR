@@ -175,10 +175,11 @@ func _process(_delta: float) -> void:
 				]:
 					scale_factor = 1.25 # Puntas más visibles
 				elif joint == XRHandTracker.HAND_JOINT_PALM:
-					scale_factor = 2.0  # Palma central prominente
-					
-				# Asignar transformaciones globales (cero latencia física)
-				mi.global_transform = joint_transform
+				# Asignar transformaciones globales reales multiplicando por el origen de XR (cero latencia física)
+				if xr_origin:
+					mi.global_transform = xr_origin.global_transform * joint_transform
+				else:
+					mi.global_transform = joint_transform
 				mi.scale = Vector3.ONE * scale_factor
 				
 				# Micro-animación: sutil pulsación sinusoidal de energía Ki en los joints
@@ -251,10 +252,16 @@ func _physics_process(delta: float) -> void:
 	if physics_fist and tracker:
 		var flags = tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_PALM)
 		if (flags & XRHandTracker.HAND_JOINT_FLAG_POSITION_VALID):
-			var palm_transform = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM)
-			var target_pos = palm_transform.origin
+			var palm_local_transform = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM)
 			
-			# Vector de desplazamiento y distancia hasta la mano física real
+			# Convertir posición local de palma a coordenadas globales reales
+			var target_pos = palm_local_transform.origin
+			var target_basis = palm_local_transform.basis
+			if xr_origin:
+				target_pos = xr_origin.global_transform * target_pos
+				target_basis = xr_origin.global_transform.basis * target_basis
+			
+			# Vector de desplazamiento y distancia hasta la mano física real en el espacio global
 			var direction = target_pos - physics_fist.global_position
 			var distance = direction.length()
 			
@@ -267,8 +274,8 @@ func _physics_process(delta: float) -> void:
 				# Si colisiona con un muro o rival, se detiene físicamente en el punto de contacto.
 				physics_fist.linear_velocity = direction * force_multiplier
 				
-			# Slerp suave para la rotación (orientación física del puño)
-			physics_fist.global_transform.basis = physics_fist.global_transform.basis.slerp(palm_transform.basis, 15.0 * delta)
+			# Slerp suave para la rotación (orientación física del puño en base global)
+			physics_fist.global_transform.basis = physics_fist.global_transform.basis.slerp(target_basis, 15.0 * delta)
 
 # --- Métodos Avanzados de Combate y Efectos de Ki (Acción Posterior) ---
 
