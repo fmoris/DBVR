@@ -94,12 +94,28 @@ func _process(delta: float) -> void:
 	var left_valid = left_tracker and _is_joint_valid(left_tracker, XRHandTracker.HAND_JOINT_WRIST)
 	var right_valid = right_tracker and _is_joint_valid(right_tracker, XRHandTracker.HAND_JOINT_WRIST)
 	
-	# Filtro de gracia por pérdida temporal de tracking (parpadeos)
-	if not left_valid or not right_valid:
+	# Filtro de gracia por pérdida temporal de tracking (parpadeos) específico de la mano activa
+	var active_gesture_needs_left = false
+	var active_gesture_needs_right = false
+	
+	if is_charging_ki or current_node == gesture_tree.get("CROSS_ARMS_MOUTH", {}):
+		active_gesture_needs_left = true
+		active_gesture_needs_right = true
+	elif is_charging_ki_blast_left or current_node == gesture_tree.get("ARM_STRETCHED_OPEN_LEFT", {}):
+		active_gesture_needs_left = true
+	elif is_charging_ki_blast_right or current_node == gesture_tree.get("ARM_STRETCHED_OPEN_RIGHT", {}):
+		active_gesture_needs_right = true
+		
+	var tracking_failed = false
+	if active_gesture_needs_left and not left_valid:
+		tracking_failed = true
+	if active_gesture_needs_right and not right_valid:
+		tracking_failed = true
+		
+	if tracking_failed:
 		tracking_loss_frames += 1
 		if tracking_loss_frames > MAX_GRACE_FRAMES:
-			if current_node != gesture_tree:
-				_cancel_action("Señal de tracking perdida")
+			_cancel_action("Señal de tracking perdida en mano activa")
 			return
 	else:
 		tracking_loss_frames = 0
@@ -162,60 +178,76 @@ func _process(delta: float) -> void:
 	# Evaluar de forma independiente cada mano si no se está cargando Ki general
 	if not is_charging_ki:
 		# --- MANO IZQUIERDA ---
-		var is_stretched_l = left_valid and pos_l.distance_to(head_pos) > 0.55
-		var is_open_l = left_valid and _is_hand_open(left_tracker)
-		var is_chest_height_l = left_valid and pos_l.y > (head_height * 0.5) and pos_l.y < (head_height * 1.1)
-		
-		if is_stretched_l and is_open_l and is_chest_height_l:
-			_feed_trie("ARM_STRETCHED_OPEN_LEFT")
+		if is_charging_ki_blast_left:
+			# Ya estamos en el estado intermedio de carga del Ki Blast Izquierdo.
+			# Aquí las reglas de pose se flexibilizan para permitir el empuje balístico:
+			# Ignoramos la pose de mano abierta e inclinación vertical momentánea.
 			
-			# Carga continua de Ki Blast Izquierdo
-			if current_node == gesture_tree.get("ARM_STRETCHED_OPEN_LEFT", {}):
-				is_charging_ki_blast_left = true
-				ki_blast_charge_time_left = min(ki_blast_charge_time_left + delta, 2.5)
-				# Solo descontar Ki si no ha alcanzado la carga máxima de 2.5s
-				if ki_blast_charge_time_left < 2.5:
-					emit_signal("ki_blast_charging", 0, ki_blast_charge_time_left, delta)
+			# 1. Carga continua de Ki Blast Izquierdo
+			ki_blast_charge_time_left = min(ki_blast_charge_time_left + delta, 2.5)
+			if ki_blast_charge_time_left < 2.5:
+				emit_signal("ki_blast_charging", 0, ki_blast_charge_time_left, delta)
+				
+			# 2. Comprobar empuje explosivo (Fase 2)
+			var forward_movement = 0.0
+			if left_valid and last_pos_left != Vector3.ZERO:
+				forward_movement = pos_l.distance_to(head_pos) - last_pos_left.distance_to(head_pos)
 			
-			# Comprobar si en este estado intermedio se realiza el empuje explosivo (Paso 2)
-			if current_node.has("FAST_THRUST_LEFT") or (current_node == gesture_tree.get("ARM_STRETCHED_OPEN_LEFT", {})):
-				if vel_l >= KIBLAST_VELOCITY_THRESHOLD:
-					var forward_movement = pos_l.distance_to(head_pos) - last_pos_left.distance_to(head_pos)
-					if forward_movement > 0.02:
-						_feed_trie("FAST_THRUST_LEFT")
+			if vel_l >= KIBLAST_VELOCITY_THRESHOLD and forward_movement > 0.01:
+				_feed_trie("FAST_THRUST_LEFT")
+			else:
+				# 3. Comprobar si se cancela por retracción del brazo o pérdida total
+				# Si se retrae el brazo claramente (distancia < 0.45 metros) o se cae
+				var is_retracted = left_valid and pos_l.distance_to(head_pos) < 0.45
+				var is_out_of_height = left_valid and (pos_l.y < (head_height * 0.45) or pos_l.y > (head_height * 1.25))
+				if is_retracted or is_out_of_height:
+					_cancel_action("Ki Blast izquierdo cancelado: brazo retraído o bajado")
+					_reset_ki_blast_charge(0)
 		else:
-			# Si el puntero está en la carga de la mano izquierda pero se retrae el brazo, cancelar
-			if current_node == gesture_tree.get("ARM_STRETCHED_OPEN_LEFT", {}):
-				_cancel_action("Ki Blast izquierdo cancelado: brazo retraído o mano cerrada")
-				_reset_ki_blast_charge(0)
+			# No estamos cargando aún. Evaluar los requisitos estrictos de entrada para el Paso 1:
+			var is_stretched_l = left_valid and pos_l.distance_to(head_pos) > 0.55
+			var is_open_l = left_valid and _is_hand_open(left_tracker)
+			var is_chest_height_l = left_valid and pos_l.y > (head_height * 0.5) and pos_l.y < (head_height * 1.1)
+			
+			if is_stretched_l and is_open_l and is_chest_height_l:
+				_feed_trie("ARM_STRETCHED_OPEN_LEFT")
+				is_charging_ki_blast_left = true
 				
 		# --- MANO DERECHA ---
-		var is_stretched_r = right_valid and pos_r.distance_to(head_pos) > 0.55
-		var is_open_r = right_valid and _is_hand_open(right_tracker)
-		var is_chest_height_r = right_valid and pos_r.y > (head_height * 0.5) and pos_r.y < (head_height * 1.1)
-		
-		if is_stretched_r and is_open_r and is_chest_height_r:
-			_feed_trie("ARM_STRETCHED_OPEN_RIGHT")
+		if is_charging_ki_blast_right:
+			# Ya estamos en el estado intermedio de carga del Ki Blast Derecho.
+			# Aquí las reglas de pose se flexibilizan para permitir el empuje balístico:
+			# Ignoramos la pose de mano abierta e inclinación vertical momentánea.
 			
-			# Carga continua de Ki Blast Derecho
-			if current_node == gesture_tree.get("ARM_STRETCHED_OPEN_RIGHT", {}):
-				is_charging_ki_blast_right = true
-				ki_blast_charge_time_right = min(ki_blast_charge_time_right + delta, 2.5)
-				# Solo descontar Ki si no ha alcanzado la carga máxima de 2.5s
-				if ki_blast_charge_time_right < 2.5:
-					emit_signal("ki_blast_charging", 1, ki_blast_charge_time_right, delta)
+			# 1. Carga continua de Ki Blast Derecho
+			ki_blast_charge_time_right = min(ki_blast_charge_time_right + delta, 2.5)
+			if ki_blast_charge_time_right < 2.5:
+				emit_signal("ki_blast_charging", 1, ki_blast_charge_time_right, delta)
+				
+			# 2. Comprobar empuje explosivo (Fase 2)
+			var forward_movement = 0.0
+			if right_valid and last_pos_right != Vector3.ZERO:
+				forward_movement = pos_r.distance_to(head_pos) - last_pos_right.distance_to(head_pos)
 			
-			# Comprobar empuje explosivo (Paso 2)
-			if current_node.has("FAST_THRUST_RIGHT") or (current_node == gesture_tree.get("ARM_STRETCHED_OPEN_RIGHT", {})):
-				if vel_r >= KIBLAST_VELOCITY_THRESHOLD:
-					var forward_movement = pos_r.distance_to(head_pos) - last_pos_right.distance_to(head_pos)
-					if forward_movement > 0.02:
-						_feed_trie("FAST_THRUST_RIGHT")
+			if vel_r >= KIBLAST_VELOCITY_THRESHOLD and forward_movement > 0.01:
+				_feed_trie("FAST_THRUST_RIGHT")
+			else:
+				# 3. Comprobar si se cancela por retracción del brazo o pérdida total
+				# Si se retrae el brazo claramente (distancia < 0.45 metros) o se cae
+				var is_retracted = right_valid and pos_r.distance_to(head_pos) < 0.45
+				var is_out_of_height = right_valid and (pos_r.y < (head_height * 0.45) or pos_r.y > (head_height * 1.25))
+				if is_retracted or is_out_of_height:
+					_cancel_action("Ki Blast derecho cancelado: brazo retraído o bajado")
+					_reset_ki_blast_charge(1)
 		else:
-			# Cancelar si se retrae el brazo de carga derecho
-			if current_node == gesture_tree.get("ARM_STRETCHED_OPEN_RIGHT", {}):
-				_cancel_action("Ki Blast derecho cancelado: brazo retraído o mano cerrada")
-				_reset_ki_blast_charge(1)
+			# No estamos cargando aún. Evaluar los requisitos estrictos de entrada para el Paso 1:
+			var is_stretched_r = right_valid and pos_r.distance_to(head_pos) > 0.55
+			var is_open_r = right_valid and _is_hand_open(right_tracker)
+			var is_chest_height_r = right_valid and pos_r.y > (head_height * 0.5) and pos_r.y < (head_height * 1.1)
+			
+			if is_stretched_r and is_open_r and is_chest_height_r:
+				_feed_trie("ARM_STRETCHED_OPEN_RIGHT")
+				is_charging_ki_blast_right = true
 
 # --- Lógica de Control del Trie-State-Machine ---
 
@@ -375,7 +407,7 @@ func _setup_sound_players() -> void:
 	# 3. Reproductor para el efecto de carga del Ki Blast
 	ki_blast_charge_player = AudioStreamPlayer.new()
 	ki_blast_charge_player.name = "KiBlastChargePlayer"
-	var charge_stream = load("res://assets/sfx/Charged KI Blast #1.mp3")
+	var charge_stream = load("res://assets/sfx/Charged_KI_Blast_1.mp3")
 	if charge_stream:
 		charge_stream.loop = false # Tono ascendente una sola vez
 		ki_blast_charge_player.stream = charge_stream
