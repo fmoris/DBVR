@@ -25,6 +25,10 @@ var np_current: float = 9000.0
 var is_recharging: bool = false
 var is_heavy_recharge: bool = false
 
+# --- Referencias y Historial de Depuración VR ---
+var debug_logs_label: RichTextLabel = null
+var debug_history: Array[String] = []
+
 func _ready() -> void:
 	if not sub_viewport or not hud_mesh:
 		return
@@ -38,6 +42,7 @@ func _ready() -> void:
 	if not Engine.is_editor_hint():
 		# Llamamos diferido para dar tiempo a que la cámara y el árbol de nodos se inicialicen completamente
 		call_deferred("_reparent_to_camera")
+		call_deferred("_setup_vr_debugger")
 
 func _reparent_to_camera() -> void:
 	var camera = get_viewport().get_camera_3d()
@@ -69,7 +74,9 @@ func _reparent_to_camera() -> void:
 			gesture_tree.ki_recharge_started.connect(_on_recharge_started)
 			gesture_tree.ki_recharge_stopped.connect(_on_recharge_stopped)
 			gesture_tree.ki_blast_fired.connect(_on_ki_blast_fired)
-			print("[VRHUD] Conexión establecida con GesturePhaseTree. Ki inicializado en 0.")
+			if gesture_tree.has_signal("gesture_logged"):
+				gesture_tree.gesture_logged.connect(log_gesture_event)
+			print("[VRHUD] Conexión establecida con GesturePhaseTree y su consola de depuración VR.")
 
 func _process(delta: float) -> void:
 	if Engine.is_editor_hint():
@@ -165,3 +172,63 @@ func format_number_with_commas(n: int) -> String:
 			res = "," + res
 			count = 0
 	return res
+
+# --- Consola Holográfica Depuradora de Gestos (Inyección Procedimental) ---
+
+## Instancia e inyecta dinámicamente la consola RichTextLabel en la UI del Viewport
+func _setup_vr_debugger() -> void:
+	var vbox = get_node_or_null("SubViewport/HUDLayout/MainPanel/MarginContainer/VBoxContainer")
+	if vbox:
+		# Crear el RichTextLabel dinámicamente
+		debug_logs_label = RichTextLabel.new()
+		debug_logs_label.name = "GestureDebuggerPanel"
+		debug_logs_label.bbcode_enabled = true
+		debug_logs_label.fit_content = true
+		debug_logs_label.custom_minimum_size = Vector2(0, 100)
+		
+		# Estilo de caja premium: panel semi-transparente oscuro tipo consola
+		var style = StyleBoxFlat.new()
+		style.bg_color = Color(0.01, 0.01, 0.03, 0.65) # Consola oscura translúcida
+		style.corner_radius_top_left = 6
+		style.corner_radius_top_right = 6
+		style.corner_radius_bottom_left = 6
+		style.corner_radius_bottom_right = 6
+		style.set_content_margin_all(8)
+		
+		debug_logs_label.add_theme_stylebox_override("normal", style)
+		
+		# Forzar tipografía compacta y de alta definición para visores VR
+		debug_logs_label.add_theme_font_size_override("normal_font_size", 12)
+		debug_logs_label.add_theme_font_size_override("bold_font_size", 12)
+		
+		vbox.add_child(debug_logs_label)
+		log_gesture_event("Consola Holográfica VR inicializada con éxito.", "success")
+		print("[VRHUD] Debugger Panel inyectado procedimentalmente con éxito en la UI interna.")
+
+## Agrega, formatea con BBCode y actualiza un log de eventos en el panel flotante
+func log_gesture_event(msg: String, type: String = "info") -> void:
+	# Obtener marca de hora actual del sistema [HH:MM:SS]
+	var time_dict = Time.get_time_dict_from_system()
+	var time_str = "%02d:%02d:%02d" % [time_dict.hour, time_dict.minute, time_dict.second]
+	
+	# Formato de colores específicos para alta legibilidad en Quest 3
+	var color_hex = "00ccff" # Celeste de base (info)
+	match type:
+		"success": color_hex = "00ff88" # Verde Ki brillante
+		"info": color_hex = "00ccff"    # Celeste Ki
+		"warning": color_hex = "ffcc00" # Amarillo
+		"error": color_hex = "ff3344"   # Rojo Ki
+		
+	var log_line = "[color=#666677][%s][/color] [color=#%s]%s[/color]" % [time_str, color_hex, msg]
+	debug_history.append(log_line)
+	
+	# Mantener un búfer circular de los últimos 4 eventos
+	if debug_history.size() > 4:
+		debug_history.remove_at(0)
+		
+	# Renderizar el búfer en la pantalla del visor
+	if debug_logs_label:
+		debug_logs_label.text = ""
+		for line in debug_history:
+			debug_logs_label.append_text(line + "\n")
+
