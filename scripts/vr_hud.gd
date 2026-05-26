@@ -3,8 +3,8 @@ extends Node3D
 
 # --- Parámetros de Posicionamiento Fijo (Espacio Local de Cámara) ---
 @export var distance_from_camera: float = 1.2
-@export var horizontal_offset: float = -0.35 # Centrado para ser visible sin cortarse en lentes (Quest 3)
-@export var vertical_offset: float = -0.3   # Ajustado un poco más arriba para comodidad visual
+@export var horizontal_offset: float = 0.0 # Centrado en el eje horizontal de la vista
+@export var vertical_offset: float = -0.3   # Situado ligeramente abajo para evitar obstruir el combate
 
 @onready var sub_viewport: SubViewport = $SubViewport
 @onready var hud_mesh: MeshInstance3D = $HUDMesh
