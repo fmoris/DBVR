@@ -40,6 +40,10 @@ var ki_blast_charge_time_right: float = 0.0
 var is_charging_ki_blast_left: bool = false
 var is_charging_ki_blast_right: bool = false
 
+# --- Reproductores de Audio de Carga de Ki ---
+var aura_start_player: AudioStreamPlayer = null
+var aura_loop_player: AudioStreamPlayer = null
+
 # --- Trackers Internos y Biometría ---
 var left_tracker: XRHandTracker
 var right_tracker: XRHandTracker
@@ -59,6 +63,7 @@ const MAX_GRACE_FRAMES: int = 4
 
 func _ready() -> void:
 	current_node = gesture_tree
+	_setup_sound_players()
 	# Enlace automático al HUD para mostrar estados generales si existe
 	var hud = get_tree().root.find_child("VRHUD", true, false)
 	if hud:
@@ -243,6 +248,12 @@ func _trigger_action(action_name: String) -> void:
 		emit_signal("ki_recharge_started", true) # Carga Máxima activada
 		emit_signal("gesture_logged", "Paso 2: ¡Carga de Ki activa a los costados de la cadera!", "success")
 		
+		# Reproducir sonidos de recarga de Ki
+		if aura_start_player:
+			aura_start_player.play()
+		if aura_loop_player:
+			aura_loop_player.play()
+		
 	elif action_name == "ki_blast_left":
 		var is_charged = ki_blast_charge_time_left >= 1.0
 		emit_signal("ki_blast_fired", 0, is_charged) # Lanzamiento Izquierdo con modificador
@@ -268,6 +279,12 @@ func _cancel_action(reason: String) -> void:
 		if is_charging_ki:
 			is_charging_ki = false
 			emit_signal("ki_recharge_stopped")
+			
+			# Detener sonidos de recarga de Ki
+			if aura_start_player:
+				aura_start_player.stop()
+			if aura_loop_player:
+				aura_loop_player.stop()
 			
 		_reset_ki_blast_charge(0)
 		_reset_ki_blast_charge(1)
@@ -317,3 +334,29 @@ func _is_hand_open(tracker: XRHandTracker) -> bool:
 		var index = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_INDEX_FINGER_TIP).origin
 		return wrist.distance_to(index) >= HAND_OPEN_DISTANCE
 	return true
+
+# --- Configuración Procedimental de Reproductores de Audio ---
+
+## Inicializa e inyecta en el árbol de nodos los reproductores de audio para los efectos de sonido de Ki
+func _setup_sound_players() -> void:
+	# 1. Reproductor para el estallido inicial del aura
+	aura_start_player = AudioStreamPlayer.new()
+	aura_start_player.name = "AuraStartPlayer"
+	var start_stream = load("res://assets/sfx/AURA.mp3")
+	if start_stream:
+		start_stream.loop = false # Un solo disparo
+		aura_start_player.stream = start_stream
+	aura_start_player.volume_db = -5.0 # Volumen óptimo para alta fidelidad
+	add_child(aura_start_player)
+	
+	# 2. Reproductor para el zumbido/bucle continuo de la energía
+	aura_loop_player = AudioStreamPlayer.new()
+	aura_loop_player.name = "AuraLoopPlayer"
+	var loop_stream = load("res://assets/sfx/aura_loop.mp3")
+	if loop_stream:
+		loop_stream.loop = true # Ciclado continuo
+		aura_loop_player.stream = loop_stream
+	aura_loop_player.volume_db = -9.0 # Ligeramente más suave
+	add_child(aura_loop_player)
+	
+	print("[GesturePhaseTree] Reproductores de audio para recarga de Ki inicializados con éxito.")
