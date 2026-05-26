@@ -4,7 +4,8 @@ extends Node
 signal phase_changed(new_phase_name: String)
 signal ki_recharge_started(is_heavy: bool)
 signal ki_recharge_stopped()
-signal ki_blast_fired(hand_side: int) # 0: Izquierda, 1: Derecha
+signal ki_blast_fired(hand_side: int, is_charged: bool) # 0: Izquierda, 1: Derecha, con modificador de cargado
+signal ki_blast_charging(hand_side: int, charge_time: float, delta: float) # Carga progresiva en vivo
 
 # NUEVA SEÑAL PARA EL DEBUGGER HUD EN VIVO
 signal gesture_logged(message: String, log_type: String) # type: "success", "info", "warning", "error"
@@ -31,8 +32,13 @@ var gesture_tree: Dictionary = {
 # --- Control del Trie-State-Machine ---
 var current_node: Dictionary
 var gesture_timer: float = 0.0
-const GESTURE_TIMEOUT: float = 1.8  # Segundos máximos para pasar del Paso 1 al Paso 2
 var is_charging_ki: bool = false
+
+# --- Control de Carga de Ki Blast (Espejo y Simétrico) ---
+var ki_blast_charge_time_left: float = 0.0
+var ki_blast_charge_time_right: float = 0.0
+var is_charging_ki_blast_left: bool = false
+var is_charging_ki_blast_right: bool = false
 
 # --- Trackers Internos y Biometría ---
 var left_tracker: XRHandTracker
@@ -137,8 +143,7 @@ func _process(delta: float) -> void:
 		var sides_valid = cam_local_pos_l.x < -0.15 and cam_local_pos_r.x > 0.15
 		
 		if l_closed and r_closed and height_valid and sides_valid:
-			# Se mantiene la pose. Emitimos la carga continua
-			# Aumentará Ki en vr_hud
+			# Se mantiene la pose lateral. La carga de Ki sigue activa.
 			pass
 		else:
 			# ¡Se rompió la pose de carga lateral! Cancelación reactiva inmediata
@@ -158,6 +163,14 @@ func _process(delta: float) -> void:
 		if is_stretched_l and is_open_l and is_chest_height_l:
 			_feed_trie("ARM_STRETCHED_OPEN_LEFT")
 			
+			# Carga continua de Ki Blast Izquierdo
+			if current_node == gesture_tree.get("ARM_STRETCHED_OPEN_LEFT", {}):
+				is_charging_ki_blast_left = true
+				ki_blast_charge_time_left = min(ki_blast_charge_time_left + delta, 2.5)
+				# Solo descontar Ki si no ha alcanzado la carga máxima de 2.5s
+				if ki_blast_charge_time_left < 2.5:
+					emit_signal("ki_blast_charging", 0, ki_blast_charge_time_left, delta)
+			
 			# Comprobar si en este estado intermedio se realiza el empuje explosivo (Paso 2)
 			if current_node.has("FAST_THRUST_LEFT") or (current_node == gesture_tree.get("ARM_STRETCHED_OPEN_LEFT", {})):
 				if vel_l >= KIBLAST_VELOCITY_THRESHOLD:
@@ -168,6 +181,7 @@ func _process(delta: float) -> void:
 			# Si el puntero está en la carga de la mano izquierda pero se retrae el brazo, cancelar
 			if current_node == gesture_tree.get("ARM_STRETCHED_OPEN_LEFT", {}):
 				_cancel_action("Ki Blast izquierdo cancelado: brazo retraído o mano cerrada")
+				_reset_ki_blast_charge(0)
 				
 		# --- MANO DERECHA ---
 		var is_stretched_r = right_valid and pos_r.distance_to(head_pos) > 0.55
@@ -176,6 +190,14 @@ func _process(delta: float) -> void:
 		
 		if is_stretched_r and is_open_r and is_chest_height_r:
 			_feed_trie("ARM_STRETCHED_OPEN_RIGHT")
+			
+			# Carga continua de Ki Blast Derecho
+			if current_node == gesture_tree.get("ARM_STRETCHED_OPEN_RIGHT", {}):
+				is_charging_ki_blast_right = true
+				ki_blast_charge_time_right = min(ki_blast_charge_time_right + delta, 2.5)
+				# Solo descontar Ki si no ha alcanzado la carga máxima de 2.5s
+				if ki_blast_charge_time_right < 2.5:
+					emit_signal("ki_blast_charging", 1, ki_blast_charge_time_right, delta)
 			
 			# Comprobar empuje explosivo (Paso 2)
 			if current_node.has("FAST_THRUST_RIGHT") or (current_node == gesture_tree.get("ARM_STRETCHED_OPEN_RIGHT", {})):
@@ -187,6 +209,7 @@ func _process(delta: float) -> void:
 			# Cancelar si se retrae el brazo de carga derecho
 			if current_node == gesture_tree.get("ARM_STRETCHED_OPEN_RIGHT", {}):
 				_cancel_action("Ki Blast derecho cancelado: brazo retraído o mano cerrada")
+				_reset_ki_blast_charge(1)
 
 # --- Lógica de Control del Trie-State-Machine ---
 
@@ -200,11 +223,13 @@ func _feed_trie(gesture_name: String) -> void:
 			emit_signal("phase_changed", "RECARGA: CONCENTRACIÓN")
 			emit_signal("gesture_logged", "Paso 1: Puños cruzados en boca. ¡Concentrando energía!", "info")
 		elif gesture_name == "ARM_STRETCHED_OPEN_LEFT":
-			emit_signal("phase_changed", "KI BLAST IZQ: CARGANDO")
-			emit_signal("gesture_logged", "Mano Izquierda abierta al frente. ¡Cargando Ki Blast!", "info")
+			if ki_blast_charge_time_left <= 0.01:
+				emit_signal("phase_changed", "KI BLAST IZQ: CARGANDO")
+				emit_signal("gesture_logged", "Mano Izquierda abierta al frente. ¡Cargando Ki Blast!", "info")
 		elif gesture_name == "ARM_STRETCHED_OPEN_RIGHT":
-			emit_signal("phase_changed", "KI BLAST DER: CARGANDO")
-			emit_signal("gesture_logged", "Mano Derecha abierta al frente. ¡Cargando Ki Blast!", "info")
+			if ki_blast_charge_time_right <= 0.01:
+				emit_signal("phase_changed", "KI BLAST DER: CARGANDO")
+				emit_signal("gesture_logged", "Mano Derecha abierta al frente. ¡Cargando Ki Blast!", "info")
 			
 		# Comprobar si se ha alcanzado una acción final
 		if current_node.has("action_trigger"):
@@ -219,21 +244,33 @@ func _trigger_action(action_name: String) -> void:
 		emit_signal("gesture_logged", "Paso 2: ¡Carga de Ki activa a los costados de la cadera!", "success")
 		
 	elif action_name == "ki_blast_left":
-		emit_signal("ki_blast_fired", 0) # Lanzamiento Izquierdo
-		emit_signal("gesture_logged", "Paso 2: ¡Ki Blast lanzado con Mano Izquierda!", "success")
+		var is_charged = ki_blast_charge_time_left >= 1.0
+		emit_signal("ki_blast_fired", 0, is_charged) # Lanzamiento Izquierdo con modificador
+		if is_charged:
+			emit_signal("gesture_logged", "Paso 2: ¡KI BLAST CARGADO lanzado con Mano Izquierda! (Lento/Gigante)", "success")
+		else:
+			emit_signal("gesture_logged", "Paso 2: ¡Ki Blast Normal lanzado con Mano Izquierda! (Rápido)", "success")
+		_reset_ki_blast_charge(0)
 		_reset_to_idle()
 		
 	elif action_name == "ki_blast_right":
-		emit_signal("ki_blast_fired", 1) # Lanzamiento Derecho
-		emit_signal("gesture_logged", "Paso 2: ¡Ki Blast lanzado con Mano Derecha!", "success")
+		var is_charged = ki_blast_charge_time_right >= 1.0
+		emit_signal("ki_blast_fired", 1, is_charged) # Lanzamiento Derecho con modificador
+		if is_charged:
+			emit_signal("gesture_logged", "Paso 2: ¡KI BLAST CARGADO lanzado con Mano Derecha! (Lento/Gigante)", "success")
+		else:
+			emit_signal("gesture_logged", "Paso 2: ¡Ki Blast Normal lanzado con Mano Derecha! (Rápido)", "success")
+		_reset_ki_blast_charge(1)
 		_reset_to_idle()
 
 func _cancel_action(reason: String) -> void:
-	if current_node != gesture_tree or is_charging_ki:
+	if current_node != gesture_tree or is_charging_ki or is_charging_ki_blast_left or is_charging_ki_blast_right:
 		if is_charging_ki:
 			is_charging_ki = false
 			emit_signal("ki_recharge_stopped")
 			
+		_reset_ki_blast_charge(0)
+		_reset_ki_blast_charge(1)
 		emit_signal("phase_changed", "IDLE (POSTURA NEUTRAL)")
 		emit_signal("gesture_logged", "Técnica interrumpida: " + reason, "error")
 		_reset_to_idle()
@@ -241,6 +278,14 @@ func _cancel_action(reason: String) -> void:
 func _reset_to_idle() -> void:
 	current_node = gesture_tree
 	gesture_timer = 0.0
+
+func _reset_ki_blast_charge(hand_side: int) -> void:
+	if hand_side == 0:
+		ki_blast_charge_time_left = 0.0
+		is_charging_ki_blast_left = false
+	else:
+		ki_blast_charge_time_right = 0.0
+		is_charging_ki_blast_right = false
 
 # --- Métodos de Consulta Biométrica Auxiliares ---
 

@@ -74,6 +74,8 @@ func _reparent_to_camera() -> void:
 			gesture_tree.ki_recharge_started.connect(_on_recharge_started)
 			gesture_tree.ki_recharge_stopped.connect(_on_recharge_stopped)
 			gesture_tree.ki_blast_fired.connect(_on_ki_blast_fired)
+			if gesture_tree.has_signal("ki_blast_charging"):
+				gesture_tree.ki_blast_charging.connect(_on_ki_blast_charging)
 			if gesture_tree.has_signal("gesture_logged"):
 				gesture_tree.gesture_logged.connect(log_gesture_event)
 			print("[VRHUD] Conexión establecida con GesturePhaseTree y su consola de depuración VR.")
@@ -111,14 +113,24 @@ func _on_recharge_stopped() -> void:
 	is_recharging = false
 	is_heavy_recharge = false
 
-func _on_ki_blast_fired(hand_side: int) -> void:
-	var cost = 15.0 # Cada disparo consume 15 unidades de Ki
-	if ki_current >= cost:
-		ki_current -= cost
-		update_ki(ki_current, ki_max)
-		print("[VRHUD] Ki Blast disparado por mano %s. Ki restante: %.1f" % ["Izquierda" if hand_side == 0 else "Derecha", ki_current])
+func _on_ki_blast_fired(hand_side: int, is_charged: bool) -> void:
+	if not is_charged:
+		var cost = 8.0 # Disparo rápido consume un mínimo de 8 de Ki base
+		if ki_current >= cost:
+			ki_current -= cost
+			update_ki(ki_current, ki_max)
+			print("[VRHUD] Ki Blast Normal disparado por mano %s. Coste base deducido. Ki restante: %.1f" % ["Izquierda" if hand_side == 0 else "Derecha", ki_current])
+		else:
+			print("[VRHUD] ¡Ki insuficiente para disparar ráfagas rápidas de Ki Blast!")
 	else:
-		print("[VRHUD] ¡Ki insuficiente para disparar ráfagas! Requieres acumular energía.")
+		# Para disparos cargados, el Ki ya fue drenado progresivamente a 5/s durante la carga
+		print("[VRHUD] ¡KI BLAST CARGADO disparado por mano %s! Ki restante: %.1f" % ["Izquierda" if hand_side == 0 else "Derecha", ki_current])
+
+func _on_ki_blast_charging(hand_side: int, charge_time: float, delta: float) -> void:
+	# Drenar de forma continua 5 de Ki por segundo de forma simétrica durante la carga
+	if charge_time < 2.5:
+		ki_current = max(ki_current - 5.0 * delta, 0.0)
+		update_ki(ki_current, ki_max)
 
 func _update_combat_stats(delta: float) -> void:
 	if is_recharging:

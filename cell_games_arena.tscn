@@ -222,10 +222,12 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.15, 0)
 [node name="LeftHand" type="XRController3D" parent="Player_XROrigin3D" unique_id=330197572]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.3, 1.15, -0.4)
 tracker = &"left_hand"
-show_when_tracked = false
 
 [node name="FingerHand" type="Node3D" parent="Player_XROrigin3D/LeftHand" unique_id=766961304]
 script = ExtResource("7_hand_visualizer")
+enable_physics_fist = null
+fist_radius = null
+force_multiplier = null
 
 [node name="@MeshInstance3D@56526" type="MeshInstance3D" parent="Player_XROrigin3D/LeftHand/FingerHand" unique_id=821816028]
 material_override = SubResource("StandardMaterial3D_iyg5j")
@@ -259,10 +261,13 @@ mesh = SubResource("CylinderMesh_8f0s8")
 [node name="RightHand" type="XRController3D" parent="Player_XROrigin3D" unique_id=788138619]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.3, 1.15, -0.4)
 tracker = &"right_hand"
-show_when_tracked = false
 
 [node name="FingerHand" type="Node3D" parent="Player_XROrigin3D/RightHand" unique_id=419008089]
 script = ExtResource("7_hand_visualizer")
+energy_color = Color(1, 0.6, 0.1, 0.9)
+enable_physics_fist = null
+fist_radius = null
+force_multiplier = null
 
 [node name="@MeshInstance3D@56527" type="MeshInstance3D" parent="Player_XROrigin3D/RightHand/FingerHand" unique_id=14095018]
 material_override = SubResource("StandardMaterial3D_ckiqd")

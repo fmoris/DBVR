@@ -22,6 +22,11 @@ var physics_fist: RigidBody3D = null
 var physics_collision: CollisionShape3D = null
 var xr_origin: XROrigin3D = null
 
+# --- Referencias de Esferas y Luces de Carga de Ki Blast (Espejo) ---
+var charging_ki_sphere: MeshInstance3D = null
+var charging_ki_light: OmniLight3D = null
+var gesture_tree_ref: Node = null
+
 # Definición de las 26 articulaciones canónicas de OpenXR corregidas para Godot 4
 const JOINTS = [
 	XRHandTracker.HAND_JOINT_WRIST,
@@ -107,10 +112,11 @@ func _ready() -> void:
 			add_child(mi)
 		joint_instances.append(mi)
 		
-	# 5. Crear el puño físico procedimental en runtime
+	# 5. Crear el puño físico y la esfera de Ki Blast procedimentales en runtime
 	if enable_physics_fist and not Engine.is_editor_hint():
 		_setup_physics_fist()
 		_inject_enemy_collider()
+		_setup_charging_ki_sphere()
 
 func _process(_delta: float) -> void:
 	# No procesar lógica de tracking real en el editor
@@ -200,6 +206,9 @@ func _process(_delta: float) -> void:
 		# Mostrar las mallas de manos estáticas alineadas al control con el material brillante de Ki
 		for sm in static_finger_meshes:
 			sm.visible = true
+			
+	# Actualizar la esfera de Ki Blast de carga
+	_update_charging_ki_sphere(_delta)
 
 func _hide_all_joints() -> void:
 	for mi in joint_instances:
@@ -413,3 +422,108 @@ func _spawn_ki_impact_vfx(contact_point: Vector3, color: Color) -> void:
 		var spark_tween = create_tween()
 		spark_tween.tween_property(spark_visual, "scale", Vector3.ZERO, 0.35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 		spark_tween.chain().tween_callback(spark.queue_free)
+
+# --- Esferas y Luces de Carga de Ki Blast Procedimentales ---
+
+## Configura e instancia la esfera de Ki y la luz de energía en el origen de XR
+func _setup_charging_ki_sphere() -> void:
+	# 1. Crear procedimentalmente la esfera de Ki
+	charging_ki_sphere = MeshInstance3D.new()
+	charging_ki_sphere.name = "ProceduralKiSphere_" + hand_side
+	
+	var sphere = SphereMesh.new()
+	sphere.radius = 0.035 # Radio de la palma aprox (sin incluir dedos)
+	sphere.height = 0.070
+	sphere.radial_segments = 32
+	sphere.rings = 16
+	charging_ki_sphere.mesh = sphere
+	
+	# Material holográfico unshaded dinámico
+	var mat = StandardMaterial3D.new()
+	mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = energy_color
+	charging_ki_sphere.material_override = mat
+	charging_ki_sphere.visible = false
+	
+	# Añadir al origen de XR deferredly
+	if xr_origin:
+		xr_origin.call_deferred("add_child", charging_ki_sphere)
+	else:
+		call_deferred("add_child", charging_ki_sphere)
+		
+	# 2. Crear procedimentalmente la luz de Ki
+	charging_ki_light = OmniLight3D.new()
+	charging_ki_light.name = "ProceduralKiLight_" + hand_side
+	charging_ki_light.light_color = energy_color
+	charging_ki_light.light_energy = 0.0
+	charging_ki_light.omni_range = 1.5
+	charging_ki_light.visible = false
+	
+	if xr_origin:
+		xr_origin.call_deferred("add_child", charging_ki_light)
+	else:
+		call_deferred("add_child", charging_ki_light)
+		
+	print("[VRHandVisualizer] %s: Esfera y luz de Ki Blast procedimentales inicializadas en el origen XR." % get_parent().name)
+
+## Actualiza el tamaño, la posición y la pulsación sinusoidal del Ki Blast en base a la carga real
+func _update_charging_ki_sphere(delta: float) -> void:
+	if not charging_ki_sphere or not charging_ki_light:
+		return
+		
+	# Intentar obtener la referencia al GesturePhaseTree
+	if not gesture_tree_ref:
+		gesture_tree_ref = get_node_or_null("/root/cell_games_arena/GesturePhaseTree")
+		if not gesture_tree_ref:
+			var arena = get_tree().root.get_child(0)
+			if arena:
+				gesture_tree_ref = arena.find_child("GesturePhaseTree", true, false)
+				
+	if not gesture_tree_ref:
+		return
+		
+	# Leer variables de carga de forma segura desde el Trie
+	var is_charging: bool = false
+	var charge_time: float = 0.0
+	
+	if hand_side == "Left":
+		is_charging = gesture_tree_ref.get("is_charging_ki_blast_left") if "is_charging_ki_blast_left" in gesture_tree_ref else false
+		charge_time = gesture_tree_ref.get("ki_blast_charge_time_left") if "ki_blast_charge_time_left" in gesture_tree_ref else 0.0
+	else:
+		is_charging = gesture_tree_ref.get("is_charging_ki_blast_right") if "is_charging_ki_blast_right" in gesture_tree_ref else false
+		charge_time = gesture_tree_ref.get("ki_blast_charge_time_right") if "ki_blast_charge_time_right" in gesture_tree_ref else 0.0
+		
+	if is_charging and charge_time > 0.0:
+		# Hacer visibles esfera y luz
+		charging_ki_sphere.visible = true
+		charging_ki_light.visible = true
+		
+		# Determinar posición de la esfera (Palma o fallback del control)
+		var palm_pos = global_position
+		if tracker:
+			var flags = tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_PALM)
+			if (flags & XRHandTracker.HAND_JOINT_FLAG_POSITION_VALID):
+				var palm_local = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM)
+				if xr_origin:
+					palm_pos = xr_origin.global_transform * palm_local.origin
+				else:
+					palm_pos = palm_local.origin
+					
+		charging_ki_sphere.global_position = palm_pos
+		charging_ki_light.global_position = palm_pos
+		
+		# Calcular factor de escala progresiva: de 1.0x inicial hasta 2.5x a los 2.5 segundos
+		var scale_factor = 1.0 + (charge_time / 2.5) * 1.5
+		
+		# Aplicar vibración sinusoidal orgánica tipo Dragon Ball
+		var pulse = scale_factor * (1.0 + randf_range(-0.06, 0.06))
+		charging_ki_sphere.scale = Vector3.ONE * pulse
+		
+		# Actualizar brillo y rango de la luz procedimental
+		charging_ki_light.light_energy = (charge_time / 2.5) * 4.0 + 1.0
+		charging_ki_light.omni_range = 1.0 + (charge_time / 2.5) * 2.0
+	else:
+		# Ocultar de inmediato
+		charging_ki_sphere.visible = false
+		charging_ki_light.visible = false
