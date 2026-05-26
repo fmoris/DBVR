@@ -102,13 +102,6 @@ func _process(delta: float) -> void:
 	# Guardar memoria de posiciones previas
 	if left_valid: last_pos_left = pos_l
 	if right_valid: last_pos_right = pos_r
-	
-	# 3. Lógica del Temporizador de Tolerancia del Trie
-	if current_node != gesture_tree and not is_charging_ki:
-		gesture_timer += delta
-		if gesture_timer >= GESTURE_TIMEOUT:
-			_cancel_action("Timeout de pose: tardó demasiado en completar la técnica")
-			return
 
 	# =========================================================================
 	# --- EVALUACIÓN DE FIRMAS BIOMÉTRICAS (ALIMENTACIÓN AL TRIE) ---
