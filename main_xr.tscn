@@ -1,0 +1,23 @@
+[gd_scene format=3 uid="uid://6ta8n7vt0ne8"]
+
+[ext_resource type="Script" uid="uid://dmcnonwlqrfe" path="res://xr_setup.gd" id="1_jsinq"]
+
+[sub_resource type="BoxMesh" id="BoxMesh_urtb8"]
+size = Vector3(10, 0.1, 10)
+
+[node name="MainXR" type="Node3D" unique_id=462644225]
+
+[node name="XROrigin3D" type="XROrigin3D" parent="." unique_id=1683035072]
+script = ExtResource("1_jsinq")
+
+[node name="XRCamera3D" type="XRCamera3D" parent="XROrigin3D" unique_id=1296183231]
+
+[node name="LeftHand" type="XRController3D" parent="XROrigin3D" unique_id=2110133537]
+tracker = &"left_hand"
+
+[node name="RightHand" type="XRController3D" parent="XROrigin3D" unique_id=1620316761]
+tracker = &"right_hand"
+
+[node name="Floor" type="MeshInstance3D" parent="." unique_id=1095611566]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.05, 0)
+mesh = SubResource("BoxMesh_urtb8")
