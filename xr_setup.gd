@@ -82,14 +82,8 @@ func analyze_hand_pose(tracker: XRHandTracker, hand_name: String) -> void:
 	else:
 		spatial_state = "POSICIÓN NEUTRAL"
 
-	# 3. Lógica de Efectos Visuales Segura (Esfera de Ki)
-	if hand_name == "Derecha" and ki_sphere != null:
-		if finger_state == "ABIERTA" and (spatial_state == "CERCA DE CADERA" or spatial_state == "BRAZO ESTIRADO"):
-			ki_sphere.visible = true
-			# Micro-animación premium: vibración orgánica de la energía
-			ki_sphere.scale = Vector3.ONE * (1.0 + randf_range(-0.06, 0.06))
-		else:
-			ki_sphere.visible = false
+	# 3. Lógica de Efectos Visuales Segura (Removida por obsoleta)
+	pass
 
 	# 4. Logs de Cambio de Estado (Evita saturar consola)
 	var current_state = finger_state + "|" + spatial_state

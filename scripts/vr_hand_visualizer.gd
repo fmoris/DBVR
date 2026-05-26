@@ -137,6 +137,14 @@ func _process(_delta: float) -> void:
 			elif get_parent().name == "RightHand":
 				tracker = origin.right_hand_tracker
 
+	# Intentar obtener la referencia al GesturePhaseTree si no está cargada
+	if not gesture_tree_ref:
+		gesture_tree_ref = get_node_or_null("/root/cell_games_arena/GesturePhaseTree")
+		if not gesture_tree_ref:
+			var arena = get_tree().root.get_child(0)
+			if arena:
+				gesture_tree_ref = arena.find_child("GesturePhaseTree", true, false)
+
 	# 2. Evaluar si el tracking de articulaciones OpenXR está activo y es válido
 	var hand_tracking_active = false
 	if tracker:
@@ -191,9 +199,17 @@ func _process(_delta: float) -> void:
 					mi.global_transform = joint_transform
 				mi.scale = Vector3.ONE * scale_factor
 				
-				# Micro-animación: sutil pulsación sinusoidal de energía Ki en los joints
-				var pulse = 1.0 + sin(Time.get_ticks_msec() * 0.015) * 0.15
-				mi.scale *= pulse
+				# Micro-animación: sutil pulsación sinusoidal de energía Ki en los joints (solo si está cargando/recarcando Ki)
+				var is_active_charging: bool = false
+				if gesture_tree_ref:
+					if hand_side == "Left":
+						is_active_charging = gesture_tree_ref.get("is_charging_ki_blast_left") or gesture_tree_ref.get("is_charging_ki")
+					else:
+						is_active_charging = gesture_tree_ref.get("is_charging_ki_blast_right") or gesture_tree_ref.get("is_charging_ki")
+						
+				if is_active_charging:
+					var pulse = 1.0 + sin(Time.get_ticks_msec() * 0.015) * 0.15
+					mi.scale *= pulse
 				
 				mi.visible = true
 			else:
