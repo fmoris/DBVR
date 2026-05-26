@@ -16,9 +16,9 @@ extends Node3D
 @onready var np_value_label: Label = get_node_or_null("SubViewport/HUDLayout/MainPanel/MarginContainer/VBoxContainer/NPSection/Labels/Value")
 @onready var phase_status_label: Label = get_node_or_null("SubViewport/HUDLayout/MainPanel/MarginContainer/VBoxContainer/PhaseStatus")
 
-# --- Estado del Combate Dinámico (Inicia Ki en 0) ---
+# --- Estado del Combate Dinámico (Inicia Ki en 50%) ---
 var ki_max: float = 100.0
-var ki_current: float = 0.0 # Partir en 0 a solicitud del usuario para probar la carga
+var ki_current: float = 50.0 # Inicializado a la mitad de Ki (50.0 / 100.0) a solicitud de Francis
 var np_max: float = 20000.0
 var np_current: float = 9000.0
 
@@ -231,4 +231,3 @@ func log_gesture_event(msg: String, type: String = "info") -> void:
 		debug_logs_label.text = ""
 		for line in debug_history:
 			debug_logs_label.append_text(line + "\n")
-
