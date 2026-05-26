@@ -103,6 +103,7 @@ func _ready() -> void:
 	# 5. Crear el puño físico procedimental en runtime
 	if enable_physics_fist and not Engine.is_editor_hint():
 		_setup_physics_fist()
+		_inject_enemy_collider()
 
 func _process(_delta: float) -> void:
 	# No procesar lógica de tracking real en el editor
@@ -211,6 +212,11 @@ func _setup_physics_fist() -> void:
 	physics_fist.collision_layer = 1
 	physics_fist.collision_mask = 1
 	
+	# Activar el monitoreo de contactos físicos para la detección de golpes y VFX
+	physics_fist.contact_monitor = true
+	physics_fist.max_contacts_reported = 4
+	physics_fist.body_entered.connect(_on_fist_collision)
+	
 	# Crear la forma esférica de colisión
 	physics_collision = CollisionShape3D.new()
 	physics_collision.name = "FistCollision"
@@ -257,4 +263,138 @@ func _physics_process(delta: float) -> void:
 				
 			# Slerp suave para la rotación (orientación física del puño)
 			physics_fist.global_transform.basis = physics_fist.global_transform.basis.slerp(palm_transform.basis, 15.0 * delta)
+
+# --- Métodos Avanzados de Combate y Efectos de Ki (Acción Posterior) ---
+
+## Busca e inyecta dinámicamente un colisionador de cápsula de combate en Vegeta si se encuentra en la escena
+func _inject_enemy_collider() -> void:
+	var arena = get_node_or_null("/root/cell_games_arena")
+	if not arena:
+		return
+		
+	var vegeta = arena.find_child("Vegeta", true, false)
+	if vegeta and is_instance_valid(vegeta):
+		# Verificar si ya inyectamos el colisionador anteriormente
+		var existing_body = vegeta.find_child("VegetaFistCollider", true, false)
+		if not existing_body:
+			var static_body = StaticBody3D.new()
+			static_body.name = "VegetaFistCollider"
+			
+			# Crear CollisionShape3D en forma de cápsula humana
+			var collision_shape = CollisionShape3D.new()
+			var capsule = CapsuleShape3D.new()
+			capsule.height = 1.8
+			capsule.radius = 0.45
+			collision_shape.shape = capsule
+			static_body.add_child(collision_shape)
+			
+			# Alinear la cápsula físicamente en la posición local del rival
+			collision_shape.position = Vector3(0, 0.9, 0)
+			
+			# Añadir el cuerpo físico al rival
+			vegeta.add_child(static_body)
+			print("[VRHandVisualizer] %s: ¡Inyección exitosa de colisiones físicas de combate en el rival Vegeta!" % get_parent().name)
+
+## Captura y reacciona a los contactos físicos del puño contra el rival o el entorno
+func _on_fist_collision(body: Node) -> void:
+	# Evitar auto-colisiones absurdas o con el otro puño del jugador
+	if body.name.begins_with("KiCombatFist") or body == physics_fist:
+		return
+		
+	var impact_speed = physics_fist.linear_velocity.length()
+	
+	# Filtrar impactos leves o vibraciones normales del tracking
+	if impact_speed > 0.6:
+		var is_vegeta = false
+		if body.name == "VegetaFistCollider" or body.get_parent().name == "Vegeta":
+			is_vegeta = true
+			
+		# Estimar punto exacto de colisión en base al radio físico de colisión del puño
+		var contact_point = physics_fist.global_position + physics_fist.linear_velocity.normalized() * fist_radius
+		
+		if is_vegeta:
+			print("[COMBATE DE KI] ¡GOLPE FÍSICO DIRECTO A VEGETA! Daño: 450 unidades | Velocidad de Impacto: %.2f m/s" % impact_speed)
+			_spawn_ki_impact_vfx(contact_point, energy_color)
+		else:
+			# Golpe contra el suelo, columnas o límites del escenario
+			print("[COMBATE DE KI] Impacto contra el entorno: %s | Velocidad: %.2f m/s" % [body.name, impact_speed])
+			_spawn_ki_impact_vfx(contact_point, energy_color)
+
+## Instancia ráfagas y destellos tridimensionales brillantes procedimentales en el punto de contacto
+func _spawn_ki_impact_vfx(contact_point: Vector3, color: Color) -> void:
+	var root_scene = get_tree().root.get_child(0)
+	if not root_scene:
+		return
+		
+	# --- 1. DESTELLO ESFÉRICO DE EXPANSIÓN (Holograma de energía) ---
+	var flash = MeshInstance3D.new()
+	var sphere_mesh = SphereMesh.new()
+	sphere_mesh.radius = 0.02
+	sphere_mesh.height = 0.04
+	flash.mesh = sphere_mesh
+	
+	# Material holográfico unshaded dinámico
+	var mat = StandardMaterial3D.new()
+	mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = color
+	flash.material_override = mat
+	
+	flash.global_position = contact_point
+	root_scene.add_child(flash)
+	
+	# Animación de expansión rápida del destello mediante Tweens en Godot 4
+	var tween = create_tween().set_parallel(true)
+	tween.tween_property(flash, "scale", Vector3.ONE * 5.0, 0.15).set_trans(Tween.TRANS_OUT).set_ease(Tween.EASE_OUT)
+	var target_color = Color(color.r, color.g, color.b, 0.0)
+	tween.tween_property(mat, "albedo_color", target_color, 0.15).set_trans(Tween.TRANS_LINEAR)
+	tween.chain().tween_callback(flash.queue_free)
+	
+	# --- 2. EXPULSIÓN FÍSICA DE CHISPAS DE ENERGÍA KI ---
+	# Instanciar procedimentalmente 5 micro-esferas con físicas dinámicas de Jolt
+	for i in range(5):
+		var spark = RigidBody3D.new()
+		
+		# Crear el mesh visual de la chispa
+		var spark_visual = MeshInstance3D.new()
+		var spark_mesh = SphereMesh.new()
+		spark_mesh.radius = 0.012
+		spark_mesh.height = 0.024
+		spark_visual.mesh = spark_mesh
+		
+		# Material translúcido independiente para evitar mutar el original
+		var spark_mat = StandardMaterial3D.new()
+		spark_mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
+		spark_mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+		spark_mat.albedo_color = color
+		spark_visual.material_override = spark_mat
+		spark.add_child(spark_visual)
+		
+		# Colisionador físico microscópico para que interactúe con el piso
+		var spark_col = CollisionShape3D.new()
+		var spark_col_shape = SphereShape3D.new()
+		spark_col_shape.radius = 0.012
+		spark_col.shape = spark_col_shape
+		spark.add_child(spark_col)
+		
+		# Propiedades del cuerpo físico
+		spark.gravity_scale = 0.4 # Gravedad ligera tipo anime
+		spark.linear_damp = 1.0
+		spark.global_position = contact_point
+		
+		root_scene.add_child(spark)
+		
+		# Proyección aleatoria hacia afuera/arriba del impacto
+		var random_direction = Vector3(
+			randf_range(-1.0, 1.0),
+			randf_range(0.2, 1.2),
+			randf_range(-1.0, 1.0)
+		).normalized()
+		var impulse_force = randf_range(1.5, 4.0)
+		spark.apply_central_impulse(random_direction * impulse_force)
+		
+		# Animación de reducción progresiva a escala cero de la chispa
+		var spark_tween = create_tween()
+		spark_tween.tween_property(spark_visual, "scale", Vector3.ZERO, 0.35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		spark_tween.chain().tween_callback(spark.queue_free)
 
