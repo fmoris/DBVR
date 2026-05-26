@@ -40,9 +40,10 @@ var ki_blast_charge_time_right: float = 0.0
 var is_charging_ki_blast_left: bool = false
 var is_charging_ki_blast_right: bool = false
 
-# --- Reproductores de Audio de Carga de Ki ---
+# --- Reproductores de Audio de Carga de Ki y Ki Blast ---
 var aura_start_player: AudioStreamPlayer = null
 var aura_loop_player: AudioStreamPlayer = null
+var ki_blast_charge_player: AudioStreamPlayer = null
 
 # --- Trackers Internos y Biometría ---
 var left_tracker: XRHandTracker
@@ -231,10 +232,14 @@ func _feed_trie(gesture_name: String) -> void:
 			if ki_blast_charge_time_left <= 0.01:
 				emit_signal("phase_changed", "KI BLAST IZQ: CARGANDO")
 				emit_signal("gesture_logged", "Mano Izquierda abierta al frente. ¡Cargando Ki Blast!", "info")
+				if ki_blast_charge_player:
+					ki_blast_charge_player.play()
 		elif gesture_name == "ARM_STRETCHED_OPEN_RIGHT":
 			if ki_blast_charge_time_right <= 0.01:
 				emit_signal("phase_changed", "KI BLAST DER: CARGANDO")
 				emit_signal("gesture_logged", "Mano Derecha abierta al frente. ¡Cargando Ki Blast!", "info")
+				if ki_blast_charge_player:
+					ki_blast_charge_player.play()
 			
 		# Comprobar si se ha alcanzado una acción final
 		if current_node.has("action_trigger"):
@@ -261,6 +266,8 @@ func _trigger_action(action_name: String) -> void:
 			emit_signal("gesture_logged", "Paso 2: ¡KI BLAST CARGADO lanzado con Mano Izquierda! (Lento/Gigante)", "success")
 		else:
 			emit_signal("gesture_logged", "Paso 2: ¡Ki Blast Normal lanzado con Mano Izquierda! (Rápido)", "success")
+		if ki_blast_charge_player:
+			ki_blast_charge_player.stop()
 		_reset_ki_blast_charge(0)
 		_reset_to_idle()
 		
@@ -271,6 +278,8 @@ func _trigger_action(action_name: String) -> void:
 			emit_signal("gesture_logged", "Paso 2: ¡KI BLAST CARGADO lanzado con Mano Derecha! (Lento/Gigante)", "success")
 		else:
 			emit_signal("gesture_logged", "Paso 2: ¡Ki Blast Normal lanzado con Mano Derecha! (Rápido)", "success")
+		if ki_blast_charge_player:
+			ki_blast_charge_player.stop()
 		_reset_ki_blast_charge(1)
 		_reset_to_idle()
 
@@ -285,6 +294,10 @@ func _cancel_action(reason: String) -> void:
 				aura_start_player.stop()
 			if aura_loop_player:
 				aura_loop_player.stop()
+			
+		# Detener sonidos de carga de Ki Blast si se cancela el gesto
+		if ki_blast_charge_player:
+			ki_blast_charge_player.stop()
 			
 		_reset_ki_blast_charge(0)
 		_reset_ki_blast_charge(1)
@@ -359,4 +372,14 @@ func _setup_sound_players() -> void:
 	aura_loop_player.volume_db = -9.0 # Ligeramente más suave
 	add_child(aura_loop_player)
 	
-	print("[GesturePhaseTree] Reproductores de audio para recarga de Ki inicializados con éxito.")
+	# 3. Reproductor para el efecto de carga del Ki Blast
+	ki_blast_charge_player = AudioStreamPlayer.new()
+	ki_blast_charge_player.name = "KiBlastChargePlayer"
+	var charge_stream = load("res://assets/sfx/Charged KI Blast #1.mp3")
+	if charge_stream:
+		charge_stream.loop = false # Tono ascendente una sola vez
+		ki_blast_charge_player.stream = charge_stream
+	ki_blast_charge_player.volume_db = -6.0 # Nivel de potencia premium
+	add_child(ki_blast_charge_player)
+	
+	print("[GesturePhaseTree] Reproductores de audio para recarga de Ki y Ki Blast inicializados con éxito.")
