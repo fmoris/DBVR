@@ -175,6 +175,8 @@ func _process(_delta: float) -> void:
 				]:
 					scale_factor = 1.25 # Puntas más visibles
 				elif joint == XRHandTracker.HAND_JOINT_PALM:
+					scale_factor = 2.0  # Palma central prominente
+					
 				# Asignar transformaciones globales reales multiplicando por el origen de XR (cero latencia física)
 				if xr_origin:
 					mi.global_transform = xr_origin.global_transform * joint_transform
