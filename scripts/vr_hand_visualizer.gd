@@ -92,12 +92,18 @@ func _ready() -> void:
 	sphere.height = joint_radius * 2.0
 	
 	# Instanciar representaciones 3D para cada uno de los 26 joints
+	# Para evadir el ocultamiento nativo de los controladores (XRController3D) cuando no hay mandos enlazados,
+	# añadimos las esferas de articulaciones dinámicamente como hijas del origen de XR (XROrigin3D) el cual siempre está visible.
+	var xr_origin = get_node_or_null("../../")
 	for j in JOINTS:
 		var mi = MeshInstance3D.new()
 		mi.mesh = sphere
 		mi.material_override = material_ki
 		mi.visible = false
-		add_child(mi)
+		if xr_origin and not Engine.is_editor_hint():
+			xr_origin.call_deferred("add_child", mi)
+		else:
+			add_child(mi)
 		joint_instances.append(mi)
 		
 	# 5. Crear el puño físico procedimental en runtime
