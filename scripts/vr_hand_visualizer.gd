@@ -345,7 +345,7 @@ func _spawn_ki_impact_vfx(contact_point: Vector3, color: Color) -> void:
 	
 	# Animación de expansión rápida del destello mediante Tweens en Godot 4
 	var tween = create_tween().set_parallel(true)
-	tween.tween_property(flash, "scale", Vector3.ONE * 5.0, 0.15).set_trans(Tween.TRANS_OUT).set_ease(Tween.EASE_OUT)
+	tween.tween_property(flash, "scale", Vector3.ONE * 5.0, 0.15).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	var target_color = Color(color.r, color.g, color.b, 0.0)
 	tween.tween_property(mat, "albedo_color", target_color, 0.15).set_trans(Tween.TRANS_LINEAR)
 	tween.chain().tween_callback(flash.queue_free)
@@ -397,4 +397,3 @@ func _spawn_ki_impact_vfx(contact_point: Vector3, color: Color) -> void:
 		var spark_tween = create_tween()
 		spark_tween.tween_property(spark_visual, "scale", Vector3.ZERO, 0.35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 		spark_tween.chain().tween_callback(spark.queue_free)
-
