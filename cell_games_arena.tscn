@@ -2,7 +2,6 @@
 
 [ext_resource type="Script" uid="uid://cr6vmiynvonpv" path="res://build_arena.gd" id="1_pfx00"]
 [ext_resource type="Script" uid="uid://dmcnonwlqrfe" path="res://xr_setup.gd" id="2_uqtep"]
-[ext_resource type="Shader" uid="uid://qo2kvhkptc5v" path="res://ki_sphere.gdshader" id="3_0if3v"]
 [ext_resource type="PackedScene" uid="uid://fdifmx46vnh1" path="res://assets/models/goku.glb" id="3_f63xa"]
 [ext_resource type="PackedScene" uid="uid://cn3docwmotu2e" path="res://assets/models/vegeta.glb" id="4_0if3v"]
 [ext_resource type="PackedScene" uid="uid://cggifip4tem77" path="res://vr_hud.tscn" id="5_vrhud"]
@@ -139,17 +138,6 @@ height = 0.05
 top_radius = 0.008
 bottom_radius = 0.008
 height = 0.04
-
-[sub_resource type="ShaderMaterial" id="ShaderMaterial_yvyfg"]
-render_priority = 0
-shader = ExtResource("3_0if3v")
-shader_parameter/base_color = Color(0.3, 0.6, 1, 1)
-shader_parameter/pulse_speed = 2.0
-shader_parameter/fresnel_power = 2.0
-
-[sub_resource type="SphereMesh" id="SphereMesh_2mvn4"]
-radius = 0.08
-height = 0.16
 
 [sub_resource type="PhysicalSkyMaterial" id="PhysicalSkyMaterial_4omsf"]
 
@@ -298,17 +286,6 @@ transform = Transform3D(1, 0, 0, 0, -4.371139e-08, -1, 0, 1, -4.371139e-08, 0.03
 material_override = SubResource("StandardMaterial3D_ckiqd")
 mesh = SubResource("CylinderMesh_qon0d")
 
-[node name="KiSphere" type="MeshInstance3D" parent="Player_XROrigin3D/RightHand" unique_id=647910317]
-transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -0.05)
-visible = false
-material_override = SubResource("ShaderMaterial_yvyfg")
-mesh = SubResource("SphereMesh_2mvn4")
-
-[node name="KiLight" type="OmniLight3D" parent="Player_XROrigin3D/RightHand/KiSphere" unique_id=1329418519]
-light_color = Color(0.3, 0.6, 1, 1)
-light_energy = 2.0
-shadow_enabled = true
-
 [node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=462322537]
 environment = SubResource("Environment_ha84r")
 
@@ -325,6 +302,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.638, 0.501, 9.751)
 
 [node name="VRHUD" parent="." unique_id=84404676 instance=ExtResource("5_vrhud")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.35, 1.3499999, 12.8)
+horizontal_offset = -0.35
 
 [node name="GesturePhaseTree" type="Node" parent="." unique_id=1679186804]
 script = ExtResource("6_gesturetree")
