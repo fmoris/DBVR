@@ -17,9 +17,10 @@ var joint_instances: Array[MeshInstance3D] = []
 var static_finger_meshes: Array[MeshInstance3D] = []
 var frames_since_log: int = 0
 
-# --- Referencias de Física ---
+# --- Referencias de Nodos y Física ---
 var physics_fist: RigidBody3D = null
 var physics_collision: CollisionShape3D = null
+var xr_origin: XROrigin3D = null
 
 # Definición de las 26 articulaciones canónicas de OpenXR corregidas para Godot 4
 const JOINTS = [
@@ -94,7 +95,7 @@ func _ready() -> void:
 	# Instanciar representaciones 3D para cada uno de los 26 joints
 	# Para evadir el ocultamiento nativo de los controladores (XRController3D) cuando no hay mandos enlazados,
 	# añadimos las esferas de articulaciones dinámicamente como hijas del origen de XR (XROrigin3D) el cual siempre está visible.
-	var xr_origin = get_node_or_null("../../")
+	xr_origin = get_node_or_null("../../")
 	for j in JOINTS:
 		var mi = MeshInstance3D.new()
 		mi.mesh = sphere
