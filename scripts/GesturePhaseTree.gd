@@ -55,7 +55,7 @@ var last_pos_right: Vector3 = Vector3.ZERO
 
 # Umbrales Biométricos
 const KIBLAST_VELOCITY_THRESHOLD: float = 2.2 # m/s
-const HAND_OPEN_DISTANCE: float = 0.09        # Distancia muñeca a index_tip para mano abierta
+const HAND_OPEN_DISTANCE: float = 0.115       # Distancia muñeca a index_tip para mano completamente abierta (dedos estirados)
 const HAND_CLOSED_DISTANCE: float = 0.08      # Distancia muñeca a index_tip para puño cerrado
 
 # Buffer de frames de gracia para evitar parpadeos del sensor óptico
@@ -116,7 +116,7 @@ func _process(delta: float) -> void:
 		tracking_loss_frames += 1
 		if tracking_loss_frames > MAX_GRACE_FRAMES:
 			_cancel_action("Señal de tracking perdida en mano activa")
-			return
+		return # RETORNAR INMEDIATAMENTE: Conserva el estado e impide cancelaciones en cero
 	else:
 		tracking_loss_frames = 0
 		
@@ -126,6 +126,12 @@ func _process(delta: float) -> void:
 	var pos_l = xr_origin.global_transform * left_tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_WRIST).origin if (left_valid and xr_origin) else Vector3.ZERO
 	var pos_r = xr_origin.global_transform * right_tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_WRIST).origin if (right_valid and xr_origin) else Vector3.ZERO
 	
+	# Evitar procesar biometría si las posiciones se reportan en cero (micro-segundo de reconexión)
+	if left_valid and pos_l == Vector3.ZERO:
+		return
+	if right_valid and pos_r == Vector3.ZERO:
+		return
+		
 	# Calcular velocidades lineales instantáneas
 	var vel_l = pos_l.distance_to(last_pos_left) / delta if left_valid and last_pos_left != Vector3.ZERO else 0.0
 	var vel_r = pos_r.distance_to(last_pos_right) / delta if right_valid and last_pos_right != Vector3.ZERO else 0.0
@@ -213,12 +219,12 @@ func _process(delta: float) -> void:
 			else:
 				# 3. Comprobar si se cancela por retracción extrema del brazo o caída
 				# Permitimos flexionar el codo (tomar impulso) pero cancelamos si está extremadamente cerca o muy abajo
-				if left_valid:
+				if left_valid and pos_l != Vector3.ZERO:
 					var cam_loc = camera.global_transform.affine_inverse() * pos_l
 					var distance = pos_l.distance_to(head_pos)
 					
 					var is_too_close = distance < 0.25
-					var is_dropped = cam_loc.y < -0.55 or cam_loc.z > -0.15
+					var is_dropped = cam_loc.y < -0.50 or cam_loc.z > -0.15
 					var is_extreme_out = abs(cam_loc.x) > 0.65
 					
 					if is_too_close or is_dropped or is_extreme_out:
@@ -226,21 +232,28 @@ func _process(delta: float) -> void:
 						_reset_ki_blast_charge(0)
 		else:
 			# No estamos cargando aún. Evaluar los requisitos estrictos de entrada para el Paso 1:
-			# El brazo debe estar estirado hacia adelante y a la altura de los hombros/pecho.
-			if left_valid:
+			# El brazo debe estar 100% estirado hacia adelante y a la altura de los hombros/pecho.
+			if left_valid and pos_l != Vector3.ZERO:
 				var cam_loc_l = camera.global_transform.affine_inverse() * pos_l
 				var distance_l = pos_l.distance_to(head_pos)
 				var is_open_l = _is_hand_open(left_tracker)
 				
-				# Criterios locales en espacio de cámara:
-				# 1. Estirado hacia adelante: local z < -0.42 (por lo menos 42 cm enfrente)
-				# 2. Altura de hombros: local y entre -0.32 y 0.08 (nivel del pecho a los ojos)
-				# 3. Espacio izquierdo: local x entre -0.45 y -0.05
-				var is_forward_l = cam_loc_l.z < -0.42 and distance_l > 0.52
-				var is_shoulder_height_l = cam_loc_l.y > -0.32 and cam_loc_l.y < 0.08
+				# Dirección del vector muñeca-cabeza y vector de mirada frontal
+				var hand_dir_l = (pos_l - head_pos).normalized()
+				var look_dir = -camera.global_transform.basis.z.normalized()
+				var alignment_l = hand_dir_l.dot(look_dir)
+				
+				# Criterios locales y globales de rigidez total:
+				# 1. Estirado global: distancia > 0.60 metros (brazo extendido)
+				# 2. Estirado frontal local: local z < -0.50 e integralmente alineado a mirada con alignment > 0.74 (cono frontal cerrado)
+				# 3. Altura de hombros estricta: pos.y global estable respecto a head_height (pecho a hombros, máximo 40cm por debajo)
+				# 4. Carril izquierdo natural del cuerpo: local x entre -0.45 y -0.05
+				var is_stretched_l = distance_l > 0.60
+				var is_forward_l = cam_loc_l.z < -0.50 and alignment_l > 0.74
+				var is_shoulder_height_l = pos_l.y > (head_height - 0.40) and pos_l.y < (head_height + 0.12)
 				var is_natural_side_l = cam_loc_l.x > -0.45 and cam_loc_l.x < -0.05
 				
-				if is_forward_l and is_shoulder_height_l and is_natural_side_l and is_open_l:
+				if is_stretched_l and is_forward_l and is_shoulder_height_l and is_natural_side_l and is_open_l:
 					_feed_trie("ARM_STRETCHED_OPEN_LEFT")
 					is_charging_ki_blast_left = true
 				
@@ -277,12 +290,12 @@ func _process(delta: float) -> void:
 			else:
 				# 3. Comprobar si se cancela por retracción extrema del brazo o caída
 				# Permitimos flexionar el codo (tomar impulso) pero cancelamos si está extremadamente cerca o muy abajo
-				if right_valid:
+				if right_valid and pos_r != Vector3.ZERO:
 					var cam_loc = camera.global_transform.affine_inverse() * pos_r
 					var distance = pos_r.distance_to(head_pos)
 					
 					var is_too_close = distance < 0.25
-					var is_dropped = cam_loc.y < -0.55 or cam_loc.z > -0.15
+					var is_dropped = cam_loc.y < -0.50 or cam_loc.z > -0.15
 					var is_extreme_out = abs(cam_loc.x) > 0.65
 					
 					if is_too_close or is_dropped or is_extreme_out:
@@ -290,21 +303,28 @@ func _process(delta: float) -> void:
 						_reset_ki_blast_charge(1)
 		else:
 			# No estamos cargando aún. Evaluar los requisitos estrictos de entrada para el Paso 1:
-			# El brazo debe estar estirado hacia adelante y a la altura de los hombros/pecho.
-			if right_valid:
+			# El brazo debe estar 100% estirado hacia adelante y a la altura de los hombros/pecho.
+			if right_valid and pos_r != Vector3.ZERO:
 				var cam_loc_r = camera.global_transform.affine_inverse() * pos_r
 				var distance_r = pos_r.distance_to(head_pos)
 				var is_open_r = _is_hand_open(right_tracker)
 				
-				# Criterios locales en espacio de cámara:
-				# 1. Estirado hacia adelante: local z < -0.42 (por lo menos 42 cm enfrente)
-				# 2. Altura de hombros: local y entre -0.32 y 0.08 (nivel del pecho a los ojos)
-				# 3. Espacio derecho: local x entre 0.05 y 0.45
-				var is_forward_r = cam_loc_r.z < -0.42 and distance_r > 0.52
-				var is_shoulder_height_r = cam_loc_r.y > -0.32 and cam_loc_r.y < 0.08
+				# Dirección del vector muñeca-cabeza y vector de mirada frontal
+				var hand_dir_r = (pos_r - head_pos).normalized()
+				var look_dir = -camera.global_transform.basis.z.normalized()
+				var alignment_r = hand_dir_r.dot(look_dir)
+				
+				# Criterios locales y globales de rigidez total:
+				# 1. Estirado global: distancia > 0.60 metros (brazo extendido)
+				# 2. Estirado frontal local: local z < -0.50 e integralmente alineado a mirada con alignment > 0.74 (cono frontal cerrado)
+				# 3. Altura de hombros estricta: pos.y global estable respecto a head_height (pecho a hombros, máximo 40cm por debajo)
+				# 4. Carril derecho natural del cuerpo: local x entre 0.05 y 0.45
+				var is_stretched_r = distance_r > 0.60
+				var is_forward_r = cam_loc_r.z < -0.50 and alignment_r > 0.74
+				var is_shoulder_height_r = pos_r.y > (head_height - 0.40) and pos_r.y < (head_height + 0.12)
 				var is_natural_side_r = cam_loc_r.x > 0.05 and cam_loc_r.x < 0.45
 				
-				if is_forward_r and is_shoulder_height_r and is_natural_side_r and is_open_r:
+				if is_forward_r and is_shoulder_height_r and is_natural_side_r and is_open_r and is_stretched_r:
 					_feed_trie("ARM_STRETCHED_OPEN_RIGHT")
 					is_charging_ki_blast_right = true
 
