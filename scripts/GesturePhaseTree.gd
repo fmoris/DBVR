@@ -120,8 +120,11 @@ func _process(delta: float) -> void:
 	else:
 		tracking_loss_frames = 0
 		
-	var pos_l = left_tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_WRIST).origin if left_valid else Vector3.ZERO
-	var pos_r = right_tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_WRIST).origin if right_valid else Vector3.ZERO
+	# Obtener el ancestro XROrigin3D de la cámara de forma robusta para transformar coordenadas locales a globales reales
+	var xr_origin = camera.get_parent() if camera.get_parent() else self
+	
+	var pos_l = xr_origin.global_transform * left_tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_WRIST).origin if (left_valid and xr_origin) else Vector3.ZERO
+	var pos_r = xr_origin.global_transform * right_tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_WRIST).origin if (right_valid and xr_origin) else Vector3.ZERO
 	
 	# Calcular velocidades lineales instantáneas
 	var vel_l = pos_l.distance_to(last_pos_left) / delta if left_valid and last_pos_left != Vector3.ZERO else 0.0
@@ -350,6 +353,7 @@ func _trigger_action(action_name: String) -> void:
 	elif action_name == "ki_blast_left":
 		var is_charged = ki_blast_charge_time_left >= 1.0
 		emit_signal("ki_blast_fired", 0, is_charged) # Lanzamiento Izquierdo con modificador
+		_spawn_ki_blast_projectile(0, is_charged) # NUEVO: Spawneo del proyectil real en la escena
 		if is_charged:
 			emit_signal("gesture_logged", "Paso 2: ¡KI BLAST CARGADO lanzado con Mano Izquierda! (Lento/Gigante)", "success")
 		else:
@@ -362,6 +366,7 @@ func _trigger_action(action_name: String) -> void:
 	elif action_name == "ki_blast_right":
 		var is_charged = ki_blast_charge_time_right >= 1.0
 		emit_signal("ki_blast_fired", 1, is_charged) # Lanzamiento Derecho con modificador
+		_spawn_ki_blast_projectile(1, is_charged) # NUEVO: Spawneo del proyectil real en la escena
 		if is_charged:
 			emit_signal("gesture_logged", "Paso 2: ¡KI BLAST CARGADO lanzado con Mano Derecha! (Lento/Gigante)", "success")
 		else:
@@ -370,6 +375,148 @@ func _trigger_action(action_name: String) -> void:
 			ki_blast_charge_player.stop()
 		_reset_ki_blast_charge(1)
 		_reset_to_idle()
+
+## Instancia procedimentalmente un proyectil de energía Ki 3D brillante que vuela e impacta dinámicamente
+func _spawn_ki_blast_projectile(hand_side: int, is_charged: bool) -> void:
+	var camera = get_viewport().get_camera_3d()
+	if not camera:
+		return
+		
+	# Determinar color de la energía
+	var energy_color = Color(0.0, 0.7, 1.0, 0.9) # Cian por defecto para Izquierda
+	if hand_side == 1:
+		energy_color = Color(1.0, 0.6, 0.1, 0.9) # Dorada para Derecha
+		
+	# Punto inicial de lanzamiento: Hacia adelante en frente de la mirada
+	var spawn_pos = camera.global_position - camera.global_transform.basis.z * 0.4
+	
+	# Intentar obtener la posición exacta de la palma de la mano en global
+	var tracker = left_tracker if hand_side == 0 else right_tracker
+	if tracker:
+		var flags = tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_PALM)
+		if (flags & XRHandTracker.HAND_JOINT_FLAG_POSITION_VALID):
+			var palm_local = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM).origin
+			var xr_origin = camera.get_parent()
+			if xr_origin:
+				spawn_pos = xr_origin.global_transform * palm_local
+				
+	# Dirección del proyectil: Eje frontal de la cámara (hacia donde mira el jugador)
+	var velocity_dir = -camera.global_transform.basis.z.normalized()
+	
+	# Atributos de escala y velocidad según carga
+	var projectile_radius = 0.05
+	var speed = 28.0
+	if is_charged:
+		projectile_radius = 0.18
+		speed = 14.0
+		
+	# Crear el nodo principal del proyectil
+	var projectile = Node3D.new()
+	projectile.name = "ProceduralKiProjectile_" + str(hand_side) + "_" + str(Time.get_ticks_msec())
+	projectile.global_position = spawn_pos
+	
+	# Malla visual de la esfera de Ki
+	var mesh_inst = MeshInstance3D.new()
+	var sphere = SphereMesh.new()
+	sphere.radius = projectile_radius
+	sphere.height = projectile_radius * 2.0
+	sphere.radial_segments = 16
+	sphere.rings = 8
+	mesh_inst.mesh = sphere
+	
+	# Material luminoso unshaded
+	var mat = StandardMaterial3D.new()
+	mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = energy_color
+	mesh_inst.material_override = mat
+	projectile.add_child(mesh_inst)
+	
+	# Luz dinámica omnidireccional asociada
+	var light = OmniLight3D.new()
+	light.light_color = energy_color
+	light.light_energy = 5.0 if is_charged else 2.5
+	light.omni_range = 3.0 if is_charged else 1.5
+	projectile.add_child(light)
+	
+	# Añadir el proyectil a la raíz del árbol
+	get_tree().root.add_child(projectile)
+	
+	# Definir e inyectar el comportamiento físico de viaje y colisión en el proyectil procedimental
+	var script = GDScript.new()
+	script.source_code = """
+extends Node3D
+
+var speed_velocity: Vector3
+var lifetime_left: float = 4.0
+var p_radius: float
+var p_color: Color
+var is_dead: bool = false
+var ray_query_exclude: Array[RID] = []
+
+func _physics_process(delta: float) -> void:
+	if is_dead: return
+	
+	# Mover en línea recta
+	var step = speed_velocity * delta
+	var prev_pos = global_position
+	global_position += step
+	
+	lifetime_left -= delta
+	if lifetime_left <= 0.0:
+		queue_free()
+		return
+		
+	# Raycast continuo para detección estable de colisiones
+	var space = get_world_3d().direct_space_state
+	if space:
+		var parameters = PhysicsRayQueryParameters3D.create(prev_pos, global_position)
+		parameters.exclude = ray_query_exclude
+		var collision = space.intersect_ray(parameters)
+		if collision:
+			is_dead = true
+			_trigger_explosion(collision.position, collision.collider)
+
+func _trigger_explosion(pos: Vector3, collider: Node) -> void:
+	# Fallback de partículas local
+	var flash = MeshInstance3D.new()
+	var sphere_mesh = SphereMesh.new()
+	sphere_mesh.radius = p_radius * 0.5
+	sphere_mesh.height = p_radius
+	flash.mesh = sphere_mesh
+	
+	var mat = StandardMaterial3D.new()
+	mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = p_color
+	flash.material_override = mat
+	flash.global_position = pos
+	get_tree().root.add_child(flash)
+	
+	var tween = create_tween().set_parallel(true)
+	tween.tween_property(flash, \"scale\", Vector3.ONE * 5.0, 0.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(mat, \"albedo_color\", Color(p_color.r, p_color.g, p_color.b, 0.0), 0.2).set_trans(Tween.TRANS_LINEAR)
+	
+	# Imprimir log del combate de Ki
+	print(\"[COMBATE DE KI] ¡EXPLOSIÓN DE KI BLAST! Impacto contra: \" + collider.name)
+	
+	# Buscar e intentar reproducir VFX de partículas de chispas en el visualizador de manos
+	var hand_visualizer = get_tree().root.find_child(\"vr_hand_visualizer*\", true, false)
+	if hand_visualizer and hand_visualizer.has_method(\"_spawn_ki_impact_vfx\"):
+		hand_visualizer.call_deferred(\"_spawn_ki_impact_vfx\", pos, p_color)
+	
+	# Limpiar
+	tween.chain().tween_callback(flash.queue_free)
+	queue_free()
+"""
+	script.reload()
+	projectile.set_script(script)
+	projectile.set("speed_velocity", velocity_dir * speed)
+	projectile.set("p_radius", projectile_radius)
+	projectile.set("p_color", energy_color)
+	
+	# Configurar el ciclo de física del proyectil
+	projectile.set_physics_process(true)
 
 func _cancel_action(reason: String) -> void:
 	if current_node != gesture_tree or is_charging_ki or is_charging_ki_blast_left or is_charging_ki_blast_right:
