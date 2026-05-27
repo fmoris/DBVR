@@ -29,9 +29,8 @@ enabled=PackedStringArray("res://addons/godot_mcp/plugin.cfg", "res://addons/mix
 
 [physics]
 
-3d/physics_engine="Jolt Physics"
 common/physics_ticks_per_second=90
-common/max_physics_steps_per_frame=8
+3d/physics_engine="Jolt Physics"
 
 [rendering]
 

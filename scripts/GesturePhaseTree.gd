@@ -189,29 +189,57 @@ func _process(delta: float) -> void:
 				emit_signal("ki_blast_charging", 0, ki_blast_charge_time_left, delta)
 				
 			# 2. Comprobar empuje explosivo (Fase 2)
-			var forward_movement = 0.0
+			var forward_thrust = false
 			if left_valid and last_pos_left != Vector3.ZERO:
-				forward_movement = pos_l.distance_to(head_pos) - last_pos_left.distance_to(head_pos)
+				var move_vector = pos_l - last_pos_left
+				var global_vel_vector = move_vector / delta
+				var current_vel = global_vel_vector.length()
+				
+				# Obtener la dirección en la que mira el jugador (eje -Z de la cámara)
+				var look_direction = -camera.global_transform.basis.z.normalized()
+				var movement_direction = move_vector.normalized()
+				
+				# Dot product: debe moverse rápidamente hacia adelante (alineado con la mirada)
+				var alignment = movement_direction.dot(look_direction)
+				
+				if current_vel >= KIBLAST_VELOCITY_THRESHOLD and alignment > 0.52:
+					forward_thrust = true
 			
-			if vel_l >= KIBLAST_VELOCITY_THRESHOLD and forward_movement > 0.01:
+			if forward_thrust:
 				_feed_trie("FAST_THRUST_LEFT")
 			else:
-				# 3. Comprobar si se cancela por retracción del brazo o pérdida total
-				# Si se retrae el brazo claramente (distancia < 0.45 metros) o se cae
-				var is_retracted = left_valid and pos_l.distance_to(head_pos) < 0.45
-				var is_out_of_height = left_valid and (pos_l.y < (head_height * 0.45) or pos_l.y > (head_height * 1.25))
-				if is_retracted or is_out_of_height:
-					_cancel_action("Ki Blast izquierdo cancelado: brazo retraído o bajado")
-					_reset_ki_blast_charge(0)
+				# 3. Comprobar si se cancela por retracción extrema del brazo o caída
+				# Permitimos flexionar el codo (tomar impulso) pero cancelamos si está extremadamente cerca o muy abajo
+				if left_valid:
+					var cam_loc = camera.global_transform.affine_inverse() * pos_l
+					var distance = pos_l.distance_to(head_pos)
+					
+					var is_too_close = distance < 0.25
+					var is_dropped = cam_loc.y < -0.55 or cam_loc.z > -0.15
+					var is_extreme_out = abs(cam_loc.x) > 0.65
+					
+					if is_too_close or is_dropped or is_extreme_out:
+						_cancel_action("Ki Blast izquierdo cancelado: postura de brazo rota")
+						_reset_ki_blast_charge(0)
 		else:
 			# No estamos cargando aún. Evaluar los requisitos estrictos de entrada para el Paso 1:
-			var is_stretched_l = left_valid and pos_l.distance_to(head_pos) > 0.55
-			var is_open_l = left_valid and _is_hand_open(left_tracker)
-			var is_chest_height_l = left_valid and pos_l.y > (head_height * 0.5) and pos_l.y < (head_height * 1.1)
-			
-			if is_stretched_l and is_open_l and is_chest_height_l:
-				_feed_trie("ARM_STRETCHED_OPEN_LEFT")
-				is_charging_ki_blast_left = true
+			# El brazo debe estar estirado hacia adelante y a la altura de los hombros/pecho.
+			if left_valid:
+				var cam_loc_l = camera.global_transform.affine_inverse() * pos_l
+				var distance_l = pos_l.distance_to(head_pos)
+				var is_open_l = _is_hand_open(left_tracker)
+				
+				# Criterios locales en espacio de cámara:
+				# 1. Estirado hacia adelante: local z < -0.42 (por lo menos 42 cm enfrente)
+				# 2. Altura de hombros: local y entre -0.32 y 0.08 (nivel del pecho a los ojos)
+				# 3. Espacio izquierdo: local x entre -0.45 y -0.05
+				var is_forward_l = cam_loc_l.z < -0.42 and distance_l > 0.52
+				var is_shoulder_height_l = cam_loc_l.y > -0.32 and cam_loc_l.y < 0.08
+				var is_natural_side_l = cam_loc_l.x > -0.45 and cam_loc_l.x < -0.05
+				
+				if is_forward_l and is_shoulder_height_l and is_natural_side_l and is_open_l:
+					_feed_trie("ARM_STRETCHED_OPEN_LEFT")
+					is_charging_ki_blast_left = true
 				
 		# --- MANO DERECHA ---
 		if is_charging_ki_blast_right:
@@ -225,29 +253,57 @@ func _process(delta: float) -> void:
 				emit_signal("ki_blast_charging", 1, ki_blast_charge_time_right, delta)
 				
 			# 2. Comprobar empuje explosivo (Fase 2)
-			var forward_movement = 0.0
+			var forward_thrust = false
 			if right_valid and last_pos_right != Vector3.ZERO:
-				forward_movement = pos_r.distance_to(head_pos) - last_pos_right.distance_to(head_pos)
+				var move_vector = pos_r - last_pos_right
+				var global_vel_vector = move_vector / delta
+				var current_vel = global_vel_vector.length()
+				
+				# Obtener la dirección en la que mira el jugador (eje -Z de la cámara)
+				var look_direction = -camera.global_transform.basis.z.normalized()
+				var movement_direction = move_vector.normalized()
+				
+				# Dot product: debe moverse rápidamente hacia adelante (alineado con la mirada)
+				var alignment = movement_direction.dot(look_direction)
+				
+				if current_vel >= KIBLAST_VELOCITY_THRESHOLD and alignment > 0.52:
+					forward_thrust = true
 			
-			if vel_r >= KIBLAST_VELOCITY_THRESHOLD and forward_movement > 0.01:
+			if forward_thrust:
 				_feed_trie("FAST_THRUST_RIGHT")
 			else:
-				# 3. Comprobar si se cancela por retracción del brazo o pérdida total
-				# Si se retrae el brazo claramente (distancia < 0.45 metros) o se cae
-				var is_retracted = right_valid and pos_r.distance_to(head_pos) < 0.45
-				var is_out_of_height = right_valid and (pos_r.y < (head_height * 0.45) or pos_r.y > (head_height * 1.25))
-				if is_retracted or is_out_of_height:
-					_cancel_action("Ki Blast derecho cancelado: brazo retraído o bajado")
-					_reset_ki_blast_charge(1)
+				# 3. Comprobar si se cancela por retracción extrema del brazo o caída
+				# Permitimos flexionar el codo (tomar impulso) pero cancelamos si está extremadamente cerca o muy abajo
+				if right_valid:
+					var cam_loc = camera.global_transform.affine_inverse() * pos_r
+					var distance = pos_r.distance_to(head_pos)
+					
+					var is_too_close = distance < 0.25
+					var is_dropped = cam_loc.y < -0.55 or cam_loc.z > -0.15
+					var is_extreme_out = abs(cam_loc.x) > 0.65
+					
+					if is_too_close or is_dropped or is_extreme_out:
+						_cancel_action("Ki Blast derecho cancelado: postura de brazo rota")
+						_reset_ki_blast_charge(1)
 		else:
 			# No estamos cargando aún. Evaluar los requisitos estrictos de entrada para el Paso 1:
-			var is_stretched_r = right_valid and pos_r.distance_to(head_pos) > 0.55
-			var is_open_r = right_valid and _is_hand_open(right_tracker)
-			var is_chest_height_r = right_valid and pos_r.y > (head_height * 0.5) and pos_r.y < (head_height * 1.1)
-			
-			if is_stretched_r and is_open_r and is_chest_height_r:
-				_feed_trie("ARM_STRETCHED_OPEN_RIGHT")
-				is_charging_ki_blast_right = true
+			# El brazo debe estar estirado hacia adelante y a la altura de los hombros/pecho.
+			if right_valid:
+				var cam_loc_r = camera.global_transform.affine_inverse() * pos_r
+				var distance_r = pos_r.distance_to(head_pos)
+				var is_open_r = _is_hand_open(right_tracker)
+				
+				# Criterios locales en espacio de cámara:
+				# 1. Estirado hacia adelante: local z < -0.42 (por lo menos 42 cm enfrente)
+				# 2. Altura de hombros: local y entre -0.32 y 0.08 (nivel del pecho a los ojos)
+				# 3. Espacio derecho: local x entre 0.05 y 0.45
+				var is_forward_r = cam_loc_r.z < -0.42 and distance_r > 0.52
+				var is_shoulder_height_r = cam_loc_r.y > -0.32 and cam_loc_r.y < 0.08
+				var is_natural_side_r = cam_loc_r.x > 0.05 and cam_loc_r.x < 0.45
+				
+				if is_forward_r and is_shoulder_height_r and is_natural_side_r and is_open_r:
+					_feed_trie("ARM_STRETCHED_OPEN_RIGHT")
+					is_charging_ki_blast_right = true
 
 # --- Lógica de Control del Trie-State-Machine ---
 
