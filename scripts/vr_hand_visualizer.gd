@@ -18,6 +18,7 @@ var static_finger_meshes: Array[MeshInstance3D] = []
 var frames_since_log: int = 0
 
 # --- Referencias de Nodos y Física ---
+var parent_node: Node = null
 var physics_fist: RigidBody3D = null
 var physics_collision: CollisionShape3D = null
 var xr_origin: XROrigin3D = null
@@ -68,11 +69,20 @@ const JOINTS = [
 ]
 
 func _ready() -> void:
+	# 0. Cachar referencias a nodos principales
+	parent_node = get_parent()
+	xr_origin = get_node_or_null("../../")
+	gesture_tree_ref = get_node_or_null("/root/cell_games_arena/GesturePhaseTree")
+	if not gesture_tree_ref and get_tree() and get_tree().root:
+		var arena = get_tree().root.get_child(0)
+		if arena:
+			gesture_tree_ref = arena.find_child("GesturePhaseTree", true, false)
+
 	# 1. Determinar color temático dinámico de Ki según el nombre del nodo padre
-	if get_parent():
-		if get_parent().name == "LeftHand":
+	if parent_node:
+		if parent_node.name == "LeftHand":
 			energy_color = Color(0.0, 0.7, 1.0, 0.9) # Celeste Ki cian
-		elif get_parent().name == "RightHand":
+		elif parent_node.name == "RightHand":
 			energy_color = Color(1.0, 0.6, 0.1, 0.9) # Dorado/Naranja Ki
 
 	# 2. Configurar el material de energía Ki (brillante y traslúcido)
@@ -90,7 +100,7 @@ func _ready() -> void:
 				child.material_override = material_ki
 				child.visible = true # Visibles por defecto
 				static_count += 1
-		print("[VRHandVisualizer] %s: Inicializado. Encontradas %d mallas estáticas de fallback." % [get_parent().name, static_count])
+		print("[VRHandVisualizer] %s: Inicializado. Encontradas %d mallas estáticas de fallback." % [parent_node.name if parent_node else name, static_count])
 
 	# 4. Crear los mesh de articulaciones dinámicamente
 	var sphere = SphereMesh.new()
@@ -100,7 +110,6 @@ func _ready() -> void:
 	# Instanciar representaciones 3D para cada uno de los 26 joints
 	# Para evadir el ocultamiento nativo de los controladores (XRController3D) cuando no hay mandos enlazados,
 	# añadimos las esferas de articulaciones dinámicamente como hijas del origen de XR (XROrigin3D) el cual siempre está visible.
-	xr_origin = get_node_or_null("../../")
 	for j in JOINTS:
 		var mi = MeshInstance3D.new()
 		mi.mesh = sphere
@@ -125,22 +134,21 @@ func _process(_delta: float) -> void:
 
 	# SEGURIDAD ABSOLUTA: Forzar que el nodo padre (LeftHand/RightHand) permanezca visible
 	# Esto anula cualquier lógica nativa del motor que intente ocultar el controlador cuando no detecta tracking.
-	if get_parent() and not get_parent().visible:
-		get_parent().visible = true
-
+	if parent_node and not parent_node.visible:
+		parent_node.visible = true
+ 
 	# 1. Obtener la referencia al tracker dinámico del script xr_setup.gd
 	if not tracker:
-		var origin = get_node_or_null("../../")
-		if origin and "left_hand_tracker" in origin:
-			if get_parent().name == "LeftHand":
-				tracker = origin.left_hand_tracker
-			elif get_parent().name == "RightHand":
-				tracker = origin.right_hand_tracker
+		if xr_origin:
+			if parent_node and parent_node.name == "LeftHand" and "left_hand_tracker" in xr_origin:
+				tracker = xr_origin.left_hand_tracker
+			elif parent_node and parent_node.name == "RightHand" and "right_hand_tracker" in xr_origin:
+				tracker = xr_origin.right_hand_tracker
 
-	# Intentar obtener la referencia al GesturePhaseTree si no está cargada
+	# Intentar obtener la referencia al GesturePhaseTree si no se cargó en _ready
 	if not gesture_tree_ref:
 		gesture_tree_ref = get_node_or_null("/root/cell_games_arena/GesturePhaseTree")
-		if not gesture_tree_ref:
+		if not gesture_tree_ref and get_tree() and get_tree().root:
 			var arena = get_tree().root.get_child(0)
 			if arena:
 				gesture_tree_ref = arena.find_child("GesturePhaseTree", true, false)
@@ -157,10 +165,10 @@ func _process(_delta: float) -> void:
 	if frames_since_log >= 180:
 		frames_since_log = 0
 		print("[VRHandVisualizer] %s: Rastro Dedos = %s | Tracker Enlazado = %s | Padre Visible = %s" % [
-			get_parent().name,
+			parent_node.name if parent_node else name,
 			"SÍ (26 Joints)" if hand_tracking_active else "NO (Fallback Controles)",
 			"SÍ" if tracker != null else "NO",
-			"SÍ" if get_parent().visible else "NO"
+			"SÍ" if parent_node and parent_node.visible else "NO"
 		])
 
 	# 3. Renderizado Inteligente Híbrido (Hand Tracking vs Controladores)
@@ -261,13 +269,12 @@ func _setup_physics_fist() -> void:
 	physics_fist.add_child(physics_collision)
 	
 	# Instanciar en la raíz de forma segura para conservar coordenadas globales sin heredar transform del tracker
-	var origin = get_node_or_null("../../")
-	if origin:
-		if origin.get_parent():
-			origin.get_parent().call_deferred("add_child", physics_fist)
+	if xr_origin:
+		if xr_origin.get_parent():
+			xr_origin.get_parent().call_deferred("add_child", physics_fist)
 		else:
-			origin.call_deferred("add_child", physics_fist)
-		print("[VRHandVisualizer] %s: Puño físico procedimental instanciado con éxito en la raíz global." % get_parent().name)
+			xr_origin.call_deferred("add_child", physics_fist)
+		print("[VRHandVisualizer] %s: Puño físico procedimental instanciado con éxito en la raíz global." % (parent_node.name if parent_node else name))
 	else:
 		call_deferred("add_child", physics_fist)
 
@@ -481,22 +488,11 @@ func _setup_charging_ki_sphere() -> void:
 	else:
 		call_deferred("add_child", charging_ki_light)
 		
-	print("[VRHandVisualizer] %s: Esfera y luz de Ki Blast procedimentales inicializadas en el origen XR." % get_parent().name)
+	print("[VRHandVisualizer] %s: Esfera y luz de Ki Blast procedimentales inicializadas en el origen XR." % (parent_node.name if parent_node else name))
 
 ## Actualiza el tamaño, la posición y la pulsación sinusoidal del Ki Blast en base a la carga real
 func _update_charging_ki_sphere(delta: float) -> void:
-	if not charging_ki_sphere or not charging_ki_light:
-		return
-		
-	# Intentar obtener la referencia al GesturePhaseTree
-	if not gesture_tree_ref:
-		gesture_tree_ref = get_node_or_null("/root/cell_games_arena/GesturePhaseTree")
-		if not gesture_tree_ref:
-			var arena = get_tree().root.get_child(0)
-			if arena:
-				gesture_tree_ref = arena.find_child("GesturePhaseTree", true, false)
-				
-	if not gesture_tree_ref:
+	if not charging_ki_sphere or not charging_ki_light or not gesture_tree_ref:
 		return
 		
 	# Leer variables de carga de forma segura desde el Trie
