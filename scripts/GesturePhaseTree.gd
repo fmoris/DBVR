@@ -51,6 +51,9 @@ var aura_start_player: AudioStreamPlayer = null
 var aura_loop_player: AudioStreamPlayer = null
 var ki_blast_charge_player: AudioStreamPlayer = null
 
+# --- Aura Visual del Jugador ---
+var visual_aura: Node3D = null
+
 # --- Trackers Internos y Biometría ---
 var left_tracker: XRHandTracker
 var right_tracker: XRHandTracker
@@ -94,6 +97,12 @@ func _process(delta: float) -> void:
 	var camera = get_viewport().get_camera_3d()
 	if not camera:
 		return
+		
+	# Actualizar la posición y rotación del aura dorada si está activa
+	if visual_aura and is_instance_valid(visual_aura):
+		var feet_pos = Vector3(camera.global_position.x, 0.5, camera.global_position.z)
+		visual_aura.global_position = feet_pos + Vector3(0, 1.2, 0)
+		visual_aura.rotate_y(delta * 0.5)
 		
 	# 2. Calcular el torso de referencia (up vector absoluto, rotación Y horizontal)
 	var torso_pos = camera.global_position - Vector3(0, 0.40, 0)
@@ -411,6 +420,9 @@ func _trigger_action(action_name: String) -> void:
 		emit_signal("ki_recharge_started", true) # Carga Máxima activada
 		emit_signal("gesture_logged", "Paso 2: ¡Carga de Ki activa a los costados de la cadera!", "success")
 		
+		# Mostrar aura visual dorada y luz
+		_show_visual_aura(true)
+		
 		# Reproducir sonidos de recarga de Ki
 		if aura_start_player:
 			aura_start_player.play()
@@ -523,14 +535,14 @@ func _spawn_ki_blast_projectile(hand_side: int, is_charged: bool) -> void:
 	light.omni_range = 3.0 if is_charged else 1.5
 	projectile.add_child(light)
 	
-	# Añadir el proyectil a la raíz del árbol
-	get_tree().root.add_child(projectile)
-	
-	# Asignar el script físico estático precompilado
+	# Asignar el script físico estático precompilado y sus variables ANTES de entrar al árbol
 	projectile.set_script(ProceduralKiProjectileScript)
 	projectile.set("speed_velocity", velocity_dir * speed)
 	projectile.set("p_radius", projectile_radius)
 	projectile.set("p_color", energy_color)
+	
+	# Añadir el proyectil a la raíz del árbol de escenas para su inicialización física
+	get_tree().root.add_child(projectile)
 	
 	# Configurar el ciclo de física del proyectil
 	projectile.set_physics_process(true)
@@ -540,6 +552,9 @@ func _cancel_action(reason: String) -> void:
 		if is_charging_ki:
 			is_charging_ki = false
 			emit_signal("ki_recharge_stopped")
+			
+			# Ocultar aura visual dorada
+			_show_visual_aura(false)
 			
 			# Detener sonidos de recarga de Ki
 			if aura_start_player:
@@ -634,3 +649,59 @@ func _setup_sound_players() -> void:
 	add_child(ki_blast_charge_player)
 	
 	print("[GesturePhaseTree] Reproductores de audio inicializados con éxito.")
+
+# --- Gestión del Aura Visual 3D del Jugador ---
+
+func _show_visual_aura(show: bool) -> void:
+	if show:
+		if visual_aura != null and is_instance_valid(visual_aura):
+			return
+			
+		var camera = get_viewport().get_camera_3d()
+		if not camera:
+			return
+			
+		# Contenedor del Aura
+		visual_aura = Node3D.new()
+		visual_aura.name = "PlayerKiAura"
+		
+		# 1. Crear cilindro procedural
+		var mesh_inst = MeshInstance3D.new()
+		mesh_inst.name = "AuraMesh"
+		var cylinder = CylinderMesh.new()
+		cylinder.top_radius = 0.85
+		cylinder.bottom_radius = 0.95
+		cylinder.height = 2.4
+		cylinder.radial_segments = 24
+		cylinder.rings = 4
+		cylinder.cap_top = false
+		cylinder.cap_bottom = false
+		mesh_inst.mesh = cylinder
+		
+		var mat = ShaderMaterial.new()
+		mat.shader = KiCoronaShader
+		mat.set_shader_parameter("base_color", Color(1.0, 0.85, 0.1, 0.85)) # Oro brillante
+		mat.set_shader_parameter("vertex_displacement", 0.07)
+		mat.set_shader_parameter("speed", 4.5)
+		mat.set_shader_parameter("scale", 5.0)
+		mesh_inst.material_override = mat
+		visual_aura.add_child(mesh_inst)
+		
+		# 2. Luz dinámica omnidireccional
+		var light = OmniLight3D.new()
+		light.name = "AuraLight"
+		light.light_color = Color(1.0, 0.8, 0.2)
+		light.light_energy = 8.0
+		light.omni_range = 4.0
+		light.position = Vector3(0, 0.5, 0)
+		visual_aura.add_child(light)
+		
+		# Posicionar a la altura de los pies del jugador
+		var feet_pos = Vector3(camera.global_position.x, 0.5, camera.global_position.z)
+		visual_aura.global_position = feet_pos + Vector3(0, 1.2, 0)
+		
+		get_tree().root.add_child(visual_aura)
+	else:
+		if visual_aura != null and is_instance_valid(visual_aura):
+			visual_aura.queue_free()
+		visual_aura = null

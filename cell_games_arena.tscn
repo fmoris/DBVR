@@ -253,6 +253,7 @@ tracker = &"right_hand"
 
 [node name="FingerHand" type="Node3D" parent="Player_XROrigin3D/RightHand" unique_id=419008089]
 script = ExtResource("7_hand_visualizer")
+hand_side = "Right"
 energy_color = Color(1, 0.6, 0.1, 0.9)
 
 [node name="@MeshInstance3D@56527" type="MeshInstance3D" parent="Player_XROrigin3D/RightHand/FingerHand" unique_id=14095018]

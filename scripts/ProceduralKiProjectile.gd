@@ -32,10 +32,14 @@ func _physics_process(delta: float) -> void:
 		var parameters = PhysicsRayQueryParameters3D.create(prev_pos, global_position)
 		parameters.exclude = ray_query_exclude
 		var collision = space.intersect_ray(parameters)
-		if collision:
-			is_dead = true
-			# Llamar a la detonación de forma diferida para no interferir en el hilo físico de Jolt
-			call_deferred("_trigger_explosion", collision.position, collision.collider)
+		if collision and collision.collider:
+			if "KiCombatFist" in collision.collider.name:
+				# Ignorar colisión con los puños del propio jugador
+				pass
+			else:
+				is_dead = true
+				# Llamar a la detonación de forma diferida para no interferir en el hilo físico de Jolt
+				call_deferred("_trigger_explosion", collision.position, collision.collider)
 
 func _trigger_explosion(pos: Vector3, collider: Node) -> void:
 	# 1. Destello esférico visual rápido (Flash de energía unshaded)

@@ -142,11 +142,12 @@ func _update_combat_stats(delta: float) -> void:
 		var recharge_speed = 35.0 if is_heavy_recharge else 12.0
 		ki_current = min(ki_current + recharge_speed * delta, ki_max)
 		
-		# Incrementar NP dinámicamente según la intensidad de la carga
+		# Incrementar NP dinámicamente según la intensidad de la carga (tope del 85% para no alcanzar el máximo solo cargando)
+		var np_cap = np_max * 0.85
 		if is_heavy_recharge:
-			np_current = min(np_current + 1800.0 * delta, np_max)
+			np_current = min(np_current + 1800.0 * delta, np_cap)
 		else:
-			np_current = min(np_current + 400.0 * delta, np_max)
+			np_current = min(np_current + 400.0 * delta, np_cap)
 			
 		update_ki(ki_current, ki_max)
 		update_power_level(np_current, np_max)

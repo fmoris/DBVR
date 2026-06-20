@@ -548,8 +548,8 @@ func _update_charging_ki_sphere(delta: float) -> void:
 		charging_ki_corona.global_position = palm_pos
 		charging_ki_light.global_position = palm_pos
 		
-		# Calcular factor de escala progresiva: de 1.0x inicial hasta 2.5x a los 2.5 segundos
-		var scale_factor = 1.0 + (charge_time / 2.5) * 1.5
+		# Calcular factor de escala progresiva: de 0.2x inicial hasta 2.0x a los 2.5 segundos (crecimiento dinámico de Ki)
+		var scale_factor = 0.2 + (charge_time / 2.5) * 1.8
 		
 		# Aplicar vibración sinusoidal orgánica tipo Dragon Ball
 		var pulse = scale_factor * (1.0 + randf_range(-0.06, 0.06))
