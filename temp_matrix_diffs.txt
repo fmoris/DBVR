@@ -1,0 +1,2 @@
+=== DIFERENCIAS EN MATRICES DE BIND ===
+No hay diferencias en las matrices de deformación.

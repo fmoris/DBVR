@@ -6,6 +6,9 @@ extends Node3D
 @export var joint_radius: float = 0.006  # 6mm por esfera de articulación para Quest 3
 @export var energy_color: Color = Color(0.0, 0.7, 1.0, 0.9) # Celeste brillante de energía Ki
 
+const KiSphereShader = preload("res://ki_sphere.gdshader")
+const KiCoronaShader = preload("res://shaders/ki_corona.gdshader")
+
 # --- Parámetros Físicos de Combate (Quest VR) ---
 @export var enable_physics_fist: bool = true
 @export var fist_radius: float = 0.08  # 8cm de radio físico para el puño de colisión
@@ -25,6 +28,7 @@ var xr_origin: XROrigin3D = null
 
 # --- Referencias de Esferas y Luces de Carga de Ki Blast (Espejo) ---
 var charging_ki_sphere: MeshInstance3D = null
+var charging_ki_corona: MeshInstance3D = null
 var charging_ki_light: OmniLight3D = null
 var gesture_tree_ref: Node = null
 
@@ -450,32 +454,49 @@ func _spawn_ki_impact_vfx(contact_point: Vector3, color: Color) -> void:
 
 ## Configura e instancia la esfera de Ki y la luz de energía en el origen de XR
 func _setup_charging_ki_sphere() -> void:
-	# 1. Crear procedimentalmente la esfera de Ki
-	charging_ki_sphere = MeshInstance3D.new()
-	charging_ki_sphere.name = "ProceduralKiSphere_" + hand_side
-	
 	var sphere = SphereMesh.new()
 	sphere.radius = 0.035 # Radio de la palma aprox (sin incluir dedos)
 	sphere.height = 0.070
 	sphere.radial_segments = 32
 	sphere.rings = 16
+
+	# 1. Crear procedimentalmente el Núcleo (Core) de Ki
+	charging_ki_sphere = MeshInstance3D.new()
+	charging_ki_sphere.name = "ProceduralKiSphere_" + hand_side
 	charging_ki_sphere.mesh = sphere
 	
-	# Material holográfico unshaded dinámico
-	var mat = StandardMaterial3D.new()
-	mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
-	mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = energy_color
-	charging_ki_sphere.material_override = mat
+	# Material de Shader para el plasma denso del Core
+	var mat_core = ShaderMaterial.new()
+	mat_core.shader = KiSphereShader
+	mat_core.set_shader_parameter("base_color", Color(energy_color.r, energy_color.g, energy_color.b, 0.9))
+	mat_core.set_shader_parameter("core_glow", 4.0)
+	charging_ki_sphere.material_override = mat_core
 	charging_ki_sphere.visible = false
 	
-	# Añadir al origen de XR deferredly
 	if xr_origin:
 		xr_origin.call_deferred("add_child", charging_ki_sphere)
 	else:
 		call_deferred("add_child", charging_ki_sphere)
 		
-	# 2. Crear procedimentalmente la luz de Ki
+	# 2. Crear procedimentalmente la Corona de Rayos (Corona)
+	charging_ki_corona = MeshInstance3D.new()
+	charging_ki_corona.name = "ProceduralKiCorona_" + hand_side
+	charging_ki_corona.mesh = sphere
+	
+	# Material de Shader para la corona eléctrica
+	var mat_corona = ShaderMaterial.new()
+	mat_corona.shader = KiCoronaShader
+	mat_corona.set_shader_parameter("base_color", Color(energy_color.r, energy_color.g, energy_color.b, 0.85))
+	mat_corona.set_shader_parameter("vertex_displacement", 0.05)
+	charging_ki_corona.material_override = mat_corona
+	charging_ki_corona.visible = false
+	
+	if xr_origin:
+		xr_origin.call_deferred("add_child", charging_ki_corona)
+	else:
+		call_deferred("add_child", charging_ki_corona)
+		
+	# 3. Crear procedimentalmente la luz de Ki
 	charging_ki_light = OmniLight3D.new()
 	charging_ki_light.name = "ProceduralKiLight_" + hand_side
 	charging_ki_light.light_color = energy_color
@@ -488,11 +509,11 @@ func _setup_charging_ki_sphere() -> void:
 	else:
 		call_deferred("add_child", charging_ki_light)
 		
-	print("[VRHandVisualizer] %s: Esfera y luz de Ki Blast procedimentales inicializadas en el origen XR." % (parent_node.name if parent_node else name))
+	print("[VRHandVisualizer] %s: Esferas concéntricas (Core + Corona) y luz de Ki Blast inicializadas." % (parent_node.name if parent_node else name))
 
 ## Actualiza el tamaño, la posición y la pulsación sinusoidal del Ki Blast en base a la carga real
 func _update_charging_ki_sphere(delta: float) -> void:
-	if not charging_ki_sphere or not charging_ki_light or not gesture_tree_ref:
+	if not charging_ki_sphere or not charging_ki_corona or not charging_ki_light or not gesture_tree_ref:
 		return
 		
 	# Leer variables de carga de forma segura desde el Trie
@@ -507,8 +528,9 @@ func _update_charging_ki_sphere(delta: float) -> void:
 		charge_time = gesture_tree_ref.get("ki_blast_charge_time_right") if "ki_blast_charge_time_right" in gesture_tree_ref else 0.0
 		
 	if is_charging and charge_time > 0.0:
-		# Hacer visibles esfera y luz
+		# Hacer visibles esferas y luz
 		charging_ki_sphere.visible = true
+		charging_ki_corona.visible = true
 		charging_ki_light.visible = true
 		
 		# Determinar posición de la esfera (Palma o fallback del control)
@@ -523,6 +545,7 @@ func _update_charging_ki_sphere(delta: float) -> void:
 					palm_pos = palm_local.origin
 					
 		charging_ki_sphere.global_position = palm_pos
+		charging_ki_corona.global_position = palm_pos
 		charging_ki_light.global_position = palm_pos
 		
 		# Calcular factor de escala progresiva: de 1.0x inicial hasta 2.5x a los 2.5 segundos
@@ -530,12 +553,16 @@ func _update_charging_ki_sphere(delta: float) -> void:
 		
 		# Aplicar vibración sinusoidal orgánica tipo Dragon Ball
 		var pulse = scale_factor * (1.0 + randf_range(-0.06, 0.06))
+		
+		# Escalar ambas esferas concéntricamente
 		charging_ki_sphere.scale = Vector3.ONE * pulse
+		charging_ki_corona.scale = Vector3.ONE * pulse * 1.15 # La corona envuelve al núcleo
 		
 		# Actualizar brillo y rango de la luz procedimental
 		charging_ki_light.light_energy = (charge_time / 2.5) * 4.0 + 1.0
 		charging_ki_light.omni_range = 1.0 + (charge_time / 2.5) * 2.0
 	else:
-		# Ocultar de inmediato
+		# Ocultar todo
 		charging_ki_sphere.visible = false
+		charging_ki_corona.visible = false
 		charging_ki_light.visible = false

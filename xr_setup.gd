@@ -5,13 +5,8 @@ var xr_interface: XRInterface
 var left_hand_tracker: XRHandTracker
 var right_hand_tracker: XRHandTracker
 
-# --- Estados Previos para Logs Limpios ---
-var last_state_left: String = ""
-var last_state_right: String = ""
-
 # --- Referencias de Nodos Dinámicos ---
 @onready var camera: XRCamera3D = $XRCamera3D
-@onready var ki_sphere: MeshInstance3D = get_node_or_null("RightHand/KiSphere")
 
 func _ready() -> void:
 	# Inicialización robusta de OpenXR según tutorial oficial
@@ -44,57 +39,6 @@ func _process(_delta: float) -> void:
 					left_hand_tracker = t
 				elif t.hand == XRHandTracker.TRACKER_HAND_RIGHT:
 					right_hand_tracker = t
-
-	# Análisis continuo de posturas para feedback local
-	if left_hand_tracker:
-		analyze_hand_pose(left_hand_tracker, "Izquierda")
-	if right_hand_tracker:
-		analyze_hand_pose(right_hand_tracker, "Derecha")
-
-func analyze_hand_pose(tracker: XRHandTracker, hand_name: String) -> void:
-	var flags = tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_WRIST)
-	
-	# Verificar si la posición de la muñeca es válida y está siendo rastreada
-	if !(flags & XRHandTracker.HAND_JOINT_FLAG_POSITION_VALID):
-		if ki_sphere and hand_name == "Derecha":
-			ki_sphere.visible = false
-		return
-
-	var wrist_pose = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_WRIST)
-	var hand_pos = wrist_pose.origin
-	var head_pos = camera.position if camera else Vector3.ZERO
-	
-	# 1. Gesto de Dedos (Apertura de la mano)
-	var index_tip = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_INDEX_FINGER_TIP).origin
-	var dist_fist = hand_pos.distance_to(index_tip)
-	var finger_state = "ABIERTA" if dist_fist > 0.1 else "CERRADA"
-
-	# 2. Posición Espacial Relativa a la Cabeza/Cámara
-	var spatial_state = ""
-	var dist_to_head = hand_pos.distance_to(head_pos)
-	
-	if dist_to_head > 0.55:
-		spatial_state = "BRAZO ESTIRADO"
-	elif hand_pos.y > head_pos.y:
-		spatial_state = "MANO ARRIBA"
-	elif hand_pos.y < (head_pos.y * 0.6):
-		spatial_state = "CERCA DE CADERA"
-	else:
-		spatial_state = "POSICIÓN NEUTRAL"
-
-	# 3. Lógica de Efectos Visuales Segura (Removida por obsoleta)
-	pass
-
-	# 4. Logs de Cambio de Estado (Evita saturar consola)
-	var current_state = finger_state + "|" + spatial_state
-	if hand_name == "Izquierda":
-		if current_state != last_state_left:
-			print("[OpenXR HandTracking] [%s] %s" % [hand_name, current_state])
-			last_state_left = current_state
-	else:
-		if current_state != last_state_right:
-			print("[OpenXR HandTracking] [%s] %s" % [hand_name, current_state])
-			last_state_right = current_state
 
 # --- APIs de Consulta Espacial Nativas para la Fase 3 (GesturePhaseTree) ---
 

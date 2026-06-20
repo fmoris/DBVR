@@ -1,0 +1,46 @@
+=== DIFERENCIAS EN JERARQUÍA DE HUESOS ===
+Hueso ������_0105 no encontrado en optimizado.
+Jerarquía cambiada para head pupil left_0102: esperado padre=������_0105, real=LeftEyeRoot
+Hueso ������_0106 no encontrado en optimizado.
+Jerarquía cambiada para head pupil right_0103: esperado padre=������_0106, real=RightEyeRoot
+Hueso ������_0119 no encontrado en optimizado.
+Hueso ������������_0145 no encontrado en optimizado.
+Hueso ������������_0146 no encontrado en optimizado.
+Hueso ������������_0147 no encontrado en optimizado.
+Hueso ������������_0148 no encontrado en optimizado.
+Hueso ������������_0149 no encontrado en optimizado.
+Hueso ������������_0150 no encontrado en optimizado.
+Hueso ������������_021 no encontrado en optimizado.
+Hueso ������������_022 no encontrado en optimizado.
+Hueso ������������_023 no encontrado en optimizado.
+Hueso ������������_024 no encontrado en optimizado.
+Hueso ������������_025 no encontrado en optimizado.
+Hueso ������������_026 no encontrado en optimizado.
+Hueso ������������_0151 no encontrado en optimizado.
+Hueso ������������_0152 no encontrado en optimizado.
+Hueso ������������_0153 no encontrado en optimizado.
+Hueso ���������_0154 no encontrado en optimizado.
+Jerarquía cambiada para unused gp lowarm mid l_0122: esperado padre=���������_0154, real=LeftForearmAdjustRoot
+Hueso ���������_0155 no encontrado en optimizado.
+Hueso ������������_031 no encontrado en optimizado.
+Hueso ������������_032 no encontrado en optimizado.
+Hueso ������������_033 no encontrado en optimizado.
+Hueso ������������_034 no encontrado en optimizado.
+Hueso ������������_035 no encontrado en optimizado.
+Hueso ������������_036 no encontrado en optimizado.
+Hueso ������������_0140 no encontrado en optimizado.
+Hueso ������������_0160 no encontrado en optimizado.
+Hueso ������������_0161 no encontrado en optimizado.
+Hueso ������������_0162 no encontrado en optimizado.
+Hueso ������������_0163 no encontrado en optimizado.
+Hueso ������������_0164 no encontrado en optimizado.
+Hueso ������������_0165 no encontrado en optimizado.
+Hueso ������������_0166 no encontrado en optimizado.
+Hueso ������������_0167 no encontrado en optimizado.
+Hueso ���������_0168 no encontrado en optimizado.
+Jerarquía cambiada para unused gp lowarm mid r_0123: esperado padre=���������_0168, real=RightForearmAdjustRoot
+Hueso ���������_0169 no encontrado en optimizado.
+Hueso ������������_0172 no encontrado en optimizado.
+Hueso ������������������_0173 no encontrado en optimizado.
+Hueso ������������_0174 no encontrado en optimizado.
+Hueso ������������������_0175 no encontrado en optimizado.

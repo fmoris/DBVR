@@ -7,6 +7,8 @@
 [ext_resource type="PackedScene" uid="uid://cggifip4tem77" path="res://vr_hud.tscn" id="5_vrhud"]
 [ext_resource type="Script" uid="uid://cp621txxly1yq" path="res://scripts/GesturePhaseTree.gd" id="6_gesturetree"]
 [ext_resource type="Script" uid="uid://yl5ssntdfgr" path="res://scripts/vr_hand_visualizer.gd" id="7_hand_visualizer"]
+[ext_resource type="PackedScene" uid="uid://bm1ihg0uwejwt" path="res://assets/models/vegeta_optimized.glb" id="8_fbjte"]
+[ext_resource type="Texture2D" uid="uid://b52bt3156w8gw" path="res://assets/images/background.png" id="9_bgtexture"]
 
 [sub_resource type="Shader" id="Shader_fbjte"]
 code = "
@@ -139,10 +141,11 @@ top_radius = 0.008
 bottom_radius = 0.008
 height = 0.04
 
-[sub_resource type="PhysicalSkyMaterial" id="PhysicalSkyMaterial_4omsf"]
+[sub_resource type="PanoramaSkyMaterial" id="PanoramaSkyMaterial_4omsf"]
+panorama = ExtResource("9_bgtexture")
 
 [sub_resource type="Sky" id="Sky_bupmm"]
-sky_material = SubResource("PhysicalSkyMaterial_4omsf")
+sky_material = SubResource("PanoramaSkyMaterial_4omsf")
 
 [sub_resource type="Environment" id="Environment_ha84r"]
 background_mode = 2
@@ -157,6 +160,7 @@ ssao_enabled = true
 script = ExtResource("1_pfx00")
 
 [node name="ArenaFloor_Single" type="MeshInstance3D" parent="ArenaBuilder" unique_id=967937368]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.028614521, 0, 0.007990837)
 material_override = SubResource("ShaderMaterial_8f0s8")
 mesh = SubResource("BoxMesh_ckiqd")
 
@@ -213,9 +217,6 @@ tracker = &"left_hand"
 
 [node name="FingerHand" type="Node3D" parent="Player_XROrigin3D/LeftHand" unique_id=766961304]
 script = ExtResource("7_hand_visualizer")
-enable_physics_fist = null
-fist_radius = null
-force_multiplier = null
 
 [node name="@MeshInstance3D@56526" type="MeshInstance3D" parent="Player_XROrigin3D/LeftHand/FingerHand" unique_id=821816028]
 material_override = SubResource("StandardMaterial3D_iyg5j")
@@ -253,9 +254,6 @@ tracker = &"right_hand"
 [node name="FingerHand" type="Node3D" parent="Player_XROrigin3D/RightHand" unique_id=419008089]
 script = ExtResource("7_hand_visualizer")
 energy_color = Color(1, 0.6, 0.1, 0.9)
-enable_physics_fist = null
-fist_radius = null
-force_multiplier = null
 
 [node name="@MeshInstance3D@56527" type="MeshInstance3D" parent="Player_XROrigin3D/RightHand/FingerHand" unique_id=14095018]
 material_override = SubResource("StandardMaterial3D_ckiqd")
@@ -306,3 +304,7 @@ horizontal_offset = -0.35
 
 [node name="GesturePhaseTree" type="Node" parent="." unique_id=1679186804]
 script = ExtResource("6_gesturetree")
+
+[node name="vegeta_optimized" parent="." unique_id=1436084695 instance=ExtResource("8_fbjte")]
+physics_interpolation_mode = 1
+transform = Transform3D(8.276304, -0.5044719, 0.06873286, 0.5045686, 8.276578, -0.009629556, -0.0680196, 0.013793809, 8.291659, -2.6358833, 0.97367823, 12.424517)

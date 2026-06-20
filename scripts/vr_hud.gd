@@ -27,7 +27,9 @@ var is_heavy_recharge: bool = false
 
 # --- Referencias y Historial de Depuración VR ---
 var debug_logs_label: RichTextLabel = null
+var live_joints_label: Label = null
 var debug_history: Array[String] = []
+
 
 func _ready() -> void:
 	if not sub_viewport or not hud_mesh:
@@ -78,7 +80,10 @@ func _reparent_to_camera() -> void:
 				gesture_tree.ki_blast_charging.connect(_on_ki_blast_charging)
 			if gesture_tree.has_signal("gesture_logged"):
 				gesture_tree.gesture_logged.connect(log_gesture_event)
+			if gesture_tree.has_signal("hand_states_updated"):
+				gesture_tree.hand_states_updated.connect(_on_hand_states_updated)
 			print("[VRHUD] Conexión establecida con GesturePhaseTree y su consola de depuración VR.")
+
 
 func _process(delta: float) -> void:
 	if Engine.is_editor_hint():
@@ -212,13 +217,26 @@ func _setup_vr_debugger() -> void:
 		# Forzar tipografía compacta y de alta definición para visores VR
 		debug_logs_label.add_theme_font_size_override("normal_font_size", 12)
 		debug_logs_label.add_theme_font_size_override("bold_font_size", 12)
-		
 		vbox.add_child(debug_logs_label)
+		
+		# Crear la etiqueta de estado de manos en vivo dinámicamente debajo de la consola
+		live_joints_label = Label.new()
+		live_joints_label.name = "LiveHandStatesLabel"
+		live_joints_label.text = "L: DESCONECTADA\nR: DESCONECTADA"
+		live_joints_label.add_theme_font_size_override("font_size", 11)
+		live_joints_label.add_theme_color_override("font_color", Color(0.65, 0.75, 0.85, 0.85))
+		vbox.add_child(live_joints_label)
+		
 		log_gesture_event("Consola Holográfica VR inicializada con éxito.", "success")
-		print("[VRHUD] Debugger Panel inyectado procedimentalmente con éxito en la UI interna.")
+		print("[VRHUD] Debugger Panel y Live Tracker inyectados procedimentalmente con éxito en la UI interna.")
+
+func _on_hand_states_updated(left_desc: String, right_desc: String) -> void:
+	if live_joints_label:
+		live_joints_label.text = "L: %s\nR: %s" % [left_desc, right_desc]
 
 ## Agrega, formatea con BBCode y actualiza un log de eventos en el panel flotante
 func log_gesture_event(msg: String, type: String = "info") -> void:
+
 	# Obtener marca de hora actual del sistema [HH:MM:SS]
 	var time_dict = Time.get_time_dict_from_system()
 	var time_str = "%02d:%02d:%02d" % [time_dict.hour, time_dict.minute, time_dict.second]
