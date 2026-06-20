@@ -300,6 +300,7 @@ transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.638, 0.501, 9.751)
 
 [node name="VRHUD" parent="." unique_id=84404676 instance=ExtResource("5_vrhud")]
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.35, 1.3499999, 12.8)
+distance_from_camera = 1.2
 horizontal_offset = -0.35
 
 [node name="GesturePhaseTree" type="Node" parent="." unique_id=1679186804]
@@ -307,4 +308,4 @@ script = ExtResource("6_gesturetree")
 
 [node name="vegeta_optimized" parent="." unique_id=1436084695 instance=ExtResource("8_fbjte")]
 physics_interpolation_mode = 1
-transform = Transform3D(8.276304, -0.5044719, 0.06873286, 0.5045686, 8.276578, -0.009629556, -0.0680196, 0.013793809, 8.291659, -2.6358833, 0.97367823, 12.424517)
+transform = Transform3D(8.276304, -0.5044719, 0.06873286, 0.5045686, 8.276578, -0.009629556, -0.0680196, 0.013793809, 8.291659, -2.6358833, 0.55031407, 12.424517)

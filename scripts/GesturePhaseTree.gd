@@ -156,9 +156,9 @@ func _process(delta: float) -> void:
 	# 5. Si estamos en modo de recarga activa, evaluar condiciones de mantenimiento/ruptura
 	if is_charging_ki:
 		var ki_charge_valid = left_state.valid and right_state.valid and \
-							left_state.shape == "CLOSED" and right_state.shape == "CLOSED" and \
-							left_state.height == "HIP" and right_state.height == "HIP" and \
-							left_state.depth == "CLOSE" and right_state.depth == "CLOSE"
+							left_state.shape != "OPEN" and right_state.shape != "OPEN" and \
+							left_state.height in ["HIP", "LOW"] and right_state.height in ["HIP", "LOW"] and \
+							left_state.depth in ["CLOSE", "MEDIUM"] and right_state.depth in ["CLOSE", "MEDIUM"]
 		if not ki_charge_valid:
 			_cancel_action("Pose de recarga rota (manos abiertas o fuera de la cadera)")
 			return
@@ -191,6 +191,13 @@ func _process(delta: float) -> void:
 	var detected_gesture = _match_gesture(left_state, right_state)
 	if not detected_gesture.is_empty():
 		_feed_trie(detected_gesture)
+	else:
+		# Timeout de seguridad para estados intermedios cuando no hay gestos activos
+		if current_node != gesture_tree and not is_charging_ki and not is_charging_ki_blast_left and not is_charging_ki_blast_right:
+			gesture_timer += delta
+			if gesture_timer >= 1.5:
+				_cancel_action("Tiempo límite de gesto expirado (1.5s)")
+				return
 
 # --- Métodos de Clasificación y Reglas de GSS v3 ---
 
@@ -269,7 +276,7 @@ func _classify_hand_state(tracker: XRHandTracker, hand_side: int, torso_transfor
 	
 	state["speed_val"] = speed_val
 	
-	if speed_val >= 2.0:
+	if speed_val >= 1.5:
 		state["speed"] = "FAST"
 	elif speed_val < 0.8:
 		state["speed"] = "STABLE"
@@ -285,10 +292,17 @@ func _classify_hand_state(tracker: XRHandTracker, hand_side: int, torso_transfor
 	return state
 
 func _match_gesture(left_state: Dictionary, right_state: Dictionary) -> String:
-	# 1. Recarga KI - Paso 1: Puños cerrados frente al pecho (no cruzados)
+	# Calcular si las manos están demasiado cerca (cruzadas o juntas)
+	var hands_are_close = false
 	if left_state.valid and right_state.valid:
-		var l_closed = left_state.shape == "CLOSED"
-		var r_closed = right_state.shape == "CLOSED"
+		var dist = left_state.pos_local.distance_to(right_state.pos_local)
+		if dist < 0.25:
+			hands_are_close = true
+
+	# 1. Recarga KI - Paso 1: Puños cerrados o relajados frente al pecho (no cruzados)
+	if left_state.valid and right_state.valid:
+		var l_not_open = left_state.shape != "OPEN"
+		var r_not_open = right_state.shape != "OPEN"
 		var l_chest = left_state.height == "CHEST"
 		var r_chest = right_state.height == "CHEST"
 		var l_side = left_state.lateral == "LEFT" or left_state.lateral == "CENTER"
@@ -296,29 +310,28 @@ func _match_gesture(left_state: Dictionary, right_state: Dictionary) -> String:
 		var hands_not_crossed = left_state.pos_local.x < right_state.pos_local.x
 		var l_close = left_state.depth == "CLOSE" or left_state.depth == "MEDIUM"
 		var r_close = right_state.depth == "CLOSE" or right_state.depth == "MEDIUM"
-		var l_stable = left_state.speed == "STABLE"
-		var r_stable = right_state.speed == "STABLE"
+		var l_stable = left_state.speed_val < 2.0
+		var r_stable = right_state.speed_val < 2.0
 		
-		if l_closed and r_closed and l_chest and r_chest and l_side and r_side and hands_not_crossed and l_close and r_close and l_stable and r_stable:
+		if l_not_open and r_not_open and l_chest and r_chest and l_side and r_side and hands_not_crossed and l_close and r_close and l_stable and r_stable:
 			return "RECHARGE_PREP"
 			
-	# 2. Recarga KI - Paso 2: Ambos puños cerrados a los costados de la cadera (cerca)
+	# 2. Recarga KI - Paso 2: Ambos puños cerrados/relajados a los costados de la cadera o bajos (no cruzados)
 	if left_state.valid and right_state.valid:
-		var l_closed = left_state.shape == "CLOSED"
-		var r_closed = right_state.shape == "CLOSED"
-		var l_hip = left_state.height == "HIP"
-		var r_hip = right_state.height == "HIP"
-		var l_left = left_state.lateral == "LEFT"
-		var r_right = right_state.lateral == "RIGHT"
-		var l_close = left_state.depth == "CLOSE"
-		var r_close = right_state.depth == "CLOSE"
-		var l_stable = left_state.speed == "STABLE"
-		var r_stable = right_state.speed == "STABLE"
+		var l_not_open = left_state.shape != "OPEN"
+		var r_not_open = right_state.shape != "OPEN"
+		var l_hip = left_state.height == "HIP" or left_state.height == "LOW"
+		var r_hip = right_state.height == "HIP" or right_state.height == "LOW"
+		var hands_not_crossed = left_state.pos_local.x < right_state.pos_local.x
+		var l_close = left_state.depth == "CLOSE" or left_state.depth == "MEDIUM"
+		var r_close = right_state.depth == "CLOSE" or right_state.depth == "MEDIUM"
+		var l_stable = left_state.speed_val < 2.0
+		var r_stable = right_state.speed_val < 2.0
 		
-		if l_closed and r_closed and l_hip and r_hip and l_left and r_right and l_close and r_close and l_stable and r_stable:
+		if l_not_open and r_not_open and l_hip and r_hip and hands_not_crossed and l_close and r_close and l_stable and r_stable:
 			return "HANDS_CLOSED_HIP"
 			
-	# 3. Ki Blast Izquierdo - Preparar (Mano izquierda abierta, brazo estirado, estable)
+	# 3. Ki Blast Izquierdo - Preparar (Mano izquierda abierta, brazo estirado, estable, manos no cruzadas)
 	if left_state.valid:
 		var l_open = left_state.shape == "OPEN"
 		var l_chest = left_state.height == "CHEST" or left_state.height == "HEAD"
@@ -326,20 +339,19 @@ func _match_gesture(left_state: Dictionary, right_state: Dictionary) -> String:
 		var l_far = left_state.depth == "FAR"
 		var l_stable = left_state.speed == "STABLE"
 		
-		if l_open and l_chest and l_left and l_far and l_stable:
+		if l_open and l_chest and l_left and l_far and l_stable and not hands_are_close:
 			return "ARM_STRETCHED_OPEN_LEFT"
 			
-	# 4. Ki Blast Izquierdo - Disparar (Mano izquierda abierta, brazo estirado, empuje rápido)
+	# 4. Ki Blast Izquierdo - Disparar (Brazo estirado, empuje rápido - sin requerir mano abierta)
 	if left_state.valid:
-		var l_open = left_state.shape == "OPEN"
 		var l_height_valid = left_state.height != "LOW"
 		var l_far = left_state.depth == "FAR" or left_state.depth == "MEDIUM"
 		var l_fast = left_state.speed == "FAST"
 		
-		if l_open and l_height_valid and l_far and l_fast:
+		if l_height_valid and l_far and l_fast:
 			return "FAST_THRUST_LEFT"
 			
-	# 5. Ki Blast Derecho - Preparar (Mano derecha abierta, brazo estirado, estable)
+	# 5. Ki Blast Derecho - Preparar (Mano derecha abierta, brazo estirado, estable, manos no cruzadas)
 	if right_state.valid:
 		var r_open = right_state.shape == "OPEN"
 		var r_chest = right_state.height == "CHEST" or right_state.height == "HEAD"
@@ -347,17 +359,16 @@ func _match_gesture(left_state: Dictionary, right_state: Dictionary) -> String:
 		var r_far = right_state.depth == "FAR"
 		var r_stable = right_state.speed == "STABLE"
 		
-		if r_open and r_chest and r_right and r_far and r_stable:
+		if r_open and r_chest and r_right and r_far and r_stable and not hands_are_close:
 			return "ARM_STRETCHED_OPEN_RIGHT"
 			
-	# 6. Ki Blast Derecho - Disparar (Mano derecha abierta, brazo estirado, empuje rápido)
+	# 6. Ki Blast Derecho - Disparar (Brazo estirado, empuje rápido - sin requerir mano abierta)
 	if right_state.valid:
-		var r_open = right_state.shape == "OPEN"
 		var r_height_valid = right_state.height != "LOW"
 		var r_far = right_state.depth == "FAR" or right_state.depth == "MEDIUM"
 		var r_fast = right_state.speed == "FAST"
 		
-		if r_open and r_height_valid and r_far and r_fast:
+		if r_height_valid and r_far and r_fast:
 			return "FAST_THRUST_RIGHT"
 			
 	return ""

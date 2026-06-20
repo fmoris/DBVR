@@ -2,8 +2,8 @@
 extends Node3D
 
 # --- Parámetros de Posicionamiento Fijo (Espacio Local de Cámara) ---
-@export var distance_from_camera: float = 1.2
-@export var horizontal_offset: float = 0.0 # Centrado en el eje horizontal de la vista
+@export var distance_from_camera: float = 1.0
+@export var horizontal_offset: float = 0.3 # Centrado en el eje horizontal de la vista
 @export var vertical_offset: float = -0.3   # Situado ligeramente abajo para evitar obstruir el combate
 
 @onready var sub_viewport: SubViewport = $SubViewport
