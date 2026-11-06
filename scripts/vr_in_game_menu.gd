@@ -210,9 +210,10 @@ func _reposition_in_front_of_player() -> void:
 	if not is_inside_tree():
 		return
 
-	var cam = camera_ref
+	var cam: Camera3D = camera_ref
 	if not cam or not is_instance_valid(cam) or not cam.is_inside_tree():
-		cam = get_viewport().get_camera_3d() if get_viewport() else null
+		if is_inside_tree() and get_viewport():
+			cam = get_viewport().get_camera_3d()
 	if not cam or not is_instance_valid(cam) or not cam.is_inside_tree():
 		return
 
@@ -225,8 +226,9 @@ func _reposition_in_front_of_player() -> void:
 	fwd = fwd.normalized()
 
 	global_position = cam_pos + fwd * 1.25 + Vector3(0.0, -0.05, 0.0)
-	look_at(cam_pos, Vector3.UP)
-	rotate_y(PI) # Alinear la normal frontal del Quad hacia los ojos
+	if global_position.distance_squared_to(cam_pos) > 0.01:
+		look_at(cam_pos, Vector3.UP)
+		rotate_y(PI) # Alinear la normal frontal del Quad hacia los ojos
 
 
 func _process(delta: float) -> void:
@@ -322,12 +324,13 @@ func _activate_action(action_name: String) -> void:
 		"reset":
 			print("[VRInGameMenu] 🔄 Reiniciando combate...")
 			toggle_menu()
-			get_tree().reload_current_scene()
+			if is_inside_tree() and get_tree():
+				get_tree().reload_current_scene()
 
 		"calibrate":
 			print("[VRInGameMenu] 🎯 Calibrando vista VR...")
 			XRServer.center_on_hmd(XRServer.RESET_BUT_KEEP_TILT, true)
-			if is_inside_tree():
+			if is_inside_tree() and get_tree():
 				var tw = create_tween()
 				if tw:
 					tw.tween_interval(0.35)
@@ -337,4 +340,5 @@ func _activate_action(action_name: String) -> void:
 
 		"quit":
 			print("[VRInGameMenu] 🚪 Saliendo del juego...")
-			get_tree().quit()
+			if is_inside_tree() and get_tree():
+				get_tree().quit()
