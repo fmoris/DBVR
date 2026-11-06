@@ -84,15 +84,17 @@ func _find_xr_nodes() -> void:
 		left_controller = xr_origin.get_node_or_null("LeftHand")
 		right_controller = xr_origin.get_node_or_null("RightHand")
 
-		if in_game_menu == null and get_tree() and get_tree().current_scene:
-			var existing = get_tree().current_scene.find_child("VRInGameMenu", true, false)
-			if existing and existing is VRInGameMenu:
-				in_game_menu = existing
-			else:
-				in_game_menu = VRInGameMenuClass.new()
-				in_game_menu.name = "VRInGameMenu"
-				get_tree().current_scene.add_child(in_game_menu)
-			in_game_menu.setup_references(xr_origin, camera, left_controller, right_controller)
+		if in_game_menu == null:
+			var scene_or_root = get_tree().current_scene if (get_tree() and get_tree().current_scene) else (get_tree().root if get_tree() else null)
+			if scene_or_root:
+				var existing = scene_or_root.find_child("VRInGameMenu", true, false)
+				if existing and existing is VRInGameMenu:
+					in_game_menu = existing
+				else:
+					in_game_menu = VRInGameMenuClass.new()
+					in_game_menu.name = "VRInGameMenu"
+					scene_or_root.add_child(in_game_menu)
+				in_game_menu.setup_references(xr_origin, camera, left_controller, right_controller)
 
 		if ki_lockon_system == null and get_tree() and get_tree().current_scene:
 			ki_lockon_system = KiSenseAndLockOnClass.new()
@@ -936,7 +938,13 @@ func _process_hud_toggle(delta: float) -> void:
 		menu_toggle_cooldown -= delta
 	elif left_controller.is_button_pressed("menu_button"):
 		menu_toggle_cooldown = 0.45
-		if in_game_menu:
+		if not in_game_menu or not is_instance_valid(in_game_menu):
+			_find_xr_nodes()
+		if in_game_menu and is_instance_valid(in_game_menu):
+			if not in_game_menu.is_inside_tree():
+				var target_parent = get_tree().current_scene if (get_tree() and get_tree().current_scene) else (get_tree().root if get_tree() else null)
+				if target_parent:
+					target_parent.add_child(in_game_menu)
 			in_game_menu.toggle_menu()
 
 	# Clics de sticks (primary_click): alternar guía de movimientos del HUD

@@ -176,29 +176,44 @@ func _build_scouter_menu_ui() -> void:
 
 
 func toggle_menu() -> void:
+	if not is_inside_tree():
+		var tree = Engine.get_main_loop() as SceneTree
+		if tree and tree.current_scene:
+			tree.current_scene.add_child(self)
+		elif tree and tree.root:
+			tree.root.add_child(self)
+		else:
+			return
+
 	is_open = not is_open
 	visible = is_open
 
 	if is_open:
 		_reposition_in_front_of_player()
-		menu_mesh.scale = Vector3.ZERO
-		var tw = create_tween()
-		tw.tween_property(menu_mesh, "scale", Vector3.ONE, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		if menu_mesh and is_instance_valid(menu_mesh):
+			menu_mesh.scale = Vector3.ZERO
+			if is_inside_tree():
+				var tw = create_tween()
+				if tw:
+					tw.tween_property(menu_mesh, "scale", Vector3.ONE, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 		# Pulso háptico suave de apertura
-		if left_controller and left_controller.has_method("trigger_haptic_pulse"):
+		if left_controller and is_instance_valid(left_controller) and left_controller.has_method("trigger_haptic_pulse"):
 			left_controller.trigger_haptic_pulse("haptic", 120.0, 0.5, 0.1, 0.0)
 	else:
-		if left_controller and left_controller.has_method("trigger_haptic_pulse"):
+		if left_controller and is_instance_valid(left_controller) and left_controller.has_method("trigger_haptic_pulse"):
 			left_controller.trigger_haptic_pulse("haptic", 80.0, 0.3, 0.05, 0.0)
 
 	emit_signal("menu_toggled", is_open)
 
 
 func _reposition_in_front_of_player() -> void:
+	if not is_inside_tree():
+		return
+
 	var cam = camera_ref
-	if not cam:
-		cam = get_viewport().get_camera_3d()
-	if not cam:
+	if not cam or not is_instance_valid(cam) or not cam.is_inside_tree():
+		cam = get_viewport().get_camera_3d() if get_viewport() else null
+	if not cam or not is_instance_valid(cam) or not cam.is_inside_tree():
 		return
 
 	# Proyectar flotando a 1.25m exactamente frente a la mirada del jugador
@@ -312,9 +327,13 @@ func _activate_action(action_name: String) -> void:
 		"calibrate":
 			print("[VRInGameMenu] 🎯 Calibrando vista VR...")
 			XRServer.center_on_hmd(XRServer.RESET_BUT_KEEP_TILT, true)
-			var tw = create_tween()
-			tw.tween_interval(0.35)
-			tw.tween_callback(func(): _reposition_in_front_of_player())
+			if is_inside_tree():
+				var tw = create_tween()
+				if tw:
+					tw.tween_interval(0.35)
+					tw.tween_callback(func(): _reposition_in_front_of_player())
+			else:
+				_reposition_in_front_of_player()
 
 		"quit":
 			print("[VRInGameMenu] 🚪 Saliendo del juego...")
