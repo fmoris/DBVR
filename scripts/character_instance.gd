@@ -123,6 +123,7 @@ func setup_character() -> void:
 			# Obtener esqueleto tanto para el jugador como para el oponente
 			skeleton = _find_skeleton(body_mesh_instance)
 			if skeleton:
+				skeleton.name = "Skeleton3D" # Asegura resolución exacta de tracks para AnimationPlayer y Ragdoll
 				if is_player:
 					head_bone_idx = skeleton.find_bone("Head")
 					if head_bone_idx == -1:
@@ -160,7 +161,7 @@ func setup_character() -> void:
 						combat_anim_player = AnimationPlayer.new()
 						combat_anim_player.name = "CombatAnimationPlayer"
 						skel_parent.add_child(combat_anim_player)
-						combat_anim_player.root_node = NodePath(".")
+						combat_anim_player.root_node = skel_parent.get_path()
 						combat_anim_player.add_animation_library("", anim_lib_res)
 						# Punto 9: Asignar 'bouncing_fight_idle' directamente para probar la animación en Goku
 						var target_anim = "bouncing_fight_idle" if combat_anim_player.has_animation("bouncing_fight_idle") else "fighting_idle"
