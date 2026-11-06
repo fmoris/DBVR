@@ -5,6 +5,7 @@ extends Node3D
 @export_enum("Left", "Right") var hand_side: String = "Left"
 @export var joint_radius: float = 0.006  # 6mm por esfera de articulación para Quest 3
 @export var energy_color: Color = Color(0.0, 0.7, 1.0, 0.9) # Celeste brillante de energía Ki
+@export var show_debug_spheres: bool = true
 
 const KiSphereShader = preload("res://ki_sphere.gdshader")
 const KiCoronaShader = preload("res://shaders/ki_corona.gdshader")
@@ -223,7 +224,7 @@ func _process(_delta: float) -> void:
 					var pulse = 1.0 + sin(Time.get_ticks_msec() * 0.015) * 0.15
 					mi.scale *= pulse
 				
-				mi.visible = true
+				mi.visible = show_debug_spheres
 			else:
 				mi.visible = false
 	else:
@@ -231,9 +232,15 @@ func _process(_delta: float) -> void:
 		# Ocultar los 26 joints dinámicos ya que no hay tracking de dedos
 		_hide_all_joints()
 		
-		# Mostrar las mallas de manos estáticas alineadas al control con el material brillante de Ki
+		# Mostrar las mallas de manos estáticas alineadas al control con el material brillante de Ki (solo si no hay modelo GLB)
+		var has_visual_hand = false
+		if parent_node:
+			var visual_hand_name = "PlayerVisualHandLeft" if hand_side == "Left" else "PlayerVisualHandRight"
+			if parent_node.has_node(visual_hand_name):
+				has_visual_hand = true
+				
 		for sm in static_finger_meshes:
-			sm.visible = true
+			sm.visible = not has_visual_hand
 			
 	# Actualizar la esfera de Ki Blast de carga
 	_update_charging_ki_sphere(_delta)
@@ -318,59 +325,68 @@ func _physics_process(delta: float) -> void:
 
 # --- Métodos Avanzados de Combate y Efectos de Ki (Acción Posterior) ---
 
-## Busca e inyecta dinámicamente un colisionador de cápsula de combate en Vegeta si se encuentra en la escena
+## Busca e inyecta dinámicamente un colisionador de cápsula de combate en los rivales de tipo CharacterInstance
 func _inject_enemy_collider() -> void:
 	var arena = get_node_or_null("/root/cell_games_arena")
 	if not arena:
 		return
 		
-	var vegeta = arena.find_child("Vegeta", true, false)
-	if vegeta and is_instance_valid(vegeta):
-		# Verificar si ya inyectamos el colisionador anteriormente
-		var existing_body = vegeta.find_child("VegetaFistCollider", true, false)
-		if not existing_body:
-			var static_body = StaticBody3D.new()
-			static_body.name = "VegetaFistCollider"
-			
-			# Crear CollisionShape3D en forma de cápsula humana
-			var collision_shape = CollisionShape3D.new()
-			var capsule = CapsuleShape3D.new()
-			capsule.height = 1.8
-			capsule.radius = 0.45
-			collision_shape.shape = capsule
-			static_body.add_child(collision_shape)
-			
-			# Alinear la cápsula físicamente en la posición local del rival
-			collision_shape.position = Vector3(0, 0.9, 0)
-			
-			# Añadir el cuerpo físico al rival
-			vegeta.add_child(static_body)
-			print("[VRHandVisualizer] %s: ¡Inyección exitosa de colisiones físicas de combate en el rival Vegeta!" % get_parent().name)
+	# Buscar todos los CharacterInstance que no sean el jugador
+	for child in arena.get_children():
+		if child.has_method("take_hit") and not child.name.contains("Player"):
+			var existing_body = child.find_child("EnemyFistCollider", true, false)
+			if not existing_body:
+				var static_body = StaticBody3D.new()
+				static_body.name = "EnemyFistCollider"
+				
+				# Crear CollisionShape3D en forma de cápsula humana
+				var collision_shape = CollisionShape3D.new()
+				var capsule = CapsuleShape3D.new()
+				capsule.height = 1.8
+				capsule.radius = 0.45
+				collision_shape.shape = capsule
+				static_body.add_child(collision_shape)
+				collision_shape.position = Vector3(0, 0.9, 0)
+				
+				child.add_child(static_body)
+				print("[VRHandVisualizer] %s: ¡Inyección de colisión física en el rival %s!" % [get_parent().name, child.name])
 
 ## Captura y reacciona a los contactos físicos del puño contra el rival o el entorno
 func _on_fist_collision(body: Node) -> void:
-	# Evitar auto-colisiones absurdas o con el otro puño del jugador
 	if body.name.begins_with("KiCombatFist") or body == physics_fist:
 		return
 		
 	var impact_speed = physics_fist.linear_velocity.length()
 	
-	# Filtrar impactos leves o vibraciones normales del tracking
 	if impact_speed > 0.6:
-		var is_vegeta = false
-		if body.name == "VegetaFistCollider" or body.get_parent().name == "Vegeta":
-			is_vegeta = true
+		var target_char = null
+		if body.name in ["EnemyFistCollider", "CharacterPhysicalBody", "CharacterHitbox"]:
+			target_char = body.get_parent()
+		elif body.has_method("take_hit"):
+			target_char = body
+		elif body.get_parent() and body.get_parent().has_method("take_hit"):
+			target_char = body.get_parent()
 			
-		# Estimar punto exacto de colisión en base al radio físico de colisión del puño
 		var contact_point = physics_fist.global_position + physics_fist.linear_velocity.normalized() * fist_radius
 		
-		if is_vegeta:
-			print("[COMBATE DE KI] ¡GOLPE FÍSICO DIRECTO A VEGETA! Daño: 450 unidades | Velocidad de Impacto: %.2f m/s" % impact_speed)
+		if target_char and target_char.has_method("take_hit"):
+			var damage_np = 450.0
+			var punch_dir = physics_fist.linear_velocity.normalized()
+			target_char.take_hit(damage_np, punch_dir)
+			
+			# Incrementar NP del jugador Goku
+			var player = get_node_or_null("/root/cell_games_arena/Player_XROrigin3D/PlayerCharacterInstance")
+			if player:
+				player.increase_np(300.0)
+				player.check_zenkai_conditions(target_char.current_np)
+				target_char.check_zenkai_conditions(player.current_np)
+				
+			print("[COMBATE DE KI] ¡GOLPE FÍSICO DIRECTO A %s! Daño NP: %.1f | Velocidad: %.2f m/s" % [target_char.name, damage_np, impact_speed])
 			_spawn_ki_impact_vfx(contact_point, energy_color)
 		else:
-			# Golpe contra el suelo, columnas o límites del escenario
 			print("[COMBATE DE KI] Impacto contra el entorno: %s | Velocidad: %.2f m/s" % [body.name, impact_speed])
 			_spawn_ki_impact_vfx(contact_point, energy_color)
+
 
 ## Instancia ráfagas y destellos tridimensionales brillantes procedimentales en el punto de contacto
 func _spawn_ki_impact_vfx(contact_point: Vector3, color: Color) -> void:

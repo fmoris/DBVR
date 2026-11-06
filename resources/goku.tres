@@ -1,0 +1,74 @@
+[gd_resource type="Resource" script_class="CharacterData" format=3 uid="uid://d5b5tf0728lr"]
+
+[ext_resource type="Script" uid="uid://daatd00d1xbee" path="res://scripts/resources/power_data.gd" id="1_ansdh"]
+[ext_resource type="Script" uid="uid://bwsul7i3jdgha" path="res://scripts/resources/character_data.gd" id="2_whopp"]
+[ext_resource type="Script" uid="uid://cvfnbqj6i0sd1" path="res://scripts/resources/transformation_data.gd" id="3_30s5j"]
+
+[sub_resource type="Resource" id="Resource_gy1yg"]
+script = ExtResource("1_ansdh")
+power_name = "Ki Blast Rápido"
+gesture_trigger = "ki_blast"
+ki_cost = 6.0
+base_damage_np = 250.0
+energy_color = Color(1, 0.6, 0.1, 0.9)
+
+[sub_resource type="Resource" id="Resource_x82nt"]
+script = ExtResource("1_ansdh")
+power_name = "Kamehameha"
+gesture_trigger = "kamehameha"
+ki_cost = 50.0
+base_damage_np = 1800.0
+projectile_speed = 25.0
+energy_color = Color(0.1, 0.6, 1, 0.95)
+unlock_requirement_transformation = "SSJ"
+
+[sub_resource type="Resource" id="Resource_012ef"]
+script = ExtResource("1_ansdh")
+power_name = "Genkidama"
+gesture_trigger = "genkidama"
+ki_cost = 90.0
+base_damage_np = 6000.0
+projectile_speed = 10.0
+energy_color = Color(0.6, 0.9, 1, 0.95)
+forbidden_transformations = Array[String](["Kaioken", "SSJ", "SSB"])
+
+[sub_resource type="Resource" id="Resource_biqls"]
+script = ExtResource("1_ansdh")
+power_name = "Super Kamehameha"
+gesture_trigger = "kamehameha"
+ki_cost = 95.0
+base_damage_np = 99999.0
+projectile_speed = 35.0
+energy_color = Color(0, 0.8, 1, 1)
+unlock_requirement_transformation = "SSJ"
+is_finisher = true
+
+[sub_resource type="Resource" id="Resource_hmayj"]
+script = ExtResource("3_30s5j")
+form_name = "Kaioken"
+np_multiplier = 1.5
+ki_drain_per_sec = 3.0
+aura_color = Color(1, 0.1, 0.1, 1)
+
+[sub_resource type="Resource" id="Resource_i1tb2"]
+script = ExtResource("3_30s5j")
+form_name = "SSJ"
+np_multiplier = 5.0
+aura_color = Color(1, 0.85, 0.1, 0.85)
+
+[sub_resource type="Resource" id="Resource_luo4d"]
+script = ExtResource("3_30s5j")
+form_name = "SSB"
+np_multiplier = 25.0
+ki_drain_per_sec = 5.0
+aura_color = Color(0.1, 0.7, 1, 0.9)
+
+[resource]
+script = ExtResource("2_whopp")
+character_name = "Goku"
+base_np = 3000000000.0
+max_np = 15000000000.0
+body_model_path = "res://assets/models/goku_optimized.glb"
+hands_model_path = "res://assets/models/goku_hands_optimized.glb"
+powers = Array[Resource]([SubResource("Resource_gy1yg"), SubResource("Resource_x82nt"), SubResource("Resource_012ef"), SubResource("Resource_biqls")])
+transformations = Array[Resource]([SubResource("Resource_hmayj"), SubResource("Resource_i1tb2"), SubResource("Resource_luo4d")])

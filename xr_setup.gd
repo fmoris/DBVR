@@ -11,6 +11,10 @@ var right_hand_tracker: XRHandTracker
 func _ready() -> void:
 	# Inicialización robusta de OpenXR según tutorial oficial
 	xr_interface = XRServer.find_interface("OpenXR")
+	if xr_interface:
+		if not xr_interface.is_initialized():
+			xr_interface.initialize()
+			
 	if xr_interface and xr_interface.is_initialized():
 		print("OpenXR inicializado exitosamente en Godot Engine.")
 		
@@ -27,18 +31,21 @@ func _ready() -> void:
 			print("[OpenXR] VRS_XR dinámico activado con éxito en el Viewport.")
 	else:
 		print("Advertencia: OpenXR no detectado o no inicializado. Verifique la conexión del visor/simulador.")
+		_adjust_camera_height_non_vr()
 
 func _process(_delta: float) -> void:
 	# Descubrimiento dinámico de Hand Trackers en caso de conexión tardía o reconexión
-	if left_hand_tracker == null or right_hand_tracker == null:
-		var trackers = XRServer.get_trackers(XRServer.TRACKER_HAND)
-		for tracker_name in trackers:
-			var t = trackers[tracker_name]
-			if t is XRHandTracker:
-				if t.hand == XRHandTracker.TRACKER_HAND_LEFT:
-					left_hand_tracker = t
-				elif t.hand == XRHandTracker.TRACKER_HAND_RIGHT:
-					right_hand_tracker = t
+	# Solo realizamos la búsqueda si OpenXR está inicializado para evitar overhead de CPU innecesario en PC
+	if xr_interface and xr_interface.is_initialized():
+		if left_hand_tracker == null or right_hand_tracker == null:
+			var trackers = XRServer.get_trackers(XRServer.TRACKER_HAND)
+			for tracker_name in trackers:
+				var t = trackers[tracker_name]
+				if t is XRHandTracker:
+					if t.hand == XRHandTracker.TRACKER_HAND_LEFT:
+						left_hand_tracker = t
+					elif t.hand == XRHandTracker.TRACKER_HAND_RIGHT:
+						right_hand_tracker = t
 
 # --- APIs de Consulta Espacial Nativas para la Fase 3 (GesturePhaseTree) ---
 
@@ -67,3 +74,16 @@ func get_joint_transform(hand_side: int, joint: int) -> Transform3D:
 	if tracker and is_joint_valid(hand_side, joint):
 		return tracker.get_hand_joint_transform(joint)
 	return Transform3D()
+
+## Ajusta la altura local de la cámara para simular la vista del personaje en modo no-VR/editor
+func _adjust_camera_height_non_vr() -> void:
+	# Esperar a que la escena esté completamente instanciada
+	await get_tree().process_frame
+	var player_char = get_node_or_null("PlayerCharacterInstance")
+	if player_char and player_char.character_data:
+		var scale_factor = player_char.character_data.scale_factor
+		if scale_factor <= 0.01:
+			scale_factor = 1.0
+		# Goku base eye level is 1.65m relative to origin floor.
+		camera.position.y = 1.65 * scale_factor
+		print("[XRSetup] Altura de cámara No-VR/Simulación ajustada a %.2fm para %s (escala %.2f)" % [camera.position.y, player_char.character_data.character_name, scale_factor])

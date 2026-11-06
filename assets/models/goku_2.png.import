@@ -22,6 +22,7 @@ dest_files=["res://.godot/imported/goku_2.png-a760527af1c20373d65414078c2233e9.s
 
 compress/mode=2
 compress/high_quality=false
+compress/high_quality_mode=0
 compress/lossy_quality=0.7
 compress/uastc_level=0
 compress/rdo_quality_loss=0.0

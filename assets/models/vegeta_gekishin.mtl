@@ -1,0 +1,120 @@
+# Vegeta Gekishin Anime Materials
+newmtl mat_hair
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+map_Kd uub_gekishin_texture.png
+Ka 0.08 0.08 0.10
+Kd 0.12 0.12 0.15
+Ks 0.1 0.1 0.1
+roughness 0.8
+
+newmtl mat_head
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+map_Kd uub_gekishin_texture.png
+Ka 0.95 0.76 0.64
+Kd 0.98 0.80 0.68
+Ks 0.05 0.05 0.05
+roughness 0.7
+
+newmtl mat_collar
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+map_Kd uub_gekishin_texture.png
+Ka 0.95 0.76 0.64
+Kd 0.98 0.80 0.68
+Ks 0.05 0.05 0.05
+roughness 0.7
+
+newmtl mat_neck
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+map_Kd uub_gekishin_texture.png
+Ka 0.95 0.76 0.64
+Kd 0.98 0.80 0.68
+Ks 0.05 0.05 0.05
+roughness 0.7
+
+newmtl mat_pelvis
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+map_Kd uub_gekishin_texture.png
+Ka 0.08 0.14 0.40
+Kd 0.10 0.18 0.48
+Ks 0.1 0.1 0.1
+roughness 0.6
+
+newmtl mat_armor
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+map_Kd uub_gekishin_texture.png
+Ka 0.90 0.90 0.88
+Kd 0.96 0.96 0.94
+Ks 0.15 0.15 0.15
+roughness 0.5
+
+newmtl mat_boots
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+map_Kd uub_gekishin_texture.png
+Ka 0.90 0.90 0.88
+Kd 0.96 0.96 0.94
+Ks 0.15 0.15 0.15
+roughness 0.5
+
+newmtl mat_bodysuit
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+map_Kd uub_gekishin_texture.png
+Ka 0.08 0.14 0.40
+Kd 0.10 0.18 0.48
+Ks 0.1 0.1 0.1
+roughness 0.6
+
+newmtl mat_gloves
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+map_Kd uub_gekishin_texture.png
+Ka 0.90 0.90 0.88
+Kd 0.96 0.96 0.94
+Ks 0.15 0.15 0.15
+roughness 0.5
+
+newmtl mat_face
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+map_Kd uub_gekishin_texture.png
+Ka 0.95 0.76 0.64
+Kd 0.98 0.80 0.68
+Ks 0.05 0.05 0.05
+roughness 0.7
+
+newmtl mat_eyes
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+map_Kd uub_gekishin_texture.png
+Ka 0.98 0.98 0.98
+Kd 1.00 1.00 1.00
+Ks 0.2 0.2 0.2
+roughness 0.3
+
+newmtl mat_mouth_eyebrows
+Ka 1.0 1.0 1.0
+Kd 1.0 1.0 1.0
+Ks 0.0 0.0 0.0
+map_Kd uub_gekishin_texture.png
+Ka 0.08 0.08 0.08
+Kd 0.10 0.10 0.10
+Ks 0.1 0.1 0.1
+roughness 0.8

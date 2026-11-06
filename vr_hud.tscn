@@ -1,63 +1,59 @@
 [gd_scene format=3 uid="uid://cggifip4tem77"]
 
-[ext_resource type="Script" path="res://scripts/vr_hud.gd" id="1_hud"]
+[ext_resource type="Script" uid="uid://dr7l7wd3ph2rs" path="res://scripts/vr_hud.gd" id="1_hud"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_bg"]
 bg_color = Color(0.05, 0.05, 0.08, 0.75)
-corner_radius_top_left = 16
-corner_radius_top_right = 16
-corner_radius_bottom_right = 16
-corner_radius_bottom_left = 16
 border_width_left = 2
 border_width_top = 2
 border_width_right = 2
 border_width_bottom = 2
 border_color = Color(1, 1, 1, 0.15)
+corner_radius_top_left = 16
+corner_radius_top_right = 16
+corner_radius_bottom_right = 16
+corner_radius_bottom_left = 16
 
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_ki_fill"]
-bg_color = Color(0, 0.94, 1, 1)
-corner_radius_top_left = 14
-corner_radius_bottom_left = 14
-shadow_color = Color(0, 0.94, 1, 0.4)
-shadow_size = 8
-
-[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_np_fill"]
-bg_color = Color(0.67, 0, 1, 1)
-corner_radius_top_left = 14
-corner_radius_bottom_left = 14
-shadow_color = Color(0.67, 0, 1, 0.4)
-shadow_size = 8
-
-[sub_resource type="LabelSettings" id="LabelSettings_title"]
-font_size = 28
-font_color = Color(1, 0.85, 0, 1)
+[sub_resource type="LabelSettings" id="LabelSettings_np"]
+font_size = 72
+font_color = Color(0.78, 0.45, 1, 1)
 shadow_size = 4
 shadow_color = Color(0, 0, 0, 0.8)
 
-[sub_resource type="LabelSettings" id="LabelSettings_label"]
-font_size = 22
-font_color = Color(0.9, 0.9, 0.9, 1)
-shadow_size = 2
+[sub_resource type="LabelSettings" id="LabelSettings_ki"]
+font_size = 72
+font_color = Color(0, 0.9, 1, 1)
+shadow_size = 4
 shadow_color = Color(0, 0, 0, 0.8)
 
-[sub_resource type="LabelSettings" id="LabelSettings_value"]
-font_size = 24
-font_color = Color(1, 1, 1, 1)
+[sub_resource type="LabelSettings" id="LabelSettings_status"]
+font_size = 36
+font_color = Color(0.9, 0.9, 0.9, 1)
 shadow_size = 3
 shadow_color = Color(0, 0, 0, 0.8)
 
-[sub_resource type="QuadMesh" id="QuadMesh_hud"]
-size = Vector2(1, 0.5)
+[sub_resource type="ViewportTexture" id="ViewportTexture_v1xwm"]
+viewport_path = NodePath("SubViewport")
 
-[node name="VRHUD" type="Node3D"]
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_7fhoi"]
+render_priority = 100
+transparency = 1
+no_depth_test = true
+shading_mode = 0
+albedo_texture = SubResource("ViewportTexture_v1xwm")
+
+[sub_resource type="QuadMesh" id="QuadMesh_hud"]
+size = Vector2(0.4, 0.2)
+
+[node name="VRHUD" type="Node3D" unique_id=507902435]
 script = ExtResource("1_hud")
 
-[node name="SubViewport" type="SubViewport" parent="."]
+[node name="SubViewport" type="SubViewport" parent="." unique_id=225938908]
 transparent_bg = true
 size = Vector2i(1024, 512)
 render_target_update_mode = 4
 
-[node name="HUDLayout" type="Control" parent="SubViewport"]
+[node name="HUDLayout" type="Control" parent="SubViewport" unique_id=1847066969]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -65,7 +61,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="MainPanel" type="Panel" parent="SubViewport/HUDLayout"]
+[node name="MainPanel" type="Panel" parent="SubViewport/HUDLayout" unique_id=1367412464]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -78,7 +74,7 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_bg")
 
-[node name="MarginContainer" type="MarginContainer" parent="SubViewport/HUDLayout/MainPanel"]
+[node name="MarginContainer" type="MarginContainer" parent="SubViewport/HUDLayout/MainPanel" unique_id=65992967]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -90,77 +86,40 @@ theme_override_constants/margin_top = 32
 theme_override_constants/margin_right = 32
 theme_override_constants/margin_bottom = 32
 
-[node name="VBoxContainer" type="VBoxContainer" parent="SubViewport/HUDLayout/MainPanel/MarginContainer"]
+[node name="VBoxContainer" type="VBoxContainer" parent="SubViewport/HUDLayout/MainPanel/MarginContainer" unique_id=1241020408]
 layout_mode = 2
-theme_override_constants/separation = 24
-
-[node name="Header" type="HBoxContainer" parent="SubViewport/HUDLayout/MainPanel/MarginContainer/VBoxContainer"]
-layout_mode = 2
+theme_override_constants/separation = 16
 alignment = 1
 
-[node name="Title" type="Label" parent="SubViewport/HUDLayout/MainPanel/MarginContainer/VBoxContainer/Header"]
+[node name="NPLabel" type="Label" parent="SubViewport/HUDLayout/MainPanel/MarginContainer/VBoxContainer" unique_id=486024849]
 layout_mode = 2
-text = "DRAGON BALL VR - COMBAT HUD"
-label_settings = SubResource("LabelSettings_title")
+text = "NP: 50%"
+label_settings = SubResource("LabelSettings_np")
 horizontal_alignment = 1
+vertical_alignment = 1
 
-[node name="KiSection" type="VBoxContainer" parent="SubViewport/HUDLayout/MainPanel/MarginContainer/VBoxContainer"]
+[node name="KILabel" type="Label" parent="SubViewport/HUDLayout/MainPanel/MarginContainer/VBoxContainer" unique_id=1007638560]
 layout_mode = 2
-theme_override_constants/separation = 8
+text = "KI: 40%"
+label_settings = SubResource("LabelSettings_ki")
+horizontal_alignment = 1
+vertical_alignment = 1
 
-[node name="Labels" type="HBoxContainer" parent="SubViewport/HUDLayout/MainPanel/MarginContainer/VBoxContainer/KiSection"]
+[node name="PhaseStatus" type="Label" parent="SubViewport/HUDLayout/MainPanel/MarginContainer/VBoxContainer" unique_id=1218411794]
 layout_mode = 2
-
-[node name="Name" type="Label" parent="SubViewport/HUDLayout/MainPanel/MarginContainer/VBoxContainer/KiSection/Labels"]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "RESERVA DE KI"
-label_settings = SubResource("LabelSettings_label")
-
-[node name="Value" type="Label" parent="SubViewport/HUDLayout/MainPanel/MarginContainer/VBoxContainer/KiSection/Labels"]
-layout_mode = 2
-text = "100 / 100"
-label_settings = SubResource("LabelSettings_value")
-
-[node name="KiBar" type="ProgressBar" parent="SubViewport/HUDLayout/MainPanel/MarginContainer/VBoxContainer/KiSection"]
-custom_minimum_size = Vector2(0, 28)
-layout_mode = 2
-theme_override_styles/fill = SubResource("StyleBoxFlat_ki_fill")
-value = 100.0
-show_percentage = false
-
-[node name="NPSection" type="VBoxContainer" parent="SubViewport/HUDLayout/MainPanel/MarginContainer/VBoxContainer"]
-layout_mode = 2
-theme_override_constants/separation = 8
-
-[node name="Labels" type="HBoxContainer" parent="SubViewport/HUDLayout/MainPanel/MarginContainer/VBoxContainer/NPSection"]
-layout_mode = 2
-
-[node name="Name" type="Label" parent="SubViewport/HUDLayout/MainPanel/MarginContainer/VBoxContainer/NPSection/Labels"]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "NIVEL DE PODER (NP)"
-label_settings = SubResource("LabelSettings_label")
-
-[node name="Value" type="Label" parent="SubViewport/HUDLayout/MainPanel/MarginContainer/VBoxContainer/NPSection/Labels"]
-layout_mode = 2
-text = "9,000"
-label_settings = SubResource("LabelSettings_value")
-
-[node name="NPBar" type="ProgressBar" parent="SubViewport/HUDLayout/MainPanel/MarginContainer/VBoxContainer/NPSection"]
-custom_minimum_size = Vector2(0, 28)
-layout_mode = 2
-theme_override_styles/fill = SubResource("StyleBoxFlat_np_fill")
-max_value = 20000.0
-value = 9000.0
-show_percentage = false
-
-[node name="PhaseStatus" type="Label" parent="SubViewport/HUDLayout/MainPanel/MarginContainer/VBoxContainer"]
-layout_mode = 2
-size_flags_vertical = 10
 text = "ESTADO: IDLE (POSTURA NEUTRAL)"
-label_settings = SubResource("LabelSettings_label")
+label_settings = SubResource("LabelSettings_status")
 horizontal_alignment = 1
+vertical_alignment = 1
 
-[node name="HUDMesh" type="MeshInstance3D" parent="."]
+[node name="HandDebugLabel" type="Label" parent="SubViewport/HUDLayout/MainPanel/MarginContainer/VBoxContainer" unique_id=1986703977]
+layout_mode = 2
+text = "L: DESCONECTADA
+R: DESCONECTADA"
+label_settings = SubResource("LabelSettings_status")
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="HUDMesh" type="MeshInstance3D" parent="." unique_id=790885514]
+material_override = SubResource("StandardMaterial3D_7fhoi")
 mesh = SubResource("QuadMesh_hud")
