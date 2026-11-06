@@ -6,6 +6,9 @@
 - **Tracking:** OpenXR Hand Tracking (26 huesos) vía XRHandModifier3D
 
 ## 🚨 REGLAS CRÍTICAS DE EJECUCIÓN
+- **SIEMPRE INSPECCIONAR CONSOLA Y LOGS TRAS CADA EDICIÓN:**
+  - Tras modificar código GDScript, shaders o escenas, inspeccionar activamente la consola de Godot (vía headless check o logs) para confirmar que **NO existen errores de compilación, de parsing ni excepciones en consola**.
+  - Nunca dar por terminada una tarea sin haber verificado empíricamente la consola de Godot.
 - **Flujo Git-Flow Estricto:**
   - `main`: **SOLO código probado y validado empíricamente en el visor VR**.
   - `develop`: Rama base para integración continua y desarrollo de nuevas funcionalidades.
