@@ -6,6 +6,11 @@
 - **Tracking:** OpenXR Hand Tracking (26 huesos) vía XRHandModifier3D
 
 ## 🚨 REGLAS CRÍTICAS DE EJECUCIÓN
+- **Flujo Git-Flow Estricto:**
+  - `main`: **SOLO código probado y validado empíricamente en el visor VR**.
+  - `develop`: Rama base para integración continua y desarrollo de nuevas funcionalidades.
+  - Ramas `feature/*`: Para tareas específicas (ej. nuevas mecánicas, poderes o shaders).
+  - Al terminar una tarea, se prueba y valida en APK antes de promocionar o mergear a `main`.
 - **Tipado Estático Estricto:** Siempre tipar variables y retornos en GDScript 2.0.
 - **Delta en Física:** Multiplicar por delta en _physics_process(delta).
 - **Rutas OpenXR:** Rutas canónicas /user/hand_tracker/left y /user/hand_tracker/right.
