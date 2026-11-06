@@ -75,11 +75,17 @@ func _init() -> void:
 				new_anim.track_set_path(new_track_idx, new_track_path)
 				new_anim.track_set_interpolation_type(new_track_idx, src_anim.track_get_interpolation_type(t))
 
+				var q_align = Quaternion(Vector3.RIGHT, deg_to_rad(90.0))
 				var key_count = src_anim.track_get_key_count(t)
 				for k in range(key_count):
 					var key_time = src_anim.track_get_key_time(t, k)
 					var key_val = src_anim.track_get_key_value(t, k)
 					var key_trans = src_anim.track_get_key_transition(t, k)
+					if target_bone == "Hips":
+						if track_type == Animation.TYPE_POSITION_3D:
+							key_val = q_align * (key_val as Vector3)
+						elif track_type == Animation.TYPE_ROTATION_3D:
+							key_val = q_align * (key_val as Quaternion)
 					new_anim.track_insert_key(new_track_idx, key_time, key_val, key_trans)
 
 				mapped_count += 1

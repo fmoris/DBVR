@@ -34,14 +34,14 @@ var audio_player: AudioStreamPlayer3D = null
 var sfx_hit_light: AudioStream = null
 var sfx_hit_heavy: AudioStream = null
 
-# Definición canónica de zonas anatómicas de impacto DBZ (relativas al centro del torso del oponente)
+# Definición canónica de zonas anatómicas de impacto DBZ (matriz frontal plana fija frente al jugador)
 const ZONE_DEFINITIONS = [
-	{ "id": 0, "name": "Rostro / Mandíbula", "offset": Vector3(0.0, 0.36, 0.22), "color": Color(1.0, 0.3, 0.2, 0.85) },
-	{ "id": 1, "name": "Plexo Solar", "offset": Vector3(0.0, 0.05, 0.24), "color": Color(0.2, 0.85, 1.0, 0.85) },
-	{ "id": 2, "name": "Costilla Izquierda", "offset": Vector3(0.22, 0.12, 0.20), "color": Color(0.2, 1.0, 0.4, 0.85) },
-	{ "id": 3, "name": "Costilla Derecha", "offset": Vector3(-0.22, 0.12, 0.20), "color": Color(0.2, 1.0, 0.4, 0.85) },
-	{ "id": 4, "name": "Hígado / Flanco", "offset": Vector3(-0.18, -0.18, 0.22), "color": Color(1.0, 0.8, 0.2, 0.85) },
-	{ "id": 5, "name": "Bazo / Abdomen", "offset": Vector3(0.18, -0.18, 0.22), "color": Color(1.0, 0.8, 0.2, 0.85) }
+	{ "id": 0, "name": "Rostro / Cabeza", "offset": Vector3(0.0, 0.22, 0.0), "color": Color(1.0, 0.3, 0.2, 0.85) },
+	{ "id": 1, "name": "Plexo Solar", "offset": Vector3(0.0, 0.0, 0.0), "color": Color(0.2, 0.85, 1.0, 0.85) },
+	{ "id": 2, "name": "Costilla Izquierda", "offset": Vector3(-0.22, 0.10, 0.0), "color": Color(0.2, 1.0, 0.4, 0.85) },
+	{ "id": 3, "name": "Costilla Derecha", "offset": Vector3(0.22, 0.10, 0.0), "color": Color(0.2, 1.0, 0.4, 0.85) },
+	{ "id": 4, "name": "Flanco Izquierdo", "offset": Vector3(-0.18, -0.16, 0.0), "color": Color(1.0, 0.8, 0.2, 0.85) },
+	{ "id": 5, "name": "Flanco Derecho", "offset": Vector3(0.18, -0.16, 0.0), "color": Color(1.0, 0.8, 0.2, 0.85) }
 ]
 
 func setup(p_attacker: Node3D, p_defender: Node3D, p_duration: float) -> void:
@@ -78,9 +78,6 @@ func _process(delta: float) -> void:
 		return
 
 	time_left -= delta
-
-	# Actualizar posición y orientación hacia el atacante si el oponente se mueve ligeramente
-	_update_dome_transform()
 
 	# 1. Actualizar cálculo de velocidad cinemática de los mandos
 	_update_controller_velocities(delta)
@@ -193,22 +190,36 @@ func _check_hammer_finisher() -> bool:
 
 
 func _update_dome_transform() -> void:
-	if not defender or not is_instance_valid(defender):
-		return
-
-	# Altura del pecho del oponente (aproximadamente 1.1m sobre su pivote)
-	var chest_world_pos = defender.global_position + Vector3(0.0, 1.15, 0.0)
-	global_position = chest_world_pos
-
-	# Orientar la cúpula hacia el atacante para que las cajas miren de frente al jugador
+	# Localizar la posición de la cabeza / cámara del jugador atacante
+	var cam: Camera3D = null
 	if attacker and is_instance_valid(attacker):
-		var my_origin = attacker.get_parent() if attacker.get("is_player") else attacker
-		var atk_pos = my_origin.global_position if my_origin else attacker.global_position
-		var look_dir = (atk_pos - global_position).normalized()
-		look_dir.y = 0.0
-		if look_dir.length_squared() > 0.01:
-			var target_rot_y = atan2(look_dir.x, look_dir.z)
-			rotation.y = target_rot_y
+		var my_origin = attacker.get_parent()
+		if my_origin:
+			cam = my_origin.get_node_or_null("XRCamera3D")
+	if not cam:
+		var vp = get_viewport()
+		if vp:
+			cam = vp.get_camera_3d()
+
+	var cam_pos = cam.global_position if cam else (attacker.global_position + Vector3(0.0, 1.45, 0.0) if attacker else global_position)
+	var fwd = -cam.global_transform.basis.z if cam else ((-attacker.global_transform.basis.z) if attacker else Vector3.FORWARD)
+	fwd.y = 0.0
+	if fwd.length_squared() < 0.01:
+		if defender and is_instance_valid(defender):
+			fwd = (defender.global_position - cam_pos)
+			fwd.y = 0.0
+		if fwd.length_squared() < 0.01:
+			fwd = Vector3.FORWARD
+	fwd = fwd.normalized()
+
+	# Posicionar la matriz de recuadros exactamente a 0.52m al frente de los ojos del jugador
+	# a la altura de su pecho, completamente desacoplada de giros del contrincante
+	global_position = cam_pos + fwd * 0.52 + Vector3(0.0, -0.16, 0.0)
+
+	# Orientar frontalmente hacia el jugador (+Z local de las cajas mira hacia los ojos del atacante)
+	rotation.y = atan2(-fwd.x, -fwd.z)
+	rotation.x = 0.0
+	rotation.z = 0.0
 
 
 ## Crea la esfera de energía anime translúcida (Matrix Dome)
@@ -313,27 +324,52 @@ func _build_header_hud() -> void:
 	add_child(header_label)
 
 
-## Detecta los puñetazos de los mandos físicos contra las zonas de impacto
+## Detecta los puñetazos de los mandos físicos o manos OpenXR contra las zonas de impacto
 func _check_controller_punches() -> void:
 	if not attacker or not is_instance_valid(attacker):
 		return
 
-	var origin = attacker.get_parent()
+	var origin: XROrigin3D = attacker.get_parent() as XROrigin3D if attacker.get("is_player") else null
 	if not origin:
 		return
 
 	var left_ctrl: XRController3D = origin.get_node_or_null("LeftHand")
 	var right_ctrl: XRController3D = origin.get_node_or_null("RightHand")
 
-	var controllers: Array = []
+	var hand_sources: Array = []
 	if left_ctrl and left_ctrl.get_is_active():
-		controllers.append({ "node": left_ctrl, "name": "LeftHand" })
+		hand_sources.append({ "pos": left_ctrl.global_position, "name": "LeftHand", "ctrl": left_ctrl })
 	if right_ctrl and right_ctrl.get_is_active():
-		controllers.append({ "node": right_ctrl, "name": "RightHand" })
+		hand_sources.append({ "pos": right_ctrl.global_position, "name": "RightHand", "ctrl": right_ctrl })
 
-	for ctrl_data in controllers:
-		var ctrl_node: XRController3D = ctrl_data["node"]
-		var hand_pos: Vector3 = ctrl_node.global_position
+	# Soporte biométrico OpenXR Hand Tracking (yemas y palmas de ambas manos)
+	var left_tracker = XRServer.get_tracker("/user/hand_tracker/left") as XRHandTracker
+	var right_tracker = XRServer.get_tracker("/user/hand_tracker/right") as XRHandTracker
+
+	if left_tracker:
+		var flags_tip = left_tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_INDEX_FINGER_TIP)
+		if (flags_tip & XRHandTracker.HAND_JOINT_FLAG_POSITION_VALID):
+			var tip_local = left_tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_INDEX_FINGER_TIP).origin
+			hand_sources.append({ "pos": origin.global_transform * tip_local, "name": "LeftHand", "ctrl": left_ctrl })
+		var flags_palm = left_tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_PALM)
+		if (flags_palm & XRHandTracker.HAND_JOINT_FLAG_POSITION_VALID):
+			var palm_local = left_tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM).origin
+			hand_sources.append({ "pos": origin.global_transform * palm_local, "name": "LeftHand", "ctrl": left_ctrl })
+
+	if right_tracker:
+		var flags_tip = right_tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_INDEX_FINGER_TIP)
+		if (flags_tip & XRHandTracker.HAND_JOINT_FLAG_POSITION_VALID):
+			var tip_local = right_tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_INDEX_FINGER_TIP).origin
+			hand_sources.append({ "pos": origin.global_transform * tip_local, "name": "RightHand", "ctrl": right_ctrl })
+		var flags_palm = right_tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_PALM)
+		if (flags_palm & XRHandTracker.HAND_JOINT_FLAG_POSITION_VALID):
+			var palm_local = right_tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM).origin
+			hand_sources.append({ "pos": origin.global_transform * palm_local, "name": "RightHand", "ctrl": right_ctrl })
+
+	for hand_data in hand_sources:
+		var hand_pos: Vector3 = hand_data["pos"]
+		var ctrl_node: XRController3D = hand_data["ctrl"]
+		var hand_name: String = hand_data["name"]
 
 		for zone in target_zones:
 			if zone["hit"]:
@@ -344,7 +380,7 @@ func _check_controller_punches() -> void:
 
 			# Radio de detección de golpe físico: 0.24 metros (sensible y natural en VR)
 			if dist <= 0.24:
-				_register_hit(zone, ctrl_node, ctrl_data["name"])
+				_register_hit(zone, ctrl_node, hand_name)
 
 
 ## Registra el impacto exitoso en una zona

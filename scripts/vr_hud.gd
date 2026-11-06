@@ -68,13 +68,14 @@ func _ready() -> void:
 	mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
 	mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED # Glow directo sin sombras
 	mat.albedo_texture = sub_viewport.get_texture()
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mat.no_depth_test = true
-	mat.render_priority = 100
+	mat.render_priority = 110
 	hud_mesh.material_override = mat
 
-	# Redimensionar la malla del HUD para estética Scouter cinematográfica (54cm x 27cm - 2:1)
+	# Redimensionar la malla del HUD para estética Scouter cinematográfica (26cm x 13cm - ratio 2:1)
 	if hud_mesh.mesh is QuadMesh:
-		hud_mesh.mesh.size = Vector2(0.54, 0.27)
+		hud_mesh.mesh.size = Vector2(0.26, 0.13)
 
 	# Construir la interfaz Dragon Ball Sci-Fi / Scouter procedimentalmente
 	_build_dragon_ball_hud()
@@ -95,31 +96,60 @@ func _exit_tree() -> void:
 
 
 func _setup_wrist_hud() -> void:
-	var left_hand = get_node_or_null("/root/cell_games_arena/Player_XROrigin3D/LeftHand")
-	if left_hand and is_instance_valid(left_hand):
-		left_wrist_node = left_hand
-		is_wrist_mode = true
-		
-		# Reparentar la malla del HUD al nodo de la muñeca izquierda
-		if hud_mesh.get_parent() != left_hand:
-			hud_mesh.get_parent().remove_child(hud_mesh)
-			left_hand.add_child(hud_mesh)
-		
-		# Tamaño de guantelete Scouter compacto (22cm x 11cm)
-		if hud_mesh.mesh is QuadMesh:
-			hud_mesh.mesh.size = Vector2(0.22, 0.11)
-			
-		# Posición ergonómica sobre el dorso de la muñeca izquierda
-		hud_mesh.position = Vector3(0.0, 0.05, 0.07)
-		hud_mesh.rotation_degrees = Vector3(-70.0, 0.0, 0.0)
+	if hud_mesh and is_instance_valid(hud_mesh):
+		hud_mesh.top_level = true
 		hud_mesh.scale = Vector3.ZERO
 		hud_mesh.visible = false
-		print("[VRHUD] HUD holográfico montado exitosamente en muñeca izquierda (LeftHand).")
-	else:
-		_reparent_to_camera_fallback()
-		
+		wrist_hud_scale = 0.0
+
+	is_wrist_mode = true
 	set_process(true)
 	_connect_gesture_signals()
+	print("[VRHUD] HUD holográfico montado exitosamente en muñeca/palma izquierda.")
+
+
+## Detecta posición y orientación biométrica de la muñeca y palma izquierda (Mandos o Hand Tracking)
+func _get_left_wrist_and_palm_info() -> Dictionary:
+	var xr_origin = get_node_or_null("/root/cell_games_arena/Player_XROrigin3D") as XROrigin3D
+	if not xr_origin:
+		return { "valid": false }
+
+	# 1. Comprobar OpenXR Hand Tracking nativo
+	var left_tracker = XRServer.get_tracker("/user/hand_tracker/left") as XRHandTracker
+	if left_tracker:
+		var flags_wrist = left_tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_WRIST)
+		var flags_palm = left_tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_PALM)
+		if (flags_wrist & XRHandTracker.HAND_JOINT_FLAG_POSITION_VALID) or (flags_palm & XRHandTracker.HAND_JOINT_FLAG_POSITION_VALID):
+			var w_local = left_tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_WRIST).origin if (flags_wrist & XRHandTracker.HAND_JOINT_FLAG_POSITION_VALID) else left_tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM).origin
+			var p_local = left_tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM).origin if (flags_palm & XRHandTracker.HAND_JOINT_FLAG_POSITION_VALID) else w_local
+			return {
+				"valid": true,
+				"wrist_pos": xr_origin.global_transform * w_local,
+				"palm_pos": xr_origin.global_transform * p_local,
+				"is_hand_tracking": true
+			}
+
+	# 2. Comprobar controlador izquierdo Quest Touch
+	var left_ctrl = xr_origin.get_node_or_null("LeftHand") as XRController3D
+	if left_ctrl and left_ctrl.get_is_active():
+		var l_basis = left_ctrl.global_transform.basis
+		var w_pos = left_ctrl.global_position + l_basis * Vector3(0.0, -0.015, 0.065)
+		var p_pos = left_ctrl.global_position + l_basis * Vector3(0.0, 0.02, 0.0)
+		return {
+			"valid": true,
+			"wrist_pos": w_pos,
+			"palm_pos": p_pos,
+			"is_hand_tracking": false
+		}
+	elif left_ctrl:
+		return {
+			"valid": true,
+			"wrist_pos": left_ctrl.global_position,
+			"palm_pos": left_ctrl.global_position,
+			"is_hand_tracking": false
+		}
+
+	return { "valid": false }
 
 
 func _reparent_to_camera_fallback() -> void:
@@ -398,36 +428,41 @@ func _process(delta: float) -> void:
 	if moves_guide_mesh == null:
 		_setup_moves_guide_hud()
 		
-	# Búsqueda dinámica de la muñeca izquierda si aún no se ha enlazado
-	if not is_wrist_mode or left_wrist_node == null or not is_instance_valid(left_wrist_node):
-		var left_hand = get_node_or_null("/root/cell_games_arena/Player_XROrigin3D/LeftHand")
-		if left_hand and is_instance_valid(left_hand):
-			_setup_wrist_hud()
-
-	# Control Diegético del HUD en la Muñeca (Punto 14)
-	if is_wrist_mode and is_instance_valid(left_wrist_node) and is_instance_valid(hud_mesh):
+	# Control Diegético del HUD en la Muñeca / Palma (KI, BP y Scouter Status)
+	if is_wrist_mode and is_instance_valid(hud_mesh):
 		var camera = get_viewport().get_camera_3d()
 		var should_display: bool = false
-		if camera:
-			var wrist_pos = hud_mesh.global_position
+
+		var hand_info = _get_left_wrist_and_palm_info()
+		if hand_info.get("valid", false) and camera and is_instance_valid(camera):
 			var cam_pos = camera.global_position
-			var dir_to_cam = (cam_pos - wrist_pos).normalized()
-			
-			# Vector normal del display holográfico
-			var screen_normal = hud_mesh.global_transform.basis.z.normalized()
-			var facing = screen_normal.dot(dir_to_cam)
-			var dist = wrist_pos.distance_to(cam_pos)
-			
-			# Vector de dirección hacia donde mira la cabeza/cámara
+			var wrist_pos = hand_info["wrist_pos"] as Vector3
+			var palm_pos = hand_info["palm_pos"] as Vector3
+			var display_anchor = (wrist_pos + palm_pos) * 0.5
+
+			# Distancia euclídea del visor a la mano izquierda
+			var dist = display_anchor.distance_to(cam_pos)
+
+			# Vector hacia donde apunta la mirada del jugador
 			var cam_forward = -camera.global_transform.basis.z.normalized()
-			var in_view = cam_forward.dot((wrist_pos - cam_pos).normalized())
-			
-			# Se activa cuando el jugador gira y mira su muñeca a distancia de lectura (< 0.85m)
-			if facing > 0.35 and dist < 0.85 and in_view > 0.40:
+			var dir_from_cam = (display_anchor - cam_pos).normalized()
+			var in_view = cam_forward.dot(dir_from_cam)
+
+			# Activación natural e intuitiva:
+			# El jugador levanta su mano/muñeca frente a su campo de visión (in_view > 0.40),
+			# a distancia ergonómica de lectura (15cm a 78cm) y sobre el nivel de la cintura/pecho
+			if in_view > 0.40 and dist >= 0.15 and dist <= 0.78 and display_anchor.y > (cam_pos.y - 0.58):
 				should_display = true
-				
+
+			if should_display or wrist_hud_scale > 0.01:
+				# Flotar holográficamente 8 cm sobre la muñeca/palma, ligeramente orientada al rostro del jugador
+				var float_offset = Vector3.UP * 0.08 + (cam_pos - display_anchor).normalized() * 0.04
+				hud_mesh.global_position = display_anchor + float_offset
+				# Orientar siempre la pantalla holográfica frente a los ojos del jugador para máxima nitidez
+				hud_mesh.look_at(cam_pos, Vector3.UP, true)
+
 		var target_scale = 1.0 if should_display else 0.0
-		wrist_hud_scale = lerp(wrist_hud_scale, target_scale, delta * 12.0)
+		wrist_hud_scale = move_toward(wrist_hud_scale, target_scale, delta * 6.5)
 		hud_mesh.scale = Vector3.ONE * wrist_hud_scale
 		hud_mesh.visible = (wrist_hud_scale > 0.02)
 		
