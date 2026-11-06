@@ -627,8 +627,10 @@ static func _create_physical_bone(skeleton: Skeleton3D, bone_name: String, part:
 
 	pb.body_offset = _compute_body_offset(skeleton, bone_idx, target_global, flip_forward)
 	pb.mass = maxf(total_mass * mass_share, 0.05)
-	pb.linear_damp = 0.5
-	pb.angular_damp = 3.0
+	pb.bounce = 0.0
+	pb.friction = 1.0
+	pb.linear_damp = 5.0
+	pb.angular_damp = 6.0
 
 	var col = CollisionShape3D.new()
 	col.name = "CollisionShape3D"

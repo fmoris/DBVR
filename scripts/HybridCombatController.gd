@@ -62,6 +62,10 @@ const VRInGameMenuClass = preload("res://scripts/vr_in_game_menu.gd")
 var in_game_menu: VRInGameMenu = null
 var menu_toggle_cooldown: float = 0.0
 
+const VRHandCalibrationMenuClass = preload("res://scripts/VRHandCalibrationMenu.gd")
+var hand_calibration_menu: VRHandCalibrationMenu = null
+var calibration_toggle_cooldown: float = 0.0
+
 const KiSenseAndLockOnClass = preload("res://scripts/ki_sense_and_lockon.gd")
 var ki_lockon_system: KiSenseAndLockOn = null
 
@@ -85,16 +89,28 @@ func _find_xr_nodes() -> void:
 		right_controller = xr_origin.get_node_or_null("RightHand")
 
 		if in_game_menu == null:
-			var scene_or_root = get_tree().current_scene if (get_tree() and get_tree().current_scene) else (get_tree().root if get_tree() else null)
-			if scene_or_root:
-				var existing = scene_or_root.find_child("VRInGameMenu", true, false)
-				if existing and existing is VRInGameMenu:
-					in_game_menu = existing
-				else:
-					in_game_menu = VRInGameMenuClass.new()
-					in_game_menu.name = "VRInGameMenu"
-					scene_or_root.add_child(in_game_menu)
-				in_game_menu.setup_references(xr_origin, camera, left_controller, right_controller)
+			var existing = xr_origin.find_child("VRInGameMenu", true, false)
+			if not existing and get_tree() and get_tree().current_scene:
+				existing = get_tree().current_scene.find_child("VRInGameMenu", true, false)
+			if existing and existing is VRInGameMenu:
+				in_game_menu = existing
+			else:
+				in_game_menu = VRInGameMenuClass.new()
+				in_game_menu.name = "VRInGameMenu"
+				xr_origin.add_child(in_game_menu)
+			in_game_menu.setup_references(xr_origin, camera, left_controller, right_controller)
+
+		if hand_calibration_menu == null:
+			var existing_calib = xr_origin.find_child("VRHandCalibrationMenu", true, false)
+			if not existing_calib and get_tree() and get_tree().current_scene:
+				existing_calib = get_tree().current_scene.find_child("VRHandCalibrationMenu", true, false)
+			if existing_calib and existing_calib is VRHandCalibrationMenu:
+				hand_calibration_menu = existing_calib
+			else:
+				hand_calibration_menu = VRHandCalibrationMenuClass.new()
+				hand_calibration_menu.name = "VRHandCalibrationMenu"
+				xr_origin.add_child(hand_calibration_menu)
+			hand_calibration_menu.setup_references(xr_origin, camera, left_controller, right_controller)
 
 		if ki_lockon_system == null and get_tree() and get_tree().current_scene:
 			ki_lockon_system = KiSenseAndLockOnClass.new()
@@ -114,14 +130,12 @@ func _process(delta: float) -> void:
 		if not left_controller or not right_controller:
 			return
 
-	# 1. Evaluar si los mandos físicos de Meta Quest están activos
-	var left_act: bool = left_controller.get_is_active()
-	var right_act: bool = right_controller.get_is_active()
-	controllers_active = left_act or right_act
+	# 1. Modo mandos de control Touch 100% activo (Hand Tracking óptico desactivado por estabilidad)
+	controllers_active = true
 
 	# Sincronizar el flag y los mandos con GesturePhaseTree para auto-switching y orígenes de proyectil
 	if gesture_tree:
-		gesture_tree.set("is_controller_override", controllers_active)
+		gesture_tree.set("is_controller_override", true)
 		gesture_tree.set("left_controller_node", left_controller)
 		gesture_tree.set("right_controller_node", right_controller)
 
@@ -129,13 +143,9 @@ func _process(delta: float) -> void:
 	if controllers_active != last_reported_mode:
 		last_reported_mode = controllers_active
 		controller_mode_changed.emit(controllers_active)
-		var mode_name = "MANDOS QUEST 3 (HÍBRIDO)" if controllers_active else "HAND TRACKING PURO"
+		var mode_name = "MANDOS QUEST 3 (CONTROL TOTAL)"
 		if gesture_tree and gesture_tree.has_signal("gesture_logged"):
 			gesture_tree.emit_signal("gesture_logged", "[INPUT] Modo activo: " + mode_name, "info")
-
-	# Si los mandos NO están activos, ceder el control al Hand Tracking óptico
-	if not controllers_active:
-		return
 
 	# 2. Calcular velocidades lineales de los mandos
 	if delta > 0.0:
@@ -942,22 +952,36 @@ func _process_hud_toggle(delta: float) -> void:
 			_find_xr_nodes()
 		if in_game_menu and is_instance_valid(in_game_menu):
 			if not in_game_menu.is_inside_tree():
-				var target_parent = get_tree().current_scene if (get_tree() and get_tree().current_scene) else (get_tree().root if get_tree() else null)
-				if target_parent:
-					target_parent.add_child(in_game_menu)
+				if xr_origin and is_instance_valid(xr_origin) and xr_origin.is_inside_tree():
+					xr_origin.add_child(in_game_menu)
+				elif get_tree() and get_tree().current_scene:
+					get_tree().current_scene.add_child(in_game_menu)
 			in_game_menu.toggle_menu()
 
-	# Clics de sticks (primary_click): alternar guía de movimientos del HUD
+	# Clic de stick izquierdo (primary_click): Menú de Calibración Biométrica de Manos
+	if calibration_toggle_cooldown > 0.0:
+		calibration_toggle_cooldown -= delta
+	elif left_controller.is_button_pressed("primary_click"):
+		calibration_toggle_cooldown = 0.45
+		if not hand_calibration_menu or not is_instance_valid(hand_calibration_menu):
+			_find_xr_nodes()
+		if hand_calibration_menu and is_instance_valid(hand_calibration_menu):
+			if not hand_calibration_menu.is_inside_tree():
+				if xr_origin and is_instance_valid(xr_origin) and xr_origin.is_inside_tree():
+					xr_origin.add_child(hand_calibration_menu)
+				elif get_tree() and get_tree().current_scene:
+					get_tree().current_scene.add_child(hand_calibration_menu)
+			hand_calibration_menu.toggle_menu()
+
+	# Clic de stick derecho (primary_click): alternar guía de movimientos del HUD
 	if hud_toggle_cooldown > 0.0:
 		hud_toggle_cooldown -= delta
-		return
-	var toggle_pressed = left_controller.is_button_pressed("primary_click") or right_controller.is_button_pressed("primary_click")
-	if toggle_pressed:
+	elif right_controller.is_button_pressed("primary_click"):
 		hud_toggle_cooldown = 0.4
 		var hud = get_tree().root.find_child("VRHUD", true, false)
 		if hud and hud.has_method("toggle_moves_guide"):
 			hud.toggle_moves_guide()
-			_pulse_haptic(left_controller, 120.0, 0.4, 0.1)
+			_pulse_haptic(right_controller, 120.0, 0.4, 0.1)
 
 
 # --- 7. GUARDIA DEFENSIVA (BLOQUEO) ---

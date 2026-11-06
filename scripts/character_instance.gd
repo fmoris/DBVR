@@ -26,11 +26,12 @@ var secured_np_threshold_ratio: float = 0.0
 
 # --- Físicas 3D, Colisiones y Knockback ---
 var velocity: Vector3 = Vector3.ZERO
-var knockback_drag: float = 8.5 # Fricción / resistencia aerodinámica
+var knockback_drag: float = 24.0 # Fricción alta para frenado realista de cuerpos (cero rebote excesivo)
 var gravity: float = 9.8
 var is_knocked_back: bool = false
-var arena_half_limit: float = 85.0 # Límite expandido a las faldas de la cordillera exterior
+var arena_half_limit: float = 92.0 # Límite en las faldas del cañón de Akira Toriyama
 const RING_HALF_SIZE: float = 16.0 # Límite del cuadrilátero de piedra de Cell (32x32m)
+var wall_stick_timer: float = 0.0 # Efecto de quedar incrustado en la roca de la montaña (Toriyama canon)
 
 # --- Estado de Guardia y Bloqueo Defensivo ---
 var is_blocking: bool = false
@@ -244,7 +245,10 @@ func _physics_process(delta: float) -> void:
 			_stop_flight()
 
 	# 2. Físicas de Velocidad y Knockback
-	if velocity.length_squared() > 0.001:
+	if wall_stick_timer > 0.0:
+		wall_stick_timer -= delta
+		velocity = Vector3.ZERO
+	elif velocity.length_squared() > 0.001:
 		var move_step = velocity * delta
 		if is_player:
 			var origin = get_parent()
@@ -354,8 +358,8 @@ func _process(delta: float) -> void:
 			var diff = opp_pos - global_position
 			diff.y = 0.0
 			if diff.length_squared() > 0.01:
-				# En su malla local mira hacia +Z, alineamos +Z con la dirección hacia el jugador
-				rotation.y = atan2(diff.x, diff.z)
+				# Alinear frontalmente al oponente cara a cara hacia el jugador (+PI de rotación para compensar orientación canónica de la animación)
+				rotation.y = atan2(-diff.x, -diff.z)
 
 			if procedural_animator:
 				# Altura de los ojos del jugador estimada a 1.45m o posición del visor
@@ -1231,10 +1235,12 @@ func apply_knockback(dir: Vector3, force: float) -> void:
 	var horiz_dir = Vector3(dir.x, 0.0, dir.z).normalized()
 	if horiz_dir.length_squared() < 0.01:
 		horiz_dir = -global_transform.basis.z
-	var impulse = (horiz_dir + Vector3.UP * 0.18).normalized() * force
-	velocity += impulse
+	# Elevación mínima y controlada para simular masa corporal real (cero saltos excesivos)
+	var controlled_force = clampf(force, 1.5, 7.8)
+	var impulse = (horiz_dir + Vector3.UP * 0.04).normalized() * controlled_force
+	velocity = impulse
 	is_knocked_back = true
-	print("[Physics] %s empujado con fuerza %.1f m/s en dirección %s." % [character_data.character_name if character_data else name, force, horiz_dir])
+	print("[Physics] %s empujado con fuerza controlada %.1f m/s en dirección %s." % [character_data.character_name if character_data else name, controlled_force, horiz_dir])
 
 
 ## Determina la cota del suelo según si el personaje está sobre el ring de piedra o en la llanura exterior
@@ -1246,24 +1252,34 @@ func get_ground_elevation(world_pos: Vector3) -> float:
 func _clamp_to_arena(node: Node3D) -> void:
 	var pos = node.global_position
 	var limit = arena_half_limit
+	var hit_mountain = false
+	var horiz_speed = Vector2(velocity.x, velocity.z).length()
 
 	if pos.x > limit:
 		pos.x = limit
-		_on_boundary_crash_impact(abs(velocity.x))
-		velocity.x = -abs(velocity.x) * 0.3
+		hit_mountain = true
 	elif pos.x < -limit:
 		pos.x = -limit
-		_on_boundary_crash_impact(abs(velocity.x))
-		velocity.x = abs(velocity.x) * 0.3
+		hit_mountain = true
 
 	if pos.z > limit:
 		pos.z = limit
-		_on_boundary_crash_impact(abs(velocity.z))
-		velocity.z = -abs(velocity.z) * 0.3
+		hit_mountain = true
 	elif pos.z < -limit:
 		pos.z = -limit
-		_on_boundary_crash_impact(abs(velocity.z))
-		velocity.z = abs(velocity.z) * 0.3
+		hit_mountain = true
+
+	if hit_mountain:
+		_on_boundary_crash_impact(horiz_speed)
+		# Cero rebote de goma: detener velocidad de inmediato
+		velocity.x = 0.0
+		velocity.z = 0.0
+		# Si el impacto fue contundente (>4.5 m/s), el personaje queda incrustado en la roca (wall-stick)
+		if horiz_speed > 4.5:
+			wall_stick_timer = 1.25
+			is_knocked_back = false
+			_spawn_ground_crash_vfx(pos + Vector3(0.0, 1.2, 0.0), false)
+			print("[Physics] %s se incrustó en el risco de la montaña por 1.25s (Wall-Stick anime)." % (character_data.character_name if character_data else name))
 
 	var ground_h = get_ground_elevation(pos)
 	if pos.y < ground_h:
@@ -1407,26 +1423,36 @@ func _process_mutual_body_collision() -> void:
 		_trigger_tactical_separation(opponent, 14.0)
 
 
-## Gatilla una separación táctica obligatoria con retroceso físico para restaurar distancia canónica
-func _trigger_tactical_separation(opponent: Node3D, separation_speed: float = 14.0) -> void:
+## Gatilla una separación táctica suave hacia la distancia inicial (atacante inmóvil, defensor retrocede poco)
+func _trigger_tactical_separation(opponent: Node3D, _separation_speed: float = 4.0) -> void:
+	if not opponent or not is_instance_valid(opponent):
+		return
+	# Solo procesar cuando ambos jugadores NO están en una fase de secuencia
+	if is_in_bullet_time or is_flying_to_opponent:
+		return
+	if opponent.get("is_in_bullet_time") or opponent.get("is_flying_to_opponent"):
+		return
+
 	var my_origin = get_parent() if is_player else null
 	var my_pos = my_origin.global_position if my_origin else global_position
 	var opp_pos = opponent.global_position
-	var diff = my_pos - opp_pos
+	var diff = opp_pos - my_pos
 	diff.y = 0.0
-	var dir = diff.normalized()
-	if diff.length_squared() < 0.001:
-		dir = Vector3(0.0, 0.0, 1.0)
+	var fwd_dir = diff.normalized() if diff.length_squared() > 0.001 else Vector3(0.0, 0.0, -1.0)
 
-	# Aplicar impulso físico de retroceso al jugador
-	velocity += dir * separation_speed
-	is_knocked_back = true
+	# El atacante NO se mueve
+	velocity = Vector3.ZERO
+	is_knocked_back = false
 
-	# Aplicar retroceso opuesto al contrincante
-	if opponent.has_method("apply_knockback"):
-		opponent.apply_knockback(-dir, separation_speed * 0.85)
+	# El defensor retrocede suavemente hasta la distancia inicial de guardia (~2.8m)
+	var current_dist = diff.length()
+	var desired_dist = 2.8
+	if current_dist < desired_dist:
+		var gentle_speed = clampf((desired_dist - current_dist) * 2.5, 2.0, 4.5)
+		opponent.set("velocity", fwd_dir * gentle_speed)
+		opponent.set("is_knocked_back", false)
 
-	print("[Combat] Separación táctica obligatoria gatillada para restaurar distancia neutral.")
+	print("[Combat] Separación suave hacia distancia inicial (~2.8m). Atacante inmóvil.")
 
 
 func _execute_melee_impact(opponent: Node3D) -> void:
@@ -1586,17 +1612,21 @@ func _execute_melee_flurry_barrage(opponent: Node3D, recorded_hits: Array) -> vo
 		if not is_instance_valid(opponent):
 			return
 
-	# Impacto final demoledor (Finisher que expulsa al oponente)
-	var final_knockback_force: float = 12.0 + float(hit_count) * 2.2
-	if opponent.has_method("take_hit"):
-		opponent.take_hit(total_damage, fwd)
-		increase_np(total_damage * 0.40)
-	elif opponent.has_method("apply_knockback"):
-		opponent.apply_knockback(fwd, final_knockback_force)
+	# Impacto final: El atacante NO se mueve. El defensor retrocede suavemente a la distancia inicial (~2.8m)
+	velocity = Vector3.ZERO
+	is_knocked_back = false
 
-	# REGLA SECUENCIAL: Retroceso del atacante para garantizar separación neutral tras la ráfaga
-	velocity += (-fwd) * 11.0
-	is_knocked_back = true
+	if opponent.has_method("take_hit"):
+		opponent.take_hit(total_damage, Vector3.ZERO)
+		increase_np(total_damage * 0.40)
+
+	# Separación controlada hacia la distancia inicial
+	var opp_diff = opponent.global_position - my_pos
+	opp_diff.y = 0.0
+	var retreat_dir = opp_diff.normalized() if opp_diff.length_squared() > 0.01 else fwd
+	var retreat_speed = clampf((2.8 - opp_diff.length()) * 2.8, 2.5, 4.8)
+	opponent.set("velocity", retreat_dir * retreat_speed)
+	opponent.set("is_knocked_back", false)
 
 	# Pulso háptico máximo final
 	if is_player and my_origin:
@@ -1606,7 +1636,7 @@ func _execute_melee_flurry_barrage(opponent: Node3D, recorded_hits: Array) -> vo
 				ctrl.trigger_haptic_pulse("haptic", 220.0, 1.0, 0.25, 0.0)
 
 	_log_combat_event("💥 ¡RÁFAGA DE COMBATE! %d golpes conectados. Daño total: %.0f NP" % [hit_count, total_damage], "success")
-	print("[BulletTime] Ráfaga concluida: %d golpes, %.0f NP de daño, empuje %.1f m/s." % [hit_count, total_damage, final_knockback_force])
+	print("[BulletTime] Ráfaga concluida: %d golpes, %.0f NP de daño, velocidad de separación %.1f m/s." % [hit_count, total_damage, retreat_speed])
 
 
 ## Ejecuta el demoledor Martillazo de Dragon Ball Z como Finisher de corte en Bullet-Time
@@ -1641,14 +1671,9 @@ func _execute_hammer_strike_finisher(opponent: Node3D, swing_velocity: float, re
 	var bp_def: float = maxf(opponent.get("current_np") if opponent.get("current_np") != null else 10000.0, 1000.0)
 	var ratio_bp: float = clampf(sqrt(bp_atk / bp_def), 0.35, 3.0)
 
-	var launch_force: float = 22.0 * factor_cinetico * ratio_bp
-	# Vector de lanzamiento hacia el cielo en ángulo elevado (70 grados)
-	var launch_dir = (fwd * 0.32 + Vector3.UP * 0.95).normalized()
-	var v_rival = launch_dir * launch_force
-
-	# Retroceso del jugador para restaurar la distancia neutral canónica (12 a 14 metros)
-	var recoil_force = clampf(8.0 + v_clean * 1.2, 10.0, 15.0)
-	var v_player = (-fwd) * recoil_force
+	# El atacante NO se mueve jamás tras el martillazo
+	velocity = Vector3.ZERO
+	is_knocked_back = false
 
 	# 3. Daño primario directo escalado por Ki y BP
 	var base_dmg = 550.0 + ki_spent * 8.0
@@ -1673,21 +1698,17 @@ func _execute_hammer_strike_finisher(opponent: Node3D, swing_velocity: float, re
 	if opponent.get("procedural_animator"):
 		opponent.procedural_animator.trigger_hit_flinch(1.4, -Vector3.UP)
 
-	# 5. Aplicar daño primario e impulsos físicos
+	# 5. Aplicar daño primario e impulso controlado hacia el suelo y atrás (~2.8m)
 	if opponent.has_method("take_hit"):
-		opponent.take_hit(direct_damage, launch_dir)
+		opponent.take_hit(direct_damage, Vector3.ZERO)
 		increase_np(direct_damage * 0.45)
-	opponent.set("velocity", opponent.get("velocity") + v_rival)
+	
+	var hammer_knockback = (fwd * 3.2 + Vector3.DOWN * 3.0)
+	opponent.set("velocity", hammer_knockback)
 	opponent.set("is_knocked_back", true)
 
-	# Retroceso al atacante
-	velocity += v_player
-	is_knocked_back = true
-
-	_log_combat_event("💥 ¡FINISHER MARTILLAZO CONECTADO! Rival expulsado a %.1f m/s. Daño: %.0f NP" % [launch_force, direct_damage], "success")
-	print("[HammerFinisher] Martillazo conectado: v_swing=%.1fm/s, fuerza=%.1fm/s, daño=%.0f NP, retroceso=%.1fm/s." % [
-		swing_velocity, launch_force, direct_damage, recoil_force
-	])
+	_log_combat_event("💥 ¡FINISHER MARTILLAZO CONECTADO! Rival derribado. Daño: %.0f NP" % direct_damage, "success")
+	print("[HammerFinisher] Martillazo conectado: daño=%.0f NP. Atacante inmóvil." % direct_damage)
 
 
 ## Genera la onda de choque expansiva del impacto físico masivo (Melee Shockwave)

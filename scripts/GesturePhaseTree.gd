@@ -163,9 +163,13 @@ const MAX_GRACE_FRAMES: int = 4
 # Timer para limitar la frecuencia de debug de zonas en consola
 var debug_log_timer: float = 0.0
 
+## Desactivación de gestos ópticos de Hand Tracking (100% mandos de control Touch)
+@export var enable_hand_tracking_gestures: bool = false
+
 func _ready() -> void:
 	current_node = gesture_tree
 	_setup_sound_players()
+	is_controller_override = true
 
 	# Inicializar el controlador híbrido de mandos Quest 3 para auto-switching
 	var hybrid_ctrl = HybridCombatControllerScript.new()
@@ -209,8 +213,8 @@ func _process(delta: float) -> void:
 	if delta <= 0.0:
 		return
 		
-	# 0. Si el controlador híbrido de mandos Quest 3 está activo, ceder el control
-	if is_controller_override:
+	# 0. Si los gestos ópticos de mano están desactivados o los mandos tienen el control, ceder
+	if not enable_hand_tracking_gestures or is_controller_override:
 		return
 
 	# 0.1 Si el jugador está volando hacia el oponente, no procesar gestos

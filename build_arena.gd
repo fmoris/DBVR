@@ -587,6 +587,8 @@ func _generate_runtime_colliders() -> void:
 	canyon_boundary.name = "CanyonBoundary_StaticBody"
 	canyon_boundary.collision_layer = 1
 	canyon_boundary.collision_mask = 1 | 2 | 4
+	canyon_boundary.add_to_group("mountains")
+	canyon_boundary.set_meta("is_mountain", true)
 
 	var segments = 16
 	for i in range(segments):
@@ -602,13 +604,15 @@ func _generate_runtime_colliders() -> void:
 		canyon_boundary.add_child(col)
 	add_child(canyon_boundary)
 
-	# F. Colisionadores físicos de los 48 Cañones y Mesetas de Akira Toriyama (Punto 3)
+	# F. Colisionadores físicos de los 48 Cañones y Mesetas de Akira Toriyama (Punto 3 y 8)
 	var canyon_node = get_node_or_null("ToriyamaCanyon_MultiMesh") as MultiMeshInstance3D
 	if canyon_node and canyon_node.multimesh:
 		var canyon_body = StaticBody3D.new()
 		canyon_body.name = "ToriyamaCanyon_StaticBody"
 		canyon_body.collision_layer = 1
 		canyon_body.collision_mask = 1 | 2 | 4
+		canyon_body.add_to_group("mountains")
+		canyon_body.set_meta("is_mountain", true)
 		var mm = canyon_node.multimesh
 		for idx in range(mm.instance_count):
 			var t = mm.get_instance_transform(idx)
@@ -617,13 +621,38 @@ func _generate_runtime_colliders() -> void:
 			var scale_xz = t.basis.get_scale().x
 			var scale_y = t.basis.get_scale().y
 			cylinder.height = 42.0 * scale_y
-			cylinder.radius = 22.0 * scale_xz # Radio físico protector de la meseta
+			cylinder.radius = 26.0 * scale_xz # Radio protector de meseta para evitar clipping
 			col.shape = cylinder
-			col.transform = t
+			col.position = t.origin
+			col.basis = t.basis.orthonormalized()
 			canyon_body.add_child(col)
 		add_child(canyon_body)
 
-	# G. Colisionadores físicos de las 36 Rocas y Peñascos del llano (Punto 3)
+	# G. Colisionadores físicos de la Gran Cordillera Exterior (72 picos montañosos - Punto 8)
+	var outer_wall_node = get_node_or_null("ToriyamaOuterWall_MultiMesh") as MultiMeshInstance3D
+	if outer_wall_node and outer_wall_node.multimesh:
+		var outer_wall_body = StaticBody3D.new()
+		outer_wall_body.name = "ToriyamaOuterWall_StaticBody"
+		outer_wall_body.collision_layer = 1
+		outer_wall_body.collision_mask = 1 | 2 | 4
+		outer_wall_body.add_to_group("mountains")
+		outer_wall_body.set_meta("is_mountain", true)
+		var w_mm = outer_wall_node.multimesh
+		for idx in range(w_mm.instance_count):
+			var t = w_mm.get_instance_transform(idx)
+			var col = CollisionShape3D.new()
+			var cylinder = CylinderShape3D.new()
+			var scale_xz = t.basis.get_scale().x
+			var scale_y = t.basis.get_scale().y
+			cylinder.height = 115.0 * scale_y
+			cylinder.radius = 65.0 * scale_xz
+			col.shape = cylinder
+			col.position = t.origin
+			col.basis = t.basis.orthonormalized()
+			outer_wall_body.add_child(col)
+		add_child(outer_wall_body)
+
+	# H. Colisionadores físicos de las 36 Rocas y Peñascos del llano (Punto 3)
 	var boulder_node = get_node_or_null("ToriyamaBoulders_MultiMesh") as MultiMeshInstance3D
 	if boulder_node and boulder_node.multimesh:
 		var boulder_body = StaticBody3D.new()
@@ -638,7 +667,8 @@ func _generate_runtime_colliders() -> void:
 			var s = t.basis.get_scale()
 			box.size = Vector3(2.6 * s.x, 2.0 * s.y, 2.4 * s.z)
 			col.shape = box
-			col.transform = t
+			col.position = t.origin
+			col.basis = t.basis.orthonormalized()
 			boulder_body.add_child(col)
 		add_child(boulder_body)
 

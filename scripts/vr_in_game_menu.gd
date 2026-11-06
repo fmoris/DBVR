@@ -177,13 +177,18 @@ func _build_scouter_menu_ui() -> void:
 
 func toggle_menu() -> void:
 	if not is_inside_tree():
-		var tree = Engine.get_main_loop() as SceneTree
-		if tree and tree.current_scene:
-			tree.current_scene.add_child(self)
-		elif tree and tree.root:
-			tree.root.add_child(self)
+		if xr_origin_ref and is_instance_valid(xr_origin_ref) and xr_origin_ref.is_inside_tree():
+			xr_origin_ref.add_child(self)
 		else:
-			return
+			var tree = Engine.get_main_loop() as SceneTree
+			if tree and tree.current_scene and tree.current_scene is Node3D:
+				tree.current_scene.add_child(self)
+			else:
+				push_warning("[VRInGameMenu] Advertencia: No se puede alternar el menú fuera de un nodo 3D del árbol.")
+				return
+
+	if not is_inside_tree():
+		return
 
 	is_open = not is_open
 	visible = is_open

@@ -29,9 +29,35 @@ func _ready() -> void:
 		if "vrs_mode" in get_viewport():
 			get_viewport().vrs_mode = Viewport.VRS_XR
 			print("[OpenXR] VRS_XR dinámico activado con éxito en el Viewport.")
+		call_deferred("_align_player_to_opponent")
 	else:
 		print("Advertencia: OpenXR no detectado o no inicializado. Verifique la conexión del visor/simulador.")
 		_adjust_camera_height_non_vr()
+		call_deferred("_align_player_to_opponent")
+
+
+## Alinea automáticamente la vista del jugador exactamente de frente hacia el oponente al iniciar
+func _align_player_to_opponent() -> void:
+	# Esperar 2 frames para que el tracking del visor y los nodos de escena estén completamente listos
+	if not is_inside_tree():
+		return
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	# Centrar orientación física del HMD
+	XRServer.center_on_hmd(XRServer.RESET_BUT_KEEP_TILT, true)
+
+	var opp = get_parent().find_child("EnemyCharacterInstance", true, false) if get_parent() else null
+	if opp and camera:
+		var cam_pos = camera.global_position
+		var opp_pos = opp.global_position
+		var dir_to_opp = opp_pos - cam_pos
+		dir_to_opp.y = 0.0
+
+		if dir_to_opp.length_squared() > 0.01:
+			var target_yaw = atan2(-dir_to_opp.x, -dir_to_opp.z)
+			rotation.y = target_yaw - camera.rotation.y
+			print("[XRSetup] 🎯 Jugador alineado frontalmente hacia el oponente (Yaw: %.2f rad)." % rotation.y)
 
 func _process(_delta: float) -> void:
 	# Descubrimiento dinámico de Hand Trackers en caso de conexión tardía o reconexión

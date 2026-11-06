@@ -112,9 +112,37 @@ func _setup_wrist_hud() -> void:
 func _get_left_wrist_and_palm_info() -> Dictionary:
 	var xr_origin = get_node_or_null("/root/cell_games_arena/Player_XROrigin3D") as XROrigin3D
 	if not xr_origin:
+		var tree = Engine.get_main_loop() as SceneTree
+		if tree and tree.current_scene:
+			xr_origin = tree.current_scene.find_child("Player_XROrigin3D", true, false) as XROrigin3D
+			if not xr_origin:
+				xr_origin = tree.current_scene.find_child("XROrigin3D", true, false) as XROrigin3D
+	if not xr_origin:
 		return { "valid": false }
 
-	# 1. Comprobar OpenXR Hand Tracking nativo
+	# 1. Prioridad: Controlador izquierdo Quest Touch (Modo activo preferente)
+	var left_ctrl = xr_origin.get_node_or_null("LeftHand") as XRController3D
+	if not left_ctrl:
+		left_ctrl = xr_origin.find_child("LeftHand", true, false) as XRController3D
+	if left_ctrl and left_ctrl.get_is_active():
+		var l_basis = left_ctrl.global_transform.basis
+		var w_pos = left_ctrl.global_position + l_basis * Vector3(0.0, 0.05, 0.04)
+		var p_pos = left_ctrl.global_position + l_basis * Vector3(0.0, 0.08, 0.0)
+		return {
+			"valid": true,
+			"wrist_pos": w_pos,
+			"palm_pos": p_pos,
+			"is_hand_tracking": false
+		}
+	elif left_ctrl:
+		return {
+			"valid": true,
+			"wrist_pos": left_ctrl.global_position + Vector3.UP * 0.05,
+			"palm_pos": left_ctrl.global_position + Vector3.UP * 0.08,
+			"is_hand_tracking": false
+		}
+
+	# 2. Fallback: OpenXR Hand Tracking nativo si no hay mandos físicos
 	var left_tracker = XRServer.get_tracker("/user/hand_tracker/left") as XRHandTracker
 	if left_tracker:
 		var flags_wrist = left_tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_WRIST)
@@ -128,26 +156,6 @@ func _get_left_wrist_and_palm_info() -> Dictionary:
 				"palm_pos": xr_origin.global_transform * p_local,
 				"is_hand_tracking": true
 			}
-
-	# 2. Comprobar controlador izquierdo Quest Touch
-	var left_ctrl = xr_origin.get_node_or_null("LeftHand") as XRController3D
-	if left_ctrl and left_ctrl.get_is_active():
-		var l_basis = left_ctrl.global_transform.basis
-		var w_pos = left_ctrl.global_position + l_basis * Vector3(0.0, -0.015, 0.065)
-		var p_pos = left_ctrl.global_position + l_basis * Vector3(0.0, 0.02, 0.0)
-		return {
-			"valid": true,
-			"wrist_pos": w_pos,
-			"palm_pos": p_pos,
-			"is_hand_tracking": false
-		}
-	elif left_ctrl:
-		return {
-			"valid": true,
-			"wrist_pos": left_ctrl.global_position,
-			"palm_pos": left_ctrl.global_position,
-			"is_hand_tracking": false
-		}
 
 	return { "valid": false }
 
@@ -449,14 +457,14 @@ func _process(delta: float) -> void:
 			var in_view = cam_forward.dot(dir_from_cam)
 
 			# Activación natural e intuitiva:
-			# El jugador levanta su mano/muñeca frente a su campo de visión (in_view > 0.40),
-			# a distancia ergonómica de lectura (15cm a 78cm) y sobre el nivel de la cintura/pecho
-			if in_view > 0.40 and dist >= 0.15 and dist <= 0.78 and display_anchor.y > (cam_pos.y - 0.58):
+			# El jugador levanta su mano/muñeca en su campo de visión
+			# a distancia ergonómica de lectura (10cm a 95cm)
+			if in_view > 0.20 and dist >= 0.10 and dist <= 0.95 and display_anchor.y > (cam_pos.y - 0.75):
 				should_display = true
 
 			if should_display or wrist_hud_scale > 0.01:
-				# Flotar holográficamente 8 cm sobre la muñeca/palma, ligeramente orientada al rostro del jugador
-				var float_offset = Vector3.UP * 0.08 + (cam_pos - display_anchor).normalized() * 0.04
+				# Flotar holográficamente 10 cm sobre el mando/muñeca
+				var float_offset = Vector3.UP * 0.10 + (cam_pos - display_anchor).normalized() * 0.05
 				hud_mesh.global_position = display_anchor + float_offset
 				# Orientar siempre la pantalla holográfica frente a los ojos del jugador para máxima nitidez
 				hud_mesh.look_at(cam_pos, Vector3.UP, true)

@@ -79,6 +79,11 @@ func _process(delta: float) -> void:
 
 	time_left -= delta
 
+	# Actualizar cooldown de impactos repetidos por zona
+	for zone in target_zones:
+		if zone.get("cooldown", 0.0) > 0.0:
+			zone["cooldown"] -= delta
+
 	# 1. Actualizar cálculo de velocidad cinemática de los mandos
 	_update_controller_velocities(delta)
 
@@ -91,18 +96,17 @@ func _process(delta: float) -> void:
 		var pct = clampf(time_left / maxf(duration, 0.1), 0.0, 1.0)
 		var bar_len = int(pct * 12.0)
 		var bar_str = "█".repeat(bar_len) + "░".repeat(12 - bar_len)
-		header_label.text = "⚡ BULLET TIME ⚡\n[ %s ] %.1fs\n🎯 IMPACTOS: %d / %d" % [
+		header_label.text = "⚡ BULLET TIME ⚡\n[ %s ] %.1fs\n🥊 COMBOS: %d GOLPES" % [
 			bar_str,
 			maxf(time_left, 0.0),
-			hits.size(),
-			target_zones.size()
+			hits.size()
 		]
 
 	# Detectar colisiones físicas de los mandos del jugador contra las cajas activas
 	_check_controller_punches()
 
-	# Si se agota el tiempo o se conectaron todos los objetivos, finalizar Bullet-Time
-	if time_left <= 0.0 or hits.size() >= target_zones.size():
+	# El tiempo dura su duración completa y SOLO se corta anticipadamente si se ejecuta el Martillazo
+	if time_left <= 0.0:
 		finish()
 
 
@@ -372,7 +376,7 @@ func _check_controller_punches() -> void:
 		var hand_name: String = hand_data["name"]
 
 		for zone in target_zones:
-			if zone["hit"]:
+			if zone.get("cooldown", 0.0) > 0.0:
 				continue
 
 			var target_pos: Vector3 = zone["node"].global_position
@@ -383,9 +387,10 @@ func _check_controller_punches() -> void:
 				_register_hit(zone, ctrl_node, hand_name)
 
 
-## Registra el impacto exitoso en una zona
+## Registra el impacto exitoso en una zona (persistente para combos repetidos)
 func _register_hit(zone: Dictionary, ctrl_node: XRController3D, hand_name: String) -> void:
-	zone["hit"] = true
+	# Cooldown de 140ms por zona para permitir golpes repetidos rápidos al mismo lugar
+	zone["cooldown"] = 0.14
 	var hit_pos: Vector3 = zone["node"].global_position
 
 	hits.append({
@@ -396,35 +401,31 @@ func _register_hit(zone: Dictionary, ctrl_node: XRController3D, hand_name: Strin
 		"time_left": time_left
 	})
 
-	# 1. Efecto visual: flash dorado brillante, expansión y disipación
-	var box_inst: MeshInstance3D = zone["box_mesh"]
-	var lbl: Label3D = zone["label"]
-	if lbl and is_instance_valid(lbl):
-		lbl.text = "¡HIT!"
-		lbl.modulate = Color(1.0, 0.9, 0.1)
-
+	# 1. Efecto visual: destello y pulso elástico SIN ocultar la caja
 	_spawn_hit_spark(hit_pos)
+
+	var box_inst: MeshInstance3D = zone["box_mesh"]
+	var orig_col: Color = zone["color"]
 
 	if box_inst and is_instance_valid(box_inst):
 		var mat = box_inst.material_override as StandardMaterial3D
 		if mat:
-			mat.albedo_color = Color(1.0, 0.9, 0.2, 1.0)
-			mat.emission = Color(1.0, 0.9, 0.3)
-			mat.emission_energy_multiplier = 4.0
+			mat.albedo_color = Color(1.0, 1.0, 0.7, 1.0)
+			mat.emission = Color(1.0, 1.0, 0.7)
+			mat.emission_energy_multiplier = 3.5
 
 		var tw = create_tween().set_parallel(true)
-		tw.tween_property(zone["node"], "scale", Vector3.ONE * 1.5, 0.15).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		tw.tween_property(zone["node"], "scale", Vector3.ONE * 1.35, 0.07).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		tw.chain().tween_property(zone["node"], "scale", Vector3.ONE, 0.07).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
 		if mat:
-			tw.tween_property(mat, "albedo_color:a", 0.0, 0.2)
-		tw.chain().tween_callback(func():
-			if is_instance_valid(zone["node"]):
-				zone["node"].visible = false
-		)
+			tw.parallel().tween_property(mat, "albedo_color", orig_col, 0.12)
+			tw.parallel().tween_property(mat, "emission", Color(orig_col.r, orig_col.g, orig_col.b), 0.12)
+			tw.parallel().tween_property(mat, "emission_energy_multiplier", 1.2, 0.12)
 
 	# 2. Audio de impacto físico inmediato
 	if audio_player:
 		audio_player.global_position = hit_pos
-		audio_player.stream = sfx_hit_heavy if hits.size() == target_zones.size() else sfx_hit_light
+		audio_player.stream = sfx_hit_heavy if (hits.size() % 4 == 0) else sfx_hit_light
 		audio_player.pitch_scale = randf_range(0.95, 1.15)
 		audio_player.play()
 
