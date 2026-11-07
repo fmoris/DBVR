@@ -648,8 +648,11 @@ func revert_to_base() -> void:
 func is_power_usable(power: Resource) -> bool:
 	if is_penalized:
 		return false
-	# 1. ¿Está desbloqueado?
-	if not unlocked_powers.has(power.power_name):
+	# 1. ¿Está desbloqueado o es técnica base/finisher en Zenkai?
+	var is_unlocked = unlocked_powers.has(power.power_name) or power.unlock_requirement_transformation == ""
+	if is_in_zenkai_state and power.is_finisher:
+		is_unlocked = true
+	if not is_unlocked:
 		return false
 	# 2. ¿Prohibido en esta forma?
 	if current_transformation and power.forbidden_transformations.has(current_transformation.form_name):
@@ -1403,24 +1406,16 @@ func _process_mutual_body_collision() -> void:
 	diff.y = 0.0
 	var dist = diff.length()
 
-	# Caso 1: Dentro de secuencia de Melee (Bullet-Time o aproximación rápida)
-	if is_in_bullet_time or is_flying_to_opponent:
-		var min_combat_dist = 0.65
-		if dist < min_combat_dist and dist > 0.001:
-			var push_dir = diff.normalized()
-			var overlap = (min_combat_dist - dist) * 0.5
-			if my_origin:
-				my_origin.global_position += push_dir * overlap
-				_clamp_to_arena(my_origin)
-			opponent.global_position -= push_dir * overlap
-			_clamp_to_arena(opponent)
-		return
-
-	# Caso 2: Fuera de secuencia (Combate Neutral - Punto 4)
-	# Si la distancia mínima neutral (< 2.2m) se viola fuera de un combo, se gatilla la separación
-	var min_neutral_dist = 2.2
-	if dist < min_neutral_dist:
-		_trigger_tactical_separation(opponent, 14.0)
+	# Prevención de penetración física mutua entre combatientes (distancia mínima de cuerpos 0.65m)
+	var min_body_dist = 0.65
+	if dist < min_body_dist and dist > 0.001:
+		var push_dir = diff.normalized()
+		var overlap = (min_body_dist - dist) * 0.5
+		if my_origin:
+			my_origin.global_position += push_dir * overlap
+			_clamp_to_arena(my_origin)
+		opponent.global_position -= push_dir * overlap
+		_clamp_to_arena(opponent)
 
 
 ## Gatilla una separación táctica suave hacia la distancia inicial (atacante inmóvil, defensor retrocede poco)

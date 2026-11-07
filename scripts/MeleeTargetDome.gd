@@ -150,18 +150,16 @@ func _check_hammer_finisher() -> bool:
 	if not left_ctrl or not right_ctrl or not left_ctrl.get_is_active() or not right_ctrl.get_is_active():
 		return false
 
-	# 1. Ambos mandos deben tener puño cerrado (Grip + Trigger presionados)
-	var l_grip = left_ctrl.get_float("grip") > 0.45 or left_ctrl.is_button_pressed("grip_click")
-	var l_trig = left_ctrl.get_float("trigger") > 0.45 or left_ctrl.is_button_pressed("trigger_click")
-	var r_grip = right_ctrl.get_float("grip") > 0.45 or right_ctrl.is_button_pressed("grip_click")
-	var r_trig = right_ctrl.get_float("trigger") > 0.45 or right_ctrl.is_button_pressed("trigger_click")
+	# 1. Ambos mandos deben tener puño cerrado (Grip o Trigger presionados en ambas manos)
+	var l_btn = left_ctrl.get_float("grip") > 0.40 or left_ctrl.get_float("trigger") > 0.40 or left_ctrl.is_button_pressed("grip_click") or left_ctrl.is_button_pressed("trigger_click")
+	var r_btn = right_ctrl.get_float("grip") > 0.40 or right_ctrl.get_float("trigger") > 0.40 or right_ctrl.is_button_pressed("grip_click") or right_ctrl.is_button_pressed("trigger_click")
 
-	if not (l_grip and l_trig and r_grip and r_trig):
+	if not (l_btn and r_btn):
 		return false
 
-	# 2. Ambas manos juntas en mazo (distancia < 25 cm)
+	# 2. Ambas manos juntas en mazo (distancia < 38 cm)
 	var hand_dist = left_ctrl.global_position.distance_to(right_ctrl.global_position)
-	if hand_dist > 0.25:
+	if hand_dist > 0.38:
 		return false
 
 	# 3. Cinemática del swing coordinado
@@ -175,8 +173,8 @@ func _check_hammer_finisher() -> bool:
 	var fwd_speed = avg_v.dot(to_def)
 	var vert_speed = abs(avg_v.y)
 
-	# Umbral cinemático: velocidad del swing > 1.8 m/s hacia el rival o en trayectoria vertical
-	if peak_speed >= 1.8 and (fwd_speed > 0.8 or vert_speed > 1.0):
+	# Umbral cinemático: swing descendente hacia abajo o hacia el rival (> 1.2 m/s)
+	if peak_speed >= 1.2 and (fwd_speed > 0.6 or vert_speed > 0.7 or avg_v.y < -0.6):
 		print("[BulletTimeDome] ⚡ ¡FINISHER MARTILLAZO DETECTADO! Velocidad física de impacto: %.2f m/s (Corte inmediato de tiempo)." % peak_speed)
 		is_active = false
 		emit_signal("finisher_triggered", "hammer_strike", peak_speed, hits)
@@ -382,8 +380,8 @@ func _check_controller_punches() -> void:
 			var target_pos: Vector3 = zone["node"].global_position
 			var dist: float = hand_pos.distance_to(target_pos)
 
-			# Radio de detección de golpe físico: 0.24 metros (sensible y natural en VR)
-			if dist <= 0.24:
+			# Radio de detección de golpe físico: 0.30 metros (sensible y natural en VR)
+			if dist <= 0.30:
 				_register_hit(zone, ctrl_node, hand_name)
 
 

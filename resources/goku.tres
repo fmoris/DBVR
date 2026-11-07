@@ -20,7 +20,6 @@ ki_cost = 50.0
 base_damage_np = 1800.0
 projectile_speed = 25.0
 energy_color = Color(0.1, 0.6, 1, 0.95)
-unlock_requirement_transformation = "SSJ"
 
 [sub_resource type="Resource" id="Resource_012ef"]
 script = ExtResource("1_ansdh")

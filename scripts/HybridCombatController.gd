@@ -177,19 +177,14 @@ func _process(delta: float) -> void:
 	_process_guard()
 
 
-# --- 1. RECARGA DE KI (Gatillos a Hombros y descenso a Cintura) ---
+# --- 1. RECARGA DE KI (Ambos gatillos sostenidos con manos a la cintura/pecho) ---
 func _process_ki_recharge(delta: float) -> void:
 	var l_trig: bool = left_controller.get_float("trigger") > 0.45 or left_controller.is_button_pressed("trigger_click")
 	var r_trig: bool = right_controller.get_float("trigger") > 0.45 or right_controller.is_button_pressed("trigger_click")
 	var triggers_held: bool = l_trig and r_trig
 
-	# Excluir grips estrictamente para evitar cualquier interferencia con super poderes o guardia
-	var l_grip: bool = left_controller.get_float("grip") > 0.45 or left_controller.is_button_pressed("grip_click")
-	var r_grip: bool = right_controller.get_float("grip") > 0.45 or right_controller.is_button_pressed("grip_click")
-	var grips_held: bool = l_grip or r_grip
-
-	# Exclusividad: Ambos gatillos sostenidos SIN grips y sin super poder activo
-	if triggers_held and not grips_held and current_super_state == SuperPowerState.IDLE:
+	# Si ambos gatillos están sostenidos y no hay super poder en curso
+	if triggers_held and current_super_state == SuperPowerState.IDLE:
 		var cam_pos = camera.global_position if camera else xr_origin.global_position + Vector3(0, 1.6, 0)
 		var cam_fwd = -camera.global_transform.basis.z if camera else Vector3.FORWARD
 		cam_fwd.y = 0.0
@@ -197,78 +192,44 @@ func _process_ki_recharge(delta: float) -> void:
 
 		var l_pos = left_controller.global_position
 		var r_pos = right_controller.global_position
-		var hands_dist = l_pos.distance_to(r_pos)
 		var l_rel_y = l_pos.y - cam_pos.y
 		var r_rel_y = r_pos.y - cam_pos.y
 		var avg_rel_y = (l_rel_y + r_rel_y) * 0.5
 
-		# REQUISITO 8: Verificar que las manos no estén detrás de la espalda
-		# Al cargar Ki a la cadera/cintura, las manos se ubican a los lados del torso (fwd_proj >= -0.10m).
-		# Se cancela solo si se llevan hacia la espalda (fwd_proj < -0.15m).
+		# Solo cancelar si las manos están claramente detrás de la espalda
 		var l_fwd_proj = (l_pos - cam_pos).dot(cam_fwd)
 		var r_fwd_proj = (r_pos - cam_pos).dot(cam_fwd)
-		var hands_behind_back = l_fwd_proj < -0.15 or r_fwd_proj < -0.15
-
-		if hands_behind_back:
-			if is_charging_ki or ki_prep_phase:
-				if is_charging_ki and gesture_tree:
-					gesture_tree._cancel_action("Recarga de Ki cancelada (manos detrás de la espalda)")
-					gesture_tree._reset_to_idle()
-				ki_prep_phase = false
-				is_charging_ki = false
+		if l_fwd_proj < -0.22 and r_fwd_proj < -0.22:
+			if is_charging_ki and gesture_tree:
+				gesture_tree._cancel_action("Recarga de Ki cancelada (manos detrás de la espalda)")
+				gesture_tree._reset_to_idle()
+			is_charging_ki = false
 			return
 
-		# Fase 1 (Preparación a la altura de los hombros o pecho):
-		# Rango amplio y permisivo para adaptarse a cualquier fisonomía del jugador
+		# Activación natural: si las manos están a la altura del pecho o cintura (avg_rel_y <= 0.15)
 		if not is_charging_ki:
-			if not ki_prep_phase:
-				if l_rel_y > -0.50 and r_rel_y > -0.50 and l_rel_y < 0.35 and r_rel_y < 0.35 and hands_dist <= 1.05:
-					ki_prep_phase = true
-					if gesture_tree and gesture_tree.has_signal("phase_changed"):
-						gesture_tree.emit_signal("phase_changed", "RECARGA KI: FASE 1 (HOMBROS)")
-					_pulse_haptic(left_controller, 80.0, 0.45, 0.10)
-					_pulse_haptic(right_controller, 80.0, 0.45, 0.10)
+			is_charging_ki = true
+			if gesture_tree:
+				gesture_tree._trigger_action("recarga_ki")
+				if gesture_tree.has_signal("phase_changed"):
+					gesture_tree.emit_signal("phase_changed", "¡RECARGANDO KI! (CONCENTRACIÓN MÁXIMA)")
 
-			# Fase 2 (Detonación al descender a la cintura / cadera):
-			# Rango expandido para que se active fácilmente al bajar los puños (avg_rel_y <= -0.25m)
-			if ki_prep_phase and avg_rel_y <= -0.25:
-				is_charging_ki = true
-				ki_prep_phase = false
-				if gesture_tree:
-					gesture_tree._trigger_action("recarga_ki")
-					if gesture_tree.has_signal("phase_changed"):
-						gesture_tree.emit_signal("phase_changed", "¡RECARGANDO KI! (CINTURA)")
-
-		# Si ya está recargando activamente en la cintura:
+		# Regenerar Ki y NP activamente cada frame
 		if is_charging_ki:
-			# Zona de tolerancia de cadera amplia: solo finaliza si se sube hasta el cuello/cabeza (> -0.12m) o bajo las rodillas (< -1.15m)
-			if avg_rel_y > -0.12 or avg_rel_y < -1.15:
-				is_charging_ki = false
-				if gesture_tree:
-					gesture_tree._cancel_action("Recarga de Ki finalizada (manos fuera de zona de cintura)")
-					gesture_tree._reset_to_idle()
-			else:
-				# Regenerar Ki y NP activamente cada frame con balance canónico (tarda ~4.5s en llenar de 0 a 100)
-				var player = gesture_tree._get_player_instance() if gesture_tree else null
-				if player and is_instance_valid(player):
-					player.recharge_ki(22.0 * delta)
-					player.increase_np(2500.0 * delta)
-				_pulse_haptic(left_controller, 95.0, 0.50, delta)
-				_pulse_haptic(right_controller, 95.0, 0.50, delta)
+			var player = gesture_tree._get_player_instance() if gesture_tree else null
+			if player and is_instance_valid(player):
+				player.recharge_ki(25.0 * delta)
+				player.increase_np(3000.0 * delta)
+			_pulse_haptic(left_controller, 95.0, 0.50, delta)
+			_pulse_haptic(right_controller, 95.0, 0.50, delta)
 	else:
 		# Soltar los gatillos cancela o finaliza la recarga
 		if is_charging_ki or ki_prep_phase:
-			if is_charging_ki:
-				is_charging_ki = false
-				if gesture_tree:
-					gesture_tree._cancel_action("Recarga de Ki finalizada (Gatillos soltados)")
-					gesture_tree._reset_to_idle()
-			elif ki_prep_phase:
-				ki_prep_phase = false
-				if gesture_tree:
-					gesture_tree._cancel_action("Recarga de Ki cancelada (Gatillos soltados)")
-					gesture_tree._reset_to_idle()
+			if is_charging_ki and gesture_tree:
+				gesture_tree._cancel_action("Recarga de Ki finalizada (Gatillos soltados)")
+				gesture_tree._reset_to_idle()
 			ki_prep_phase = false
+			is_charging_ki = false
 			left_charge_time = 0.0
 			right_charge_time = 0.0
 			left_is_charging = false
@@ -342,16 +303,11 @@ func _process_ki_blasts(delta: float) -> void:
 
 func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta: float) -> void:
 	var trig_val = controller.get_float("trigger")
-	var trig_pressed = trig_val > 0.55 or controller.is_button_pressed("trigger_click")
-	var grip_val = controller.get_float("grip")
-	var grip_pressed = grip_val > 0.40 or controller.is_button_pressed("grip_click")
+	var trig_pressed = trig_val > 0.40 or controller.is_button_pressed("trigger_click")
 	var is_left = (hand_side == 0)
-	var arm_extended = _is_arm_extended(controller)
 
-	# EXCLUSIVIDAD MUTUA MELEE / KI BLAST:
-	# Si el Grip está presionado (ej: formando puño cerrado para Melee), o en cooldown de Melee,
-	# o hay un super poder activo, ABORTAR Ki Blast de inmediato y no permitir que se dispare ni cargue.
-	if grip_pressed or melee_cooldown > 0.0 or current_super_state != SuperPowerState.IDLE:
+	# Si hay un super poder activo o en cooldown de melee, no permitir Ki Blast
+	if melee_cooldown > 0.0 or current_super_state != SuperPowerState.IDLE:
 		if (is_left and left_charge_time > 0.0) or (not is_left and right_charge_time > 0.0):
 			if gesture_tree:
 				gesture_tree._cleanup_ki_blast_charge_sphere(hand_side)
@@ -364,38 +320,21 @@ func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta:
 		return
 
 	if trig_pressed:
-		# REQUISITO 1 & 2: Solo se puede cargar si el brazo está extendido al frente
-		if not arm_extended:
-			if (is_left and left_charge_time > 0.0) or (not is_left and right_charge_time > 0.0):
-				if gesture_tree:
-					gesture_tree._cleanup_ki_blast_charge_sphere(hand_side)
-					if gesture_tree.has_signal("gesture_logged"):
-						gesture_tree.emit_signal("gesture_logged", "Carga cancelada: Extiende el brazo al frente.", "warning")
-			if is_left:
-				left_charge_time = 0.0
-				left_is_charging = false
-			else:
-				right_charge_time = 0.0
-				right_is_charging = false
-			return
+		var cam_p = camera.global_position if camera else xr_origin.global_position + Vector3(0, 1.6, 0)
+		var aim_origin = controller.global_position
+		var aim_fwd = -controller.global_transform.basis.z.normalized()
 
-		# REQUISITO 3 & 4: Consumir Ki mientras carga. Si no queda Ki, Último Aliento (quema de BP)
+		# Consumir Ki mientras carga. Si no queda Ki, quema vital (BP)
 		var player = gesture_tree._get_player_instance() if gesture_tree else null
 		if player and is_instance_valid(player):
 			if player.current_ki > 0.0:
-				var ki_drain = 8.0 * delta
+				var ki_drain = 6.0 * delta
 				player.consume_ki(ki_drain)
 			else:
-				# Quema de fuerza vital (BP) continua durante la carga sin Ki
-				var vital_drain = 120.0 * delta
+				var vital_drain = 80.0 * delta
 				player.current_np = max(1.0, player.current_np - vital_drain)
 				player._notify_stats()
 				_pulse_haptic(controller, 130.0, 0.70, delta)
-
-		# Vector y origen directo del mando que apunta hacia donde el jugador extiende el brazo
-		var cam_p = camera.global_position if camera else xr_origin.global_position + Vector3(0, 1.6, 0)
-		var aim_origin = controller.global_position
-		var aim_fwd = (aim_origin - cam_p).normalized()
 
 		if is_left:
 			left_charge_time += delta
@@ -403,44 +342,36 @@ func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta:
 			if gesture_tree:
 				gesture_tree._update_ki_blast_charge_sphere(0, left_charge_time, delta)
 				gesture_tree.emit_signal("ki_blast_charging", 0, left_charge_time, delta)
-				# Mira de apuntado holográfica activa en fase de carga para mano izquierda
 				gesture_tree._update_aim_reticle(aim_origin, aim_fwd, Color(0.1, 0.8, 1.0))
-			_pulse_haptic(controller, 100.0, clamp(0.15 + left_charge_time * 0.35, 0.15, 0.95), delta)
+			_pulse_haptic(controller, 100.0, clamp(0.15 + left_charge_time * 0.4, 0.15, 0.95), delta)
 		else:
 			right_charge_time += delta
 			right_is_charging = true
 			if gesture_tree:
 				gesture_tree._update_ki_blast_charge_sphere(1, right_charge_time, delta)
 				gesture_tree.emit_signal("ki_blast_charging", 1, right_charge_time, delta)
-				# Mira de apuntado holográfica activa en fase de carga para mano derecha
 				gesture_tree._update_aim_reticle(aim_origin, aim_fwd, Color(1.0, 0.7, 0.1))
-			_pulse_haptic(controller, 100.0, clamp(0.15 + right_charge_time * 0.35, 0.15, 0.95), delta)
+			_pulse_haptic(controller, 100.0, clamp(0.15 + right_charge_time * 0.4, 0.15, 0.95), delta)
 	else:
-		# Gatillo soltado: Evaluar disparo
+		# Gatillo soltado: Evaluar disparo (tap rápido o disparo cargado)
 		var held_time = left_charge_time if is_left else right_charge_time
 
-		# Requisito canónico anti-spam (Punto 6): Mínimo 0.20s de concentración para Ki Blast
-		if held_time >= 0.20:
-			# REQUISITO 1: El Ki Blast SOLO puede ser disparado con el brazo extendido
-			if not arm_extended:
-				if gesture_tree and gesture_tree.has_signal("gesture_logged"):
-					gesture_tree.emit_signal("gesture_logged", "Disparo fallido: Extiende el brazo al frente para lanzar Ki.", "warning")
-			else:
-				var is_charged = held_time >= 0.85
-				var action_name = "ki_blast_left" if is_left else "ki_blast_right"
+		if held_time >= 0.04:
+			var is_charged = held_time >= 0.50
+			var action_name = "ki_blast_left" if is_left else "ki_blast_right"
 
-				if gesture_tree:
-					gesture_tree.set("last_firing_controller", controller)
-					gesture_tree.set("last_firing_hand_side", hand_side)
-					if is_left:
-						gesture_tree.set("ki_blast_charge_time_left", held_time)
-					else:
-						gesture_tree.set("ki_blast_charge_time_right", held_time)
-					gesture_tree._trigger_action(action_name)
+			if gesture_tree:
+				gesture_tree.set("last_firing_controller", controller)
+				gesture_tree.set("last_firing_hand_side", hand_side)
+				if is_left:
+					gesture_tree.set("ki_blast_charge_time_left", held_time)
+				else:
+					gesture_tree.set("ki_blast_charge_time_right", held_time)
+				gesture_tree._trigger_action(action_name)
 
-				var recoil_amp = 0.95 if is_charged else 0.65
-				var recoil_time = 0.20 if is_charged else 0.08
-				_pulse_haptic(controller, 160.0, recoil_amp, recoil_time)
+			var recoil_amp = 0.95 if is_charged else 0.60
+			var recoil_time = 0.18 if is_charged else 0.08
+			_pulse_haptic(controller, 160.0, recoil_amp, recoil_time)
 
 		# Limpiar esfera visual de carga en la palma
 		if gesture_tree:
@@ -675,40 +606,28 @@ func _process_super_powers(delta: float) -> void:
 
 		match super_power_type:
 			"final_flash":
-				var arms_fwd = (l_fwd_proj >= 0.15 and r_fwd_proj >= 0.15) or arms_extended_both
-				if super_charge_timer < 2.5:
-					cancel_reason = "Final Flash cancelado: Carga insuficiente (%.1fs / 2.5s)." % super_charge_timer
-				elif not (arms_fwd and hands_dist <= 0.50):
-					cancel_reason = "Final Flash cancelado: Junta ambas manos al frente con brazos hacia adelante al soltar los grips."
+				if super_charge_timer < 1.0:
+					cancel_reason = "Final Flash cancelado: Carga insuficiente (%.1fs / 1.0s)." % super_charge_timer
 				else:
 					fire_success = true
 			"galick_ho":
-				var arms_fwd = arms_extended_both or _is_arm_extended(left_controller) or _is_arm_extended(right_controller)
-				if super_charge_timer < 1.5:
-					cancel_reason = "Galick Ho cancelado: Carga insuficiente (%.1fs / 1.5s)." % super_charge_timer
-				elif not arms_fwd:
-					cancel_reason = "Galick Ho cancelado: Debes extender los brazos al frente al soltar los grips."
+				if super_charge_timer < 0.7:
+					cancel_reason = "Galick Ho cancelado: Carga insuficiente (%.1fs / 0.7s)." % super_charge_timer
 				else:
 					fire_success = true
 			"big_bang":
-				if super_charge_timer < 1.2:
-					cancel_reason = "Big Bang cancelado: Carga insuficiente (%.1fs / 1.2s)." % super_charge_timer
-				elif not _is_arm_extended(bb_ctrl):
-					cancel_reason = "Big Bang cancelado: Mantén el brazo extendido al frente al soltar el grip."
+				if super_charge_timer < 0.5:
+					cancel_reason = "Big Bang cancelado: Carga insuficiente (%.1fs / 0.5s)." % super_charge_timer
 				else:
 					fire_success = true
 			"kamehameha":
-				if super_charge_timer < 2.0:
-					cancel_reason = "Kamehameha cancelado: Carga insuficiente (%.1fs / 2.0s)." % super_charge_timer
-				elif not (arms_extended_both and hands_dist < 0.45):
-					cancel_reason = "Kamehameha cancelado: Extiende ambos brazos al frente al soltar grips."
+				if super_charge_timer < 0.7:
+					cancel_reason = "Kamehameha cancelado: Carga insuficiente (%.1fs / 0.7s)." % super_charge_timer
 				else:
 					fire_success = true
 			"genkidama":
-				if super_charge_timer < 3.5:
-					cancel_reason = "Genkidama cancelada: Carga insuficiente (%.1fs / 3.5s)." % super_charge_timer
-				elif rel_y >= 0.15:
-					cancel_reason = "Genkidama cancelada: Baja los brazos al frente al soltar grips."
+				if super_charge_timer < 1.2:
+					cancel_reason = "Genkidama cancelada: Carga insuficiente (%.1fs / 1.2s)." % super_charge_timer
 				else:
 					fire_success = true
 
@@ -717,7 +636,7 @@ func _process_super_powers(delta: float) -> void:
 		else:
 			if gesture_tree and cancel_reason != "":
 				gesture_tree._cancel_action(cancel_reason)
-			super_cooldown = 0.35
+			super_cooldown = 0.25
 			must_release_super_buttons = true
 			_reset_super_state()
 
@@ -770,9 +689,9 @@ func _execute_super_fire(tech_name: String) -> void:
 		gesture_tree._hide_aim_reticle()
 		gesture_tree._trigger_action(tech_name)
 
-	# Ventana de fatiga de 4.0 segundos canon para evitar spam de super poderes
-	super_fatigue_timer = 4.0
-	super_cooldown = 0.80
+	# Ventana de enfriamiento ágil para super poderes
+	super_fatigue_timer = 1.0
+	super_cooldown = 0.40
 	must_release_super_buttons = true
 	_reset_super_state()
 
@@ -872,22 +791,22 @@ func _process_transformations() -> void:
 			_pulse_haptic(right_controller, 120.0, 0.6, 0.25)
 
 
-# --- 5. GOLPES MELEE CINEMÁTICOS (SIMULACIÓN DE PUÑO CERRADO CON AMBOS BOTONES) ---
+# --- 5. GOLPES MELEE CINEMÁTICOS (LANZAMIENTO HACIA EL RIVAL) ---
 func _process_melee_punches() -> void:
 	if melee_cooldown > 0.0 or is_charging_ki:
 		return
 
-	var l_grip = left_controller.get_float("grip") > 0.45 or left_controller.is_button_pressed("grip_click")
-	var l_trig = left_controller.get_float("trigger") > 0.45 or left_controller.is_button_pressed("trigger_click")
-	var l_fist = l_grip and l_trig # REQUISITO 5: AMBOS BOTONES PRESIONADOS PARA SIMULAR PUÑO CERRADO
+	var l_grip = left_controller.get_float("grip") > 0.35 or left_controller.is_button_pressed("grip_click")
+	var l_trig = left_controller.get_float("trigger") > 0.35 or left_controller.is_button_pressed("trigger_click")
+	var l_punch_held = l_grip or l_trig
 
-	var r_grip = right_controller.get_float("grip") > 0.45 or right_controller.is_button_pressed("grip_click")
-	var r_trig = right_controller.get_float("trigger") > 0.45 or right_controller.is_button_pressed("trigger_click")
-	var r_fist = r_grip and r_trig # REQUISITO 5: AMBOS BOTONES PRESIONADOS PARA SIMULAR PUÑO CERRADO
+	var r_grip = right_controller.get_float("grip") > 0.35 or right_controller.is_button_pressed("grip_click")
+	var r_trig = right_controller.get_float("trigger") > 0.35 or right_controller.is_button_pressed("trigger_click")
+	var r_punch_held = r_grip or r_trig
 
-	# Si se estaba cargando Big Bang por error y el usuario cierra el puño (grip + trigger), cancelar Big Bang para priorizar Melee
+	# Si se estaba cargando Big Bang y el usuario lanza un puño frontal rápido, priorizar Melee
 	if current_super_state == SuperPowerState.CHARGING and super_power_type == "big_bang":
-		if l_fist or r_fist:
+		if left_velocity.length() > 1.2 or right_velocity.length() > 1.2:
 			_reset_super_state()
 	elif current_super_state != SuperPowerState.IDLE:
 		return
@@ -897,45 +816,42 @@ func _process_melee_punches() -> void:
 	cam_fwd.y = 0.0
 	cam_fwd = cam_fwd.normalized() if cam_fwd.length_squared() > 0.01 else Vector3.FORWARD
 
-	var l_fwd_proj = (left_controller.global_position - cam_pos).dot(cam_fwd)
-	var r_fwd_proj = (right_controller.global_position - cam_pos).dot(cam_fwd)
-
-	# Puño izquierdo veloz con puño cerrado (grip + trigger) proyectado al frente (> 0.15m)
-	if l_fist and left_velocity.dot(cam_fwd) > 1.6 and l_fwd_proj >= 0.15:
+	# Puño izquierdo hacia adelante (velocidad frontal > 1.1 m/s)
+	if l_punch_held and (left_velocity.dot(cam_fwd) > 1.1 or left_velocity.length() > 1.4):
 		_execute_melee_punch(left_controller)
-	# Puño derecho veloz con puño cerrado (grip + trigger) proyectado al frente (> 0.15m)
-	elif r_fist and right_velocity.dot(cam_fwd) > 1.6 and r_fwd_proj >= 0.15:
+	# Puño derecho hacia adelante (velocidad frontal > 1.1 m/s)
+	elif r_punch_held and (right_velocity.dot(cam_fwd) > 1.1 or right_velocity.length() > 1.4):
 		_execute_melee_punch(right_controller)
 
 
 func _execute_melee_punch(controller: XRController3D) -> void:
-	melee_cooldown = 0.40
-	_reset_super_state() # Asegura que Big Bang u otra carga quede 100% limpia
-	# Limpieza rigurosa de cualquier carga de Ki o mira activa para evitar interferencias
+	melee_cooldown = 0.45
+	_reset_super_state()
 	left_charge_time = 0.0
 	right_charge_time = 0.0
 	left_is_charging = false
 	right_is_charging = false
 
 	var player = gesture_tree._get_player_instance() if gesture_tree else null
-	# Si ya estamos en Bullet-Time cuerpo a cuerpo, no reiniciar el vuelo; el puñetazo impacta la cúpula táctica
+	# Si ya estamos en Bullet-Time cuerpo a cuerpo, el golpe impacta la cúpula táctica
 	if player and player.get("is_in_bullet_time"):
 		_pulse_haptic(controller, 200.0, 0.95, 0.12)
 		return
 
-	# Requisito canónico (Punto 5): Si no hay un oponente fijado, no se puede hacer el ataque de melee
-	if player and not player.get("is_target_locked"):
-		if gesture_tree and gesture_tree.has_signal("gesture_logged"):
-			gesture_tree.emit_signal("gesture_logged", "[KI] ¡Fija al rival con la mirada antes de embestir!", "warning")
-		_pulse_haptic(controller, 90.0, 0.65, 0.22)
-		return
+	# Auto-fijar al rival si no está bloqueado para garantizar embestida instantánea
+	if player and is_instance_valid(player):
+		if not player.get("is_target_locked"):
+			var opp = get_tree().current_scene.find_child("EnemyCharacterInstance", true, false)
+			if opp:
+				player.set("is_target_locked", true)
+				player.set("target_opponent", opp)
 
 	if gesture_tree:
 		gesture_tree._cleanup_ki_blast_charge_sphere(0)
 		gesture_tree._cleanup_ki_blast_charge_sphere(1)
 		gesture_tree._hide_aim_reticle()
 		gesture_tree._trigger_action("melee_attack")
-	_pulse_haptic(controller, 180.0, 0.85, 0.15)
+	_pulse_haptic(controller, 180.0, 0.90, 0.18)
 
 
 # --- 6. CONTROL DEL HUD Y MENÚ IN-GAME ---

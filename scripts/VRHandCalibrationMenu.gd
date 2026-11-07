@@ -63,6 +63,8 @@ func setup_references(xr_origin: Node3D, camera: Camera3D, left_ctrl: XRControll
 	camera_ref = camera
 	left_controller = left_ctrl
 	right_controller = right_ctrl
+	if not is_inside_tree() and xr_origin_ref and is_instance_valid(xr_origin_ref) and xr_origin_ref.is_inside_tree():
+		xr_origin_ref.add_child(self)
 
 
 func _build_calibration_ui() -> void:

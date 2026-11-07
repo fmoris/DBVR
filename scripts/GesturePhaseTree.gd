@@ -212,10 +212,6 @@ func _unhandled_input(event: InputEvent) -> void:
 func _process(delta: float) -> void:
 	if delta <= 0.0:
 		return
-		
-	# 0. Si los gestos ópticos de mano están desactivados o los mandos tienen el control, ceder
-	if not enable_hand_tracking_gestures or is_controller_override:
-		return
 
 	# 0.1 Si el jugador está volando hacia el oponente, no procesar gestos
 	var player_check = _get_player_instance()
@@ -599,10 +595,11 @@ func _process(delta: float) -> void:
 			var sp_info = _get_hand_projectile_origin(1)
 			_update_aim_reticle(sp_info["pos"], sp_info["dir"], Color(1.0, 0.6, 0.1))
 			
-	# 7. Evaluar reglas gestuales para avanzar en el Trie
-	detected_gesture = _match_gesture(left_state, right_state, torso_transform)
-	if not detected_gesture.is_empty():
-		_feed_trie(detected_gesture)
+	# 7. Evaluar reglas gestuales para avanzar en el Trie (Solo si Hand Tracking óptico está activado)
+	if enable_hand_tracking_gestures and not is_controller_override:
+		detected_gesture = _match_gesture(left_state, right_state, torso_transform)
+		if not detected_gesture.is_empty():
+			_feed_trie(detected_gesture)
 	else:
 		# Timeout de seguridad para estados intermedios cuando no hay gestos activos
 		if current_node != gesture_tree and not is_charging_ki and not is_charging_ki_blast_left and not is_charging_ki_blast_right:
