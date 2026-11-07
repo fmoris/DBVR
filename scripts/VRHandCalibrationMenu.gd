@@ -13,6 +13,12 @@ var input_cooldown: float = 0.0
 var stream_telemetry_active: bool = false
 var stream_timer: float = 0.0
 
+# Variables de cuenta regresiva de 3s para calibración de posturas
+var countdown_active: bool = false
+var countdown_timer: float = 0.0
+var countdown_mode: String = ""
+var last_announced_second: int = 4
+
 var xr_origin_ref: Node3D = null
 var camera_ref: Camera3D = null
 var left_controller: XRController3D = null
@@ -292,13 +298,17 @@ func _process(delta: float) -> void:
 	if input_cooldown > 0.0:
 		input_cooldown -= delta
 
+	if countdown_active:
+		_process_countdown(delta)
+		return
+
 	_process_analog_navigation()
 	_process_interactions()
 	_update_live_telemetry(delta)
 
 
 func _process_analog_navigation() -> void:
-	if input_cooldown > 0.0:
+	if input_cooldown > 0.0 or countdown_active:
 		return
 
 	var joy_y: float = 0.0
@@ -350,6 +360,9 @@ func _update_selection_visuals() -> void:
 
 
 func _process_interactions() -> void:
+	if countdown_active:
+		return
+
 	var trigger_pressed = false
 	if left_controller and left_controller.get_is_active():
 		trigger_pressed = left_controller.get_float("trigger") > 0.6 or left_controller.is_button_pressed("trigger_click") or left_controller.is_button_pressed("ax_button")
@@ -362,8 +375,61 @@ func _process_interactions() -> void:
 
 
 func _execute_calibration_action(mode: String) -> void:
+	if mode == "stream":
+		stream_telemetry_active = not stream_telemetry_active
+		var status = "ACTIVADO (cada 0.5s)" if stream_telemetry_active else "DESACTIVADO"
+		print("[CALIBRACION_MANOS] 📡 Stream continuo de telemetría a consola: %s" % status)
+		if live_feedback_label:
+			live_feedback_label.text = "[CALIBRACION] Stream a consola: %s" % status
+		if left_controller and left_controller.has_method("trigger_haptic_pulse"):
+			left_controller.trigger_haptic_pulse("haptic", 180.0, 0.8, 0.12, 0.0)
+		return
+
+	# Iniciar cuenta regresiva de 3 segundos para dar tiempo de posicionar la mano
+	countdown_active = true
+	countdown_timer = 3.0
+	countdown_mode = mode
+	last_announced_second = 4
+	input_cooldown = 3.5
+
 	if left_controller and left_controller.has_method("trigger_haptic_pulse"):
-		left_controller.trigger_haptic_pulse("haptic", 200.0, 0.9, 0.18, 0.0)
+		left_controller.trigger_haptic_pulse("haptic", 150.0, 0.6, 0.15, 0.0)
+
+	_update_countdown_display(3)
+
+
+func _process_countdown(delta: float) -> void:
+	countdown_timer -= delta
+	var current_sec = int(ceil(countdown_timer))
+	if current_sec != last_announced_second and current_sec > 0:
+		last_announced_second = current_sec
+		_update_countdown_display(current_sec)
+		if left_controller and left_controller.has_method("trigger_haptic_pulse"):
+			var freq = 120.0 + float(3 - current_sec) * 50.0
+			left_controller.trigger_haptic_pulse("haptic", freq, 0.65, 0.10, 0.0)
+
+	if countdown_timer <= 0.0:
+		countdown_active = false
+		_capture_and_record_calibration(countdown_mode)
+
+
+func _update_countdown_display(sec: int) -> void:
+	var mode_name = "GESTO"
+	match countdown_mode:
+		"wrist": mode_name = "ORIENTACIÓN FRONTAL DE MUÑECA"
+		"fist": mode_name = "APERTURA / PUÑO CERRADO"
+		"palm": mode_name = "GIRO DE PALMA (SCOUTER)"
+
+	var msg = "⏳ PREPARANDO POSTURA: [%s]\n⏱️ ¡CAPTURA EN: %d SEGUNDOS! (Mantén la mano firme)" % [mode_name, sec]
+	if live_feedback_label:
+		live_feedback_label.text = msg
+	print("[CALIBRACION_CONTEO] %s => Capturando en %d..." % [mode_name, sec])
+
+
+func _capture_and_record_calibration(mode: String) -> void:
+	# Pulso háptico contundente de confirmación
+	if left_controller and left_controller.has_method("trigger_haptic_pulse"):
+		left_controller.trigger_haptic_pulse("haptic", 240.0, 1.0, 0.35, 0.0)
 
 	match mode:
 		"wrist":
@@ -372,12 +438,6 @@ func _execute_calibration_action(mode: String) -> void:
 			_capture_fist_data()
 		"palm":
 			_capture_palm_rotation_data()
-		"stream":
-			stream_telemetry_active = not stream_telemetry_active
-			var status = "ACTIVADO (cada 0.5s)" if stream_telemetry_active else "DESACTIVADO"
-			print("[CALIBRACION_MANOS] 📡 Stream continuo de telemetría a consola: %s" % status)
-			if live_feedback_label:
-				live_feedback_label.text = "[CALIBRACION] Stream a consola: %s" % status
 
 
 func _capture_wrist_data() -> void:
@@ -392,7 +452,10 @@ func _capture_wrist_data() -> void:
 	var log_msg = "[CALIBRACION_MANOS] 📏 MUÑECA IZQ: Pos=(%.3f, %.3f, %.3f) | Euler=(Pitch: %.1f°, Yaw: %.1f°, Roll: %.1f°)" % [
 		pos.x, pos.y, pos.z, pitch_deg, yaw_deg, roll_deg
 	]
+	print("==========================================================")
+	print("🎯 [CALIBRACIÓN BIOMÉTRICA: ORIENTACIÓN FRONTAL DE MUÑECA]")
 	print(log_msg)
+	print("==========================================================")
 
 	if live_feedback_label:
 		live_feedback_label.text = "✅ [MUÑECA CAPTURADA]\n" + log_msg
@@ -412,7 +475,10 @@ func _capture_fist_data() -> void:
 	var log_msg = "[CALIBRACION_MANOS] ✊ APERTURA/DEDOS: Trigger=%.2f | Grip=%.2f | BotonAX=%s | Stick=(%.2f, %.2f) => Estado: %s" % [
 		trig, grip, str(is_ax), stick.x, stick.y, fist_str
 	]
+	print("==========================================================")
+	print("🎯 [CALIBRACIÓN BIOMÉTRICA: APERTURA Y PUÑO CERRADO]")
 	print(log_msg)
+	print("==========================================================")
 
 	if live_feedback_label:
 		live_feedback_label.text = "✅ [DEDOS CAPTURADOS]\n" + log_msg
@@ -431,7 +497,10 @@ func _capture_palm_rotation_data() -> void:
 	var log_msg = "[CALIBRACION_MANOS] 🔄 GIRO PALMA: UpDot=%.2f | ForwardDot=%.2f => Orientación: %s" % [
 		up_dot, forward_dot, posture
 	]
+	print("==========================================================")
+	print("🎯 [CALIBRACIÓN BIOMÉTRICA: GIRO DE PALMA Y SCOUTER]")
 	print(log_msg)
+	print("==========================================================")
 
 	if live_feedback_label:
 		live_feedback_label.text = "✅ [GIRO PALMA CAPTURADO]\n" + log_msg

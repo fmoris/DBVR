@@ -54,6 +54,7 @@ var hud_toggle_cooldown: float = 0.0
 var transform_cooldown: float = 0.0
 var was_ax_pressed: bool = false
 var was_by_pressed: bool = false
+var startup_cooldown: float = 1.5
 
 # Temporizador para comprobación periódica de estado en HUD
 var status_pulse_timer: float = 0.0
@@ -156,6 +157,14 @@ func _process(delta: float) -> void:
 	prev_left_pos = left_controller.global_position
 	prev_right_pos = right_controller.global_position
 
+	# Calentamiento inicial de 1.5s: asienta tracking de OpenXR y descarta picos de aceleración
+	if startup_cooldown > 0.0:
+		startup_cooldown -= delta
+		left_velocity = Vector3.ZERO
+		right_velocity = Vector3.ZERO
+		_process_hud_toggle(delta)
+		return
+
 	if melee_cooldown > 0.0:
 		melee_cooldown -= delta
 	if super_cooldown > 0.0:
@@ -167,7 +176,30 @@ func _process(delta: float) -> void:
 	if transform_cooldown > 0.0:
 		transform_cooldown -= delta
 
-	# 3. Procesar las acciones híbridas (Melee procesado antes que Ki Blasts para exclusividad total)
+	# 3. Comprobación de estado Melee / Bullet-Time (Minijuego de cajas)
+	var player = gesture_tree._get_player_instance() if gesture_tree else null
+	var in_melee_minigame = player and (player.get("is_in_bullet_time") or player.get("is_flying_to_melee"))
+	if in_melee_minigame:
+		# Durante el combate melee o minijuego de cajas, SOLO se permite golpear las cajas físicamente.
+		# Se bloquea totalmente el lanzamiento de poderes especiales, Ki Blasts, recarga de Ki, guardia y transformaciones.
+		_reset_super_state()
+		if left_is_charging or right_is_charging:
+			if gesture_tree:
+				gesture_tree._cleanup_ki_blast_charge_sphere(0)
+				gesture_tree._cleanup_ki_blast_charge_sphere(1)
+			left_charge_time = 0.0
+			right_charge_time = 0.0
+			left_is_charging = false
+			right_is_charging = false
+		if is_charging_ki:
+			is_charging_ki = false
+			if gesture_tree:
+				gesture_tree._cancel_action("En combate cuerpo a cuerpo")
+				gesture_tree._reset_to_idle()
+		_process_hud_toggle(delta)
+		return
+
+	# 4. Procesar las acciones híbridas en combate libre
 	_process_ki_recharge(delta)
 	_process_melee_punches()
 	_process_ki_blasts(delta)
@@ -793,20 +825,21 @@ func _process_transformations() -> void:
 
 # --- 5. GOLPES MELEE CINEMÁTICOS (LANZAMIENTO HACIA EL RIVAL) ---
 func _process_melee_punches() -> void:
-	if melee_cooldown > 0.0 or is_charging_ki:
+	if melee_cooldown > 0.0 or is_charging_ki or startup_cooldown > 0.0:
 		return
 
-	var l_grip = left_controller.get_float("grip") > 0.35 or left_controller.is_button_pressed("grip_click")
-	var l_trig = left_controller.get_float("trigger") > 0.35 or left_controller.is_button_pressed("trigger_click")
-	var l_punch_held = l_grip or l_trig
+	var l_grip = left_controller.get_float("grip") > 0.45 or left_controller.is_button_pressed("grip_click")
+	var l_trig = left_controller.get_float("trigger") > 0.45 or left_controller.is_button_pressed("trigger_click")
+	# Puño cerrado para Melee: requiere sujetar el Grip activamente
+	var l_punch_held = l_grip or (l_grip and l_trig)
 
-	var r_grip = right_controller.get_float("grip") > 0.35 or right_controller.is_button_pressed("grip_click")
-	var r_trig = right_controller.get_float("trigger") > 0.35 or right_controller.is_button_pressed("trigger_click")
-	var r_punch_held = r_grip or r_trig
+	var r_grip = right_controller.get_float("grip") > 0.45 or right_controller.is_button_pressed("grip_click")
+	var r_trig = right_controller.get_float("trigger") > 0.45 or right_controller.is_button_pressed("trigger_click")
+	var r_punch_held = r_grip or (r_grip and r_trig)
 
 	# Si se estaba cargando Big Bang y el usuario lanza un puño frontal rápido, priorizar Melee
 	if current_super_state == SuperPowerState.CHARGING and super_power_type == "big_bang":
-		if left_velocity.length() > 1.2 or right_velocity.length() > 1.2:
+		if left_velocity.length() > 1.4 or right_velocity.length() > 1.4:
 			_reset_super_state()
 	elif current_super_state != SuperPowerState.IDLE:
 		return
@@ -816,11 +849,14 @@ func _process_melee_punches() -> void:
 	cam_fwd.y = 0.0
 	cam_fwd = cam_fwd.normalized() if cam_fwd.length_squared() > 0.01 else Vector3.FORWARD
 
-	# Puño izquierdo hacia adelante (velocidad frontal > 1.1 m/s)
-	if l_punch_held and (left_velocity.dot(cam_fwd) > 1.1 or left_velocity.length() > 1.4):
+	var l_fwd_proj = (left_controller.global_position - cam_pos).dot(cam_fwd)
+	var r_fwd_proj = (right_controller.global_position - cam_pos).dot(cam_fwd)
+
+	# Puño izquierdo lanzado hacia adelante (movimiento frontal > 1.3 m/s con brazo delante del pecho)
+	if l_punch_held and left_velocity.dot(cam_fwd) > 1.3 and l_fwd_proj > 0.12:
 		_execute_melee_punch(left_controller)
-	# Puño derecho hacia adelante (velocidad frontal > 1.1 m/s)
-	elif r_punch_held and (right_velocity.dot(cam_fwd) > 1.1 or right_velocity.length() > 1.4):
+	# Puño derecho lanzado hacia adelante (movimiento frontal > 1.3 m/s con brazo delante del pecho)
+	elif r_punch_held and right_velocity.dot(cam_fwd) > 1.3 and r_fwd_proj > 0.12:
 		_execute_melee_punch(right_controller)
 
 

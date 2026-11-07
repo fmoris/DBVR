@@ -110,25 +110,41 @@ func _process(delta: float) -> void:
 		finish()
 
 
+## Localiza de forma robusta los mandos XRController3D en la escena
+func _get_controller(hand_name: String) -> XRController3D:
+	if attacker and is_instance_valid(attacker):
+		var p = attacker.get_parent()
+		if p:
+			var c = p.get_node_or_null(hand_name) as XRController3D
+			if c:
+				return c
+	var scene = get_tree().current_scene if (is_inside_tree() and get_tree()) else null
+	if scene:
+		var xr = scene.find_child("Player_XROrigin3D", true, false)
+		if not xr:
+			xr = scene.find_child("XROrigin3D", true, false)
+		if xr:
+			var c = xr.get_node_or_null(hand_name) as XRController3D
+			if c:
+				return c
+	return null
+
+
 ## Muestreo frame a frame de la velocidad física de ambos mandos
 func _update_controller_velocities(delta: float) -> void:
-	if delta <= 0.0001 or not attacker or not is_instance_valid(attacker):
+	if delta <= 0.0001:
 		return
 
-	var origin = attacker.get_parent()
-	if not origin:
-		return
+	var left_ctrl = _get_controller("LeftHand")
+	var right_ctrl = _get_controller("RightHand")
 
-	var left_ctrl: XRController3D = origin.get_node_or_null("LeftHand")
-	var right_ctrl: XRController3D = origin.get_node_or_null("RightHand")
-
-	if left_ctrl and left_ctrl.get_is_active():
+	if left_ctrl:
 		var cur_pos = left_ctrl.global_position
 		if prev_left_pos != Vector3.ZERO:
 			left_velocity = (cur_pos - prev_left_pos) / delta
 		prev_left_pos = cur_pos
 
-	if right_ctrl and right_ctrl.get_is_active():
+	if right_ctrl:
 		var cur_pos = right_ctrl.global_position
 		if prev_right_pos != Vector3.ZERO:
 			right_velocity = (cur_pos - prev_right_pos) / delta
@@ -137,44 +153,38 @@ func _update_controller_velocities(delta: float) -> void:
 
 ## Comprueba si el jugador junta ambos puños y descarga el Martillazo como Finisher
 func _check_hammer_finisher() -> bool:
-	if not attacker or not is_instance_valid(attacker) or not defender or not is_instance_valid(defender):
+	if not is_active:
 		return false
 
-	var origin = attacker.get_parent()
-	if not origin:
+	var left_ctrl = _get_controller("LeftHand")
+	var right_ctrl = _get_controller("RightHand")
+	if not left_ctrl or not right_ctrl:
 		return false
 
-	var left_ctrl: XRController3D = origin.get_node_or_null("LeftHand")
-	var right_ctrl: XRController3D = origin.get_node_or_null("RightHand")
+	var l_pos = left_ctrl.global_position
+	var r_pos = right_ctrl.global_position
 
-	if not left_ctrl or not right_ctrl or not left_ctrl.get_is_active() or not right_ctrl.get_is_active():
+	# 1. Ambas manos juntas en mazo (distancia < 42 cm)
+	var hand_dist = l_pos.distance_to(r_pos)
+	if hand_dist > 0.42:
 		return false
 
-	# 1. Ambos mandos deben tener puño cerrado (Grip o Trigger presionados en ambas manos)
-	var l_btn = left_ctrl.get_float("grip") > 0.40 or left_ctrl.get_float("trigger") > 0.40 or left_ctrl.is_button_pressed("grip_click") or left_ctrl.is_button_pressed("trigger_click")
-	var r_btn = right_ctrl.get_float("grip") > 0.40 or right_ctrl.get_float("trigger") > 0.40 or right_ctrl.is_button_pressed("grip_click") or right_ctrl.is_button_pressed("trigger_click")
-
-	if not (l_btn and r_btn):
-		return false
-
-	# 2. Ambas manos juntas en mazo (distancia < 38 cm)
-	var hand_dist = left_ctrl.global_position.distance_to(right_ctrl.global_position)
-	if hand_dist > 0.38:
-		return false
-
-	# 3. Cinemática del swing coordinado
+	# 2. Cinemática del swing coordinado
 	var avg_v = (left_velocity + right_velocity) * 0.5
 	var peak_speed = maxf(left_velocity.length(), right_velocity.length())
 
-	var to_def = (defender.global_position - attacker.global_position).normalized()
-	to_def.y = 0.0
-	to_def = to_def.normalized() if to_def.length_squared() > 0.01 else Vector3.FORWARD
+	var to_def = Vector3.FORWARD
+	if defender and is_instance_valid(defender) and attacker and is_instance_valid(attacker):
+		var diff = (defender.global_position - attacker.global_position)
+		diff.y = 0.0
+		if diff.length_squared() > 0.01:
+			to_def = diff.normalized()
 
 	var fwd_speed = avg_v.dot(to_def)
-	var vert_speed = abs(avg_v.y)
+	var downward_speed = -avg_v.y
 
-	# Umbral cinemático: swing descendente hacia abajo o hacia el rival (> 1.2 m/s)
-	if peak_speed >= 1.2 and (fwd_speed > 0.6 or vert_speed > 0.7 or avg_v.y < -0.6):
+	# Umbral cinemático: swing descendente hacia el suelo o hacia el oponente
+	if (downward_speed > 0.65 and peak_speed > 0.95) or (fwd_speed > 0.75 and peak_speed > 0.95) or peak_speed >= 1.25:
 		print("[BulletTimeDome] ⚡ ¡FINISHER MARTILLAZO DETECTADO! Velocidad física de impacto: %.2f m/s (Corte inmediato de tiempo)." % peak_speed)
 		is_active = false
 		emit_signal("finisher_triggered", "hammer_strike", peak_speed, hits)
@@ -335,13 +345,13 @@ func _check_controller_punches() -> void:
 	if not origin:
 		return
 
-	var left_ctrl: XRController3D = origin.get_node_or_null("LeftHand")
-	var right_ctrl: XRController3D = origin.get_node_or_null("RightHand")
+	var left_ctrl = _get_controller("LeftHand")
+	var right_ctrl = _get_controller("RightHand")
 
 	var hand_sources: Array = []
-	if left_ctrl and left_ctrl.get_is_active():
+	if left_ctrl:
 		hand_sources.append({ "pos": left_ctrl.global_position, "name": "LeftHand", "ctrl": left_ctrl })
-	if right_ctrl and right_ctrl.get_is_active():
+	if right_ctrl:
 		hand_sources.append({ "pos": right_ctrl.global_position, "name": "RightHand", "ctrl": right_ctrl })
 
 	# Soporte biométrico OpenXR Hand Tracking (yemas y palmas de ambas manos)
@@ -458,8 +468,8 @@ func _spawn_hit_spark(pos: Vector3) -> void:
 	spark.global_position = pos
 
 	var tw = spark.create_tween().set_parallel(true)
-	tw.tween_property(spark, "scale", Vector3.ONE * 2.8, 0.14).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tw.tween_property(mat, "albedo_color:a", 0.0, 0.14)
+	tw.tween_property(spark, "scale", Vector3.ONE * 0.35, 0.10).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(mat, "albedo_color:a", 0.0, 0.10)
 	tw.chain().tween_callback(spark.queue_free)
 
 

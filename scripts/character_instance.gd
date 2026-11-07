@@ -1586,24 +1586,20 @@ func _execute_melee_flurry_barrage(opponent: Node3D, recorded_hits: Array) -> vo
 	# Secuencia de impactos de alta velocidad anime (tatatatata)
 	for i in range(hit_count):
 		var hit_info = recorded_hits[i]
-		var hit_pos: Vector3 = hit_info.get("pos", opponent.global_position + Vector3(0.0, 1.1, 0.0))
 
 		# Flinch reactivo en el modelo del oponente
 		if opponent.get("procedural_animator"):
-			opponent.procedural_animator.trigger_hit_flinch(0.45, -fwd)
-
-		# Destello de impacto visual
-		_spawn_flurry_spark(hit_pos)
+			opponent.procedural_animator.trigger_hit_flinch(0.35, -fwd)
 
 		# Pulso háptico en mandos durante la ráfaga
 		if is_player and my_origin:
 			var h_name: String = hit_info.get("hand", "RightHand")
 			var ctrl = my_origin.get_node_or_null(h_name)
 			if ctrl and ctrl.has_method("trigger_haptic_pulse"):
-				ctrl.trigger_haptic_pulse("haptic", 160.0, 0.75, 0.06, 0.0)
+				ctrl.trigger_haptic_pulse("haptic", 160.0, 0.75, 0.05, 0.0)
 
-		# Intervalo rítmico de 0.06s entre golpes
-		await get_tree().create_timer(0.06).timeout
+		# Intervalo rítmico de 0.04s entre golpes
+		await get_tree().create_timer(0.04).timeout
 		if not is_instance_valid(opponent):
 			return
 
@@ -1767,8 +1763,8 @@ func _spawn_ground_crash_vfx(pos: Vector3, is_stone_ring: bool) -> void:
 func _spawn_flurry_spark(pos: Vector3) -> void:
 	var spark = MeshInstance3D.new()
 	var sphere = SphereMesh.new()
-	sphere.radius = 0.10
-	sphere.height = 0.20
+	sphere.radius = 0.03
+	sphere.height = 0.06
 	spark.mesh = sphere
 
 	var mat = StandardMaterial3D.new()
@@ -1786,6 +1782,6 @@ func _spawn_flurry_spark(pos: Vector3) -> void:
 	spark.global_position = pos
 
 	var tw = spark.create_tween().set_parallel(true)
-	tw.tween_property(spark, "scale", Vector3.ONE * 3.0, 0.12).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tw.tween_property(mat, "albedo_color:a", 0.0, 0.12)
+	tw.tween_property(spark, "scale", Vector3.ONE * 0.35, 0.08).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(mat, "albedo_color:a", 0.0, 0.08)
 	tw.chain().tween_callback(spark.queue_free)
