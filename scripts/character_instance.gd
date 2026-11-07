@@ -1259,6 +1259,32 @@ func _clamp_to_arena(node: Node3D) -> void:
 	var hit_mountain = false
 	var horiz_speed = Vector2(velocity.x, velocity.z).length()
 
+	# 1. Colisión física tridimensional continua contra mesetas, riscos y cañones interiores (Puntos 8 y 9)
+	if is_inside_tree() and get_world_3d() and velocity.length_squared() > 0.01:
+		var space = get_world_3d().direct_space_state
+		if space:
+			var char_center = pos + Vector3(0.0, 0.9, 0.0)
+			var query_dir = velocity.normalized()
+			var query_dist = maxf(horiz_speed * 0.05, 0.65)
+			var ray_params = PhysicsRayQueryParameters3D.create(char_center, char_center + query_dir * query_dist)
+			ray_params.collision_mask = 1 # Capa 1: Terreno, montañas y mesetas
+			var col = space.intersect_ray(ray_params)
+			if col and col.collider:
+				var collider = col.collider
+				if collider.is_in_group("mountains") or collider.has_meta("is_mountain") or "Mountain" in collider.name or "Canyon" in collider.name:
+					hit_mountain = true
+					pos = col.position + col.normal * 0.50
+					_on_boundary_crash_impact(horiz_speed)
+					velocity.x = 0.0
+					velocity.z = 0.0
+					if horiz_speed > 3.2:
+						wall_stick_timer = 1.25
+						is_knocked_back = false
+						_spawn_ground_crash_vfx(col.position, false)
+						_log_combat_event("💥 ¡Estrellamiento contra el risco! Incrustado en la roca (Wall-Stick).", "warning")
+						print("[Physics] %s se incrustó en el risco de la montaña por 1.25s (Wall-Stick anime)." % (character_data.character_name if character_data else name))
+
+	# 2. Bounding box perimetral exterior
 	if pos.x > limit:
 		pos.x = limit
 		hit_mountain = true
@@ -1273,17 +1299,17 @@ func _clamp_to_arena(node: Node3D) -> void:
 		pos.z = -limit
 		hit_mountain = true
 
-	if hit_mountain:
+	if hit_mountain and wall_stick_timer <= 0.0:
 		_on_boundary_crash_impact(horiz_speed)
 		# Cero rebote de goma: detener velocidad de inmediato
 		velocity.x = 0.0
 		velocity.z = 0.0
-		# Si el impacto fue contundente (>4.5 m/s), el personaje queda incrustado en la roca (wall-stick)
-		if horiz_speed > 4.5:
+		# Si el impacto fue contundente (>3.2 m/s), el personaje queda incrustado en la roca (wall-stick)
+		if horiz_speed > 3.2:
 			wall_stick_timer = 1.25
 			is_knocked_back = false
 			_spawn_ground_crash_vfx(pos + Vector3(0.0, 1.2, 0.0), false)
-			print("[Physics] %s se incrustó en el risco de la montaña por 1.25s (Wall-Stick anime)." % (character_data.character_name if character_data else name))
+			print("[Physics] %s se incrustó en el límite exterior por 1.25s (Wall-Stick anime)." % (character_data.character_name if character_data else name))
 
 	var ground_h = get_ground_elevation(pos)
 	if pos.y < ground_h:

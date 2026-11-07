@@ -457,9 +457,9 @@ func _process(delta: float) -> void:
 			var in_view = cam_forward.dot(dir_from_cam)
 
 			# Activación natural e intuitiva:
-			# El jugador levanta su mano/muñeca en su campo de visión
-			# a distancia ergonómica de lectura (10cm a 95cm)
-			if in_view > 0.20 and dist >= 0.10 and dist <= 0.95 and display_anchor.y > (cam_pos.y - 0.75):
+			# El jugador mira su mano/muñeca izquierda en su campo de visión
+			# a distancia ergonómica de lectura (8cm a 1.15m)
+			if in_view > 0.15 and dist >= 0.08 and dist <= 1.15 and display_anchor.y > (cam_pos.y - 1.15):
 				should_display = true
 
 			if should_display or wrist_hud_scale > 0.01:
