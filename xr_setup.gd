@@ -38,14 +38,16 @@ func _ready() -> void:
 
 ## Alinea automáticamente la vista del jugador exactamente de frente hacia el oponente al iniciar
 func _align_player_to_opponent() -> void:
-	# Esperar 2 frames para que el tracking del visor y los nodos de escena estén completamente listos
+	# Esperar a que el tracking de OpenXR y la escena estén completamente sincronizados
 	if not is_inside_tree():
 		return
 	await get_tree().process_frame
 	await get_tree().process_frame
 
-	# Centrar orientación física del HMD
+	# Centrar orientación física del HMD en el punto de mira actual
 	XRServer.center_on_hmd(XRServer.RESET_BUT_KEEP_TILT, true)
+	await get_tree().process_frame
+	await get_tree().process_frame
 
 	var opp = get_parent().find_child("EnemyCharacterInstance", true, false) if get_parent() else null
 	if opp and camera:

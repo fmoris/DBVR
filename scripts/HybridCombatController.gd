@@ -55,6 +55,7 @@ var transform_cooldown: float = 0.0
 var was_ax_pressed: bool = false
 var was_by_pressed: bool = false
 var startup_cooldown: float = 1.5
+var recharge_exit_cooldown: float = 0.0 # Compuerta de gracia para evitar Ki Blasts indeseados al soltar gatillos de recarga
 
 # Temporizador para comprobación periódica de estado en HUD
 var status_pulse_timer: float = 0.0
@@ -175,6 +176,8 @@ func _process(delta: float) -> void:
 		hud_toggle_cooldown -= delta
 	if transform_cooldown > 0.0:
 		transform_cooldown -= delta
+	if recharge_exit_cooldown > 0.0:
+		recharge_exit_cooldown -= delta
 
 	# 3. Comprobación de estado Melee / Bullet-Time (Minijuego de cajas)
 	var player = gesture_tree._get_player_instance() if gesture_tree else null
@@ -266,6 +269,10 @@ func _process_ki_recharge(delta: float) -> void:
 			right_charge_time = 0.0
 			left_is_charging = false
 			right_is_charging = false
+			recharge_exit_cooldown = 0.25 # Ventana debounce de 250ms para evitar Ki Blast accidental al soltar gatillos asincrónicamente
+			if gesture_tree:
+				gesture_tree._cleanup_ki_blast_charge_sphere(0)
+				gesture_tree._cleanup_ki_blast_charge_sphere(1)
 
 
 # --- MÉTODOS AUXILIARES BIOMÉTRICOS ---
@@ -290,8 +297,8 @@ func _is_arm_extended(controller: XRController3D) -> bool:
 
 # --- 2. KI BLASTS (Izquierda y Derecha) ---
 func _process_ki_blasts(delta: float) -> void:
-	# Bloqueo total si se está recargando Ki, en preparación o cargando super poder
-	if is_charging_ki or ki_prep_phase or current_super_state != SuperPowerState.IDLE:
+	# Bloqueo total si se está recargando Ki, en preparación, en debounce de salida (250ms) o cargando super poder
+	if is_charging_ki or ki_prep_phase or recharge_exit_cooldown > 0.0 or current_super_state != SuperPowerState.IDLE:
 		if left_is_charging or right_is_charging:
 			if gesture_tree:
 				gesture_tree._cleanup_ki_blast_charge_sphere(0)
@@ -340,8 +347,8 @@ func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta:
 	var grip_held = grip_val > 0.40 or controller.is_button_pressed("grip_click")
 	var is_left = (hand_side == 0)
 
-	# Si se sostiene el Grab (Grip), es para Melee (Grab+Gatillo), Guardia o Super Poder: NO Ki Blast
-	if grip_held or melee_cooldown > 0.0 or current_super_state != SuperPowerState.IDLE:
+	# Si se sostiene el Grab (Grip > 0.20), es para Melee (Grab+Gatillo), Guardia o Super Poder: NO Ki Blast
+	if grip_held or grip_val > 0.20 or melee_cooldown > 0.0 or recharge_exit_cooldown > 0.0 or current_super_state != SuperPowerState.IDLE:
 		if (is_left and left_charge_time > 0.0) or (not is_left and right_charge_time > 0.0):
 			if gesture_tree:
 				gesture_tree._cleanup_ki_blast_charge_sphere(hand_side)

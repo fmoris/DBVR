@@ -164,11 +164,11 @@ func setup_character() -> void:
 						skel_parent.add_child(combat_anim_player)
 						combat_anim_player.root_node = skel_parent.get_path()
 						combat_anim_player.add_animation_library("", anim_lib_res)
-						# Punto 9: Asignar 'bouncing_fight_idle' directamente para probar la animación en Goku
-						var target_anim = "bouncing_fight_idle" if combat_anim_player.has_animation("bouncing_fight_idle") else "fighting_idle"
+						# Postura de combate firme y marcial (cero saltos de boxeo)
+						var target_anim = "fighting_idle" if combat_anim_player.has_animation("fighting_idle") else "bouncing_fight_idle"
 						if combat_anim_player.has_animation(target_anim):
 							combat_anim_player.play(target_anim)
-							print("[CharacterInstance] %s: Animación '%s' activada en bucle." % [(character_data.character_name if character_data else name), target_anim])
+							print("[CharacterInstance] %s: Postura firme '%s' activada en bucle." % [(character_data.character_name if character_data else name), target_anim])
 
 					# 2. Configurar animador procedural para dar vida orgánica al oponente en VR (Look-At, Ki jitter, Flinch)
 					procedural_animator = ProceduralCombatAnimatorClass.new()
@@ -358,8 +358,8 @@ func _process(delta: float) -> void:
 			var diff = opp_pos - global_position
 			diff.y = 0.0
 			if diff.length_squared() > 0.01:
-				# Alinear frontalmente al oponente cara a cara hacia el jugador (+PI de rotación para compensar orientación canónica de la animación)
-				rotation.y = atan2(-diff.x, -diff.z)
+				# Alinear frontalmente al oponente cara a cara hacia el jugador (el modelo tiene su frente canónico en +Z)
+				rotation.y = atan2(diff.x, diff.z)
 
 			if procedural_animator:
 				# Altura de los ojos del jugador estimada a 1.45m o posición del visor
@@ -1238,9 +1238,10 @@ func apply_knockback(dir: Vector3, force: float) -> void:
 	var horiz_dir = Vector3(dir.x, 0.0, dir.z).normalized()
 	if horiz_dir.length_squared() < 0.01:
 		horiz_dir = -global_transform.basis.z
-	# Elevación mínima y controlada para simular masa corporal real (cero saltos excesivos)
-	var controlled_force = clampf(force, 1.5, 7.8)
-	var impulse = (horiz_dir + Vector3.UP * 0.04).normalized() * controlled_force
+	# Masa corporal realista sin saltos artificiales en impactos horizontales
+	var vert_comp = clampf(dir.y, -1.0, 1.0) if abs(dir.y) > 0.35 else 0.0
+	var controlled_force = clampf(force, 1.5, 7.5)
+	var impulse = (horiz_dir + Vector3.UP * vert_comp).normalized() * controlled_force
 	velocity = impulse
 	is_knocked_back = true
 	print("[Physics] %s empujado con fuerza controlada %.1f m/s en dirección %s." % [character_data.character_name if character_data else name, controlled_force, horiz_dir])
@@ -1385,7 +1386,7 @@ func stop_ragdoll() -> void:
 	if procedural_animator:
 		procedural_animator.enabled = true
 	if combat_anim_player:
-		var target_anim = "bouncing_fight_idle" if combat_anim_player.has_animation("bouncing_fight_idle") else "fighting_idle"
+		var target_anim = "fighting_idle" if combat_anim_player.has_animation("fighting_idle") else "bouncing_fight_idle"
 		if combat_anim_player.has_animation(target_anim):
 			combat_anim_player.play(target_anim)
 	print("[Ragdoll] Simulación física detenida. Reanudando postura de combate.")
@@ -1611,13 +1612,16 @@ func _execute_melee_flurry_barrage(opponent: Node3D, recorded_hits: Array) -> vo
 		opponent.take_hit(total_damage, Vector3.ZERO)
 		increase_np(total_damage * 0.40)
 
-	# Separación controlada hacia la distancia inicial
+	# Separación controlada hacia la distancia inicial exacta (~2.8m) sin explosiones ni rebote
 	var opp_diff = opponent.global_position - my_pos
 	opp_diff.y = 0.0
 	var retreat_dir = opp_diff.normalized() if opp_diff.length_squared() > 0.01 else fwd
-	var retreat_speed = clampf((2.8 - opp_diff.length()) * 2.8, 2.5, 4.8)
-	opponent.set("velocity", retreat_dir * retreat_speed)
+	var target_retreat_pos = my_pos + retreat_dir * 2.8
+	target_retreat_pos.y = opponent.global_position.y
+	opponent.set("velocity", Vector3.ZERO)
 	opponent.set("is_knocked_back", false)
+	var tw = opponent.create_tween()
+	tw.tween_property(opponent, "global_position", target_retreat_pos, 0.45).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 
 	# Pulso háptico máximo final
 	if is_player and my_origin:
@@ -1627,7 +1631,7 @@ func _execute_melee_flurry_barrage(opponent: Node3D, recorded_hits: Array) -> vo
 				ctrl.trigger_haptic_pulse("haptic", 220.0, 1.0, 0.25, 0.0)
 
 	_log_combat_event("💥 ¡RÁFAGA DE COMBATE! %d golpes conectados. Daño total: %.0f NP" % [hit_count, total_damage], "success")
-	print("[BulletTime] Ráfaga concluida: %d golpes, %.0f NP de daño, velocidad de separación %.1f m/s." % [hit_count, total_damage, retreat_speed])
+	print("[BulletTime] Ráfaga concluida: %d golpes, %.0f NP de daño. Defensor separado suavemente a distancia canónica (2.8m)." % [hit_count, total_damage])
 
 
 ## Ejecuta el demoledor Martillazo de Dragon Ball Z como Finisher de corte en Bullet-Time
