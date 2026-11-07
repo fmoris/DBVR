@@ -336,10 +336,12 @@ func _process_ki_blasts(delta: float) -> void:
 func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta: float) -> void:
 	var trig_val = controller.get_float("trigger")
 	var trig_pressed = trig_val > 0.40 or controller.is_button_pressed("trigger_click")
+	var grip_val = controller.get_float("grip")
+	var grip_held = grip_val > 0.40 or controller.is_button_pressed("grip_click")
 	var is_left = (hand_side == 0)
 
-	# Si hay un super poder activo o en cooldown de melee, no permitir Ki Blast
-	if melee_cooldown > 0.0 or current_super_state != SuperPowerState.IDLE:
+	# Si se sostiene el Grab (Grip), es para Melee (Grab+Gatillo), Guardia o Super Poder: NO Ki Blast
+	if grip_held or melee_cooldown > 0.0 or current_super_state != SuperPowerState.IDLE:
 		if (is_left and left_charge_time > 0.0) or (not is_left and right_charge_time > 0.0):
 			if gesture_tree:
 				gesture_tree._cleanup_ki_blast_charge_sphere(hand_side)
@@ -828,18 +830,19 @@ func _process_melee_punches() -> void:
 	if melee_cooldown > 0.0 or is_charging_ki or startup_cooldown > 0.0:
 		return
 
-	var l_grip = left_controller.get_float("grip") > 0.45 or left_controller.is_button_pressed("grip_click")
-	var l_trig = left_controller.get_float("trigger") > 0.45 or left_controller.is_button_pressed("trigger_click")
-	# Puño cerrado para Melee: requiere sujetar el Grip activamente
-	var l_punch_held = l_grip or (l_grip and l_trig)
+	var l_grip = left_controller.get_float("grip") > 0.40 or left_controller.is_button_pressed("grip_click")
+	var l_trig = left_controller.get_float("trigger") > 0.40 or left_controller.is_button_pressed("trigger_click")
+	# REQUISITO CANÓNICO: Puño cerrado simulado con Grab + Gatillo (ambos botones presionados)
+	var l_fist = l_grip and l_trig
 
-	var r_grip = right_controller.get_float("grip") > 0.45 or right_controller.is_button_pressed("grip_click")
-	var r_trig = right_controller.get_float("trigger") > 0.45 or right_controller.is_button_pressed("trigger_click")
-	var r_punch_held = r_grip or (r_grip and r_trig)
+	var r_grip = right_controller.get_float("grip") > 0.40 or right_controller.is_button_pressed("grip_click")
+	var r_trig = right_controller.get_float("trigger") > 0.40 or right_controller.is_button_pressed("trigger_click")
+	# REQUISITO CANÓNICO: Puño cerrado simulado con Grab + Gatillo (ambos botones presionados)
+	var r_fist = r_grip and r_trig
 
-	# Si se estaba cargando Big Bang y el usuario lanza un puño frontal rápido, priorizar Melee
+	# Si se estaba cargando Big Bang y el usuario cierra el puño completo (grab + gatillo), priorizar Melee
 	if current_super_state == SuperPowerState.CHARGING and super_power_type == "big_bang":
-		if left_velocity.length() > 1.4 or right_velocity.length() > 1.4:
+		if l_fist or r_fist:
 			_reset_super_state()
 	elif current_super_state != SuperPowerState.IDLE:
 		return
@@ -852,11 +855,11 @@ func _process_melee_punches() -> void:
 	var l_fwd_proj = (left_controller.global_position - cam_pos).dot(cam_fwd)
 	var r_fwd_proj = (right_controller.global_position - cam_pos).dot(cam_fwd)
 
-	# Puño izquierdo lanzado hacia adelante (movimiento frontal > 1.3 m/s con brazo delante del pecho)
-	if l_punch_held and left_velocity.dot(cam_fwd) > 1.3 and l_fwd_proj > 0.12:
+	# Puño izquierdo lanzado hacia adelante: Grab + Gatillo con velocidad frontal > 1.2 m/s
+	if l_fist and left_velocity.dot(cam_fwd) > 1.2 and l_fwd_proj > 0.10:
 		_execute_melee_punch(left_controller)
-	# Puño derecho lanzado hacia adelante (movimiento frontal > 1.3 m/s con brazo delante del pecho)
-	elif r_punch_held and right_velocity.dot(cam_fwd) > 1.3 and r_fwd_proj > 0.12:
+	# Puño derecho lanzado hacia adelante: Grab + Gatillo con velocidad frontal > 1.2 m/s
+	elif r_fist and right_velocity.dot(cam_fwd) > 1.2 and r_fwd_proj > 0.10:
 		_execute_melee_punch(right_controller)
 
 
