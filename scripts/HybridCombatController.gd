@@ -350,9 +350,10 @@ func _process_ki_blasts(delta: float) -> void:
 		right_is_charging = false
 		return
 
-	var l_trig: bool = left_controller.get_float("trigger") > 0.45 or left_controller.is_button_pressed("trigger_click")
-	var r_trig: bool = right_controller.get_float("trigger") > 0.45 or right_controller.is_button_pressed("trigger_click")
-	# Si ambos gatillos están presionados simultáneamente, es Recarga de Ki, NO Ki Blasts
+	var l_trig: bool = left_controller.get_float("trigger") > 0.35 or left_controller.is_button_pressed("trigger_click")
+	var r_trig: bool = right_controller.get_float("trigger") > 0.35 or right_controller.is_button_pressed("trigger_click")
+
+	# Si ambos gatillos están presionados simultáneamente, se reserva para Recarga de Ki, NO para Ki Blasts
 	if l_trig and r_trig:
 		if left_is_charging or right_is_charging:
 			if gesture_tree:
@@ -365,8 +366,8 @@ func _process_ki_blasts(delta: float) -> void:
 		return
 
 	# Si ambos mandos tienen Grip presionado, es Super Poder o Guardia
-	var l_grip: bool = left_controller.get_float("grip") > 0.45 or left_controller.is_button_pressed("grip_click")
-	var r_grip: bool = right_controller.get_float("grip") > 0.45 or right_controller.is_button_pressed("grip_click")
+	var l_grip: bool = left_controller.get_float("grip") > 0.50 or left_controller.is_button_pressed("grip_click")
+	var r_grip: bool = right_controller.get_float("grip") > 0.50 or right_controller.is_button_pressed("grip_click")
 	if l_grip and r_grip:
 		return
 
@@ -383,28 +384,8 @@ func _process_ki_blasts(delta: float) -> void:
 
 func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta: float) -> void:
 	var trig_val = controller.get_float("trigger")
-	var trig_pressed = trig_val > 0.40 or controller.is_button_pressed("trigger_click")
-	var grip_val = controller.get_float("grip")
-	var grip_held = grip_val > 0.60 or controller.is_button_pressed("grip_click")
+	var trig_pressed = trig_val > 0.35 or controller.is_button_pressed("trigger_click")
 	var is_left = (hand_side == 0)
-
-	# REQUISITO CANÓNICO: Puño cerrado simulado con Grab + Gatillo (ambos presionados) o agarre fuerte intencional (>0.60).
-	# El descanso natural de los dedos en mandos Quest 3 (~0.35-0.42) NUNCA debe bloquear el disparo.
-	var is_fist_or_grab = grip_held or (grip_val > 0.55 and trig_val > 0.40)
-
-	if is_fist_or_grab or melee_cooldown > 0.0 or recharge_exit_cooldown > 0.0 or current_super_state != SuperPowerState.IDLE:
-		if (is_left and left_charge_time > 0.0) or (not is_left and right_charge_time > 0.0):
-			if gesture_tree:
-				gesture_tree._cleanup_ki_blast_charge_sphere(hand_side)
-		if is_left:
-			left_charge_time = 0.0
-			left_is_charging = false
-			left_blast_locked_haptic = false
-		else:
-			right_charge_time = 0.0
-			right_is_charging = false
-			right_blast_locked_haptic = false
-		return
 
 	if trig_pressed:
 		var cam_p = camera.global_position if camera else xr_origin.global_position + Vector3(0, 1.6, 0)
@@ -672,93 +653,59 @@ func _process_super_powers(delta: float) -> void:
 
 			gesture_tree._update_aim_reticle(aim_origin, aim_dir, aim_color)
 
-		# VALIDACIÓN ESTRICTA DE MANTENIMIENTO DE POSTURA EN FASE 1:
-		# Si el usuario hace cualquier otro movimiento que rompa la pose requerida, se cancela y regresa a IDLE.
-		var pose_maintained = true
-		match super_power_type:
-			"final_flash":
-				# Requiere ambos grips y brazos en cruz (hands_dist >= 0.42, rel_y entre -0.38 y +0.38)
-				if not (l_grip and r_grip and hands_dist >= 0.42 and rel_y > -0.38 and rel_y < 0.38 and l_fwd_proj >= -0.15 and r_fwd_proj >= -0.15):
-					pose_maintained = false
-			"galick_ho":
-				# Manos juntas a la altura del hombro/pecho (hands_dist < 0.48, rel_y > -0.35)
-				if not (l_grip and r_grip and hands_dist < 0.48 and rel_y > -0.35 and (l_fwd_proj >= -0.12 or r_fwd_proj >= -0.12)):
-					pose_maintained = false
-			"big_bang":
-				var bb_side = gesture_tree.get("big_bang_hand") if gesture_tree else (0 if l_grip else 1)
-				var bb_ctrl = left_controller if bb_side == 0 else right_controller
-				var active_grip = l_grip if bb_side == 0 else r_grip
-				var active_trig = l_trig if bb_side == 0 else r_trig
-				if not active_grip or active_trig or not _is_arm_extended(bb_ctrl):
-					pose_maintained = false
-			"genkidama":
-				# Brazos arriba
-				if not (l_grip and r_grip and rel_y >= 0.18 and hands_dist >= 0.25):
-					pose_maintained = false
-			"kamehameha":
-				# Manos juntas al costado/cadera
-				if not (l_grip and r_grip and rel_y <= -0.12 and hands_dist < 0.38):
-					pose_maintained = false
+		# --- FASE 1 EN CURSO: MANTENIMIENTO DE CARGA Y EVALUACIÓN DE SALIDA ---
+		# REGLA CANÓNICA DEL JUGADOR:
+		# "cuando se esta en una fase 1 de algun gesto, solo existen 2 posibilidades:
+		#  1. Ir a la fase 2 (disparar al soltar los botones con carga lista)
+		#  2. Cancelar la acción soltando los botones (si se suelta antes de tiempo)
+		# MIENTRAS SE MANTENGAN APRETADOS LOS BOTONES, NINGÚN OTRO GESTO PUEDE ACTIVARSE NI INTERRUMPIR."
 
-		# Si el jugador hizo otro movimiento cualquiera mientras cargaba, cancelar de inmediato a IDLE
-		if not pose_maintained:
-			if gesture_tree:
-				gesture_tree._cancel_action("%s interrumpido (postura rota)" % super_power_type.capitalize())
-				gesture_tree._reset_to_idle()
-			_reset_super_state()
-			return
-
-		# Notificar estado listo en HUD cuando la carga supera el mínimo de la técnica
-		var min_time_required = 1.2
-		match super_power_type:
-			"kamehameha": min_time_required = 2.0
-			"final_flash": min_time_required = 2.5
-			"genkidama": min_time_required = 3.5
-			"galick_ho": min_time_required = 1.5
-			"big_bang": min_time_required = 1.2
-
-		if super_charge_timer >= min_time_required:
-			if not super_locked_haptic:
-				super_locked_haptic = true
-				_pulse_haptic(left_controller, 160.0, 0.90, 0.15)
-				_pulse_haptic(right_controller, 160.0, 0.90, 0.15)
-				if gesture_tree and gesture_tree.has_signal("phase_changed"):
-					gesture_tree.emit_signal("phase_changed", "¡%s CARGADO! (SUELTA LOS GRIPS PARA DISPARAR)" % super_power_type.to_upper())
-			elif int(super_charge_timer * 10) % 5 == 0:
-				if gesture_tree and gesture_tree.has_signal("phase_changed"):
-					gesture_tree.emit_signal("phase_changed", "¡%s CONCENTRADO! (SUELTA LOS GRIPS PARA DISPARAR)" % super_power_type.to_upper())
-
-		# --- FASE 2: DISPARO EXCLUSIVAMENTE AL SOLTAR LOS BOTONES (REGLAS 1 & 4) ---
 		var bb_side = gesture_tree.get("big_bang_hand") if gesture_tree else (0 if l_grip else 1)
 		var active_grip = l_grip if bb_side == 0 else r_grip
 
-		var buttons_released = false
+		var buttons_held: bool = false
 		if super_power_type == "big_bang":
-			buttons_released = not active_grip
+			buttons_held = active_grip
 		else:
-			buttons_released = not l_grip and not r_grip
+			# Para técnicas de dos manos (Final Flash, Galick Ho, Kamehameha, Genkidama):
+			# Mientras mantenga al menos uno o ambos grips apretados, la carga se sostiene inamoviblemente
+			buttons_held = l_grip or r_grip
 
-		# Si los botones siguen apretados, continúa cargando
-		if not buttons_released:
-			return
-
-		# En el momento en que se sueltan los botones, evaluar si cumple la carga mínima
+		# Tiempo mínimo de carga requerida para que la Fase 1 quede LISTA y permita el disparo
 		var min_fire_time = 0.7
 		match super_power_type:
 			"final_flash": min_fire_time = 1.0
 			"galick_ho": min_fire_time = 0.7
-			"big_bang": min_fire_time = 0.5
-			"kamehameha": min_fire_time = 0.7
+			"big_bang": min_fire_time = 0.6
+			"kamehameha": min_fire_time = 0.8
 			"genkidama": min_fire_time = 1.2
 
+		# Pulso háptico e indicación de "FASE 1 LISTA" en el instante exacto en que alcanza la carga mínima
 		if super_charge_timer >= min_fire_time:
+			if not super_locked_haptic:
+				super_locked_haptic = true
+				_pulse_haptic(left_controller, 180.0, 1.0, 0.20)
+				_pulse_haptic(right_controller, 180.0, 1.0, 0.20)
+				if gesture_tree and gesture_tree.has_signal("phase_changed"):
+					gesture_tree.emit_signal("phase_changed", "¡%s LISTO! (SUELTA PARA DISPARAR)" % super_power_type.to_upper())
+				if gesture_tree and gesture_tree.has_signal("gesture_logged"):
+					gesture_tree.emit_signal("gesture_logged", "¡%s listo para lanzar! Suelta los botones o sigue concentrando." % super_power_type.capitalize(), "success")
+			elif int(super_charge_timer * 10) % 5 == 0:
+				if gesture_tree and gesture_tree.has_signal("phase_changed"):
+					gesture_tree.emit_signal("phase_changed", "¡%s MÁXIMA ENERGÍA! (SUELTA PARA DISPARAR)" % super_power_type.to_upper())
+
+		# POSIBILIDAD A: Mientras los botones sigan apretados, permanecer en Fase 1 concentrando energía
+		if buttons_held:
+			return
+
+		# POSIBILIDAD B: Se soltaron los botones -> Evaluar si dispara (Fase 2) o cancela
+		if super_charge_timer >= min_fire_time:
+			# ¡FASE 2: DISPARO DE TÉCNICA!
 			_execute_super_fire(super_power_type)
 		else:
-			# Se soltó antes de tiempo: cancelar inmediatamente y regresar a IDLE limpio
+			# Cancelación por soltar botones antes de tiempo
 			if gesture_tree:
-				gesture_tree._cancel_action("%s cancelado: carga insuficiente (%.1fs / %.1fs)" % [
-					super_power_type.capitalize(), super_charge_timer, min_fire_time
-				])
+				gesture_tree._cancel_action("%s cancelado (botones soltados antes de completar carga)" % super_power_type.capitalize())
 				gesture_tree._reset_to_idle()
 			super_cooldown = 0.20
 			_reset_super_state()

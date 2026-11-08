@@ -1754,6 +1754,13 @@ func _separate_fighters_to_canonical_distance(opponent: Node3D, target_distance:
 	var p_h = Vector3(p_pos.x, 0.0, p_pos.z)
 	var opp_h = Vector3(opponent.global_position.x, 0.0, opponent.global_position.z)
 
+	var current_dist = p_h.distance_to(opp_h)
+	# ¡REQUISITO CANÓNICO! Solo reajustar si la distancia entre los combatientes es menor a la distancia canónica (están pegados / muy juntos).
+	# Si ya cumplen la distancia mínima (por ejemplo porque salieron volando por un golpe cargado o martillo a 8-12m), ¡NO reajustar ni traerlos de vuelta!
+	if current_dist >= (target_distance - 0.3):
+		print("[Combat] Combatientes ya a distancia adecuada (%.1fm >= %.1fm). Sin reajuste necesario." % [current_dist, target_distance])
+		return
+
 	var fwd_dir = (opp_h - p_h).normalized()
 	if fwd_dir.length_squared() < 0.01:
 		fwd_dir = -cam.global_transform.basis.z if cam else -global_transform.basis.z
