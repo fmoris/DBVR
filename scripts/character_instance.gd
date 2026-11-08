@@ -1062,15 +1062,33 @@ func _solve_arm_ik(
 	skeleton.set_bone_pose_rotation(shoulder_idx, q_shoulder)
 	skeleton.set_bone_pose_rotation(forearm_idx, q_forearm_local)
 
-	# 3. Orientación matemática canónica de la muñeca calibrada según telemetría empírica del visor VR
+	# 3. Orientación matemática canónica de la muñeca según la cinemática del modelo y mandos OpenXR
 	var target_basis_skel = skel_inv.basis * target_global_basis
-	# Calibración: Pitch 6.0°, Yaw ±90.0°, Roll ∓5.5° para encaje anatómico exacto del mando
-	var align_basis = Basis.from_euler(Vector3(deg_to_rad(6.0), deg_to_rad(90.0 if is_left else -90.0), deg_to_rad(-5.5 if is_left else 5.5)))
+
+	# Matriz ortonormal canónica que alinea el espacio de reposo de la mano en A-pose con el mando OpenXR:
+	# En el mando: -Z es hacia adelante (dedos), +Y es hacia arriba (pulgar), +X/-X es hacia la palma/dorso.
+	# En el modelo: el brazo y mano caen a -37.23° (A-pose) con dedos en +X/-X, pulgar en +Z, palma en -Y.
+	var align_basis: Basis
+	if is_left:
+		align_basis = Basis(
+			Vector3(-0.605083, 0.0, -0.796162),
+			Vector3(-0.796162, 0.0, 0.605083),
+			Vector3(0.0, 1.0, 0.0)
+		)
+	else:
+		align_basis = Basis(
+			Vector3(-0.605083, 0.0, 0.796162),
+			Vector3(0.796162, 0.0, 0.605083),
+			Vector3(0.0, 1.0, 0.0)
+		)
+
 	var desired_hand_basis = target_basis_skel * align_basis
 
-	var parent_pose_basis = skeleton.get_bone_global_pose(forearm_idx).basis
+	# Usamos la orientación mundial exacta del antebrazo calculada analíticamente en este frame
+	# para evitar la caché desactualizada de 1 frame de get_bone_global_pose() en Godot 4
+	var forearm_world_basis = Basis(q_forearm_world)
 	var rest_hand_basis = skeleton.get_bone_rest(hand_idx).basis
-	var local_hand_basis = rest_hand_basis.inverse() * parent_pose_basis.inverse() * desired_hand_basis
+	var local_hand_basis = rest_hand_basis.inverse() * forearm_world_basis.inverse() * desired_hand_basis
 	skeleton.set_bone_pose_rotation(hand_idx, local_hand_basis.get_rotation_quaternion())
 
 
@@ -1095,8 +1113,8 @@ func _apply_finger_curls_to_skeleton(skel: Skeleton3D, prefix: String, trigger: 
 	var idx_rot_j2 = Quaternion(curl_axis, eff_trig * 0.85)
 	var idx_rot_j3 = Quaternion(curl_axis, eff_trig * 0.65)
 
-	# Pulgar
-	var thumb_axis = Vector3(0.5, -0.4, -0.7).normalized() if is_left else Vector3(-0.5, -0.4, 0.7).normalized()
+	# Pulgar: rota desde +Z envolviendo hacia -Z a través de la palma y sobre los dedos
+	var thumb_axis = Vector3(0.58, 0.78, -0.22).normalized() if is_left else Vector3(0.58, -0.78, 0.22).normalized()
 	var thumb_val = (eff_trig * 0.4 + eff_grip * 0.6)
 	var thumb_rot_1 = Quaternion(thumb_axis, thumb_val * 0.45)
 	var thumb_rot_2 = Quaternion(thumb_axis, thumb_val * 0.60)
