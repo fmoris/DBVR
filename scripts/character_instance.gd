@@ -71,6 +71,9 @@ var aura_node: Node3D = null
 var is_in_bullet_time: bool = false
 var active_target_dome: Node3D = null
 var is_target_locked: bool = false # Requisito canónico de fijación visual para Melee Dash
+var is_in_followup_bullet_time: bool = false
+var followup_bullet_time_timer: float = 0.0
+var opponent_airborne_target: Node3D = null
 
 # Variables de vuelo hacia el contrincante
 var is_flying_to_opponent: bool = false
@@ -188,35 +191,36 @@ func _physics_process(delta: float) -> void:
 				stop_ragdoll()
 		return
 
-	# 1. Movimiento de vuelo rápido hacia el oponente (Melee Dash)
+	# 0. Temporizador de Follow-Up Bullet-Time en el aire
+	if is_in_followup_bullet_time:
+		followup_bullet_time_timer -= delta
+		if followup_bullet_time_timer <= 0.0:
+			_end_followup_bullet_time(true)
+
+	# 1. Movimiento de vuelo rápido hacia el oponente (Melee Dash con seguimiento 3D completo)
 	if is_flying_to_opponent:
 		var opponent = _get_opponent()
 		if opponent and is_instance_valid(opponent):
 			var cam = get_parent().get_node_or_null("XRCamera3D") if (is_player and get_parent()) else null
 			var my_pos = cam.global_position if cam else (get_parent().global_position if is_player else global_position)
-			var opponent_pos = opponent.global_position
+			var opponent_pos = opponent.global_position + Vector3(0.0, 0.9, 0.0) # Apuntar al torso del rival
 			var diff = opponent_pos - my_pos
-			var diff_h = Vector3(diff.x, 0.0, diff.z)
-			var dist_h = diff_h.length()
+			var dist = diff.length()
 			var target_dist = 0.65 # Distancia canónica exacta para golpear en VR
 
-			if dist_h > target_dist:
-				var dir_h = diff_h.normalized() if dist_h > 0.01 else Vector3.FORWARD
-				var move_amount = min(flight_speed * delta, dist_h - target_dist)
+			if dist > target_dist:
+				var dir = diff.normalized() if dist > 0.01 else Vector3.FORWARD
+				var move_amount = min(flight_speed * delta, dist - target_dist)
 				if is_player:
 					var origin = get_parent()
 					if origin:
-						origin.global_position += dir_h * move_amount
-						# Nivelar suavemente altura hacia el oponente
-						var target_y = opponent_pos.y
-						if abs(origin.global_position.y - target_y) > 0.1:
-							origin.global_position.y = move_toward(origin.global_position.y, target_y, flight_speed * 0.35 * delta)
+						origin.global_position += dir * move_amount
 						_clamp_to_arena(origin)
 				else:
-					global_position += dir_h * move_amount
+					global_position += dir * move_amount
 					_clamp_to_arena(self)
 
-				if dist_h - move_amount <= target_dist + 0.05:
+				if dist - move_amount <= target_dist + 0.05:
 					_stop_flight()
 					if is_player:
 						_start_melee_bullet_time(opponent)
@@ -579,7 +583,13 @@ func trigger_comeback_zenkai() -> void:
 		_notify_stats()
 		print("[CharacterInstance] %s: ¡ZENKAI COMEBACK ACTIVADO! Tienes un ataque para liquidar o serás penalizado." % character_data.character_name)
 
-func notify_attack_launched(_power: Resource) -> void:
+func notify_attack_launched(p_power: Resource) -> void:
+	# REQUISITO CANÓNICO: Si se lanza un Super Ataque de Ki durante el Follow-Up Bullet-Time, corta el tiempo
+	if is_in_followup_bullet_time:
+		var p_name = p_power.power_name.to_lower() if (p_power and "power_name" in p_power) else ""
+		if not ("ki blast" in p_name):
+			_end_followup_bullet_time(false)
+
 	# Si lanzamos un ataque siendo Comeback Zenkai, consumimos el intento
 	if is_comeback_zenkai:
 		# Dejamos de estar en estado Zenkai Comeback inmediatamente (se consume el tiro)
@@ -805,6 +815,9 @@ func _find_skeleton(node: Node) -> Skeleton3D:
 	return null
 
 func start_flight_to_opponent() -> void:
+	if is_in_followup_bullet_time:
+		is_in_followup_bullet_time = false
+
 	if is_player and not is_target_locked:
 		_log_combat_event("⚠️ ¡Debes fijar al rival con la mirada antes de embestir!", "warning")
 		var my_origin = get_parent()
@@ -1454,9 +1467,9 @@ func _trigger_tactical_separation(opponent: Node3D, _separation_speed: float = 4
 	velocity = Vector3.ZERO
 	is_knocked_back = false
 
-	# El defensor retrocede suavemente hasta la distancia inicial de guardia (~2.8m)
+	# El defensor retrocede suavemente hasta la distancia inicial canónica (~5.5m)
 	var current_dist = diff.length()
-	var desired_dist = 2.8
+	var desired_dist = 5.5
 	if current_dist < desired_dist:
 		var gentle_speed = clampf((desired_dist - current_dist) * 2.5, 2.0, 4.5)
 		opponent.set("velocity", fwd_dir * gentle_speed)
@@ -1557,24 +1570,24 @@ func _start_melee_bullet_time(opponent: Node3D) -> void:
 
 
 ## Callback al finalizar la ventana de Bullet-Time: desactiva la cúpula e inicia la ráfaga
-func _on_bullet_time_completed(recorded_hits: Array, opponent: Node3D) -> void:
+func _on_bullet_time_completed(recorded_hits: Array, launch_vector: Vector3, opponent: Node3D) -> void:
 	is_in_bullet_time = false
 	active_target_dome = null
-	_execute_melee_flurry_barrage(opponent, recorded_hits)
+	_execute_melee_flurry_barrage(opponent, recorded_hits, launch_vector)
 
 
 ## Callback al activarse un Finisher (ej. Martillazo bimanual) durante el Bullet-Time
-func _on_bullet_time_finisher(finisher_name: String, swing_velocity: float, recorded_hits: Array, opponent: Node3D) -> void:
+func _on_bullet_time_finisher(finisher_name: String, swing_velocity: float, recorded_hits: Array, launch_vector: Vector3, opponent: Node3D) -> void:
 	is_in_bullet_time = false
 	active_target_dome = null
 	if finisher_name == "hammer_strike":
-		_execute_hammer_strike_finisher(opponent, swing_velocity, recorded_hits)
+		_execute_hammer_strike_finisher(opponent, swing_velocity, recorded_hits, launch_vector)
 	else:
-		_execute_melee_flurry_barrage(opponent, recorded_hits)
+		_execute_melee_flurry_barrage(opponent, recorded_hits, launch_vector)
 
 
 ## Ejecuta cinematográficamente la ráfaga de puñetazos (flurry) acumulada durante el Bullet-Time
-func _execute_melee_flurry_barrage(opponent: Node3D, recorded_hits: Array) -> void:
+func _execute_melee_flurry_barrage(opponent: Node3D, recorded_hits: Array, launch_vector: Vector3 = Vector3.ZERO) -> void:
 	if not opponent or not is_instance_valid(opponent):
 		return
 
@@ -1588,13 +1601,23 @@ func _execute_melee_flurry_barrage(opponent: Node3D, recorded_hits: Array) -> vo
 	if hit_count == 0:
 		print("[BulletTime] 0 golpes conectados. El oponente esquivó la embestida.")
 		_log_combat_event("¡El oponente esquivó tu embestida!", "warning")
-		_trigger_tactical_separation(opponent, 14.0)
+		_separate_fighters_to_canonical_distance(opponent, 5.5)
 		return
 
-	# Daño escalado: base 160 NP por golpe con bonus acumulativo de combo (+15% por cada golpe adicional)
-	var damage_per_hit: float = 160.0
+	# Daño escalado: potencia por golpe sumada con bonus de combo (+15% por cada golpe adicional)
+	var total_damage: float = 0.0
+	var has_charged_hit: bool = false
+	for h in recorded_hits:
+		var p_power = float(h.get("power", 1.0))
+		var is_c = bool(h.get("is_charged", false))
+		if is_c:
+			has_charged_hit = true
+			total_damage += 280.0 * p_power
+		else:
+			total_damage += 140.0 * p_power
+
 	var combo_bonus: float = 1.0 + float(hit_count) * 0.15
-	var total_damage: float = float(hit_count) * damage_per_hit * combo_bonus
+	total_damage *= combo_bonus
 	if is_in_zenkai_state:
 		total_damage *= 2.0
 
@@ -1618,24 +1641,13 @@ func _execute_melee_flurry_barrage(opponent: Node3D, recorded_hits: Array) -> vo
 		if not is_instance_valid(opponent):
 			return
 
-	# Impacto final: El atacante NO se mueve. El defensor retrocede suavemente a la distancia inicial (~2.8m)
+	# Impacto final: El atacante NO se mueve
 	velocity = Vector3.ZERO
 	is_knocked_back = false
 
 	if opponent.has_method("take_hit"):
 		opponent.take_hit(total_damage, Vector3.ZERO)
 		increase_np(total_damage * 0.40)
-
-	# Separación controlada hacia la distancia inicial exacta (~2.8m) sin explosiones ni rebote
-	var opp_diff = opponent.global_position - my_pos
-	opp_diff.y = 0.0
-	var retreat_dir = opp_diff.normalized() if opp_diff.length_squared() > 0.01 else fwd
-	var target_retreat_pos = my_pos + retreat_dir * 2.8
-	target_retreat_pos.y = opponent.global_position.y
-	opponent.set("velocity", Vector3.ZERO)
-	opponent.set("is_knocked_back", false)
-	var tw = opponent.create_tween()
-	tw.tween_property(opponent, "global_position", target_retreat_pos, 0.45).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 
 	# Pulso háptico máximo final
 	if is_player and my_origin:
@@ -1645,11 +1657,20 @@ func _execute_melee_flurry_barrage(opponent: Node3D, recorded_hits: Array) -> vo
 				ctrl.trigger_haptic_pulse("haptic", 220.0, 1.0, 0.25, 0.0)
 
 	_log_combat_event("💥 ¡RÁFAGA DE COMBATE! %d golpes conectados. Daño total: %.0f NP" % [hit_count, total_damage], "success")
-	print("[BulletTime] Ráfaga concluida: %d golpes, %.0f NP de daño. Defensor separado suavemente a distancia canónica (2.8m)." % [hit_count, total_damage])
+
+	# REQUISITO CANÓNICO 5: Si la secuencia terminó con un golpe cargado, el contrincante sale despedido por los aires
+	# y tras 1 segundo se activa una nueva ventana de Follow-Up Bullet-Time
+	if has_charged_hit and launch_vector.length_squared() > 0.1:
+		print("[BulletTime] Ráfaga concluida con golpe cargado. Lanzando al oponente por los aires hacia: %s" % str(launch_vector))
+		_start_followup_airborne_sequence(opponent, launch_vector)
+	else:
+		# Si no hubo golpe cargado, separación garantizada a la distancia inicial canónica (5.5m)
+		print("[BulletTime] Ráfaga concluida. Separando combatientes a distancia canónica (5.5m).")
+		_separate_fighters_to_canonical_distance(opponent, 5.5)
 
 
 ## Ejecuta el demoledor Martillazo de Dragon Ball Z como Finisher de corte en Bullet-Time
-func _execute_hammer_strike_finisher(opponent: Node3D, swing_velocity: float, recorded_hits: Array) -> void:
+func _execute_hammer_strike_finisher(opponent: Node3D, swing_velocity: float, recorded_hits: Array, launch_vector: Vector3 = Vector3.ZERO) -> void:
 	if not opponent or not is_instance_valid(opponent):
 		return
 
@@ -1707,17 +1728,95 @@ func _execute_hammer_strike_finisher(opponent: Node3D, swing_velocity: float, re
 	if opponent.get("procedural_animator"):
 		opponent.procedural_animator.trigger_hit_flinch(1.4, -Vector3.UP)
 
-	# 5. Aplicar daño primario e impulso controlado hacia el suelo y atrás (~2.8m)
+	# 5. Aplicar daño primario
 	if opponent.has_method("take_hit"):
 		opponent.take_hit(direct_damage, Vector3.ZERO)
 		increase_np(direct_damage * 0.45)
-	
-	var hammer_knockback = (fwd * 3.2 + Vector3.DOWN * 3.0)
-	opponent.set("velocity", hammer_knockback)
-	opponent.set("is_knocked_back", true)
+
+	var final_launch = launch_vector if launch_vector.length_squared() > 0.1 else (fwd * 3.5 + Vector3.DOWN * 4.5).normalized() * 7.0
 
 	_log_combat_event("💥 ¡FINISHER MARTILLAZO CONECTADO! Rival derribado. Daño: %.0f NP" % direct_damage, "success")
-	print("[HammerFinisher] Martillazo conectado: daño=%.0f NP. Atacante inmóvil." % direct_damage)
+	print("[HammerFinisher] Martillazo conectado: daño=%.0f NP. Atacante inmóvil. Impulsando hacia suelo y cielo." % direct_damage)
+
+	# Iniciar secuencia de seguimiento aéreo tras el impacto del martillazo
+	_start_followup_airborne_sequence(opponent, final_launch)
+
+
+## Separa determinísticamente a ambos combatientes hacia la distancia canónica de combate (5.5m)
+func _separate_fighters_to_canonical_distance(opponent: Node3D, target_distance: float = 5.5) -> void:
+	if not opponent or not is_instance_valid(opponent):
+		return
+
+	var my_origin = get_parent() if is_player else null
+	var my_pos = my_origin.global_position if my_origin else global_position
+	var opp_pos = opponent.global_position
+	var diff = opp_pos - my_pos
+	diff.y = 0.0
+	var dir = diff.normalized() if diff.length_squared() > 0.01 else -global_transform.basis.z
+	dir.y = 0.0
+	dir = dir.normalized()
+
+	var target_opp_pos = my_pos + dir * target_distance
+	target_opp_pos.y = get_ground_elevation(target_opp_pos)
+
+	opponent.set("velocity", Vector3.ZERO)
+	opponent.set("is_knocked_back", false)
+
+	var tw = opponent.create_tween()
+	tw.tween_property(opponent, "global_position", target_opp_pos, 0.45).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+
+	if is_player and my_origin:
+		_clamp_to_arena(my_origin)
+	_clamp_to_arena(opponent)
+
+
+## Inicia la secuencia de lanzamiento aéreo y activa el Follow-Up Bullet-Time tras 1 segundo
+func _start_followup_airborne_sequence(opponent: Node3D, launch_vector: Vector3) -> void:
+	if not opponent or not is_instance_valid(opponent):
+		return
+
+	# Aplicar el impulso cinemático inicial en la dirección del impacto
+	opponent.set("velocity", launch_vector * 1.6)
+	opponent.set("is_knocked_back", true)
+
+	# Esperar 1.0 segundo mientras el contrincante vuela por los aires
+	await get_tree().create_timer(1.0).timeout
+	if not opponent or not is_instance_valid(opponent):
+		return
+
+	# Si el combate sigue activo, encender el Follow-Up Bullet-Time
+	is_in_followup_bullet_time = true
+	followup_bullet_time_timer = 4.0
+	opponent_airborne_target = opponent
+
+	# Ralentizar al oponente para mantenerlo suspendido en el aire
+	var opp_v = opponent.get("velocity")
+	if opp_v is Vector3:
+		opponent.set("velocity", opp_v * 0.12)
+
+	_log_combat_event("⚡ ¡CADENA DE SEGUIMIENTO EN EL AIRE! (4.0s) Dispara Ki Blasts, Melee Dash o Super Poder", "success")
+	var gss = _get_gesture_tree()
+	if gss and gss.has_signal("phase_changed"):
+		gss.emit_signal("phase_changed", "¡CADENA EN EL AIRE! (FOLLOW-UP BULLET TIME)")
+
+
+## Finaliza el Follow-Up Bullet-Time
+func _end_followup_bullet_time(timed_out: bool = false) -> void:
+	if not is_in_followup_bullet_time:
+		return
+	is_in_followup_bullet_time = false
+
+	var target_opp = opponent_airborne_target
+	opponent_airborne_target = null
+
+	if target_opp and is_instance_valid(target_opp):
+		if timed_out:
+			# Si se agotó el tiempo sin acción, la gravedad devuelve al oponente al suelo y se separan a 5.5m
+			_separate_fighters_to_canonical_distance(target_opp, 5.5)
+			_log_combat_event("Secuencia aérea concluida. Separación táctica restablecida (5.5m).", "info")
+		else:
+			target_opp.set("velocity", Vector3.ZERO)
+			target_opp.set("is_knocked_back", false)
 
 
 ## Genera la onda de choque expansiva del impacto físico masivo (Melee Shockwave)

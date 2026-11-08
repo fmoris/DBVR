@@ -7,9 +7,9 @@ extends Node3D
 ## tridimensional de 6 cajas de impacto anime en puntos anatómicos clave del oponente.
 ## Registra los puñetazos físicos de los mandos VR en tiempo real.
 
-signal target_hit(hit_count: int, zone_name: String, hit_pos: Vector3)
-signal bullet_time_completed(recorded_hits: Array)
-signal finisher_triggered(finisher_name: String, swing_velocity: float, recorded_hits: Array)
+signal target_hit(hit_count: int, zone_name: String, hit_pos: Vector3, is_charged: bool, power: float)
+signal bullet_time_completed(recorded_hits: Array, launch_vector: Vector3)
+signal finisher_triggered(finisher_name: String, swing_velocity: float, recorded_hits: Array, launch_vector: Vector3)
 
 var attacker: Node3D = null
 var defender: Node3D = null
@@ -18,11 +18,24 @@ var time_left: float = 2.5
 var is_active: bool = false
 var hits: Array = []
 
-# Seguimiento de velocidad para el Martillazo (Finisher bimanual)
+# Seguimiento de velocidad para velocímetro y Martillazo
 var prev_left_pos: Vector3 = Vector3.ZERO
 var prev_right_pos: Vector3 = Vector3.ZERO
 var left_velocity: Vector3 = Vector3.ZERO
 var right_velocity: Vector3 = Vector3.ZERO
+
+# Seguimiento de puño cerrado y carga para puñetazos (0: Izquierda, 1: Derecha)
+var fist_charge_times: Array[float] = [0.0, 0.0]
+var fist_locked_haptic: Array[bool] = [false, false]
+var fist_buffer_timers: Array[float] = [0.0, 0.0]
+
+# Seguimiento de carga para Martillazo bimanual (mínimo 2.0s de carga con manos juntas)
+var hammer_charge_time: float = 0.0
+var hammer_locked_haptic: bool = false
+
+# Vector de lanzamiento del último golpe cargado o martillo
+var last_impact_vector: Vector3 = Vector3.ZERO
+var was_last_hit_charged: bool = false
 
 # Cajas de objetivo tácticas
 var target_zones: Array = []
@@ -77,17 +90,23 @@ func _process(delta: float) -> void:
 	if not is_active:
 		return
 
-	time_left -= delta
+	# Actualizar seguimiento de puño cerrado y acumulación de carga por mando
+	_update_fist_states(delta)
+
+	# 1. Actualizar cálculo de velocidad cinemática de los mandos
+	_update_controller_velocities(delta)
+
+	# 2. Comprobar carga y ejecución de Martillazo Finisher bimanual
+	# Si se está cargando el martillazo con ambas manos juntas, ralentizar el tiempo del domo (delta * 0.25)
+	var is_charging_hammer = _process_hammer_charge(delta)
+	var effective_delta = delta * 0.25 if is_charging_hammer else delta
+	time_left -= effective_delta
 
 	# Actualizar cooldown de impactos repetidos por zona
 	for zone in target_zones:
 		if zone.get("cooldown", 0.0) > 0.0:
 			zone["cooldown"] -= delta
 
-	# 1. Actualizar cálculo de velocidad cinemática de los mandos
-	_update_controller_velocities(delta)
-
-	# 2. Comprobar si el jugador ejecuta el Martillazo Finisher bimanual (Time-Cut inmediato)
 	if _check_hammer_finisher():
 		return
 
@@ -96,11 +115,30 @@ func _process(delta: float) -> void:
 		var pct = clampf(time_left / maxf(duration, 0.1), 0.0, 1.0)
 		var bar_len = int(pct * 12.0)
 		var bar_str = "█".repeat(bar_len) + "░".repeat(12 - bar_len)
-		header_label.text = "⚡ BULLET TIME ⚡\n[ %s ] %.1fs\n🥊 COMBOS: %d GOLPES" % [
-			bar_str,
-			maxf(time_left, 0.0),
-			hits.size()
-		]
+		if hammer_charge_time >= 2.0:
+			header_label.text = "⚡ ¡MARTILLAZO LISTO! ⚡\n¡DESCARGA AMBOS PUÑOS HACIA ABAJO!\n🥊 COMBOS: %d GOLPES" % hits.size()
+		elif is_charging_hammer:
+			header_label.text = "⚡ CARGANDO MARTILLAZO: %.1fs / 2.0s ⚡\n[ %s ] %.1fs\n🥊 COMBOS: %d GOLPES" % [
+				hammer_charge_time,
+				bar_str,
+				maxf(time_left, 0.0),
+				hits.size()
+			]
+		else:
+			var max_charge = maxf(fist_charge_times[0], fist_charge_times[1])
+			if max_charge >= 0.5:
+				header_label.text = "⚡ BULLET TIME ⚡ [GOLPE CARGADO: %.1fs]\n[ %s ] %.1fs\n🥊 COMBOS: %d GOLPES" % [
+					max_charge,
+					bar_str,
+					maxf(time_left, 0.0),
+					hits.size()
+				]
+			else:
+				header_label.text = "⚡ BULLET TIME ⚡\n[ %s ] %.1fs\n🥊 COMBOS: %d GOLPES" % [
+					bar_str,
+					maxf(time_left, 0.0),
+					hits.size()
+				]
 
 	# Detectar colisiones físicas de los mandos del jugador contra las cajas activas
 	_check_controller_punches()
@@ -151,9 +189,84 @@ func _update_controller_velocities(delta: float) -> void:
 		prev_right_pos = cur_pos
 
 
+## Actualiza el estado de puño cerrado y la carga de cada mano
+func _update_fist_states(delta: float) -> void:
+	var left_ctrl = _get_controller("LeftHand")
+	var right_ctrl = _get_controller("RightHand")
+	var ctrls = [left_ctrl, right_ctrl]
+
+	for i in range(2):
+		var c = ctrls[i]
+		if not c:
+			continue
+		var grip_v = c.get_float("grip")
+		var trig_v = c.get_float("trigger")
+		var grip_press = grip_v > 0.55 or c.is_button_pressed("grip_click")
+		var trig_press = trig_v > 0.40 or c.is_button_pressed("trigger_click")
+		var is_fist = grip_press and trig_press
+
+		if is_fist:
+			fist_buffer_timers[i] = 0.15 # Gracia de 150ms
+			fist_charge_times[i] = minf(fist_charge_times[i] + delta, 2.5)
+
+			# Pulso háptico distintivo de Fase 1 lista (0.5s)
+			if fist_charge_times[i] >= 0.50 and not fist_locked_haptic[i]:
+				fist_locked_haptic[i] = true
+				if c.has_method("trigger_haptic_pulse"):
+					c.trigger_haptic_pulse("haptic", 140.0, 0.75, 0.10, 0.0)
+		else:
+			if fist_buffer_timers[i] > 0.0:
+				fist_buffer_timers[i] -= delta
+			else:
+				fist_charge_times[i] = 0.0
+				fist_locked_haptic[i] = false
+
+
+## Procesa la carga bimanual del Martillazo (requiere ambos puños juntos)
+func _process_hammer_charge(delta: float) -> bool:
+	var left_ctrl = _get_controller("LeftHand")
+	var right_ctrl = _get_controller("RightHand")
+	if not left_ctrl or not right_ctrl:
+		hammer_charge_time = 0.0
+		hammer_locked_haptic = false
+		return false
+
+	var l_fist = fist_buffer_timers[0] > 0.0
+	var r_fist = fist_buffer_timers[1] > 0.0
+	var hands_dist = left_ctrl.global_position.distance_to(right_ctrl.global_position)
+
+	# Ambas manos en puño cerrado juntas (distancia <= 0.38m)
+	if l_fist and r_fist and hands_dist <= 0.38:
+		hammer_charge_time += delta
+		# Pulso háptico rítmico mientras carga
+		if left_ctrl.has_method("trigger_haptic_pulse"):
+			left_ctrl.trigger_haptic_pulse("haptic", 85.0, clampf(0.20 + hammer_charge_time * 0.25, 0.20, 0.85), delta, 0.0)
+		if right_ctrl.has_method("trigger_haptic_pulse"):
+			right_ctrl.trigger_haptic_pulse("haptic", 85.0, clampf(0.20 + hammer_charge_time * 0.25, 0.20, 0.85), delta, 0.0)
+
+		# Haptic Lock-in al completar 2.0s de carga mínima
+		if hammer_charge_time >= 2.0 and not hammer_locked_haptic:
+			hammer_locked_haptic = true
+			if left_ctrl.has_method("trigger_haptic_pulse"):
+				left_ctrl.trigger_haptic_pulse("haptic", 170.0, 1.0, 0.20, 0.0)
+			if right_ctrl.has_method("trigger_haptic_pulse"):
+				right_ctrl.trigger_haptic_pulse("haptic", 170.0, 1.0, 0.20, 0.0)
+		return true
+	else:
+		# Si se separan las manos antes de 2.0s, resetea
+		if hammer_charge_time < 2.0:
+			hammer_charge_time = 0.0
+			hammer_locked_haptic = false
+		return false
+
+
 ## Comprueba si el jugador junta ambos puños y descarga el Martillazo como Finisher
 func _check_hammer_finisher() -> bool:
 	if not is_active:
+		return false
+
+	# REQUISITO CANÓNICO: Requiere al menos 2.0 segundos de carga con ambos puños juntos
+	if hammer_charge_time < 2.0:
 		return false
 
 	var left_ctrl = _get_controller("LeftHand")
@@ -163,31 +276,31 @@ func _check_hammer_finisher() -> bool:
 
 	var l_pos = left_ctrl.global_position
 	var r_pos = right_ctrl.global_position
-
-	# 1. Ambas manos juntas en mazo (distancia < 42 cm)
 	var hand_dist = l_pos.distance_to(r_pos)
-	if hand_dist > 0.42:
+	if hand_dist > 0.45:
 		return false
 
-	# 2. Cinemática del swing coordinado
 	var avg_v = (left_velocity + right_velocity) * 0.5
 	var peak_speed = maxf(left_velocity.length(), right_velocity.length())
-
-	var to_def = Vector3.FORWARD
-	if defender and is_instance_valid(defender) and attacker and is_instance_valid(attacker):
-		var diff = (defender.global_position - attacker.global_position)
-		diff.y = 0.0
-		if diff.length_squared() > 0.01:
-			to_def = diff.normalized()
-
-	var fwd_speed = avg_v.dot(to_def)
 	var downward_speed = -avg_v.y
 
-	# Umbral cinemático: swing descendente hacia el suelo o hacia el oponente
-	if (downward_speed > 0.65 and peak_speed > 0.95) or (fwd_speed > 0.75 and peak_speed > 0.95) or peak_speed >= 1.25:
-		print("[BulletTimeDome] ⚡ ¡FINISHER MARTILLAZO DETECTADO! Velocidad física de impacto: %.2f m/s (Corte inmediato de tiempo)." % peak_speed)
+	# Umbral cinemático estricto tras la carga: swing descendente hacia abajo
+	if downward_speed > 0.80 or (downward_speed > 0.50 and peak_speed > 1.10):
+		var to_def = Vector3.FORWARD
+		if defender and is_instance_valid(defender) and attacker and is_instance_valid(attacker):
+			var diff = (defender.global_position - attacker.global_position)
+			diff.y = 0.0
+			if diff.length_squared() > 0.01:
+				to_def = diff.normalized()
+
+		# Vector de impacto hacia abajo y hacia el oponente/suelo
+		var launch_vec = (to_def * 2.5 + Vector3.DOWN * 5.0).normalized() * 7.0
+		last_impact_vector = launch_vec
+		was_last_hit_charged = true
+
+		print("[BulletTimeDome] ⚡ ¡FINISHER MARTILLAZO DETECTADO! (Carga: %.2fs, Vel: %.2f m/s, Corte inmediato de tiempo)." % [hammer_charge_time, peak_speed])
 		is_active = false
-		emit_signal("finisher_triggered", "hammer_strike", peak_speed, hits)
+		emit_signal("finisher_triggered", "hammer_strike", peak_speed, hits, launch_vec)
 
 		# Desvanecer rápidamente la cúpula y autoeliminarse
 		if dome_mesh and is_instance_valid(dome_mesh):
@@ -350,38 +463,43 @@ func _check_controller_punches() -> void:
 
 	var hand_sources: Array = []
 	if left_ctrl:
-		hand_sources.append({ "pos": left_ctrl.global_position, "name": "LeftHand", "ctrl": left_ctrl })
+		hand_sources.append({ "pos": left_ctrl.global_position, "name": "LeftHand", "ctrl": left_ctrl, "idx": 0 })
 	if right_ctrl:
-		hand_sources.append({ "pos": right_ctrl.global_position, "name": "RightHand", "ctrl": right_ctrl })
+		hand_sources.append({ "pos": right_ctrl.global_position, "name": "RightHand", "ctrl": right_ctrl, "idx": 1 })
 
 	# Soporte biométrico OpenXR Hand Tracking (yemas y palmas de ambas manos)
 	var left_tracker = XRServer.get_tracker("/user/hand_tracker/left") as XRHandTracker
 	var right_tracker = XRServer.get_tracker("/user/hand_tracker/right") as XRHandTracker
 
 	if left_tracker:
-		var flags_tip = left_tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_INDEX_FINGER_TIP)
-		if (flags_tip & XRHandTracker.HAND_JOINT_FLAG_POSITION_VALID):
-			var tip_local = left_tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_INDEX_FINGER_TIP).origin
-			hand_sources.append({ "pos": origin.global_transform * tip_local, "name": "LeftHand", "ctrl": left_ctrl })
 		var flags_palm = left_tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_PALM)
 		if (flags_palm & XRHandTracker.HAND_JOINT_FLAG_POSITION_VALID):
 			var palm_local = left_tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM).origin
-			hand_sources.append({ "pos": origin.global_transform * palm_local, "name": "LeftHand", "ctrl": left_ctrl })
+			hand_sources.append({ "pos": origin.global_transform * palm_local, "name": "LeftHand", "ctrl": left_ctrl, "idx": 0 })
 
 	if right_tracker:
-		var flags_tip = right_tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_INDEX_FINGER_TIP)
-		if (flags_tip & XRHandTracker.HAND_JOINT_FLAG_POSITION_VALID):
-			var tip_local = right_tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_INDEX_FINGER_TIP).origin
-			hand_sources.append({ "pos": origin.global_transform * tip_local, "name": "RightHand", "ctrl": right_ctrl })
 		var flags_palm = right_tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_PALM)
 		if (flags_palm & XRHandTracker.HAND_JOINT_FLAG_POSITION_VALID):
 			var palm_local = right_tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM).origin
-			hand_sources.append({ "pos": origin.global_transform * palm_local, "name": "RightHand", "ctrl": right_ctrl })
+			hand_sources.append({ "pos": origin.global_transform * palm_local, "name": "RightHand", "ctrl": right_ctrl, "idx": 1 })
 
 	for hand_data in hand_sources:
 		var hand_pos: Vector3 = hand_data["pos"]
 		var ctrl_node: XRController3D = hand_data["ctrl"]
 		var hand_name: String = hand_data["name"]
+		var hand_idx: int = hand_data["idx"]
+
+		# REQUISITO CANÓNICO 1: Para dar un golpe se DEBEN apretar Gatillo y Grab al mismo tiempo (simulando puño cerrado).
+		# Se utiliza un buffer de gracia de 150ms (fist_buffer_timers). Si no es un puño cerrado, ¡NO cuenta como golpe!
+		var is_fist = fist_buffer_timers[hand_idx] > 0.0
+		if not is_fist:
+			continue
+
+		# REQUISITO CANÓNICO 2: Velocímetro del golpe. Se requiere una velocidad física mínima de 0.55 m/s
+		var cur_vel = left_velocity if hand_idx == 0 else right_velocity
+		var v_mag = cur_vel.length()
+		if v_mag < 0.55:
+			continue
 
 		for zone in target_zones:
 			if zone.get("cooldown", 0.0) > 0.0:
@@ -390,26 +508,54 @@ func _check_controller_punches() -> void:
 			var target_pos: Vector3 = zone["node"].global_position
 			var dist: float = hand_pos.distance_to(target_pos)
 
-			# Radio de detección de golpe físico: 0.30 metros (sensible y natural en VR)
+			# Radio de detección de golpe físico: 0.30 metros
 			if dist <= 0.30:
-				_register_hit(zone, ctrl_node, hand_name)
+				_register_hit(zone, ctrl_node, hand_name, hand_idx, cur_vel, v_mag)
 
 
-## Registra el impacto exitoso en una zona (persistente para combos repetidos)
-func _register_hit(zone: Dictionary, ctrl_node: XRController3D, hand_name: String) -> void:
+## Registra el impacto exitoso en una zona calculando potencia y dirección del golpe
+func _register_hit(zone: Dictionary, ctrl_node: XRController3D, hand_name: String, hand_idx: int, cur_vel: Vector3, v_mag: float) -> void:
 	# Cooldown de 140ms por zona para permitir golpes repetidos rápidos al mismo lugar
 	zone["cooldown"] = 0.14
 	var hit_pos: Vector3 = zone["node"].global_position
+
+	# REQUISITO CANÓNICO: Potencia del golpe = Velocidad del mando * (1.0 + tiempo_carga * 1.25)
+	var charge_t = fist_charge_times[hand_idx]
+	var is_charged = charge_t >= 0.50
+	var punch_power = v_mag * (1.0 + charge_t * 1.25)
+
+	# Dirección del impacto basada en la cinemática del puñetazo
+	var swing_dir = cur_vel.normalized() if cur_vel.length_squared() > 0.01 else -global_transform.basis.z
+	var fwd = -global_transform.basis.z
+
+	# Determinar vector de lanzamiento según la dirección donde llegó el golpe (cielo, atrás, lado, suelo)
+	if is_charged:
+		was_last_hit_charged = true
+		last_impact_vector = (swing_dir + Vector3.UP * 0.30).normalized() * (5.5 + punch_power * 0.35)
+	else:
+		was_last_hit_charged = false
+		last_impact_vector = (fwd + Vector3.UP * 0.15).normalized() * 3.8
+
+	# Consumo de Ki / BP por golpe físico
+	if attacker and is_instance_valid(attacker) and attacker.has_method("consume_ki_or_life_force"):
+		var res = attacker.consume_ki_or_life_force(3.5)
+		if res.get("is_life_sacrifice", false):
+			var bp_lost = int(res.get("sacrificed_np", 0.0))
+			print("[BulletTimeDome] Golpe físico ejecutado con sacrificio vital: -%d BP" % bp_lost)
 
 	hits.append({
 		"zone_id": zone["id"],
 		"name": zone["name"],
 		"pos": hit_pos,
 		"hand": hand_name,
-		"time_left": time_left
+		"time_left": time_left,
+		"power": punch_power,
+		"is_charged": is_charged,
+		"velocity": v_mag,
+		"swing_dir": swing_dir
 	})
 
-	# 1. Efecto visual: destello y pulso elástico SIN ocultar la caja
+	# 1. Efecto visual: destello y pulso elástico
 	_spawn_hit_spark(hit_pos)
 
 	var box_inst: MeshInstance3D = zone["box_mesh"]
@@ -418,31 +564,42 @@ func _register_hit(zone: Dictionary, ctrl_node: XRController3D, hand_name: Strin
 	if box_inst and is_instance_valid(box_inst):
 		var mat = box_inst.material_override as StandardMaterial3D
 		if mat:
-			mat.albedo_color = Color(1.0, 1.0, 0.7, 1.0)
-			mat.emission = Color(1.0, 1.0, 0.7)
-			mat.emission_energy_multiplier = 3.5
+			var flash_col = Color(1.0, 1.0, 0.4) if not is_charged else Color(1.0, 0.3, 0.1)
+			mat.albedo_color = flash_col
+			mat.emission = flash_col
+			mat.emission_energy_multiplier = 4.5 if is_charged else 3.0
 
+		var scale_mult = 1.65 if is_charged else 1.35
 		var tw = create_tween().set_parallel(true)
-		tw.tween_property(zone["node"], "scale", Vector3.ONE * 1.35, 0.07).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		tw.tween_property(zone["node"], "scale", Vector3.ONE * scale_mult, 0.07).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 		tw.chain().tween_property(zone["node"], "scale", Vector3.ONE, 0.07).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
 		if mat:
 			tw.parallel().tween_property(mat, "albedo_color", orig_col, 0.12)
 			tw.parallel().tween_property(mat, "emission", Color(orig_col.r, orig_col.g, orig_col.b), 0.12)
 			tw.parallel().tween_property(mat, "emission_energy_multiplier", 1.2, 0.12)
 
-	# 2. Audio de impacto físico inmediato
+	# 2. Audio de impacto físico
 	if audio_player:
 		audio_player.global_position = hit_pos
-		audio_player.stream = sfx_hit_heavy if (hits.size() % 4 == 0) else sfx_hit_light
-		audio_player.pitch_scale = randf_range(0.95, 1.15)
+		audio_player.stream = sfx_hit_heavy if (is_charged or hits.size() % 4 == 0) else sfx_hit_light
+		audio_player.pitch_scale = randf_range(0.90, 1.10) if is_charged else randf_range(0.95, 1.15)
 		audio_player.play()
 
-	# 3. Pulso háptico en el mando que conectó el puñetazo
+	# 3. Pulso háptico de impacto (mayor intensidad en golpe cargado)
 	if ctrl_node and ctrl_node.has_method("trigger_haptic_pulse"):
-		ctrl_node.trigger_haptic_pulse("haptic", 200.0, 0.95, 0.12, 0.0)
+		var h_freq = 220.0 if is_charged else 180.0
+		var h_amp = 1.0 if is_charged else clampf(0.55 + v_mag * 0.15, 0.55, 0.95)
+		var h_dur = 0.20 if is_charged else 0.08
+		ctrl_node.trigger_haptic_pulse("haptic", h_freq, h_amp, h_dur, 0.0)
 
-	emit_signal("target_hit", hits.size(), zone["name"], hit_pos)
-	print("[BulletTimeDome] ¡Impacto #%d conectado en '%s'! (Mando: %s)" % [hits.size(), zone["name"], hand_name])
+	# Resetear carga de la mano tras impactar
+	fist_charge_times[hand_idx] = 0.0
+	fist_locked_haptic[hand_idx] = false
+
+	emit_signal("target_hit", hits.size(), zone["name"], hit_pos, is_charged, punch_power)
+	print("[BulletTimeDome] ¡Impacto #%d conectado en '%s'! (Potencia: %.1f, Cargado: %s, Mando: %s)" % [
+		hits.size(), zone["name"], punch_power, str(is_charged), hand_name
+	])
 
 
 ## Genera un destello radial anime (sparks) en el punto de contacto
@@ -473,14 +630,24 @@ func _spawn_hit_spark(pos: Vector3) -> void:
 	tw.chain().tween_callback(spark.queue_free)
 
 
-## Finaliza el Bullet-Time y emite los resultados para la ráfaga de golpes
+## Finaliza el Bullet-Time y emite los resultados con el vector de lanzamiento para la ráfaga
 func finish() -> void:
 	if not is_active:
 		return
 	is_active = false
 
-	print("[BulletTimeDome] Bullet-Time finalizado. Total de golpes registrados: %d" % hits.size())
-	emit_signal("bullet_time_completed", hits)
+	var final_launch = last_impact_vector
+	if final_launch == Vector3.ZERO:
+		var fwd = Vector3.BACK
+		if defender and is_instance_valid(defender) and attacker and is_instance_valid(attacker):
+			var diff = defender.global_position - attacker.global_position
+			diff.y = 0.0
+			if diff.length_squared() > 0.01:
+				fwd = diff.normalized()
+		final_launch = fwd * 4.0
+
+	print("[BulletTimeDome] Bullet-Time finalizado. Total golpes: %d, Último golpe cargado: %s" % [hits.size(), str(was_last_hit_charged)])
+	emit_signal("bullet_time_completed", hits, final_launch)
 
 	# Desvanecer la cúpula exterior y destruirse limpiamente
 	if dome_mesh and is_instance_valid(dome_mesh):

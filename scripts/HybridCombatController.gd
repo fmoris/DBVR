@@ -33,13 +33,19 @@ var left_charge_time: float = 0.0
 var right_charge_time: float = 0.0
 var left_is_charging: bool = false
 var right_is_charging: bool = false
+var left_blast_locked_haptic: bool = false
+var right_blast_locked_haptic: bool = false
 
 # 3. Super Poderes (Kamehameha / Galick Ho / Final Flash)
 enum SuperPowerState { IDLE, CHARGING, READY_TO_FIRE }
 var current_super_state: SuperPowerState = SuperPowerState.IDLE
 var super_power_type: String = "" # "kamehameha", "galick_ho", "final_flash", "genkidama"
 var super_charge_timer: float = 0.0
+var super_locked_haptic: bool = false
 const SUPER_MIN_CHARGE_TIME: float = 1.0
+
+# 3b. Bio-Hápticos de Ki y Transformación (Heartbeat continuo no invasivo)
+var bio_haptic_timer: float = 0.0
 
 # 4. Melee / Velocidades anteriores para aceleración
 var prev_left_pos: Vector3 = Vector3.ZERO
@@ -210,6 +216,7 @@ func _process(delta: float) -> void:
 	_process_transformations()
 	_process_hud_toggle(delta)
 	_process_guard()
+	_process_bio_haptics(delta)
 
 
 # --- 1. RECARGA DE KI (2 FASES: Gatillos a Hombros -> Descenso a Cintura/Cadera) ---
@@ -362,20 +369,25 @@ func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta:
 	var trig_val = controller.get_float("trigger")
 	var trig_pressed = trig_val > 0.40 or controller.is_button_pressed("trigger_click")
 	var grip_val = controller.get_float("grip")
-	var grip_held = grip_val > 0.40 or controller.is_button_pressed("grip_click")
+	var grip_held = grip_val > 0.60 or controller.is_button_pressed("grip_click")
 	var is_left = (hand_side == 0)
 
-	# Si se sostiene el Grab (Grip > 0.20), es para Melee (Grab+Gatillo), Guardia o Super Poder: NO Ki Blast
-	if grip_held or grip_val > 0.20 or melee_cooldown > 0.0 or recharge_exit_cooldown > 0.0 or current_super_state != SuperPowerState.IDLE:
+	# REQUISITO CANÓNICO: Puño cerrado simulado con Grab + Gatillo (ambos presionados) o agarre fuerte intencional (>0.60).
+	# El descanso natural de los dedos en mandos Quest 3 (~0.35-0.42) NUNCA debe bloquear el disparo.
+	var is_fist_or_grab = grip_held or (grip_val > 0.55 and trig_val > 0.40)
+
+	if is_fist_or_grab or melee_cooldown > 0.0 or recharge_exit_cooldown > 0.0 or current_super_state != SuperPowerState.IDLE:
 		if (is_left and left_charge_time > 0.0) or (not is_left and right_charge_time > 0.0):
 			if gesture_tree:
 				gesture_tree._cleanup_ki_blast_charge_sphere(hand_side)
 		if is_left:
 			left_charge_time = 0.0
 			left_is_charging = false
+			left_blast_locked_haptic = false
 		else:
 			right_charge_time = 0.0
 			right_is_charging = false
+			right_blast_locked_haptic = false
 		return
 
 	if trig_pressed:
@@ -398,6 +410,12 @@ func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta:
 		if is_left:
 			left_charge_time += delta
 			left_is_charging = true
+			if left_charge_time >= 0.50 and not left_blast_locked_haptic:
+				left_blast_locked_haptic = true
+				_pulse_haptic(controller, 140.0, 0.85, 0.12)
+				if gesture_tree and gesture_tree.has_signal("phase_changed"):
+					gesture_tree.emit_signal("phase_changed", "¡KI BLAST IZQ CARGADO LISTO!")
+
 			if gesture_tree:
 				gesture_tree._update_ki_blast_charge_sphere(0, left_charge_time, delta)
 				gesture_tree.emit_signal("ki_blast_charging", 0, left_charge_time, delta)
@@ -406,6 +424,12 @@ func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta:
 		else:
 			right_charge_time += delta
 			right_is_charging = true
+			if right_charge_time >= 0.50 and not right_blast_locked_haptic:
+				right_blast_locked_haptic = true
+				_pulse_haptic(controller, 140.0, 0.85, 0.12)
+				if gesture_tree and gesture_tree.has_signal("phase_changed"):
+					gesture_tree.emit_signal("phase_changed", "¡KI BLAST DER CARGADO LISTO!")
+
 			if gesture_tree:
 				gesture_tree._update_ki_blast_charge_sphere(1, right_charge_time, delta)
 				gesture_tree.emit_signal("ki_blast_charging", 1, right_charge_time, delta)
@@ -440,9 +464,11 @@ func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta:
 		if is_left:
 			left_charge_time = 0.0
 			left_is_charging = false
+			left_blast_locked_haptic = false
 		else:
 			right_charge_time = 0.0
 			right_is_charging = false
+			right_blast_locked_haptic = false
 
 
 # --- 3. SUPER PODERES (Galick Ho / Final Flash / Big Bang Attack / Kamehameha / Genkidama) ---
@@ -639,9 +665,16 @@ func _process_super_powers(delta: float) -> void:
 			"galick_ho": min_time_required = 1.5
 			"big_bang": min_time_required = 1.2
 
-		if super_charge_timer >= min_time_required and int(super_charge_timer * 10) % 5 == 0:
-			if gesture_tree and gesture_tree.has_signal("phase_changed"):
-				gesture_tree.emit_signal("phase_changed", "¡%s CONCENTRADO! (SUELTA LOS GRIPS PARA DISPARAR)" % super_power_type.to_upper())
+		if super_charge_timer >= min_time_required:
+			if not super_locked_haptic:
+				super_locked_haptic = true
+				_pulse_haptic(left_controller, 160.0, 0.90, 0.15)
+				_pulse_haptic(right_controller, 160.0, 0.90, 0.15)
+				if gesture_tree and gesture_tree.has_signal("phase_changed"):
+					gesture_tree.emit_signal("phase_changed", "¡%s CARGADO! (SUELTA LOS GRIPS PARA DISPARAR)" % super_power_type.to_upper())
+			elif int(super_charge_timer * 10) % 5 == 0:
+				if gesture_tree and gesture_tree.has_signal("phase_changed"):
+					gesture_tree.emit_signal("phase_changed", "¡%s CONCENTRADO! (SUELTA LOS GRIPS PARA DISPARAR)" % super_power_type.to_upper())
 
 		# --- FASE 2: DISPARO EXCLUSIVAMENTE AL SOLTAR LOS BOTONES (REGLAS 1 & 4) ---
 		var arms_extended_both = _is_arm_extended(left_controller) and _is_arm_extended(right_controller)
@@ -773,6 +806,7 @@ func _reset_super_state() -> void:
 	current_super_state = SuperPowerState.IDLE
 	super_power_type = ""
 	super_charge_timer = 0.0
+	super_locked_haptic = false
 	if gesture_tree:
 		gesture_tree._hide_aim_reticle()
 		gesture_tree.set("is_charging_kamehameha", false)
@@ -1022,6 +1056,56 @@ func _set_player_blocking(blocking: bool) -> void:
 
 
 # --- UTILIDADES HÁPTICAS Y COMUNICACIÓN ---
+## Bio-Hápticos sutiles: vibración rítmica en latido ("heartbeat") proporcional al % de Ki y multiplicada por la transformación
+func _process_bio_haptics(delta: float) -> void:
+	if not haptics_enabled or not left_controller or not right_controller:
+		return
+
+	# Silenciar durante la carga o ejecución activa de cualquier ataque para no contaminar el feedback cinético
+	if left_is_charging or right_is_charging or is_charging_ki or ki_prep_phase or current_super_state != SuperPowerState.IDLE:
+		bio_haptic_timer = 0.0
+		return
+
+	var player = gesture_tree._get_player_instance() if gesture_tree else null
+	if not player or not is_instance_valid(player):
+		return
+
+	if player.get("is_in_bullet_time") or player.get("is_flying_to_melee"):
+		bio_haptic_timer = 0.0
+		return
+
+	var current_ki = float(player.get("current_ki") if player.get("current_ki") != null else 0.0)
+	var max_ki = float(player.get("max_ki") if player.get("max_ki") != null else 100.0)
+	var ki_ratio = clampf(current_ki / maxf(max_ki, 1.0), 0.0, 1.0)
+
+	# Multiplicador según la transformación actual
+	var trans_mult: float = 1.0
+	var trans = player.get("current_transformation")
+	if trans != null and trans.get("transformation_name") != null:
+		var t_name: String = String(trans.get("transformation_name")).to_lower()
+		if "kaioken" in t_name:
+			trans_mult = 1.35
+		elif "ssj2" in t_name or "super saiyan 2" in t_name:
+			trans_mult = 2.0
+		elif "ssj3" in t_name or "blue" in t_name or "ssb" in t_name or "god" in t_name:
+			trans_mult = 2.25
+		elif "ssj" in t_name or "super" in t_name:
+			trans_mult = 1.75
+
+	# Intervalo del latido: a mayor Ki, latido más enérgico (entre 1.25s y 0.70s)
+	var target_interval = lerpf(1.25, 0.70, ki_ratio)
+	bio_haptic_timer += delta
+
+	if bio_haptic_timer >= target_interval:
+		bio_haptic_timer = 0.0
+		# Amplitud base sutil entre 0.06 y 0.14 modulada por la transformación
+		var base_amp = lerpf(0.06, 0.14, ki_ratio)
+		var final_amp = clampf(base_amp * trans_mult, 0.06, 0.60)
+		var freq = lerpf(55.0, 90.0, ki_ratio)
+		_pulse_haptic(left_controller, freq, final_amp, 0.05)
+		_pulse_haptic(right_controller, freq, final_amp, 0.05)
+
+
 func _pulse_haptic(controller: XRController3D, freq: float, amp: float, duration: float) -> void:
 	if not haptics_enabled or not controller:
 		return
