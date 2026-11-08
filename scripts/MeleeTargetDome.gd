@@ -28,10 +28,14 @@ var right_velocity: Vector3 = Vector3.ZERO
 var fist_charge_times: Array[float] = [0.0, 0.0]
 var fist_locked_haptic: Array[bool] = [false, false]
 var fist_buffer_timers: Array[float] = [0.0, 0.0]
+var hand_must_retract: Array[bool] = [false, false] # Exige retraer el puño antes del siguiente golpe (evita barridos)
 
 # Seguimiento de carga para Martillazo bimanual (mínimo 2.0s de carga con manos juntas)
 var hammer_charge_time: float = 0.0
 var hammer_locked_haptic: bool = false
+var hammer_primed: bool = false
+var hammer_primed_window: float = 0.0
+var hammer_interruption_timer: float = 0.0
 
 # Vector de lanzamiento del último golpe cargado o martillo
 var last_impact_vector: Vector3 = Vector3.ZERO
@@ -189,11 +193,13 @@ func _update_controller_velocities(delta: float) -> void:
 		prev_right_pos = cur_pos
 
 
-## Actualiza el estado de puño cerrado y la carga de cada mano
+## Actualiza el estado de puño cerrado, la carga de cada mano y la retracción del brazo
 func _update_fist_states(delta: float) -> void:
 	var left_ctrl = _get_controller("LeftHand")
 	var right_ctrl = _get_controller("RightHand")
 	var ctrls = [left_ctrl, right_ctrl]
+	var cam_pos = global_position
+	var cam_fwd = -global_transform.basis.z
 
 	for i in range(2):
 		var c = ctrls[i]
@@ -204,6 +210,16 @@ func _update_fist_states(delta: float) -> void:
 		var grip_press = grip_v > 0.55 or c.is_button_pressed("grip_click")
 		var trig_press = trig_v > 0.40 or c.is_button_pressed("trigger_click")
 		var is_fist = grip_press and trig_press
+
+		# Comprobar retracción obligatoria del brazo para habilitar el siguiente golpe
+		var cur_vel = left_velocity if i == 0 else right_velocity
+		var fwd_speed = cur_vel.dot(cam_fwd)
+		var dist_to_body = c.global_position.distance_to(cam_pos)
+
+		if hand_must_retract[i]:
+			# El puño se considera retraído si viaja hacia atrás (pull-back) o se recoge cerca del cuerpo (< 0.35m)
+			if fwd_speed < -0.22 or dist_to_body < 0.35:
+				hand_must_retract[i] = false
 
 		if is_fist:
 			fist_buffer_timers[i] = 0.15 # Gracia de 150ms
@@ -227,17 +243,26 @@ func _process_hammer_charge(delta: float) -> bool:
 	var left_ctrl = _get_controller("LeftHand")
 	var right_ctrl = _get_controller("RightHand")
 	if not left_ctrl or not right_ctrl:
-		hammer_charge_time = 0.0
-		hammer_locked_haptic = false
 		return false
 
 	var l_fist = fist_buffer_timers[0] > 0.0
 	var r_fist = fist_buffer_timers[1] > 0.0
 	var hands_dist = left_ctrl.global_position.distance_to(right_ctrl.global_position)
 
-	# Ambas manos en puño cerrado juntas (distancia <= 0.38m)
-	if l_fist and r_fist and hands_dist <= 0.38:
+	# Si ya completó los 2 segundos de carga, mantener el martillazo armado por 2.5 segundos para ejecutar el golpe
+	if hammer_primed:
+		hammer_primed_window -= delta
+		if hammer_primed_window <= 0.0:
+			hammer_primed = false
+			hammer_charge_time = 0.0
+			hammer_locked_haptic = false
+		return true
+
+	# Ambas manos en puño cerrado juntas (distancia ergonómica <= 0.48m)
+	if l_fist and r_fist and hands_dist <= 0.48:
 		hammer_charge_time += delta
+		hammer_interruption_timer = 0.35 # Ventana de gracia contra fluctuaciones de tracking
+
 		# Pulso háptico rítmico mientras carga
 		if left_ctrl.has_method("trigger_haptic_pulse"):
 			left_ctrl.trigger_haptic_pulse("haptic", 85.0, clampf(0.20 + hammer_charge_time * 0.25, 0.20, 0.85), delta, 0.0)
@@ -247,26 +272,31 @@ func _process_hammer_charge(delta: float) -> bool:
 		# Haptic Lock-in al completar 2.0s de carga mínima
 		if hammer_charge_time >= 2.0 and not hammer_locked_haptic:
 			hammer_locked_haptic = true
+			hammer_primed = true
+			hammer_primed_window = 2.5 # 2.5s para descargar el martillo hacia abajo
 			if left_ctrl.has_method("trigger_haptic_pulse"):
-				left_ctrl.trigger_haptic_pulse("haptic", 170.0, 1.0, 0.20, 0.0)
+				left_ctrl.trigger_haptic_pulse("haptic", 180.0, 1.0, 0.25, 0.0)
 			if right_ctrl.has_method("trigger_haptic_pulse"):
-				right_ctrl.trigger_haptic_pulse("haptic", 170.0, 1.0, 0.20, 0.0)
+				right_ctrl.trigger_haptic_pulse("haptic", 180.0, 1.0, 0.25, 0.0)
 		return true
 	else:
-		# Si se separan las manos antes de 2.0s, resetea
-		if hammer_charge_time < 2.0:
-			hammer_charge_time = 0.0
-			hammer_locked_haptic = false
+		# Si se separan las manos temporalmente, amortiguar con el buffer de interrupción
+		if not hammer_primed:
+			if hammer_interruption_timer > 0.0:
+				hammer_interruption_timer -= delta
+			else:
+				hammer_charge_time = 0.0
+				hammer_locked_haptic = false
 		return false
 
 
-## Comprueba si el jugador junta ambos puños y descarga el Martillazo como Finisher
+## Comprueba si el jugador descarga el Martillazo como Finisher tras haberlo cargado
 func _check_hammer_finisher() -> bool:
 	if not is_active:
 		return false
 
-	# REQUISITO CANÓNICO: Requiere al menos 2.0 segundos de carga con ambos puños juntos
-	if hammer_charge_time < 2.0:
+	# REQUISITO CANÓNICO: Requiere haber completado los 2 segundos de carga (hammer_primed)
+	if not hammer_primed and hammer_charge_time < 2.0:
 		return false
 
 	var left_ctrl = _get_controller("LeftHand")
@@ -274,38 +304,34 @@ func _check_hammer_finisher() -> bool:
 	if not left_ctrl or not right_ctrl:
 		return false
 
-	var l_pos = left_ctrl.global_position
-	var r_pos = right_ctrl.global_position
-	var hand_dist = l_pos.distance_to(r_pos)
-	if hand_dist > 0.45:
-		return false
-
-	var avg_v = (left_velocity + right_velocity) * 0.5
+	# Velocidad descendente de ambos mandos
+	var down_l = -left_velocity.y
+	var down_r = -right_velocity.y
+	var avg_down = (down_l + down_r) * 0.5
 	var peak_speed = maxf(left_velocity.length(), right_velocity.length())
-	var downward_speed = -avg_v.y
 
-	# Umbral cinemático estricto tras la carga: swing descendente hacia abajo
-	if downward_speed > 0.80 or (downward_speed > 0.50 and peak_speed > 1.10):
-		var to_def = Vector3.FORWARD
+	# Umbral cinemático estricto tras la carga: swing descendente rápido hacia el suelo
+	if avg_down > 0.55 or down_l > 0.65 or down_r > 0.65 or (avg_down > 0.40 and peak_speed > 0.95):
+		var to_def = -global_transform.basis.z
 		if defender and is_instance_valid(defender) and attacker and is_instance_valid(attacker):
 			var diff = (defender.global_position - attacker.global_position)
 			diff.y = 0.0
 			if diff.length_squared() > 0.01:
 				to_def = diff.normalized()
 
-		# Vector de impacto hacia abajo y hacia el oponente/suelo
-		var launch_vec = (to_def * 2.5 + Vector3.DOWN * 5.0).normalized() * 7.0
+		# Vector canónico de impacto DBZ: Proyecta al oponente hacia atrás y por los aires a alta velocidad
+		var launch_vec = (to_def * 4.2 + Vector3.UP * 2.2).normalized() * 11.5
 		last_impact_vector = launch_vec
 		was_last_hit_charged = true
 
-		print("[BulletTimeDome] ⚡ ¡FINISHER MARTILLAZO DETECTADO! (Carga: %.2fs, Vel: %.2f m/s, Corte inmediato de tiempo)." % [hammer_charge_time, peak_speed])
+		print("[BulletTimeDome] ⚡ ¡FINISHER MARTILLAZO DETECTADO! (Descendente: %.2f m/s). Cortando minijuego de inmediato y lanzando por los aires." % avg_down)
 		is_active = false
 		emit_signal("finisher_triggered", "hammer_strike", peak_speed, hits, launch_vec)
 
 		# Desvanecer rápidamente la cúpula y autoeliminarse
 		if dome_mesh and is_instance_valid(dome_mesh):
 			var tw = create_tween()
-			tw.tween_property(dome_mesh, "scale", Vector3.ZERO, 0.12).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+			tw.tween_property(dome_mesh, "scale", Vector3.ZERO, 0.10).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
 			tw.tween_callback(queue_free)
 		else:
 			queue_free()
@@ -495,11 +521,18 @@ func _check_controller_punches() -> void:
 		if not is_fist:
 			continue
 
-		# REQUISITO CANÓNICO 2: Velocímetro del golpe. Se requiere una velocidad física mínima de 0.55 m/s
+		# REQUISITO CANÓNICO 2: Retracción obligatoria del brazo (Anti-Barrido).
+		# Tras conectar un golpe, el brazo debe retraerse hacia atrás antes de poder asestar el siguiente.
+		if hand_must_retract[hand_idx]:
+			continue
+
+		# REQUISITO CANÓNICO 3: Velocímetro del golpe real. Requiere velocidad física mínima de 0.85 m/s
 		var cur_vel = left_velocity if hand_idx == 0 else right_velocity
 		var v_mag = cur_vel.length()
-		if v_mag < 0.55:
+		if v_mag < 0.85:
 			continue
+
+		var cam_fwd = -global_transform.basis.z
 
 		for zone in target_zones:
 			if zone.get("cooldown", 0.0) > 0.0:
@@ -508,14 +541,22 @@ func _check_controller_punches() -> void:
 			var target_pos: Vector3 = zone["node"].global_position
 			var dist: float = hand_pos.distance_to(target_pos)
 
-			# Radio de detección de golpe físico: 0.30 metros
-			if dist <= 0.30:
-				_register_hit(zone, ctrl_node, hand_name, hand_idx, cur_vel, v_mag)
+			# Radio de detección calibrado al tamaño real de la caja (0.16m)
+			if dist <= 0.16:
+				# Cinemática de puñetazo auténtico: el vector de velocidad debe penetrar hacia el objetivo o avanzar frontalmente
+				var to_target = (target_pos - hand_pos).normalized() if dist > 0.01 else cam_fwd
+				var punch_speed = maxf(cur_vel.dot(cam_fwd), cur_vel.dot(to_target))
+
+				# Si la mano solo se desplaza lateralmente con el brazo estirado (barrido), se descarta (mínimo 0.70 m/s de avance)
+				if punch_speed >= 0.70:
+					hand_must_retract[hand_idx] = true
+					_register_hit(zone, ctrl_node, hand_name, hand_idx, cur_vel, v_mag)
+					break
 
 
 ## Registra el impacto exitoso en una zona calculando potencia y dirección del golpe
 func _register_hit(zone: Dictionary, ctrl_node: XRController3D, hand_name: String, hand_idx: int, cur_vel: Vector3, v_mag: float) -> void:
-	# Cooldown de 140ms por zona para permitir golpes repetidos rápidos al mismo lugar
+	# Cooldown de 140ms por zona para permitir golpes repetidos rápidos al mismo lugar tras retraer
 	zone["cooldown"] = 0.14
 	var hit_pos: Vector3 = zone["node"].global_position
 
@@ -531,10 +572,10 @@ func _register_hit(zone: Dictionary, ctrl_node: XRController3D, hand_name: Strin
 	# Determinar vector de lanzamiento según la dirección donde llegó el golpe (cielo, atrás, lado, suelo)
 	if is_charged:
 		was_last_hit_charged = true
-		last_impact_vector = (swing_dir + Vector3.UP * 0.30).normalized() * (5.5 + punch_power * 0.35)
+		last_impact_vector = (swing_dir + Vector3.UP * 0.25).normalized() * (8.5 + punch_power * 0.45)
 	else:
 		was_last_hit_charged = false
-		last_impact_vector = (fwd + Vector3.UP * 0.15).normalized() * 3.8
+		last_impact_vector = (fwd + Vector3.UP * 0.15).normalized() * 4.0
 
 	# Consumo de Ki / BP por golpe físico
 	if attacker and is_instance_valid(attacker) and attacker.has_method("consume_ki_or_life_force"):

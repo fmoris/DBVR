@@ -249,18 +249,34 @@ func _process_ki_recharge(delta: float) -> void:
 			is_charging_ki = false
 			return
 
-		# FASE 1: Concentración a la altura de los hombros o pecho
+		# FASE 1: Concentración a la altura de los hombros o pecho (OBLIGATORIAMENTE DELANTE DE LOS HOMBROS)
+		var cam_right = camera.global_transform.basis.x if camera else Vector3.RIGHT
+		var l_local_x = (l_pos - cam_pos).dot(cam_right)
+		var r_local_x = (r_pos - cam_pos).dot(cam_right)
+		var hands_dist = l_pos.distance_to(r_pos)
+
+		var in_front_of_shoulders = (l_fwd_proj >= 0.16 and r_fwd_proj >= 0.16) and (abs(l_local_x) < 0.45 and abs(r_local_x) < 0.45) and hands_dist <= 0.48
+		var at_shoulder_height = (l_rel_y > -0.38 and r_rel_y > -0.38 and l_rel_y < 0.18 and r_rel_y < 0.18)
+
 		if not is_charging_ki:
 			if not ki_prep_phase:
-				if l_rel_y > -0.45 and r_rel_y > -0.45 and l_rel_y < 0.25 and r_rel_y < 0.25:
+				if at_shoulder_height and in_front_of_shoulders:
 					ki_prep_phase = true
 					if gesture_tree and gesture_tree.has_signal("phase_changed"):
 						gesture_tree.emit_signal("phase_changed", "RECARGA KI: FASE 1 (HOMBROS)")
 					if gesture_tree and gesture_tree.has_signal("gesture_logged"):
-						gesture_tree.emit_signal("gesture_logged", "[KI] Fase 1: Concentración en hombros. ¡Baja los puños a la cintura!", "info")
+						gesture_tree.emit_signal("gesture_logged", "[KI] Fase 1: Concentración delante de los hombros. ¡Baja los puños a la cintura!", "info")
 					_pulse_haptic(left_controller, 70.0, 0.40, 0.12)
 					_pulse_haptic(right_controller, 70.0, 0.40, 0.12)
 			else:
+				# Si durante la Fase 1 aleja las manos hacia los lados o rompe la pose sin descender a la cintura, cancelar
+				if not in_front_of_shoulders and avg_rel_y > -0.28:
+					ki_prep_phase = false
+					if gesture_tree:
+						gesture_tree._cancel_action("Recarga cancelada (manos fuera de posición)")
+						gesture_tree._reset_to_idle()
+					return
+
 				# Pulso háptico suave continuo indicando concentración en Fase 1
 				_pulse_haptic(left_controller, 50.0, 0.22, delta)
 				_pulse_haptic(right_controller, 50.0, 0.22, delta)
@@ -479,10 +495,10 @@ func _process_super_powers(delta: float) -> void:
 		return
 
 	if must_release_super_buttons:
-		var l_g = left_controller.get_float("grip") > 0.35 or left_controller.is_button_pressed("grip_click")
-		var r_g = right_controller.get_float("grip") > 0.35 or right_controller.is_button_pressed("grip_click")
-		var l_t = left_controller.get_float("trigger") > 0.35 or left_controller.is_button_pressed("trigger_click")
-		var r_t = right_controller.get_float("trigger") > 0.35 or right_controller.is_button_pressed("trigger_click")
+		var l_g = left_controller.get_float("grip") > 0.55 or left_controller.is_button_pressed("grip_click")
+		var r_g = right_controller.get_float("grip") > 0.55 or right_controller.is_button_pressed("grip_click")
+		var l_t = left_controller.get_float("trigger") > 0.50 or left_controller.is_button_pressed("trigger_click")
+		var r_t = right_controller.get_float("trigger") > 0.50 or right_controller.is_button_pressed("trigger_click")
 		if not l_g and not r_g and not l_t and not r_t:
 			must_release_super_buttons = false
 		else:
@@ -656,6 +672,42 @@ func _process_super_powers(delta: float) -> void:
 
 			gesture_tree._update_aim_reticle(aim_origin, aim_dir, aim_color)
 
+		# VALIDACIÓN ESTRICTA DE MANTENIMIENTO DE POSTURA EN FASE 1:
+		# Si el usuario hace cualquier otro movimiento que rompa la pose requerida, se cancela y regresa a IDLE.
+		var pose_maintained = true
+		match super_power_type:
+			"final_flash":
+				# Requiere ambos grips y brazos en cruz (hands_dist >= 0.42, rel_y entre -0.38 y +0.38)
+				if not (l_grip and r_grip and hands_dist >= 0.42 and rel_y > -0.38 and rel_y < 0.38 and l_fwd_proj >= -0.15 and r_fwd_proj >= -0.15):
+					pose_maintained = false
+			"galick_ho":
+				# Manos juntas a la altura del hombro/pecho (hands_dist < 0.48, rel_y > -0.35)
+				if not (l_grip and r_grip and hands_dist < 0.48 and rel_y > -0.35 and (l_fwd_proj >= -0.12 or r_fwd_proj >= -0.12)):
+					pose_maintained = false
+			"big_bang":
+				var bb_side = gesture_tree.get("big_bang_hand") if gesture_tree else (0 if l_grip else 1)
+				var bb_ctrl = left_controller if bb_side == 0 else right_controller
+				var active_grip = l_grip if bb_side == 0 else r_grip
+				var active_trig = l_trig if bb_side == 0 else r_trig
+				if not active_grip or active_trig or not _is_arm_extended(bb_ctrl):
+					pose_maintained = false
+			"genkidama":
+				# Brazos arriba
+				if not (l_grip and r_grip and rel_y >= 0.18 and hands_dist >= 0.25):
+					pose_maintained = false
+			"kamehameha":
+				# Manos juntas al costado/cadera
+				if not (l_grip and r_grip and rel_y <= -0.12 and hands_dist < 0.38):
+					pose_maintained = false
+
+		# Si el jugador hizo otro movimiento cualquiera mientras cargaba, cancelar de inmediato a IDLE
+		if not pose_maintained:
+			if gesture_tree:
+				gesture_tree._cancel_action("%s interrumpido (postura rota)" % super_power_type.capitalize())
+				gesture_tree._reset_to_idle()
+			_reset_super_state()
+			return
+
 		# Notificar estado listo en HUD cuando la carga supera el mínimo de la técnica
 		var min_time_required = 1.2
 		match super_power_type:
@@ -677,9 +729,7 @@ func _process_super_powers(delta: float) -> void:
 					gesture_tree.emit_signal("phase_changed", "¡%s CONCENTRADO! (SUELTA LOS GRIPS PARA DISPARAR)" % super_power_type.to_upper())
 
 		# --- FASE 2: DISPARO EXCLUSIVAMENTE AL SOLTAR LOS BOTONES (REGLAS 1 & 4) ---
-		var arms_extended_both = _is_arm_extended(left_controller) and _is_arm_extended(right_controller)
 		var bb_side = gesture_tree.get("big_bang_hand") if gesture_tree else (0 if l_grip else 1)
-		var bb_ctrl = left_controller if bb_side == 0 else right_controller
 		var active_grip = l_grip if bb_side == 0 else r_grip
 
 		var buttons_released = false
@@ -688,48 +738,29 @@ func _process_super_powers(delta: float) -> void:
 		else:
 			buttons_released = not l_grip and not r_grip
 
-		# Si los botones siguen apretados, NO dispara bajo ninguna circunstancia (evita metralleta)
+		# Si los botones siguen apretados, continúa cargando
 		if not buttons_released:
 			return
 
-		# En el momento en que se sueltan los botones, evaluar si cumple la postura y tiempo mínimo
-		var fire_success = false
-		var cancel_reason = ""
-
+		# En el momento en que se sueltan los botones, evaluar si cumple la carga mínima
+		var min_fire_time = 0.7
 		match super_power_type:
-			"final_flash":
-				if super_charge_timer < 1.0:
-					cancel_reason = "Final Flash cancelado: Carga insuficiente (%.1fs / 1.0s)." % super_charge_timer
-				else:
-					fire_success = true
-			"galick_ho":
-				if super_charge_timer < 0.7:
-					cancel_reason = "Galick Ho cancelado: Carga insuficiente (%.1fs / 0.7s)." % super_charge_timer
-				else:
-					fire_success = true
-			"big_bang":
-				if super_charge_timer < 0.5:
-					cancel_reason = "Big Bang cancelado: Carga insuficiente (%.1fs / 0.5s)." % super_charge_timer
-				else:
-					fire_success = true
-			"kamehameha":
-				if super_charge_timer < 0.7:
-					cancel_reason = "Kamehameha cancelado: Carga insuficiente (%.1fs / 0.7s)." % super_charge_timer
-				else:
-					fire_success = true
-			"genkidama":
-				if super_charge_timer < 1.2:
-					cancel_reason = "Genkidama cancelada: Carga insuficiente (%.1fs / 1.2s)." % super_charge_timer
-				else:
-					fire_success = true
+			"final_flash": min_fire_time = 1.0
+			"galick_ho": min_fire_time = 0.7
+			"big_bang": min_fire_time = 0.5
+			"kamehameha": min_fire_time = 0.7
+			"genkidama": min_fire_time = 1.2
 
-		if fire_success:
+		if super_charge_timer >= min_fire_time:
 			_execute_super_fire(super_power_type)
 		else:
-			if gesture_tree and cancel_reason != "":
-				gesture_tree._cancel_action(cancel_reason)
-			super_cooldown = 0.25
-			must_release_super_buttons = true
+			# Se soltó antes de tiempo: cancelar inmediatamente y regresar a IDLE limpio
+			if gesture_tree:
+				gesture_tree._cancel_action("%s cancelado: carga insuficiente (%.1fs / %.1fs)" % [
+					super_power_type.capitalize(), super_charge_timer, min_fire_time
+				])
+				gesture_tree._reset_to_idle()
+			super_cooldown = 0.20
 			_reset_super_state()
 
 
@@ -780,11 +811,12 @@ func _execute_super_fire(tech_name: String) -> void:
 	if gesture_tree:
 		gesture_tree._hide_aim_reticle()
 		gesture_tree._trigger_action(tech_name)
+		gesture_tree._reset_to_idle()
 
-	# Ventana de enfriamiento ágil para super poderes
+	# Ventana de enfriamiento ágil para super poderes y retorno limpio a IDLE
 	super_fatigue_timer = 1.0
-	super_cooldown = 0.40
-	must_release_super_buttons = true
+	super_cooldown = 0.30
+	must_release_super_buttons = false
 	_reset_super_state()
 
 

@@ -1733,41 +1733,63 @@ func _execute_hammer_strike_finisher(opponent: Node3D, swing_velocity: float, re
 		opponent.take_hit(direct_damage, Vector3.ZERO)
 		increase_np(direct_damage * 0.45)
 
-	var final_launch = launch_vector if launch_vector.length_squared() > 0.1 else (fwd * 3.5 + Vector3.DOWN * 4.5).normalized() * 7.0
+	var final_launch = launch_vector if launch_vector.length_squared() > 0.1 else (fwd * 4.2 + Vector3.UP * 2.2).normalized() * 11.5
 
 	_log_combat_event("💥 ¡FINISHER MARTILLAZO CONECTADO! Rival derribado. Daño: %.0f NP" % direct_damage, "success")
-	print("[HammerFinisher] Martillazo conectado: daño=%.0f NP. Atacante inmóvil. Impulsando hacia suelo y cielo." % direct_damage)
+	print("[HammerFinisher] Martillazo conectado: daño=%.0f NP. Atacante inmóvil. Impulsando hacia los aires." % direct_damage)
 
 	# Iniciar secuencia de seguimiento aéreo tras el impacto del martillazo
 	_start_followup_airborne_sequence(opponent, final_launch)
 
 
-## Separa determinísticamente a ambos combatientes hacia la distancia canónica de combate (5.5m)
+## Separa simétricamente a ambos combatientes hacia la distancia canónica de combate (5.5m)
 func _separate_fighters_to_canonical_distance(opponent: Node3D, target_distance: float = 5.5) -> void:
 	if not opponent or not is_instance_valid(opponent):
 		return
 
 	var my_origin = get_parent() if is_player else null
-	var my_pos = my_origin.global_position if my_origin else global_position
-	var opp_pos = opponent.global_position
-	var diff = opp_pos - my_pos
-	diff.y = 0.0
-	var dir = diff.normalized() if diff.length_squared() > 0.01 else -global_transform.basis.z
-	dir.y = 0.0
-	dir = dir.normalized()
+	var cam: Camera3D = my_origin.get_node_or_null("XRCamera3D") if my_origin else null
 
-	var target_opp_pos = my_pos + dir * target_distance
+	var p_pos = cam.global_position if cam else (my_origin.global_position if my_origin else global_position)
+	var p_h = Vector3(p_pos.x, 0.0, p_pos.z)
+	var opp_h = Vector3(opponent.global_position.x, 0.0, opponent.global_position.z)
+
+	var fwd_dir = (opp_h - p_h).normalized()
+	if fwd_dir.length_squared() < 0.01:
+		fwd_dir = -cam.global_transform.basis.z if cam else -global_transform.basis.z
+		fwd_dir.y = 0.0
+		fwd_dir = fwd_dir.normalized() if fwd_dir.length_squared() > 0.01 else Vector3.FORWARD
+
+	# Punto medio horizontal entre los combatientes
+	var mid = (p_h + opp_h) * 0.5
+	var half_dist = target_distance * 0.5
+
+	# Destino canónico del oponente (alejándose hacia adelante)
+	var target_opp_pos = mid + fwd_dir * half_dist
 	target_opp_pos.y = get_ground_elevation(target_opp_pos)
 
+	# Destino canónico del jugador (alejándose hacia atrás)
+	var target_head_pos = mid - fwd_dir * half_dist
+	var cam_offset = (cam.global_position - my_origin.global_position) if (cam and my_origin) else Vector3.ZERO
+	var target_origin_pos = Vector3(target_head_pos.x - cam_offset.x, my_origin.global_position.y if my_origin else 0.0, target_head_pos.z - cam_offset.z)
+
+	# Frenar velocidades físicas
+	velocity = Vector3.ZERO
+	is_knocked_back = false
 	opponent.set("velocity", Vector3.ZERO)
 	opponent.set("is_knocked_back", false)
 
-	var tw = opponent.create_tween()
-	tw.tween_property(opponent, "global_position", target_opp_pos, 0.45).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	# Desplazamiento simétrico suave simultáneo (0.45s)
+	var tw_opp = opponent.create_tween()
+	tw_opp.tween_property(opponent, "global_position", target_opp_pos, 0.45).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 
 	if is_player and my_origin:
-		_clamp_to_arena(my_origin)
-	_clamp_to_arena(opponent)
+		var tw_p = my_origin.create_tween()
+		tw_p.tween_property(my_origin, "global_position", target_origin_pos, 0.45).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		tw_p.tween_callback(func(): _clamp_to_arena(my_origin))
+
+	tw_opp.tween_callback(func(): _clamp_to_arena(opponent))
+	print("[Combat] Separación simétrica canónica ejecutada: Distancia final=%.1fm." % target_distance)
 
 
 ## Inicia la secuencia de lanzamiento aéreo y activa el Follow-Up Bullet-Time tras 1 segundo
@@ -1775,8 +1797,23 @@ func _start_followup_airborne_sequence(opponent: Node3D, launch_vector: Vector3)
 	if not opponent or not is_instance_valid(opponent):
 		return
 
-	# Aplicar el impulso cinemático inicial en la dirección del impacto
-	opponent.set("velocity", launch_vector * 1.6)
+	# Asegurar componente de elevación aérea y propulsión horizontal enérgica
+	var h_comp = Vector3(launch_vector.x, 0.0, launch_vector.z)
+	var h_dir = h_comp.normalized() if h_comp.length_squared() > 0.01 else -global_transform.basis.z
+	h_dir.y = 0.0
+	h_dir = h_dir.normalized()
+
+	var vert_speed = maxf(launch_vector.y, 3.8)
+	var horiz_speed = maxf(h_comp.length(), 9.5)
+	var final_impulse = h_dir * horiz_speed + Vector3.UP * vert_speed
+
+	# Elevar ligeramente al contrincante sobre el suelo para iniciar vuelo libre por los aires
+	var ground_h = get_ground_elevation(opponent.global_position)
+	opponent.global_position.y = maxf(opponent.global_position.y, ground_h + 0.85)
+
+	# Reducir fricción durante el lanzamiento aéreo (drag=4.0 en vez de 24.0) para que vuele varios metros
+	opponent.set("knockback_drag", 4.0)
+	opponent.set("velocity", final_impulse)
 	opponent.set("is_knocked_back", true)
 
 	# Esperar 1.0 segundo mientras el contrincante vuela por los aires
@@ -1784,15 +1821,17 @@ func _start_followup_airborne_sequence(opponent: Node3D, launch_vector: Vector3)
 	if not opponent or not is_instance_valid(opponent):
 		return
 
+	# Restaurar fricción canónica
+	opponent.set("knockback_drag", 24.0)
+
 	# Si el combate sigue activo, encender el Follow-Up Bullet-Time
 	is_in_followup_bullet_time = true
 	followup_bullet_time_timer = 4.0
 	opponent_airborne_target = opponent
 
-	# Ralentizar al oponente para mantenerlo suspendido en el aire
-	var opp_v = opponent.get("velocity")
-	if opp_v is Vector3:
-		opponent.set("velocity", opp_v * 0.12)
+	# Suspender al oponente en el aire en cámara lenta
+	opponent.set("velocity", Vector3.ZERO)
+	opponent.set("is_knocked_back", false)
 
 	_log_combat_event("⚡ ¡CADENA DE SEGUIMIENTO EN EL AIRE! (4.0s) Dispara Ki Blasts, Melee Dash o Super Poder", "success")
 	var gss = _get_gesture_tree()
@@ -1810,8 +1849,13 @@ func _end_followup_bullet_time(timed_out: bool = false) -> void:
 	opponent_airborne_target = null
 
 	if target_opp and is_instance_valid(target_opp):
-		if timed_out:
-			# Si se agotó el tiempo sin acción, la gravedad devuelve al oponente al suelo y se separan a 5.5m
+		# En cualquier finalización donde los combatientes queden cerca o tras expirar el tiempo, separarlos a 5.5m
+		var my_origin = get_parent() if is_player else null
+		var cam: Camera3D = my_origin.get_node_or_null("XRCamera3D") if my_origin else null
+		var p_pos = cam.global_position if cam else (my_origin.global_position if my_origin else global_position)
+		var current_dist = p_pos.distance_to(target_opp.global_position)
+
+		if timed_out or current_dist < 4.5:
 			_separate_fighters_to_canonical_distance(target_opp, 5.5)
 			_log_combat_event("Secuencia aérea concluida. Separación táctica restablecida (5.5m).", "info")
 		else:
