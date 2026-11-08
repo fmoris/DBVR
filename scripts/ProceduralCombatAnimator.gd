@@ -221,13 +221,7 @@ func _apply_arms_guard(delta: float, is_charging_ki: bool, is_blocking: bool, fl
 		_set_bone_rot_relative("RightForeArm", charge_forearm_r)
 
 	else:
-		# Si hay un AnimationPlayer reproduciendo una animación de combate (ej: fighting_idle / bouncing_fight_idle),
-		# respetar la pose del AnimationPlayer y no sobreescribir los brazos para evitar posturas rígidas
-		var anim_player: AnimationPlayer = character_instance.get("combat_anim_player") if character_instance else null
-		if anim_player and anim_player.is_playing():
-			return
-
-		# Guardia de Combate Marcial DBZ estándar (Idle vivo fallback):
+		# Guardia de Combate Marcial DBZ canónica (Idle vivo orgánico y fluido):
 		var idle_pulse = sin(anim_time * 1.5) * 0.025
 
 		var guard_arm_l = Quaternion.from_euler(Vector3(deg_to_rad(35.0) + idle_pulse, deg_to_rad(12.0), deg_to_rad(15.0)))
@@ -248,5 +242,5 @@ func _set_bone_rot_relative(bone_name: String, offset_quat: Quaternion) -> void:
 
 	var idx: int = bone_indices[bone_name]
 	var rest_quat: Quaternion = bone_rest_rotations[bone_name]
-	var final_rot: Quaternion = (rest_quat * offset_quat).normalized()
+	var final_rot: Quaternion = (offset_quat * rest_quat).normalized()
 	skeleton.set_bone_pose_rotation(idx, final_rot)

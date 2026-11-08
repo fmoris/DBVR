@@ -155,26 +155,13 @@ func setup_character() -> void:
 							
 					print("[CharacterInstance] Cuerpo 1ra persona configurado. Head: %d, Neck: %d, ArmIK: [L:%d, R:%d]" % [head_bone_idx, neck_bone_idx, left_arm_idx, right_arm_idx])
 				else:
-					# 1. Configurar AnimationPlayer con la librería de animaciones de combate retargeteadas
-					var anim_lib_res = load("res://resources/DBVR_Combat_Animations.tres")
-					if anim_lib_res:
-						var skel_parent = skeleton.get_parent()
-						combat_anim_player = AnimationPlayer.new()
-						combat_anim_player.name = "CombatAnimationPlayer"
-						skel_parent.add_child(combat_anim_player)
-						combat_anim_player.root_node = skel_parent.get_path()
-						combat_anim_player.add_animation_library("", anim_lib_res)
-						# Postura de combate firme y marcial (cero saltos de boxeo)
-						var target_anim = "fighting_idle" if combat_anim_player.has_animation("fighting_idle") else "bouncing_fight_idle"
-						if combat_anim_player.has_animation(target_anim):
-							combat_anim_player.play(target_anim)
-							print("[CharacterInstance] %s: Postura firme '%s' activada en bucle." % [(character_data.character_name if character_data else name), target_anim])
-
-					# 2. Configurar animador procedural para dar vida orgánica al oponente en VR (Look-At, Ki jitter, Flinch)
+					# 1. Configurar animador procedural para dar vida orgánica al oponente en VR
+					# Utiliza la anatomía y rest pose canónica de Dragon Ball (Look-At interactivo, respiración, guardia DBZ, Ki jitter y flinch)
+					# No se aplica animación Mixamo FBX ya que colapsa los huesos y rota la pelvis 180°
 					procedural_animator = ProceduralCombatAnimatorClass.new()
 					procedural_animator.setup(skeleton, self)
 
-					# 3. Generar PhysicalBoneSimulator3D para la simulación física de impactos (Ragdoll)
+					# 2. Generar PhysicalBoneSimulator3D para la simulación física de impactos (Ragdoll)
 					ragdoll_simulator = RuntimeRagdollGenerator.generate_ragdoll(skeleton, {"total_mass": 75.0})
 					if ragdoll_simulator:
 						ragdoll_simulator.physical_bones_stop_simulation()
@@ -1416,10 +1403,6 @@ func stop_ragdoll() -> void:
 	ragdoll_simulator.physical_bones_stop_simulation()
 	if procedural_animator:
 		procedural_animator.enabled = true
-	if combat_anim_player:
-		var target_anim = "fighting_idle" if combat_anim_player.has_animation("fighting_idle") else "bouncing_fight_idle"
-		if combat_anim_player.has_animation(target_anim):
-			combat_anim_player.play(target_anim)
 	print("[Ragdoll] Simulación física detenida. Reanudando postura de combate.")
 
 
