@@ -1062,9 +1062,10 @@ func _solve_arm_ik(
 	skeleton.set_bone_pose_rotation(shoulder_idx, q_shoulder)
 	skeleton.set_bone_pose_rotation(forearm_idx, q_forearm_local)
 
-	# 3. Orientación matemática canónica de la muñeca relativa al antebrazo padre (Punto 5)
+	# 3. Orientación matemática canónica de la muñeca calibrada según telemetría empírica del visor VR
 	var target_basis_skel = skel_inv.basis * target_global_basis
-	var align_basis = Basis.from_euler(Vector3(deg_to_rad(14.0), deg_to_rad(90.0 if is_left else -90.0), 0.0))
+	# Calibración: Pitch 6.0°, Yaw ±90.0°, Roll ∓5.5° para encaje anatómico exacto del mando
+	var align_basis = Basis.from_euler(Vector3(deg_to_rad(6.0), deg_to_rad(90.0 if is_left else -90.0), deg_to_rad(-5.5 if is_left else 5.5)))
 	var desired_hand_basis = target_basis_skel * align_basis
 
 	var parent_pose_basis = skeleton.get_bone_global_pose(forearm_idx).basis
@@ -1080,19 +1081,23 @@ func _apply_finger_curls_to_skeleton(skel: Skeleton3D, prefix: String, trigger: 
 	var is_left = (prefix == "Left")
 	var curl_axis = Vector3(0.0, 0.0, -1.0) if is_left else Vector3(0.0, 0.0, 1.0)
 
+	# Zona muerta de descanso natural en empuñadura de mandos Quest (calibrado empíricamente a 0.12)
+	var eff_grip = clampf((grip - 0.12) / 0.88, 0.0, 1.0)
+	var eff_trig = clampf((trigger - 0.08) / 0.92, 0.0, 1.0)
+
 	# Distribución jerárquica anatómica para evitar sobre-flexión de dedos en espiral
-	var rot_j1 = Quaternion(curl_axis, grip * 0.70)
-	var rot_j2 = Quaternion(curl_axis, grip * 0.85)
-	var rot_j3 = Quaternion(curl_axis, grip * 0.65)
+	var rot_j1 = Quaternion(curl_axis, eff_grip * 0.70)
+	var rot_j2 = Quaternion(curl_axis, eff_grip * 0.85)
+	var rot_j3 = Quaternion(curl_axis, eff_grip * 0.65)
 
 	# Índice controlado por Trigger
-	var idx_rot_j1 = Quaternion(curl_axis, trigger * 0.70)
-	var idx_rot_j2 = Quaternion(curl_axis, trigger * 0.85)
-	var idx_rot_j3 = Quaternion(curl_axis, trigger * 0.65)
+	var idx_rot_j1 = Quaternion(curl_axis, eff_trig * 0.70)
+	var idx_rot_j2 = Quaternion(curl_axis, eff_trig * 0.85)
+	var idx_rot_j3 = Quaternion(curl_axis, eff_trig * 0.65)
 
 	# Pulgar
 	var thumb_axis = Vector3(0.5, -0.4, -0.7).normalized() if is_left else Vector3(-0.5, -0.4, 0.7).normalized()
-	var thumb_val = (trigger * 0.4 + grip * 0.6)
+	var thumb_val = (eff_trig * 0.4 + eff_grip * 0.6)
 	var thumb_rot_1 = Quaternion(thumb_axis, thumb_val * 0.45)
 	var thumb_rot_2 = Quaternion(thumb_axis, thumb_val * 0.60)
 	var thumb_rot_3 = Quaternion(thumb_axis, thumb_val * 0.50)
