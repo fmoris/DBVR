@@ -212,7 +212,7 @@ func _process(delta: float) -> void:
 	_process_guard()
 
 
-# --- 1. RECARGA DE KI (Ambos gatillos sostenidos con manos a la cintura/pecho) ---
+# --- 1. RECARGA DE KI (2 FASES: Gatillos a Hombros -> Descenso a Cintura/Cadera) ---
 func _process_ki_recharge(delta: float) -> void:
 	var l_trig: bool = left_controller.get_float("trigger") > 0.45 or left_controller.is_button_pressed("trigger_click")
 	var r_trig: bool = right_controller.get_float("trigger") > 0.45 or right_controller.is_button_pressed("trigger_click")
@@ -235,21 +235,39 @@ func _process_ki_recharge(delta: float) -> void:
 		var l_fwd_proj = (l_pos - cam_pos).dot(cam_fwd)
 		var r_fwd_proj = (r_pos - cam_pos).dot(cam_fwd)
 		if l_fwd_proj < -0.22 and r_fwd_proj < -0.22:
-			if is_charging_ki and gesture_tree:
+			if (is_charging_ki or ki_prep_phase) and gesture_tree:
 				gesture_tree._cancel_action("Recarga de Ki cancelada (manos detrás de la espalda)")
 				gesture_tree._reset_to_idle()
+			ki_prep_phase = false
 			is_charging_ki = false
 			return
 
-		# Activación natural: si las manos están a la altura del pecho o cintura (avg_rel_y <= 0.15)
+		# FASE 1: Concentración a la altura de los hombros o pecho
 		if not is_charging_ki:
-			is_charging_ki = true
-			if gesture_tree:
-				gesture_tree._trigger_action("recarga_ki")
-				if gesture_tree.has_signal("phase_changed"):
-					gesture_tree.emit_signal("phase_changed", "¡RECARGANDO KI! (CONCENTRACIÓN MÁXIMA)")
+			if not ki_prep_phase:
+				if l_rel_y > -0.45 and r_rel_y > -0.45 and l_rel_y < 0.25 and r_rel_y < 0.25:
+					ki_prep_phase = true
+					if gesture_tree and gesture_tree.has_signal("phase_changed"):
+						gesture_tree.emit_signal("phase_changed", "RECARGA KI: FASE 1 (HOMBROS)")
+					if gesture_tree and gesture_tree.has_signal("gesture_logged"):
+						gesture_tree.emit_signal("gesture_logged", "[KI] Fase 1: Concentración en hombros. ¡Baja los puños a la cintura!", "info")
+					_pulse_haptic(left_controller, 70.0, 0.40, 0.12)
+					_pulse_haptic(right_controller, 70.0, 0.40, 0.12)
+			else:
+				# Pulso háptico suave continuo indicando concentración en Fase 1
+				_pulse_haptic(left_controller, 50.0, 0.22, delta)
+				_pulse_haptic(right_controller, 50.0, 0.22, delta)
 
-		# Regenerar Ki y NP activamente cada frame
+				# FASE 2: Detonación de Ki al descender las manos/muñecas a la cintura o caderas
+				if avg_rel_y <= -0.28:
+					is_charging_ki = true
+					ki_prep_phase = false
+					if gesture_tree:
+						gesture_tree._trigger_action("recarga_ki")
+						if gesture_tree.has_signal("phase_changed"):
+							gesture_tree.emit_signal("phase_changed", "¡RECARGA DE KI ACTIVA! (CINTURA)")
+
+		# Mantenimiento activo de la Fase 2 (Carga Máxima de Ki y NP)
 		if is_charging_ki:
 			var player = gesture_tree._get_player_instance() if gesture_tree else null
 			if player and is_instance_valid(player):
