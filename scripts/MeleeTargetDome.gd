@@ -198,8 +198,16 @@ func _update_fist_states(delta: float) -> void:
 	var left_ctrl = _get_controller("LeftHand")
 	var right_ctrl = _get_controller("RightHand")
 	var ctrls = [left_ctrl, right_ctrl]
-	var cam_pos = global_position
-	var cam_fwd = -global_transform.basis.z
+
+	var cam: Camera3D = null
+	if attacker and is_instance_valid(attacker):
+		var p = attacker.get_parent()
+		if p:
+			cam = p.get_node_or_null("XRCamera3D")
+	var cam_pos = cam.global_position if cam else (attacker.global_position + Vector3(0.0, 1.45, 0.0) if attacker else global_position)
+	var cam_fwd = -cam.global_transform.basis.z if cam else (-attacker.global_transform.basis.z if attacker else Vector3.FORWARD)
+	cam_fwd.y = 0.0
+	cam_fwd = cam_fwd.normalized() if cam_fwd.length_squared() > 0.01 else Vector3.FORWARD
 
 	for i in range(2):
 		var c = ctrls[i]
@@ -217,8 +225,8 @@ func _update_fist_states(delta: float) -> void:
 		var dist_to_body = c.global_position.distance_to(cam_pos)
 
 		if hand_must_retract[i]:
-			# El puño se considera retraído si viaja hacia atrás (pull-back) o se recoge cerca del cuerpo (< 0.35m)
-			if fwd_speed < -0.22 or dist_to_body < 0.35:
+			# El puño se considera retraído si viaja hacia atrás (pull-back) o se recoge cerca del cuerpo (< 0.35m del pecho real)
+			if fwd_speed < -0.30 or dist_to_body < 0.35:
 				hand_must_retract[i] = false
 
 		if is_fist:
@@ -543,12 +551,10 @@ func _check_controller_punches() -> void:
 
 			# Radio de detección calibrado al tamaño real de la caja (0.16m)
 			if dist <= 0.16:
-				# Cinemática de puñetazo auténtico: el vector de velocidad debe penetrar hacia el objetivo o avanzar frontalmente
-				var to_target = (target_pos - hand_pos).normalized() if dist > 0.01 else cam_fwd
-				var punch_speed = maxf(cur_vel.dot(cam_fwd), cur_vel.dot(to_target))
-
-				# Si la mano solo se desplaza lateralmente con el brazo estirado (barrido), se descarta (mínimo 0.70 m/s de avance)
-				if punch_speed >= 0.70:
+				# Cinemática de puñetazo auténtico: debe ser un golpe real hacia adelante, no un barrido lateral
+				var punch_fwd_speed = cur_vel.dot(cam_fwd)
+				# Requiere avance frontal nítido (mínimo 0.95 m/s) para evitar que pasar la mano extendida active golpes
+				if punch_fwd_speed >= 0.95:
 					hand_must_retract[hand_idx] = true
 					_register_hit(zone, ctrl_node, hand_name, hand_idx, cur_vel, v_mag)
 					break

@@ -387,10 +387,18 @@ func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta:
 	var trig_pressed = trig_val > 0.35 or controller.is_button_pressed("trigger_click")
 	var is_left = (hand_side == 0)
 
-	if trig_pressed:
-		var cam_p = camera.global_position if camera else xr_origin.global_position + Vector3(0, 1.6, 0)
+	var cam_p = camera.global_position if camera else xr_origin.global_position + Vector3(0, 1.6, 0)
+	var cam_fwd = -camera.global_transform.basis.z.normalized() if camera else -xr_origin.global_transform.basis.z.normalized()
+	var ctrl_p = controller.global_position
+	var aim_fwd = -controller.global_transform.basis.z.normalized()
+	var dist_from_cam = ctrl_p.distance_to(cam_p)
+
+	# REQUISITO CANÓNICO: Para cargar y disparar Ki Blast, el brazo debe estar estirado hacia adelante (distancia >= 0.36m)
+	# y la palma/mando apuntando hacia el frente en la dirección de la vista (dot product >= 0.35)
+	var is_arm_extended = dist_from_cam >= 0.36 and aim_fwd.dot(cam_fwd) > 0.35
+
+	if trig_pressed and is_arm_extended:
 		var aim_origin = controller.global_position
-		var aim_fwd = -controller.global_transform.basis.z.normalized()
 
 		# Consumir Ki mientras carga. Si no queda Ki, quema vital (BP)
 		var player = gesture_tree._get_player_instance() if gesture_tree else null
@@ -433,10 +441,11 @@ func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta:
 				gesture_tree._update_aim_reticle(aim_origin, aim_fwd, Color(1.0, 0.7, 0.1))
 			_pulse_haptic(controller, 100.0, clamp(0.15 + right_charge_time * 0.4, 0.15, 0.95), delta)
 	else:
-		# Gatillo soltado: Evaluar disparo (tap rápido o disparo cargado)
+		# Gatillo soltado o brazo retirado: Evaluar disparo (tap rápido o disparo cargado)
 		var held_time = left_charge_time if is_left else right_charge_time
 
-		if held_time >= 0.04:
+		# Solo dispara si se mantuvo cargando al menos 0.04s Y el brazo sigue estirado al frente
+		if held_time >= 0.04 and is_arm_extended:
 			var is_charged = held_time >= 0.50
 			var action_name = "ki_blast_left" if is_left else "ki_blast_right"
 

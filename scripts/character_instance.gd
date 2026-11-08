@@ -1097,43 +1097,71 @@ func _apply_finger_curls_to_skeleton(skel: Skeleton3D, prefix: String, trigger: 
 	if not skel:
 		return
 	var is_left = (prefix == "Left")
+
+	# Ejes anatómicos canónicos de flexión (dir_hueso x normal_palma)
+	# Para Índice, Medio y Anular: rotación perpendicular pura en Z
 	var curl_axis = Vector3(0.0, 0.0, -1.0) if is_left else Vector3(0.0, 0.0, 1.0)
+	# Para Meñique: compensación del ángulo rest pose de 37° en Z
+	var pinky_axis = Vector3(0.5794, -0.3436, -0.7390) if is_left else Vector3(0.5765, 0.3419, 0.7421)
+	# Para Pulgar: flexión hacia la palma con leve oposición hacia -Z
+	var thumb_curl_axis = Vector3(0.0, 0.0, -1.0) if is_left else Vector3(0.0, 0.0, 1.0)
+	var thumb_opp_axis = Vector3(0.0, 1.0, 0.0) if is_left else Vector3(0.0, -1.0, 0.0)
 
-	# Zona muerta de descanso natural en empuñadura de mandos Quest (calibrado empíricamente a 0.12)
-	var eff_grip = clampf((grip - 0.12) / 0.88, 0.0, 1.0)
-	var eff_trig = clampf((trigger - 0.08) / 0.92, 0.0, 1.0)
+	var eff_grip = clampf(grip, 0.0, 1.0)
+	var eff_trig = clampf(trigger, 0.0, 1.0)
 
-	# Distribución jerárquica anatómica para evitar sobre-flexión de dedos en espiral
-	var rot_j1 = Quaternion(curl_axis, eff_grip * 0.70)
-	var rot_j2 = Quaternion(curl_axis, eff_grip * 0.85)
-	var rot_j3 = Quaternion(curl_axis, eff_grip * 0.65)
+	# Postura ergonómica base al empuñar el mando (descanso natural sin botones) + flexión activa al apretar
+	# Dedos de agarre (Medio y Anular)
+	var bend_mid_j1 = 0.28 + eff_grip * 0.45
+	var bend_mid_j2 = 0.32 + eff_grip * 0.55
+	var bend_mid_j3 = 0.22 + eff_grip * 0.40
+	var rot_j1 = Quaternion(curl_axis, bend_mid_j1)
+	var rot_j2 = Quaternion(curl_axis, bend_mid_j2)
+	var rot_j3 = Quaternion(curl_axis, bend_mid_j3)
 
-	# Índice controlado por Trigger
-	var idx_rot_j1 = Quaternion(curl_axis, eff_trig * 0.70)
-	var idx_rot_j2 = Quaternion(curl_axis, eff_trig * 0.85)
-	var idx_rot_j3 = Quaternion(curl_axis, eff_trig * 0.65)
+	# Meñique (con su eje propio compensado)
+	var rot_pinky_j1 = Quaternion(pinky_axis, bend_mid_j1)
+	var rot_pinky_j2 = Quaternion(pinky_axis, bend_mid_j2)
+	var rot_pinky_j3 = Quaternion(pinky_axis, bend_mid_j3)
 
-	# Pulgar: rota desde +Z envolviendo hacia -Z a través de la palma y sobre los dedos
-	var thumb_axis = Vector3(0.58, 0.78, -0.22).normalized() if is_left else Vector3(0.58, -0.78, 0.22).normalized()
-	var thumb_val = (eff_trig * 0.4 + eff_grip * 0.6)
-	var thumb_rot_1 = Quaternion(thumb_axis, thumb_val * 0.45)
-	var thumb_rot_2 = Quaternion(thumb_axis, thumb_val * 0.60)
-	var thumb_rot_3 = Quaternion(thumb_axis, thumb_val * 0.50)
+	# Índice (curvatura natural en gatillo + flexión total al apretar)
+	var bend_idx_j1 = 0.16 + eff_trig * 0.52
+	var bend_idx_j2 = 0.20 + eff_trig * 0.62
+	var bend_idx_j3 = 0.14 + eff_trig * 0.48
+	var idx_rot_j1 = Quaternion(curl_axis, bend_idx_j1)
+	var idx_rot_j2 = Quaternion(curl_axis, bend_idx_j2)
+	var idx_rot_j3 = Quaternion(curl_axis, bend_idx_j3)
 
-	# Aplicar a cada nivel jerárquico (Middle, Ring, Pinky)
-	var bones_level_1 = [prefix + "Middle1", prefix + "Ring1", prefix + "Pinky1", prefix + "MiddleProximal", prefix + "RingProximal", prefix + "PinkyProximal"]
-	var bones_level_2 = [prefix + "Middle2", prefix + "Ring2", prefix + "Pinky2", prefix + "MiddleIntermediate", prefix + "RingIntermediate", prefix + "PinkyIntermediate"]
-	var bones_level_3 = [prefix + "Middle3", prefix + "Ring3", prefix + "Pinky3", prefix + "MiddleDistal", prefix + "RingDistal", prefix + "PinkyDistal"]
+	# Pulgar (descanso sobre el plato superior + oposición al cerrar puño)
+	var thumb_val = clampf(eff_trig * 0.45 + eff_grip * 0.55, 0.0, 1.0)
+	var th_bend_1 = 0.12 + thumb_val * 0.35
+	var th_bend_2 = 0.16 + thumb_val * 0.42
+	var th_bend_3 = 0.14 + thumb_val * 0.38
+	var thumb_rot_1 = Quaternion(thumb_curl_axis, th_bend_1) * Quaternion(thumb_opp_axis, 0.20 + thumb_val * 0.30)
+	var thumb_rot_2 = Quaternion(thumb_curl_axis, th_bend_2)
+	var thumb_rot_3 = Quaternion(thumb_curl_axis, th_bend_3)
 
-	for b_name in bones_level_1:
+	# Aplicar a Medio y Anular
+	for b_name in [prefix + "Middle1", prefix + "Ring1", prefix + "MiddleProximal", prefix + "RingProximal"]:
 		var idx = skel.find_bone(b_name)
 		if idx != -1: skel.set_bone_pose_rotation(idx, rot_j1)
-	for b_name in bones_level_2:
+	for b_name in [prefix + "Middle2", prefix + "Ring2", prefix + "MiddleIntermediate", prefix + "RingIntermediate"]:
 		var idx = skel.find_bone(b_name)
 		if idx != -1: skel.set_bone_pose_rotation(idx, rot_j2)
-	for b_name in bones_level_3:
+	for b_name in [prefix + "Middle3", prefix + "Ring3", prefix + "MiddleDistal", prefix + "RingDistal"]:
 		var idx = skel.find_bone(b_name)
 		if idx != -1: skel.set_bone_pose_rotation(idx, rot_j3)
+
+	# Aplicar a Meñique
+	for b_name in [prefix + "Pinky1", prefix + "PinkyProximal"]:
+		var idx = skel.find_bone(b_name)
+		if idx != -1: skel.set_bone_pose_rotation(idx, rot_pinky_j1)
+	for b_name in [prefix + "Pinky2", prefix + "PinkyIntermediate"]:
+		var idx = skel.find_bone(b_name)
+		if idx != -1: skel.set_bone_pose_rotation(idx, rot_pinky_j2)
+	for b_name in [prefix + "Pinky3", prefix + "PinkyDistal"]:
+		var idx = skel.find_bone(b_name)
+		if idx != -1: skel.set_bone_pose_rotation(idx, rot_pinky_j3)
 
 	# Índice
 	var idx_b1 = skel.find_bone(prefix + "Index1")
@@ -1751,13 +1779,35 @@ func _execute_hammer_strike_finisher(opponent: Node3D, swing_velocity: float, re
 		opponent.take_hit(direct_damage, Vector3.ZERO)
 		increase_np(direct_damage * 0.45)
 
-	var final_launch = launch_vector if launch_vector.length_squared() > 0.1 else (fwd * 4.2 + Vector3.UP * 2.2).normalized() * 11.5
+	# 6. Cálculo cinético de expulsión demoledora (BP atacante vs BP defensor + Ki gastado + velocidad de golpe)
+	var ki_mult: float = 1.0 + (ki_spent / 25.0) * 0.90
+	var swing_mult: float = clampf(v_clean / 2.2, 0.85, 2.2)
+	var launch_base_speed: float = 26.0 # m/s base estilo Dragon Ball Z
+	var final_speed: float = launch_base_speed * ratio_bp * ki_mult * swing_mult
 
-	_log_combat_event("💥 ¡FINISHER MARTILLAZO CONECTADO! Rival derribado. Daño: %.0f NP" % direct_damage, "success")
-	print("[HammerFinisher] Martillazo conectado: daño=%.0f NP. Atacante inmóvil. Impulsando hacia los aires." % direct_damage)
+	var launch_dir = (fwd * 3.8 + Vector3.UP * 1.8).normalized()
+	var final_impulse = launch_dir * final_speed
 
-	# Iniciar secuencia de seguimiento aéreo tras el impacto del martillazo
-	_start_followup_airborne_sequence(opponent, final_launch)
+	# Elevar ligeramente al oponente sobre el suelo para trayectoria parabólica aérea
+	var ground_h = get_ground_elevation(opponent.global_position)
+	opponent.global_position.y = maxf(opponent.global_position.y, ground_h + 0.85)
+
+	# Fricción reducida (1.6 en vez de 24.0) para que vuele 15-25m cruzando la arena
+	opponent.set("knockback_drag", 1.6)
+	opponent.set("velocity", final_impulse)
+	opponent.set("is_knocked_back", true)
+
+	# REQUISITO CANÓNICO: El martillazo CORTA Y TERMINA el minijuego por completo (sin Follow-Up Bullet Time)
+	is_in_bullet_time = false
+	is_in_followup_bullet_time = false
+	active_target_dome = null
+
+	_log_combat_event("💥 ¡FINISHER MARTILLAZO! Rival expulsado a %.1f m/s (BP Ratio: %.2f). Fin del minijuego." % [final_speed, ratio_bp], "success")
+	print("[HammerFinisher] Martillazo conectado: daño=%.0f NP, vel=%.1f m/s. Minijuego cortado. Oponente volando por los aires." % [direct_damage, final_speed])
+
+	var gss = _get_gesture_tree()
+	if gss and gss.has_signal("phase_changed"):
+		gss.emit_signal("phase_changed", "¡FASE LIBRE! (RIVAL EXPULSADO)")
 
 
 ## Separa simétricamente a ambos combatientes hacia la distancia canónica de combate (5.5m)
@@ -1828,16 +1878,22 @@ func _start_followup_airborne_sequence(opponent: Node3D, launch_vector: Vector3)
 	h_dir.y = 0.0
 	h_dir = h_dir.normalized()
 
-	var vert_speed = maxf(launch_vector.y, 3.8)
-	var horiz_speed = maxf(h_comp.length(), 9.5)
+	# Cálculo de expulsión aérea escalado por ratio BP y Ki
+	var bp_atk: float = maxf(current_np, 1000.0)
+	var bp_def: float = maxf(opponent.get("current_np") if opponent.get("current_np") != null else 10000.0, 1000.0)
+	var ratio_bp: float = clampf(sqrt(bp_atk / bp_def), 0.50, 3.5)
+	var ki_mult: float = 1.0 + (current_ki / 100.0) * 0.60
+
+	var vert_speed = maxf(launch_vector.y, 4.5) * ratio_bp * 0.9
+	var horiz_speed = maxf(h_comp.length(), 16.0) * ratio_bp * ki_mult
 	var final_impulse = h_dir * horiz_speed + Vector3.UP * vert_speed
 
 	# Elevar ligeramente al contrincante sobre el suelo para iniciar vuelo libre por los aires
 	var ground_h = get_ground_elevation(opponent.global_position)
 	opponent.global_position.y = maxf(opponent.global_position.y, ground_h + 0.85)
 
-	# Reducir fricción durante el lanzamiento aéreo (drag=4.0 en vez de 24.0) para que vuele varios metros
-	opponent.set("knockback_drag", 4.0)
+	# Fricción reducida durante el lanzamiento aéreo (drag=1.8 en vez de 24.0) para que vuele varios metros
+	opponent.set("knockback_drag", 1.8)
 	opponent.set("velocity", final_impulse)
 	opponent.set("is_knocked_back", true)
 
