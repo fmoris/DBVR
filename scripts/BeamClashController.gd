@@ -40,6 +40,7 @@ var prev_l_grip: bool = false
 var prev_r_grip: bool = false
 
 const KiCoronaShader = preload("res://shaders/ki_corona.gdshader")
+const KiBeamShader = preload("res://shaders/ki_beam.gdshader")
 const ShockwaveShader = preload("res://shaders/shockwave.gdshader")
 
 
@@ -339,9 +340,11 @@ func _build_visuals() -> void:
 	beam_mesh_atk.mesh = cyl_atk
 
 	var mat_atk = ShaderMaterial.new()
-	mat_atk.shader = KiCoronaShader
-	mat_atk.set_shader_parameter("base_color", color_atk)
-	mat_atk.set_shader_parameter("speed", 6.0)
+	mat_atk.shader = KiBeamShader
+	mat_atk.set_shader_parameter("beam_color", color_atk)
+	mat_atk.set_shader_parameter("core_color", Color(1.0, 1.0, 1.0, 1.0))
+	mat_atk.set_shader_parameter("flow_speed", 14.0)
+	mat_atk.set_shader_parameter("core_intensity", 3.8)
 	beam_mesh_atk.material_override = mat_atk
 	add_child(beam_mesh_atk)
 
@@ -353,9 +356,11 @@ func _build_visuals() -> void:
 	beam_mesh_def.mesh = cyl_def
 
 	var mat_def = ShaderMaterial.new()
-	mat_def.shader = KiCoronaShader
-	mat_def.set_shader_parameter("base_color", color_def)
-	mat_def.set_shader_parameter("speed", 6.0)
+	mat_def.shader = KiBeamShader
+	mat_def.set_shader_parameter("beam_color", color_def)
+	mat_def.set_shader_parameter("core_color", Color(1.0, 1.0, 1.0, 1.0))
+	mat_def.set_shader_parameter("flow_speed", 14.0)
+	mat_def.set_shader_parameter("core_intensity", 3.8)
 	beam_mesh_def.material_override = mat_def
 	add_child(beam_mesh_def)
 

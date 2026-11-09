@@ -60,8 +60,17 @@ const ProceduralCombatAnimatorClass = preload("res://scripts/ProceduralCombatAni
 var procedural_animator: RefCounted = null
 var combat_anim_player: AnimationPlayer = null
 var head_bone_idx: int = -1
+var hidden_head_bone_indices: Array[int] = []
 var neck_bone_idx: int = -1
 var torso_yaw: float = 0.0
+
+## Retorna el nodo espacial raíz responsable del posicionamiento en el mundo (XROrigin3D para el jugador, o self para la IA)
+func get_spatial_root() -> Node3D:
+	if is_player:
+		var p = get_parent()
+		if p is Node3D and p is XROrigin3D:
+			return p
+	return self
 
 # Índices óseos para Cinemática Inversa (IK) de brazos en 1ra persona
 var left_arm_idx: int = -1
@@ -155,6 +164,21 @@ func setup_character() -> void:
 								break
 					if head_bone_idx != -1:
 						skeleton.set_bone_pose_scale(head_bone_idx, Vector3.ZERO)
+					
+					# Recolectar recursivamente todos los huesos asociados a cabeza, cabello y rostro
+					hidden_head_bone_indices.clear()
+					for i in range(skeleton.get_bone_count()):
+						var b_name = skeleton.get_bone_name(i).to_lower()
+						var is_head_descendant = false
+						var p_idx = skeleton.get_bone_parent(i)
+						while p_idx != -1:
+							if p_idx == head_bone_idx:
+								is_head_descendant = true
+								break
+							p_idx = skeleton.get_bone_parent(p_idx)
+						if i == head_bone_idx or is_head_descendant or "hair" in b_name or "eye" in b_name or "face" in b_name or "jaw" in b_name or "brow" in b_name or "mouth" in b_name:
+							hidden_head_bone_indices.append(i)
+							skeleton.set_bone_pose_scale(i, Vector3.ZERO)
 						
 					neck_bone_idx = skeleton.find_bone("Neck")
 					if neck_bone_idx == -1:
@@ -207,6 +231,10 @@ func setup_character() -> void:
 func _physics_process(delta: float) -> void:
 	if Engine.is_editor_hint():
 		return
+
+	# Asegurar bloqueo rígido permanente del Transform del jugador al XROrigin3D (Cero desfase 1ra persona)
+	if is_player:
+		transform = Transform3D.IDENTITY
 
 	# Control de simulación y recuperación Ragdoll
 	if is_ragdoll_active:
@@ -312,6 +340,10 @@ func _physics_process(delta: float) -> void:
 
 
 func _process(delta: float) -> void:
+	# Asegurar bloqueo rígido permanente del Transform del jugador al XROrigin3D
+	if is_player:
+		transform = Transform3D.IDENTITY
+
 	# Manejar temporizador de penalización por fallo de remate
 	if is_penalized:
 		penalty_timer -= delta
@@ -337,14 +369,15 @@ func _process(delta: float) -> void:
 	if is_player and aura_node and is_instance_valid(aura_node):
 		var camera = get_parent().get_node_or_null("XRCamera3D")
 		if camera:
-			aura_node.position = Vector3(camera.position.x, 0.0, camera.position.z)
+			var cam_w = camera.global_position
+			var p_orig: Node3D = get_parent() as Node3D
+			var floor_y = p_orig.global_position.y if p_orig else global_position.y
+			aura_node.global_position = Vector3(cam_w.x, floor_y, cam_w.z)
 
 	# Alinear el cuerpo con la cámara y mover cuello según la dirección de mirada con deadzone
 	if is_player and is_instance_valid(body_mesh_instance):
 		var camera = get_parent().get_node_or_null("XRCamera3D")
 		if camera:
-			var local_cam_pos = camera.position
-			
 			# 1. Torso Deadzone: El torso no gira bruscamente; solo cuando la cabeza gira más de 35 grados
 			var cam_yaw: float = camera.rotation.y
 			var yaw_diff: float = wrapf(cam_yaw - torso_yaw, -PI, PI)
@@ -355,14 +388,20 @@ func _process(delta: float) -> void:
 				
 			# Offset hacia atrás del torso respecto a los ojos (10cm) para alineación anatómica
 			var torso_back: Vector3 = Vector3(sin(torso_yaw), 0.0, cos(torso_yaw)) * 0.10
-			body_mesh_instance.position = Vector3(local_cam_pos.x + torso_back.x, 0.0, local_cam_pos.z + torso_back.z)
-			# El modelo mira hacia +Z en local; para mirar hacia adelante (-Z del visor VR) rotamos torso_yaw + PI (180 grados)
-			body_mesh_instance.rotation = Vector3(0.0, torso_yaw + PI, 0.0)
+			var cam_world: Vector3 = camera.global_position
+			var origin_node: Node3D = get_parent() as Node3D
+			var floor_y: float = origin_node.global_position.y if origin_node else global_position.y
+			
+			# Anclaje mundial absoluto: El cuerpo siempre está exactamente debajo de la cabeza en el mundo real
+			body_mesh_instance.global_position = Vector3(cam_world.x + torso_back.x, floor_y, cam_world.z + torso_back.z)
+			var origin_rot_y: float = origin_node.global_rotation.y if origin_node else 0.0
+			body_mesh_instance.global_rotation = Vector3(0.0, origin_rot_y + torso_yaw + PI, 0.0)
 			
 			if skeleton:
-				# Ocultar únicamente el hueso "Head" a escala cero para evitar clipping con la cámara
-				if head_bone_idx != -1 and skeleton.get_bone_pose_scale(head_bone_idx) != Vector3.ZERO:
-					skeleton.set_bone_pose_scale(head_bone_idx, Vector3.ZERO)
+				# Ocultar todos los huesos de cabeza, cabello y rostro a escala cero para evitar cualquier visión en 3ra persona
+				for b_idx in hidden_head_bone_indices:
+					if skeleton.get_bone_pose_scale(b_idx) != Vector3.ZERO:
+						skeleton.set_bone_pose_scale(b_idx, Vector3.ZERO)
 				
 				# Mover el cuello para acompañar la mirada del jugador (Pitch y Yaw natural)
 				if neck_bone_idx != -1:
@@ -1506,6 +1545,14 @@ func get_ground_elevation(world_pos: Vector3) -> float:
 
 
 func _clamp_to_arena(node: Node3D) -> void:
+	if not node or not is_instance_valid(node):
+		return
+	# Si el nodo es el avatar del jugador, clamplear el XROrigin3D y asegurar transform local cero
+	if node.get("is_player") and node.get_parent() is XROrigin3D:
+		var origin: XROrigin3D = node.get_parent()
+		node.transform = Transform3D.IDENTITY
+		node = origin
+
 	var pos = node.global_position
 	var limit = arena_half_limit
 	var hit_mountain = false
@@ -2059,7 +2106,12 @@ func _execute_hammer_strike_finisher(opponent: Node3D, swing_velocity: float, re
 
 	# Elevar ligeramente al oponente sobre el suelo para trayectoria parabólica aérea
 	var ground_h = get_ground_elevation(opponent.global_position)
-	opponent.global_position.y = maxf(opponent.global_position.y, ground_h + 0.85)
+	if opponent.get("is_player"):
+		var p_orig = opponent.get_parent()
+		if p_orig is Node3D:
+			p_orig.global_position.y = maxf(p_orig.global_position.y, ground_h)
+	else:
+		opponent.global_position.y = maxf(opponent.global_position.y, ground_h + 0.85)
 
 	# Fricción reducida (0.85 en vez de 1.6) para que vuele el doble de distancia cruzando la arena
 	opponent.set("knockback_drag", 0.85)
@@ -2085,6 +2137,34 @@ func _separate_fighters_to_canonical_distance(opponent: Node3D, target_distance:
 	if not opponent or not is_instance_valid(opponent):
 		return
 
+	# Si la IA es quien ejecutó la acción, la IA retrocede respecto al jugador para mantener el espacio de combate
+	if not is_player:
+		var opp_origin = opponent.get_parent() if opponent.get("is_player") else null
+		var opp_cam = opp_origin.get_node_or_null("XRCamera3D") if opp_origin else null
+		var p_head = opp_cam.global_position if opp_cam else (opp_origin.global_position if opp_origin else opponent.global_position)
+		var p_h = Vector3(p_head.x, 0.0, p_head.z)
+		var ai_h = Vector3(global_position.x, 0.0, global_position.z)
+		var current_d = ai_h.distance_to(p_h)
+		if current_d >= target_distance:
+			return
+		var away_dir = (ai_h - p_h).normalized()
+		if away_dir.length_squared() < 0.01:
+			away_dir = global_transform.basis.z
+			away_dir.y = 0.0
+			away_dir = away_dir.normalized() if away_dir.length_squared() > 0.01 else Vector3.FORWARD
+		var target_ai_pos = p_h + away_dir * target_distance
+		target_ai_pos.y = get_ground_elevation(target_ai_pos)
+		
+		velocity = Vector3.ZERO
+		is_knocked_back = false
+		is_flying_to_opponent = false
+		var tw_self = create_tween()
+		tw_self.tween_property(self, "global_position", target_ai_pos, 0.35).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		tw_self.tween_callback(func(): _clamp_to_arena(self))
+		print("[Combat] Separación canónica: IA retrocedió suavemente a %.1fm del jugador." % target_distance)
+		return
+
+	# Si el jugador ejecutó la acción (atacante), el oponente IA es quien se aleja
 	var my_origin = get_parent() if is_player else null
 	var cam: Camera3D = my_origin.get_node_or_null("XRCamera3D") if my_origin else null
 
@@ -2103,7 +2183,7 @@ func _separate_fighters_to_canonical_distance(opponent: Node3D, target_distance:
 		fwd_dir.y = 0.0
 		fwd_dir = fwd_dir.normalized() if fwd_dir.length_squared() > 0.01 else Vector3.FORWARD
 
-	# Destino canónico del oponente: exactamente a target_distance frente a la cabeza del jugador
+	# Destino canónico del oponente IA: exactamente a target_distance frente a la cabeza del jugador
 	var target_opp_pos = p_h + fwd_dir * target_distance
 	target_opp_pos.y = get_ground_elevation(target_opp_pos)
 
@@ -2115,7 +2195,7 @@ func _separate_fighters_to_canonical_distance(opponent: Node3D, target_distance:
 	opponent.set("is_knocked_back", false)
 	opponent.set("is_flying_to_opponent", false)
 
-	# Desplazamiento limpio y suave del oponente hacia la distancia canónica (0.35s)
+	# Desplazamiento limpio y suave del oponente IA hacia la distancia canónica (0.35s)
 	var tw_opp = opponent.create_tween()
 	tw_opp.tween_property(opponent, "global_position", target_opp_pos, 0.35).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	tw_opp.tween_callback(func(): _clamp_to_arena(opponent))
@@ -2145,7 +2225,12 @@ func _start_followup_airborne_sequence(opponent: Node3D, launch_vector: Vector3)
 
 	# Elevar ligeramente al contrincante sobre el suelo para iniciar vuelo libre por los aires
 	var ground_h = get_ground_elevation(opponent.global_position)
-	opponent.global_position.y = maxf(opponent.global_position.y, ground_h + 0.85)
+	if opponent.get("is_player"):
+		var p_orig = opponent.get_parent()
+		if p_orig is Node3D:
+			p_orig.global_position.y = maxf(p_orig.global_position.y, ground_h)
+	else:
+		opponent.global_position.y = maxf(opponent.global_position.y, ground_h + 0.85)
 
 	# Fricción reducida durante el lanzamiento aéreo (drag=1.8 en vez de 24.0) para que vuele varios metros
 	opponent.set("knockback_drag", 1.8)

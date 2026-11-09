@@ -56,6 +56,7 @@ var l_hand_vel: Vector3 = Vector3.ZERO
 var r_hand_vel: Vector3 = Vector3.ZERO
 
 const KiCoronaShader = preload("res://shaders/ki_corona.gdshader")
+const KiBeamShader = preload("res://shaders/ki_beam.gdshader")
 const ShockwaveShader = preload("res://shaders/shockwave.gdshader")
 const BeamClashControllerClass = preload("res://scripts/BeamClashController.gd")
 
@@ -468,10 +469,11 @@ func _build_visual_beam() -> void:
 	beam_core_mesh.mesh = cyl
 
 	var mat_beam = ShaderMaterial.new()
-	mat_beam.shader = KiCoronaShader
-	mat_beam.set_shader_parameter("base_color", energy_color)
-	mat_beam.set_shader_parameter("speed", 7.0)
-	mat_beam.set_shader_parameter("vertex_displacement", 0.08)
+	mat_beam.shader = KiBeamShader
+	mat_beam.set_shader_parameter("beam_color", energy_color)
+	mat_beam.set_shader_parameter("core_color", Color(1.0, 1.0, 1.0, 1.0))
+	mat_beam.set_shader_parameter("flow_speed", 14.0)
+	mat_beam.set_shader_parameter("core_intensity", 3.8)
 	beam_core_mesh.material_override = mat_beam
 	add_child(beam_core_mesh)
 
