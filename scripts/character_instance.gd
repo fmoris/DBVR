@@ -73,6 +73,7 @@ var right_hand_idx: int = -1
 
 const KiCoronaShader = preload("res://shaders/ki_corona.gdshader")
 const MeleeTargetDomeClass = preload("res://scripts/MeleeTargetDome.gd")
+const SuperBeamSequenceClass = preload("res://scripts/SuperBeamSequenceController.gd")
 var is_charging_ki: bool = false
 var aura_node: Node3D = null
 
@@ -83,6 +84,10 @@ var is_target_locked: bool = false # Requisito canónico de fijación visual par
 var is_in_followup_bullet_time: bool = false
 var followup_bullet_time_timer: float = 0.0
 var opponent_airborne_target: Node3D = null
+
+# Estado y control de Secuencia de Super Haz (Bullet-Time para técnicas supremas)
+var is_in_beam_sequence: bool = false
+var active_beam_sequence: Node3D = null
 
 # Variables de vuelo hacia el contrincante
 var is_flying_to_opponent: bool = false
@@ -1756,6 +1761,31 @@ func calculate_bullet_time_duration(attacker: Node3D, defender: Node3D) -> float
 	var ratio: float = bp_diff / bp_def
 	# Micro-turno dinámico: duración base 2.2s (rango 1.6s - 2.8s según diferencia de BP)
 	return clampf(2.2 + ratio * 0.6, 1.6, 2.8)
+
+
+## Activa la secuencia cinemática y Bullet-Time de Super Ataque de Ki
+func start_super_beam_sequence(tech_name: String, col: Color, dmg: float, tier_level: int = 3) -> void:
+	var opp = _get_opponent()
+	if not opp or not is_instance_valid(opp):
+		return
+	if is_in_beam_sequence or is_in_bullet_time:
+		return
+
+	is_in_beam_sequence = true
+	if opp.has_method("set"):
+		opp.set("is_in_beam_sequence", true)
+
+	var seq = SuperBeamSequenceClass.new()
+	seq.name = "SuperBeamSequenceController"
+	active_beam_sequence = seq
+	get_tree().current_scene.add_child(seq)
+	seq.setup(self, opp, tech_name, col, dmg, tier_level)
+	seq.sequence_completed.connect(func(res: String, final_dmg: float):
+		is_in_beam_sequence = false
+		active_beam_sequence = null
+		if is_instance_valid(opp) and opp.has_method("set"):
+			opp.set("is_in_beam_sequence", false)
+	)
 
 
 ## Activa el modo Bullet-Time táctico al conectar el Melee Dash con el oponente

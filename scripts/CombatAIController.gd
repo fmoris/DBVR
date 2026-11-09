@@ -104,6 +104,10 @@ func _physics_process(delta: float) -> void:
 			host.is_blocking = true
 		return
 
+	# Si la IA está en secuencia de Super Haz de Ki, la resolución la gestiona SuperBeamSequenceController
+	if host.get("is_in_beam_sequence"):
+		return
+
 	# Si el personaje está en ragdoll, volando o noqueado, pausar toma de decisiones
 	if host.is_ragdoll_active or host.is_flying_to_opponent or host.is_knocked_back or host.wall_stick_timer > 0.0:
 		if host.is_charging_ki and current_state != AIState.KI_RECHARGE:
@@ -561,6 +565,14 @@ func _spawn_ki_blast(target_pos: Vector3, is_charged: bool = false) -> void:
 func _spawn_kamehameha_beam(target_pos: Vector3) -> void:
 	if not host.consume_ki(50.0):
 		return
+
+	# Activación de la Secuencia Cinemática y Bullet-Time de Super Ataque para la IA
+	if host and host.has_method("start_super_beam_sequence"):
+		var opp = host._get_opponent()
+		if opp and is_instance_valid(opp):
+			host.start_super_beam_sequence("Kamehameha", Color(0.25, 0.85, 1.0), 1800.0, 3)
+			_play_ai_sfx("kamehameha_fire")
+			return
 
 	var fwd = (target_pos - host.global_position).normalized()
 	if fwd.length_squared() < 0.01:

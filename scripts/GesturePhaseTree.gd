@@ -1542,6 +1542,20 @@ func _spawn_special_projectile(power: Resource) -> void:
 		
 	var speed = power.projectile_speed
 	var energy_color = power.energy_color
+	var player = _get_player_instance()
+	var base_dmg = power.base_damage_np
+	if power.is_finisher and not (player and player.is_in_zenkai_state):
+		base_dmg = 4500.0
+
+	var is_ult_tech = power.is_finisher or power.power_name.contains("Super") or power.power_name == "Genkidama"
+	var tier_val = 4 if is_ult_tech else 3
+
+	# Activación canónica de la Secuencia Cinemática y Bullet-Time de Super Ataques de Ki
+	if player and player.has_method("start_super_beam_sequence"):
+		var opp = player._get_opponent()
+		if opp and is_instance_valid(opp):
+			player.start_super_beam_sequence(power.power_name, energy_color, base_dmg, tier_val)
+			return
 	
 	var projectile = Node3D.new()
 	projectile.name = "ProceduralKiProjectile_" + power.power_name.replace(" ", "") + "_" + str(Time.get_ticks_msec())
@@ -1575,15 +1589,9 @@ func _spawn_special_projectile(power: Resource) -> void:
 	projectile.set("speed_velocity", velocity_dir * speed)
 	projectile.set("p_radius", projectile_radius)
 	projectile.set("p_color", energy_color)
-	var is_ult = power.is_finisher or power.power_name.contains("Super") or power.power_name == "Genkidama"
-	projectile.set("tier", 4 if is_ult else 3)
-	
-	var player = _get_player_instance()
-	var base_dmg = power.base_damage_np
-	if power.is_finisher and not (player and player.is_in_zenkai_state):
-		base_dmg = 4500.0
+	projectile.set("tier", tier_val)
 	projectile.set("base_damage", base_dmg)
-	projectile.set("explosion_radius", 8.5 if is_ult else 4.8)
+	projectile.set("explosion_radius", 8.5 if is_ult_tech else 4.8)
 	
 	# Almacenar referencia al recurso del poder y tiempo de carga
 	projectile.set_meta("power_ref", power)
