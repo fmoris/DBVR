@@ -480,6 +480,8 @@ func _process(delta: float) -> void:
 		if player:
 			player_instance = player
 			player_instance.stats_changed.connect(_on_player_stats_changed)
+			if player_instance.has_signal("transformation_unlocked"):
+				player_instance.transformation_unlocked.connect(_on_transformation_unlocked)
 			_on_player_stats_changed(player_instance.current_ki, player_instance.current_np, player_instance.is_in_zenkai_state)
 			_update_moves_guide_text(current_controller_mode)
 			if ki_cost_label and player_instance.character_data:
@@ -559,6 +561,12 @@ func _on_player_stats_changed(ki: float, np: float, _is_zenkai: bool) -> void:
 			form_col = player_instance.current_transformation.aura_color
 		player_badge_label.text = "[ 🥋 %s // %s ]" % [c_name, form]
 		player_badge_label.label_settings.font_color = form_col
+
+
+func _on_transformation_unlocked(form_name: String) -> void:
+	if action_status_label:
+		action_status_label.text = "⚡ ¡PODER SAIYAN DESPERTADO: %s! ⚡" % form_name.to_upper()
+		action_status_label.label_settings.font_color = Color(1.0, 0.9, 0.1)
 
 
 func _on_phase_changed(new_phase_name: String) -> void:

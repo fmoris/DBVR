@@ -58,6 +58,7 @@ var super_fatigue_timer: float = 0.0
 var must_release_super_buttons: bool = false
 var hud_toggle_cooldown: float = 0.0
 var transform_cooldown: float = 0.0
+var gesture_transform_timer: float = 0.0
 var was_ax_pressed: bool = false
 var was_by_pressed: bool = false
 var startup_cooldown: float = 1.5
@@ -856,6 +857,14 @@ func _process_transformations() -> void:
 					transform_cooldown = 0.30
 					return
 
+			var target_trans = player.character_data.transformations[target_idx]
+			if not player.is_transformation_unlocked(target_trans.form_name):
+				print("[Transformation] %s intentó activar %s pero aún no está desbloqueada." % [player.character_data.character_name, target_trans.form_name])
+				_pulse_haptic(right_controller, 90.0, 0.45, 0.15)
+				_pulse_haptic(left_controller, 90.0, 0.45, 0.15)
+				transform_cooldown = 0.35
+				return
+
 			player.transform_to(target_idx)
 			transform_cooldown = 0.35 # Previene rebotes y pulsaciones múltiples por frame
 			_pulse_haptic(left_controller, 180.0, 0.9, 0.35)
@@ -870,6 +879,55 @@ func _process_transformations() -> void:
 			transform_cooldown = 0.35
 			_pulse_haptic(left_controller, 120.0, 0.6, 0.25)
 			_pulse_haptic(right_controller, 120.0, 0.6, 0.25)
+			return
+
+	# Gesto Canónico de Transformación en VR (Puños a la cintura durante 1.8s)
+	var l_trig = left_controller.get_float("trigger") > 0.45 or left_controller.is_button_pressed("trigger_click") if left_controller else false
+	var r_trig = right_controller.get_float("trigger") > 0.45 or right_controller.is_button_pressed("trigger_click") if right_controller else false
+	var l_grip = left_controller.get_float("grip") > 0.45 or left_controller.is_button_pressed("grip_click") if left_controller else false
+	var r_grip = right_controller.get_float("grip") > 0.45 or right_controller.is_button_pressed("grip_click") if right_controller else false
+
+	if l_trig and r_trig and l_grip and r_grip and camera and left_controller and right_controller:
+		var cam_pos = camera.global_position
+		var left_pos = left_controller.global_position
+		var right_pos = right_controller.global_position
+
+		var is_at_waist = (left_pos.y < cam_pos.y - 0.22) and (right_pos.y < cam_pos.y - 0.22)
+		var dist_hands = left_pos.distance_to(right_pos)
+		var is_waist_dist = dist_hands >= 0.20 and dist_hands <= 0.65
+
+		if is_at_waist and is_waist_dist:
+			gesture_transform_timer += get_process_delta_time()
+			if gesture_transform_timer > 0.2:
+				var pulse_freq = lerp(70.0, 200.0, clampf(gesture_transform_timer / 1.8, 0.0, 1.0))
+				_pulse_haptic(left_controller, pulse_freq, 0.45, 0.05)
+				_pulse_haptic(right_controller, pulse_freq, 0.45, 0.05)
+
+			if gesture_transform_timer >= 1.8:
+				gesture_transform_timer = 0.0
+				var current_trans = player.get("current_transformation")
+				var total_forms = player.character_data.transformations.size()
+				var next_idx = 0
+				if current_trans != null:
+					for i in range(total_forms):
+						if player.character_data.transformations[i] == current_trans:
+							next_idx = i + 1
+							break
+				if next_idx < total_forms:
+					var trans_to_activate = player.character_data.transformations[next_idx]
+					if player.is_transformation_unlocked(trans_to_activate.form_name):
+						player.transform_to(next_idx)
+						transform_cooldown = 0.60
+						_pulse_haptic(left_controller, 220.0, 1.0, 0.50)
+						_pulse_haptic(right_controller, 220.0, 1.0, 0.50)
+					else:
+						_pulse_haptic(left_controller, 80.0, 0.35, 0.15)
+						_pulse_haptic(right_controller, 80.0, 0.35, 0.15)
+						transform_cooldown = 0.40
+		else:
+			gesture_transform_timer = 0.0
+	else:
+		gesture_transform_timer = 0.0
 
 
 # --- 5. GOLPES MELEE CINEMÁTICOS (LANZAMIENTO HACIA EL RIVAL) ---

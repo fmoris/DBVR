@@ -3,6 +3,7 @@ extends Node3D
 
 signal stats_changed(ki: float, np: float, is_zenkai: bool)
 signal transformed(transformation: Resource)
+signal transformation_unlocked(form_name: String)
 signal power_unlocked(power_name: String)
 signal game_finished(winner_name: String)
 signal zenkai_activated(source: String) # "brecha", "comeback"
@@ -15,6 +16,7 @@ var current_np: float = 9000.0
 
 var current_transformation: Resource = null
 var unlocked_powers: Array[String] = []
+var unlocked_transformations: Array[String] = []
 
 # Estado de Zenkai y Comebacks
 var is_in_zenkai_state: bool = false
@@ -112,6 +114,7 @@ func setup_character() -> void:
 	
 	# Desbloquear técnicas base
 	unlocked_powers.clear()
+	unlocked_transformations.clear()
 	for power in character_data.powers:
 		if power.unlock_requirement_transformation == "":
 			unlocked_powers.append(power.power_name)
@@ -168,6 +171,16 @@ func setup_character() -> void:
 					ragdoll_simulator = RuntimeRagdollGenerator.generate_ragdoll(skeleton, {"total_mass": 75.0})
 					if ragdoll_simulator:
 						ragdoll_simulator.physical_bones_stop_simulation()
+
+					# 3. Inicializar Inteligencia Artificial de Combate (CombatAIController)
+					var ai_ctrl = get_node_or_null("CombatAIController")
+					if not ai_ctrl:
+						var ai_script = load("res://scripts/CombatAIController.gd")
+						if ai_script:
+							ai_ctrl = Node.new()
+							ai_ctrl.name = "CombatAIController"
+							ai_ctrl.set_script(ai_script)
+							add_child(ai_ctrl)
 			_disable_frustum_culling_in_children(body_mesh_instance)
 			
 	# Instanciar el modelo de las manos en runtime (solo si ES el jugador, para ver nuestras manos en primera persona)
@@ -374,6 +387,7 @@ func take_hit(amount_np: float, hit_direction: Vector3 = Vector3.ZERO) -> void:
 	var floor_limit: float = max(active_max * secured_np_threshold_ratio, 100.0)
 	current_np = max(current_np - amount_np, floor_limit)
 	_notify_stats()
+	_check_transformation_unlocks()
 
 	# Solo aplicar retroceso físico a impactos reales (no a decaimiento pasivo por delta)
 	if amount_np >= 10.0:
@@ -575,12 +589,15 @@ func check_zenkai_conditions(opponent_np: float) -> void:
 			is_in_zenkai_state = false
 			_notify_stats()
 
+	_check_transformation_unlocks()
+
 func trigger_comeback_zenkai() -> void:
 	if not is_in_zenkai_state:
 		is_in_zenkai_state = true
 		is_comeback_zenkai = true
 		emit_signal("zenkai_activated", "comeback")
 		_notify_stats()
+		_check_transformation_unlocks()
 		print("[CharacterInstance] %s: ¡ZENKAI COMEBACK ACTIVADO! Tienes un ataque para liquidar o serás penalizado." % character_data.character_name)
 
 func notify_attack_launched(p_power: Resource) -> void:
@@ -613,9 +630,62 @@ func notify_attack_failed() -> void:
 	_notify_stats()
 	print("[CharacterInstance] %s: ¡FALLO DE REMATE! Penalizado: Ki a 0, NP reducido a la mitad y recarga mermada." % character_data.character_name)
 
+func unlock_transformation(form_name: String) -> void:
+	if not unlocked_transformations.has(form_name):
+		unlocked_transformations.append(form_name)
+		emit_signal("transformation_unlocked", form_name)
+		var char_name = character_data.character_name if character_data else name
+		_log_combat_event("[TRANSFORMACIÓN] ¡%s ha despertado la transformación %s!" % [char_name, form_name], "success")
+		print("[Transformation] %s desbloqueó: %s" % [char_name, form_name])
+
+func is_transformation_unlocked(form_name: String) -> bool:
+	return unlocked_transformations.has(form_name)
+
+func _check_transformation_unlocks() -> void:
+	if not character_data or character_data.transformations.is_empty():
+		return
+	
+	var active_max: float = character_data.max_np
+	if current_transformation:
+		active_max *= current_transformation.np_multiplier
+	var hp_ratio: float = current_np / maxf(1.0, active_max)
+	
+	var opp = _get_opponent()
+	var opp_np: float = opp.get("current_np") if (opp and is_instance_valid(opp) and opp.get("current_np") != null) else current_np
+	var is_lagging_behind: bool = (opp_np - current_np) / maxf(1.0, current_np) >= 0.25
+	
+	# Desbloqueo Fase 1 (SSJ / Kaioken):
+	# Se activa si el NP baja del 70% O si está en desventaja de Furia (>25% atrás)
+	var form_1: String = character_data.transformations[0].form_name
+	if not is_transformation_unlocked(form_1):
+		if hp_ratio <= 0.70 or is_lagging_behind:
+			unlock_transformation(form_1)
+	
+	# Desbloqueo Fase 2 (Super Vegeta / SSJ2):
+	# Se activa si ya está en la Forma 1 y ha sufrido más daño (<= 45%) o completado combo
+	if character_data.transformations.size() > 1:
+		var form_2: String = character_data.transformations[1].form_name
+		if not is_transformation_unlocked(form_2):
+			if current_transformation != null and (hp_ratio <= 0.45 or is_lagging_behind):
+				unlock_transformation(form_2)
+				
+	# Desbloqueo Fase 3 (SSB / Forma Divina):
+	# Se activa exclusivamente al alcanzar el Estado Zenkai
+	if character_data.transformations.size() > 2:
+		var form_3: String = character_data.transformations[2].form_name
+		if not is_transformation_unlocked(form_3):
+			if is_in_zenkai_state:
+				unlock_transformation(form_3)
+
 func transform_to(index: int) -> void:
 	if index >= 0 and index < character_data.transformations.size():
 		var trans = character_data.transformations[index]
+		if not is_transformation_unlocked(trans.form_name):
+			var char_name = character_data.character_name if character_data else name
+			print("[Transformation] %s intentó transformarse en %s pero AÚN NO ESTÁ DESBLOQUEADA." % [char_name, trans.form_name])
+			_log_combat_event("[TRANSFORMACIÓN] %s bloqueada. ¡Aumenta tu furia en combate para despertarla!" % trans.form_name, "warning")
+			return
+
 		current_transformation = trans
 		
 		# Desbloquear técnicas de esta fase
@@ -628,6 +698,11 @@ func transform_to(index: int) -> void:
 		emit_signal("transformed", trans)
 		_notify_stats()
 		_update_aura_visuals()
+
+		# Feedback cinemático y onda expansiva de transformación
+		_spawn_melee_shockwave(global_position + Vector3(0, 1.0, 0))
+		var char_name = character_data.character_name if character_data else name
+		_log_combat_event("[TRANSFORMACIÓN] ¡%s se ha transformado en %s! (NP x%.1f)" % [char_name, trans.form_name, trans.np_multiplier], "success")
 
 func revert_to_base() -> void:
 	if current_transformation == null:
@@ -1804,6 +1879,7 @@ func _execute_hammer_strike_finisher(opponent: Node3D, swing_velocity: float, re
 
 	_log_combat_event("💥 ¡FINISHER MARTILLAZO! Rival expulsado a %.1f m/s (BP Ratio: %.2f). Fin del minijuego." % [final_speed, ratio_bp], "success")
 	print("[HammerFinisher] Martillazo conectado: daño=%.0f NP, vel=%.1f m/s. Minijuego cortado. Oponente volando por los aires." % [direct_damage, final_speed])
+	_check_transformation_unlocks()
 
 	var gss = _get_gesture_tree()
 	if gss and gss.has_signal("phase_changed"):
