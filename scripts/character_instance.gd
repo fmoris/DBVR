@@ -242,16 +242,10 @@ func _physics_process(delta: float) -> void:
 
 				if dist - move_amount <= target_dist + 0.05:
 					_stop_flight()
-					if is_player:
-						_start_melee_bullet_time(opponent)
-					else:
-						_execute_melee_impact(opponent)
+					_start_melee_bullet_time(opponent)
 			else:
 				_stop_flight()
-				if is_player:
-					_start_melee_bullet_time(opponent)
-				else:
-					_execute_melee_impact(opponent)
+				_start_melee_bullet_time(opponent)
 		else:
 			_stop_flight()
 
@@ -1772,10 +1766,12 @@ func _start_melee_bullet_time(opponent: Node3D) -> void:
 		return
 
 	is_in_bullet_time = true
+	if opponent.has_method("set"):
+		opponent.set("is_in_bullet_time", true)
 	var duration: float = calculate_bullet_time_duration(self, opponent)
 	print("[CharacterInstance] ¡Iniciando Melee Bullet-Time! Duración calculada: %.2fs" % duration)
 
-	# 0. Alinear milimétricamente la cabeza del jugador a 0.65m horizontal del rival
+	# 0. Alinear milimétricamente a distancia cuerpo a cuerpo
 	if is_player:
 		var my_origin = get_parent()
 		var cam = my_origin.get_node_or_null("XRCamera3D") if my_origin else null
@@ -1791,6 +1787,18 @@ func _start_melee_bullet_time(opponent: Node3D) -> void:
 			my_origin.global_position.x = desired_cam_pos.x - cam_offset_from_origin.x
 			my_origin.global_position.z = desired_cam_pos.z - cam_offset_from_origin.z
 			_clamp_to_arena(my_origin)
+	else:
+		var opp_origin = opponent.get_parent() if opponent.get("is_player") else null
+		var opp_cam = opp_origin.get_node_or_null("XRCamera3D") if opp_origin else null
+		var player_head = opp_cam.global_position if opp_cam else (opp_origin.global_position if opp_origin else opponent.global_position)
+		var player_h = Vector3(player_head.x, 0.0, player_head.z)
+		var ai_h = Vector3(global_position.x, 0.0, global_position.z)
+		var to_ai_dir = (ai_h - player_h).normalized()
+		if to_ai_dir.length_squared() < 0.01:
+			to_ai_dir = Vector3.FORWARD
+		global_position.x = player_h.x + to_ai_dir.x * 0.65
+		global_position.z = player_h.z + to_ai_dir.z * 0.65
+		_clamp_to_arena(self)
 
 	# Instanciar la cúpula holográfica anime con las cajas de impacto
 	active_target_dome = MeleeTargetDomeClass.new()
@@ -1798,6 +1806,7 @@ func _start_melee_bullet_time(opponent: Node3D) -> void:
 	active_target_dome.setup(self, opponent, duration)
 	active_target_dome.bullet_time_completed.connect(_on_bullet_time_completed.bind(opponent))
 	active_target_dome.finisher_triggered.connect(_on_bullet_time_finisher.bind(opponent))
+	active_target_dome.perfect_parry_triggered.connect(_on_perfect_parry_turnover)
 
 	# Pulso háptico inicial y log en HUD
 	var my_origin = get_parent() if is_player else null
@@ -1807,22 +1816,51 @@ func _start_melee_bullet_time(opponent: Node3D) -> void:
 			if ctrl and ctrl.has_method("trigger_haptic_pulse"):
 				ctrl.trigger_haptic_pulse("haptic", 180.0, 0.7, 0.15, 0.0)
 
-	_log_combat_event("⚡ ¡BULLET TIME ACTIVADO! Golpea los puntos vitales (%.1fs)" % duration, "success")
+	_log_combat_event("⚡ ¡COMBATE MELEE RÍTMICO! Descarga tus golpes (%.1fs)" % duration, "success")
 	var gss = _get_gesture_tree()
 	if gss and gss.has_signal("phase_changed"):
-		gss.emit_signal("phase_changed", "¡BULLET TIME ACTIVADO!")
+		gss.emit_signal("phase_changed", "¡FASE DE ATAQUE MELEE!")
 
 
-## Callback al finalizar la ventana de Bullet-Time: desactiva la cúpula e inicia la ráfaga
+## Callback al completarse el Bloqueo Perfecto: Inversión de Roles instantánea
+func _on_perfect_parry_turnover(new_attacker: Node3D, new_defender: Node3D) -> void:
+	if new_attacker == self:
+		_log_combat_event("⚡ ¡BLOQUEO PERFECTO! ¡CONTRAATAQUE INICIADO!", "success")
+		var gss = _get_gesture_tree()
+		if gss and gss.has_signal("phase_changed"):
+			gss.emit_signal("phase_changed", "¡BLOQUEO PERFECTO! ¡CONTRAATACA!")
+	else:
+		_log_combat_event("⚠️ ¡EL RIVAL EJECUTÓ BLOQUEO PERFECTO! ¡DEFENSA OBLIGATORIA!", "warning")
+		var gss = _get_gesture_tree()
+		if gss and gss.has_signal("phase_changed"):
+			gss.emit_signal("phase_changed", "¡EL RIVAL HIZO PARRY! ¡DEFIENDE!")
+
+
+## Callback al finalizar la secuencia completa de Melee Rítmico
 func _on_bullet_time_completed(recorded_hits: Array, launch_vector: Vector3, opponent: Node3D) -> void:
 	is_in_bullet_time = false
+	if opponent and is_instance_valid(opponent) and opponent.has_method("set"):
+		opponent.set("is_in_bullet_time", false)
 	active_target_dome = null
-	_execute_melee_flurry_barrage(opponent, recorded_hits, launch_vector)
+
+	if recorded_hits.is_empty():
+		_log_combat_event("¡El oponente esquivó tu embestida!", "warning")
+		_separate_fighters_to_canonical_distance(opponent, 5.5)
+		return
+
+	# Si la secuencia concluyó con un golpe pesado / martillazo con vector de lanzamiento
+	if launch_vector.length_squared() > 0.1:
+		if opponent and is_instance_valid(opponent) and opponent.has_method("apply_knockback"):
+			opponent.apply_knockback(launch_vector.normalized(), launch_vector.length())
+
+	_separate_fighters_to_canonical_distance(opponent, 5.5)
 
 
 ## Callback al activarse un Finisher (ej. Martillazo bimanual) durante el Bullet-Time
 func _on_bullet_time_finisher(finisher_name: String, swing_velocity: float, recorded_hits: Array, launch_vector: Vector3, opponent: Node3D) -> void:
 	is_in_bullet_time = false
+	if opponent and is_instance_valid(opponent) and opponent.has_method("set"):
+		opponent.set("is_in_bullet_time", false)
 	active_target_dome = null
 	if finisher_name == "hammer_strike":
 		_execute_hammer_strike_finisher(opponent, swing_velocity, recorded_hits, launch_vector)
