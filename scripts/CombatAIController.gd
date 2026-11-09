@@ -22,7 +22,7 @@ enum AIState {
 	KI_BLAST_VOLLEY,
 	KAMEHAMEHA_CHARGE,
 	MELEE_RUSH,
-	Z_VANISH,
+	STEP_DODGE,
 	DEFENSIVE_BLOCK
 }
 
@@ -37,17 +37,18 @@ var current_state: AIState = AIState.IDLE_SPACING
 var state_timer: float = 0.0
 var decision_timer: float = 0.0
 var attack_cooldown: float = 2.5
-var vanish_cooldown: float = 0.0
+var dodge_cooldown: float = 0.0
 var block_cooldown: float = 0.0
-var strafe_timer: float = 0.0
-var strafe_dir: float = 1.0
+var spacing_step_timer: float = 0.0
+var next_spacing_interval: float = 1.6
+var is_stepping: bool = false
 
-# Parámetros de combate espacial
+# Parámetros de combate por casillas / pasos
+const AI_STEP_DISTANCE: float = 2.0
+const VERTICAL_STEP: float = 1.4
+const MIN_ALLOWED_DISTANCE: float = 2.4
 const OPTIMAL_DIST_MIN: float = 3.2
 const OPTIMAL_DIST_MAX: float = 5.8
-const STRAFE_SPEED: float = 1.6
-const ADVANCE_SPEED: float = 3.2
-const RETREAT_SPEED: float = 2.8
 
 # Ráfaga de Ki Blasts
 var blast_volley_count: int = 0
@@ -114,8 +115,8 @@ func _physics_process(delta: float) -> void:
 	# Actualizar temporizadores
 	if attack_cooldown > 0.0:
 		attack_cooldown -= delta
-	if vanish_cooldown > 0.0:
-		vanish_cooldown -= delta
+	if dodge_cooldown > 0.0:
+		dodge_cooldown -= delta
 	if block_cooldown > 0.0:
 		block_cooldown -= delta
 	if decision_timer > 0.0:
@@ -123,7 +124,7 @@ func _physics_process(delta: float) -> void:
 
 	state_timer += delta
 
-	# Capa reactiva defensiva inmediata (Z-Vanish o Bloqueo ante proyectiles)
+	# Capa reactiva defensiva inmediata (Esquive por paso o Bloqueo ante proyectiles)
 	_check_incoming_threats()
 
 	# Capa de transformaciones autónomas de la IA
@@ -143,7 +144,7 @@ func _physics_process(delta: float) -> void:
 			_process_state_defensive_block(delta)
 
 
-## Estado 1: Mantenimiento de distancia (Spacing) y órbita táctica
+## Estado 1: Mantenimiento de distancia (Spacing) y órbita por casillas
 func _process_state_idle_spacing(delta: float) -> void:
 	var my_pos = host.global_position
 	var opp_pos = player.global_position
@@ -152,29 +153,30 @@ func _process_state_idle_spacing(delta: float) -> void:
 	var dist = diff.length()
 	var fwd = diff.normalized() if dist > 0.01 else -host.global_transform.basis.z
 
-	# Cambio de dirección de órbita periódica
-	strafe_timer += delta
-	if strafe_timer >= 3.0:
-		strafe_timer = 0.0
-		strafe_dir = -strafe_dir if randf() > 0.3 else strafe_dir
+	# Pasos de reposicionamiento cada 1.2s - 2.2s
+	spacing_step_timer += delta
+	if spacing_step_timer >= next_spacing_interval and not is_stepping:
+		spacing_step_timer = 0.0
+		next_spacing_interval = randf_range(1.2, 2.2)
 
-	# Vector lateral perpendicular para rodear al jugador
-	var lateral = host.global_transform.basis.x.normalized() * strafe_dir
+		var right_vec = host.global_transform.basis.x.normalized()
+		var lateral = right_vec * (1.0 if randf() > 0.5 else -1.0)
 
-	var move_vec = Vector3.ZERO
-	if dist > OPTIMAL_DIST_MAX:
-		# Acercarse suavemente al jugador
-		move_vec = (fwd * ADVANCE_SPEED) + (lateral * STRAFE_SPEED * 0.5)
-	elif dist < OPTIMAL_DIST_MIN:
-		# Retroceder para mantener espacio de combate
-		move_vec = (-fwd * RETREAT_SPEED) + (lateral * STRAFE_SPEED * 0.7)
-	else:
-		# Distancia óptima: orbitar lateralmente
-		move_vec = lateral * STRAFE_SPEED
-
-	# Aplicar desplazamiento y mantener dentro de la arena
-	host.global_position += move_vec * delta
-	host._clamp_to_arena(host)
+		# Evaluar nivel de elevación vertical con el jugador
+		var y_diff = player.global_position.y - host.global_position.y
+		if y_diff > 1.2:
+			execute_vertical_step(true)
+		elif y_diff < -1.2:
+			execute_vertical_step(false)
+		elif dist > OPTIMAL_DIST_MAX:
+			# Acercarse un paso hacia adelante si no invade distancia mínima
+			execute_step_movement(fwd)
+		elif dist < OPTIMAL_DIST_MIN:
+			# Paso atrás para recuperar espacio
+			execute_step_movement(-fwd)
+		else:
+			# Paso lateral (órbita)
+			execute_step_movement(lateral)
 
 	# Evaluación de transiciones tácticas cada 0.35s
 	if decision_timer <= 0.0:
@@ -319,9 +321,9 @@ func _transition_to(new_state: AIState) -> void:
 			block_cooldown = 1.8
 
 
-## Capa reactiva: Detecta proyectiles enemigos entrantes y reacciona con Z-Vanish o Guardia
+## Capa reactiva: Detecta proyectiles enemigos entrantes y reacciona con Esquive por pasos o Bloqueo
 func _check_incoming_threats() -> void:
-	if current_state == AIState.Z_VANISH:
+	if is_stepping:
 		return
 
 	var my_pos = host.global_position
@@ -336,41 +338,82 @@ func _check_incoming_threats() -> void:
 			var to_me = (my_pos - p_pos).normalized()
 			# Si el proyectil vuela directo hacia Goku
 			if p_vel.normalized().dot(to_me) > 0.65:
-				# 1. Z-Vanish táctico si tiene Ki >= 20.0 y no está en cooldown
-				if host.current_ki >= 20.0 and vanish_cooldown <= 0.0:
-					execute_z_vanish(1.0 if randf() > 0.5 else -1.0)
-					return
-				# 2. Bloqueo si no puede teletransportarse
+				# 1. Esquive con paso lateral por casillas si tiene Ki >= 8.0 y no está en cooldown
+				if host.current_ki >= 8.0 and dodge_cooldown <= 0.0:
+					var right_vec = host.global_transform.basis.x.normalized()
+					var dodge_dir = right_vec * (1.0 if randf() > 0.5 else -1.0)
+					if execute_step_movement(dodge_dir):
+						host.consume_ki(8.0)
+						dodge_cooldown = 1.8
+						host._log_combat_event("[ESQUIVE] ¡%s dio un paso lateral evasivo para esquivar el ataque!" % (host.character_data.character_name if host.character_data else "Goku"), "info")
+						return
+				# 2. Bloqueo con guardia si no puede dar un paso
 				elif block_cooldown <= 0.0 and current_state != AIState.DEFENSIVE_BLOCK:
 					_transition_to(AIState.DEFENSIVE_BLOCK)
 					return
 
 
-## Ejecuta el Z-Vanish (Teletransporte Evasivo Canónico)
-func execute_z_vanish(direction_sign: float = 1.0) -> void:
-	if not host.consume_ki(20.0):
-		return
+## Ejecuta un paso discreto por casillas en el plano horizontal
+func execute_step_movement(move_dir: Vector3) -> bool:
+	if not host or not is_instance_valid(host) or is_stepping:
+		return false
 
-	var fwd = (player.global_position - host.global_position).normalized()
-	fwd.y = 0.0
-	var right_vec = host.global_transform.basis.x.normalized()
-	var offset = (right_vec * direction_sign * 3.4) + (fwd * 0.4)
+	var target_pos = host.global_position + move_dir * AI_STEP_DISTANCE
 
-	# Efecto visual en origen
-	if host.has_method("_spawn_melee_shockwave"):
-		host._spawn_melee_shockwave(host.global_position + Vector3(0, 1.1, 0))
+	# 1. Comprobación estricta de distancia mínima con el jugador (2.4m)
+	if player and is_instance_valid(player):
+		var p_pos = player.global_position
+		var current_diff = p_pos - host.global_position
+		current_diff.y = 0.0
+		var current_dist = current_diff.length()
 
-	# Reubicar instantáneamente
-	host.global_position += offset
-	host._clamp_to_arena(host)
+		var future_diff = p_pos - target_pos
+		future_diff.y = 0.0
+		var future_dist = future_diff.length()
 
-	# Efecto visual en destino
-	if host.has_method("_spawn_melee_shockwave"):
-		host._spawn_melee_shockwave(host.global_position + Vector3(0, 1.1, 0))
+		# Si el paso nos acerca al rival y nos deja a menos de 2.4m, bloquear el paso
+		if future_dist < current_dist and future_dist < MIN_ALLOWED_DISTANCE:
+			return false
 
-	_play_ai_sfx("vanish")
-	vanish_cooldown = 3.8
-	host._log_combat_event("[Z-VANISH] ¡%s ejecutó un teletransporte de evasión!" % (host.character_data.character_name if host.character_data else "Goku"), "info")
+	# 2. Comprobar límites de arena
+	var dist_center = Vector2(target_pos.x, target_pos.z).length()
+	if dist_center > host.arena_half_limit:
+		return false
+
+	# 3. Desplazamiento ágil estilo anime (0.16s Tween)
+	is_stepping = true
+	_play_ai_sfx("step")
+
+	var tween = host.create_tween().set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(host, "global_position", target_pos, 0.16)
+	tween.tween_callback(func(): is_stepping = false)
+	return true
+
+
+## Ejecuta un paso vertical (subir o bajar en el aire)
+func execute_vertical_step(is_up: bool) -> bool:
+	if not host or not is_instance_valid(host) or is_stepping:
+		return false
+
+	var current_pos = host.global_position
+	var ground_h = host.get_ground_elevation(current_pos)
+	var target_y = current_pos.y + (VERTICAL_STEP if is_up else -VERTICAL_STEP)
+
+	if is_up:
+		if target_y > ground_h + 9.0:
+			return false
+	else:
+		if target_y < ground_h + 0.05:
+			target_y = ground_h + 0.05
+
+	var target_pos = Vector3(current_pos.x, target_y, current_pos.z)
+	is_stepping = true
+	_play_ai_sfx("step")
+
+	var tween = host.create_tween().set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(host, "global_position", target_pos, 0.16)
+	tween.tween_callback(func(): is_stepping = false)
+	return true
 
 
 ## Despierta transformaciones para Goku en tiempo real según el peligro
@@ -582,8 +625,9 @@ func _play_ai_sfx(sfx_type: String) -> void:
 				audio_player_3d.stream = snd_aura
 				audio_player_3d.pitch_scale = 1.0
 				audio_player_3d.play()
-		"vanish":
+		"step", "vanish":
 			if snd_vanish:
 				audio_player_3d.stream = snd_vanish
-				audio_player_3d.pitch_scale = randf_range(0.95, 1.05)
+				audio_player_3d.pitch_scale = randf_range(1.15, 1.35)
+				audio_player_3d.volume_db = -4.0
 				audio_player_3d.play()

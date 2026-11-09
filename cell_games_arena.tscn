@@ -625,6 +625,3 @@ script = ExtResource("6_gesturetree")
 transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.501, 8.5)
 script = ExtResource("4_c7tww")
 character_data = ExtResource("5_vmgen")
-
-[node name="VRInGameMenu" type="Node3D" parent="." unique_id=987123456]
-script = ExtResource("12_menu")

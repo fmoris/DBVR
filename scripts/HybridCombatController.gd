@@ -64,6 +64,18 @@ var was_by_pressed: bool = false
 var startup_cooldown: float = 1.5
 var recharge_exit_cooldown: float = 0.0 # Compuerta de gracia para evitar Ki Blasts indeseados al soltar gatillos de recarga
 
+# --- Movimiento por Casillas / Pasos (Yu Yu Hakusho / DB Legends / Ajedrez) ---
+const STEP_DISTANCE: float = 2.0 # Metros por paso/casilla
+const VERTICAL_STEP: float = 1.4 # Metros por salto o descenso en el aire
+const MIN_ALLOWED_DISTANCE: float = 2.4 # Distancia frontal mínima prohibida contra el rival
+const MAX_VERTICAL_HEIGHT: float = 9.0 # Límite superior de vuelo en metros
+var step_cooldown: float = 0.0
+var vertical_step_cooldown: float = 0.0
+var right_stick_flicked: bool = false
+var is_step_moving: bool = false
+var step_audio_player: AudioStreamPlayer = null
+var snd_step: AudioStream = null
+
 # Temporizador para comprobación periódica de estado en HUD
 var status_pulse_timer: float = 0.0
 
@@ -83,6 +95,12 @@ func _ready() -> void:
 	if not gesture_tree:
 		gesture_tree = get_parent()
 	_find_xr_nodes()
+
+	step_audio_player = AudioStreamPlayer.new()
+	step_audio_player.name = "StepAudioPlayer"
+	add_child(step_audio_player)
+	if ResourceLoader.exists("res://assets/audio/gekishin_test/003074_s4.wav"):
+		snd_step = load("res://assets/audio/gekishin_test/003074_s4.wav")
 
 
 func _find_xr_nodes() -> void:
@@ -215,6 +233,7 @@ func _process(delta: float) -> void:
 	_process_ki_blasts(delta)
 	_process_super_powers(delta)
 	_process_transformations()
+	_process_grid_step_movement(delta)
 	_process_hud_toggle(delta)
 	_process_guard()
 	_process_bio_haptics(delta)
@@ -1018,30 +1037,151 @@ func _process_hud_toggle(delta: float) -> void:
 					get_tree().current_scene.add_child(in_game_menu)
 			in_game_menu.toggle_menu()
 
-	# Clic de stick izquierdo (primary_click): Menú de Calibración Biométrica de Manos
-	if calibration_toggle_cooldown > 0.0:
-		calibration_toggle_cooldown -= delta
-	elif left_controller.is_button_pressed("primary_click"):
-		calibration_toggle_cooldown = 0.45
-		if not hand_calibration_menu or not is_instance_valid(hand_calibration_menu):
-			_find_xr_nodes()
-		if hand_calibration_menu and is_instance_valid(hand_calibration_menu):
-			if not hand_calibration_menu.is_inside_tree():
-				if xr_origin and is_instance_valid(xr_origin) and xr_origin.is_inside_tree():
-					xr_origin.add_child(hand_calibration_menu)
-				elif get_tree() and get_tree().current_scene:
-					get_tree().current_scene.add_child(hand_calibration_menu)
-			hand_calibration_menu.toggle_menu()
 
-	# Clic de stick derecho (primary_click): alternar guía de movimientos del HUD
-	if hud_toggle_cooldown > 0.0:
-		hud_toggle_cooldown -= delta
-	elif right_controller.is_button_pressed("primary_click"):
-		hud_toggle_cooldown = 0.4
-		var hud = get_tree().root.find_child("VRHUD", true, false)
-		if hud and hud.has_method("toggle_moves_guide"):
-			hud.toggle_moves_guide()
-			_pulse_haptic(right_controller, 120.0, 0.4, 0.1)
+# --- 6. MOVIMIENTO POR CASILLAS / PASOS DISCRETOS (Yu Yu Hakusho / DB Legends / Ajedrez) ---
+func _process_grid_step_movement(delta: float) -> void:
+	if not left_controller or not right_controller or not xr_origin:
+		return
+
+	if step_cooldown > 0.0:
+		step_cooldown -= delta
+	if vertical_step_cooldown > 0.0:
+		vertical_step_cooldown -= delta
+
+	var player = gesture_tree._get_player_instance() if gesture_tree else null
+	if not player:
+		return
+
+	# Si estamos en minijuego melee o en ráfaga de golpes, no se permite movimiento
+	if player.get("is_in_bullet_time") or player.get("is_flying_to_melee") or player.get("is_flying_to_opponent"):
+		return
+
+	# A. ELEVACIÓN VERTICAL POR CLIC DE STICK
+	# Clic stick derecho (primary_click): SUBIR un espacio vertical
+	if right_controller.is_button_pressed("primary_click") and vertical_step_cooldown <= 0.0 and not is_step_moving:
+		vertical_step_cooldown = 0.35
+		var ground_h = player.get_ground_elevation(xr_origin.global_position)
+		var max_h = ground_h + MAX_VERTICAL_HEIGHT
+		if xr_origin.global_position.y + VERTICAL_STEP <= max_h:
+			var target_pos = xr_origin.global_position + Vector3(0.0, VERTICAL_STEP, 0.0)
+			_execute_vertical_step(target_pos, true)
+		else:
+			_pulse_haptic(right_controller, 90.0, 0.4, 0.12) # Límite superior alcanzado
+
+	# Clic stick izquierdo (primary_click): BAJAR un espacio vertical
+	elif left_controller.is_button_pressed("primary_click") and vertical_step_cooldown <= 0.0 and not is_step_moving:
+		vertical_step_cooldown = 0.35
+		var ground_h = player.get_ground_elevation(xr_origin.global_position)
+		var min_h = ground_h + 0.05
+		if xr_origin.global_position.y - VERTICAL_STEP >= min_h:
+			var target_pos = xr_origin.global_position - Vector3(0.0, VERTICAL_STEP, 0.0)
+			_execute_vertical_step(target_pos, false)
+		elif xr_origin.global_position.y > min_h + 0.02:
+			var target_pos = Vector3(xr_origin.global_position.x, min_h, xr_origin.global_position.z)
+			_execute_vertical_step(target_pos, false)
+		else:
+			_pulse_haptic(left_controller, 90.0, 0.4, 0.12) # Límite inferior (suelo) alcanzado
+
+	# B. DESPLAZAMIENTO HORIZONTAL POR CASILLAS (STICK DERECHO)
+	var stick: Vector2 = right_controller.get_vector2("primary")
+	var stick_len: float = stick.length()
+
+	if stick_len < 0.25:
+		right_stick_flicked = false
+	elif stick_len >= 0.55 and not right_stick_flicked and step_cooldown <= 0.0 and not is_step_moving:
+		right_stick_flicked = true
+		step_cooldown = 0.28
+
+		var cam_basis = camera.global_transform.basis if camera else xr_origin.global_transform.basis
+		var cam_fwd = -cam_basis.z
+		cam_fwd.y = 0.0
+		cam_fwd = cam_fwd.normalized()
+
+		var cam_right = cam_basis.x
+		cam_right.y = 0.0
+		cam_right = cam_right.normalized()
+
+		var move_dir = Vector3.ZERO
+		# Seleccionar dirección dominante (4 direcciones discretas como ajedrez)
+		# En OpenXR Godot, stick.y positivo es hacia adelante
+		if abs(stick.y) >= abs(stick.x):
+			if stick.y > 0.0:
+				move_dir = cam_fwd  # Adelante
+			else:
+				move_dir = -cam_fwd # Atrás
+		else:
+			if stick.x > 0.0:
+				move_dir = cam_right  # Derecha
+			else:
+				move_dir = -cam_right # Izquierda
+
+		_execute_horizontal_step(move_dir)
+
+
+func _execute_horizontal_step(move_dir: Vector3) -> void:
+	if not xr_origin or is_step_moving:
+		return
+	var player = gesture_tree._get_player_instance() if gesture_tree else null
+	if not player:
+		return
+
+	var target_pos = xr_origin.global_position + move_dir * STEP_DISTANCE
+
+	# 1. Comprobación estricta de distancia mínima frontal con el oponente (2.4m)
+	var opponent = player._get_opponent()
+	if opponent and is_instance_valid(opponent):
+		var opp_pos = opponent.global_position
+		var current_diff = opp_pos - xr_origin.global_position
+		current_diff.y = 0.0
+		var current_dist = current_diff.length()
+
+		var future_diff = opp_pos - target_pos
+		future_diff.y = 0.0
+		var future_dist = future_diff.length()
+
+		# Si el paso nos acerca al rival y nos dejaría a una distancia no permitida (< 2.4m)
+		if future_dist < current_dist and future_dist < MIN_ALLOWED_DISTANCE:
+			print("[Movement] Paso frontal bloqueado: distancia mínima con el rival (2.4m). Distancia futura: %.2fm" % future_dist)
+			_pulse_haptic(right_controller, 90.0, 0.5, 0.15)
+			player._log_combat_event("[MOVIMIENTO] ¡Distancia mínima alcanzada (2.4m)! No puedes avanzar más.", "warning")
+			return
+
+	# 2. Comprobación de límites de la arena
+	var dist_center = Vector2(target_pos.x, target_pos.z).length()
+	if dist_center > player.arena_half_limit:
+		_pulse_haptic(right_controller, 90.0, 0.4, 0.15)
+		return
+
+	# 3. Desplazamiento ágil estilo anime (0.16s Tween)
+	is_step_moving = true
+	_play_step_audio(1.25)
+	_pulse_haptic(right_controller, 140.0, 0.45, 0.08)
+
+	var tween = create_tween().set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(xr_origin, "global_position", target_pos, 0.16)
+	tween.tween_callback(func(): is_step_moving = false)
+
+
+func _execute_vertical_step(target_pos: Vector3, is_up: bool) -> void:
+	if not xr_origin or is_step_moving:
+		return
+
+	is_step_moving = true
+	_play_step_audio(1.40 if is_up else 1.10)
+	var ctrl = right_controller if is_up else left_controller
+	_pulse_haptic(ctrl, 160.0, 0.6, 0.10)
+
+	var tween = create_tween().set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(xr_origin, "global_position", target_pos, 0.16)
+	tween.tween_callback(func(): is_step_moving = false)
+
+
+func _play_step_audio(pitch: float = 1.25) -> void:
+	if step_audio_player and snd_step:
+		step_audio_player.stream = snd_step
+		step_audio_player.pitch_scale = pitch
+		step_audio_player.volume_db = -5.0
+		step_audio_player.play()
 
 
 # --- 7. GUARDIA DEFENSIVA (BLOQUEO) ---
