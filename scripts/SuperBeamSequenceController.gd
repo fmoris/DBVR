@@ -458,7 +458,7 @@ func _update_hud(rem_time: float) -> void:
 func _build_visual_beam() -> void:
 	var radius = 0.45 if tier >= 4 else 0.35
 
-	# 1. Cuerpo cilíndrico del haz
+	# 1. Cuerpo cilíndrico del haz (Manto de plasma exterior)
 	beam_core_mesh = MeshInstance3D.new()
 	beam_core_mesh.name = "BeamCore"
 	var cyl = CylinderMesh.new()
@@ -475,6 +475,21 @@ func _build_visual_beam() -> void:
 	beam_core_mesh.material_override = mat_beam
 	add_child(beam_core_mesh)
 
+	# 1.1 Núcleo interior blanco incandescente (White-Hot Inner Core)
+	var mat_inner = StandardMaterial3D.new()
+	mat_inner.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+	mat_inner.albedo_color = Color(1.0, 1.0, 1.0, 1.0)
+
+	var inner_core = MeshInstance3D.new()
+	inner_core.name = "InnerWhiteCore"
+	var cyl_inner = CylinderMesh.new()
+	cyl_inner.radial_segments = 12
+	cyl_inner.top_radius = radius * 0.60
+	cyl_inner.bottom_radius = radius * 0.60
+	inner_core.mesh = cyl_inner
+	inner_core.material_override = mat_inner
+	beam_core_mesh.add_child(inner_core)
+
 	# 2. Cabeza del haz (esfera de impacto)
 	beam_head_mesh = MeshInstance3D.new()
 	beam_head_mesh.name = "BeamHead"
@@ -484,6 +499,15 @@ func _build_visual_beam() -> void:
 	beam_head_mesh.mesh = sph
 	beam_head_mesh.material_override = mat_beam
 	add_child(beam_head_mesh)
+
+	var inner_head = MeshInstance3D.new()
+	inner_head.name = "InnerHeadCore"
+	var sph_inner = SphereMesh.new()
+	sph_inner.radius = radius * 0.8
+	sph_inner.height = radius * 1.6
+	inner_head.mesh = sph_inner
+	inner_head.material_override = mat_inner
+	beam_head_mesh.add_child(inner_head)
 
 	# 3. Luz dinámica
 	beam_light = OmniLight3D.new()

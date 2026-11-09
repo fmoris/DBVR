@@ -215,9 +215,12 @@ func _evaluate_tactical_transition(dist: float) -> void:
 		_transition_to(AIState.KI_BLAST_VOLLEY)
 		return
 
-	# 4. Melee Dash si el jugador tiene la guardia baja o Ki agotado y está cerca (< 6.0m)
-	if host.current_ki >= 25.0 and dist <= 6.0 and (player.current_ki < 20.0 or player.is_penalized):
-		_transition_to(AIState.MELEE_RUSH)
+	# 4. Melee Dash ofensivo (táctico o de castigo a corta-media distancia)
+	if host.current_ki >= 22.0 and dist <= 7.5:
+		if player.current_ki < 20.0 or player.is_penalized or randf() < 0.40:
+			attack_cooldown = randf_range(3.5, 6.0)
+			_transition_to(AIState.MELEE_RUSH)
+			return
 
 
 ## Estado 2: Recarga táctica de Ki

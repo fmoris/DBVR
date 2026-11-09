@@ -25,6 +25,10 @@ var last_reported_mode: bool = false
 # 1. Recarga de Ki (2 Fases)
 var is_charging_ki: bool = false
 var ki_prep_phase: bool = false
+var ki_haptic_timer: float = 0.0
+var require_input_release_after_melee: bool = false
+var post_melee_cooldown: float = 0.0
+var was_in_melee_minigame: bool = false
 
 # 2. Ki Blasts (Izquierda y Derecha)
 var left_trigger_held: bool = false
@@ -203,11 +207,14 @@ func _process(delta: float) -> void:
 		transform_cooldown -= delta
 	if recharge_exit_cooldown > 0.0:
 		recharge_exit_cooldown -= delta
+	if post_melee_cooldown > 0.0:
+		post_melee_cooldown -= delta
 
 	# 3. Comprobación de estado Melee / Bullet-Time (Minijuego de cajas)
 	var player = gesture_tree._get_player_instance() if gesture_tree else null
-	var in_melee_minigame = player and (player.get("is_in_bullet_time") or player.get("is_flying_to_melee"))
+	var in_melee_minigame = player and (player.get("is_in_bullet_time") or player.get("is_flying_to_opponent") or player.get("is_flying_to_melee"))
 	if in_melee_minigame:
+		was_in_melee_minigame = true
 		# Durante el combate melee o minijuego de cajas se bloquean poderes y recarga de Ki,
 		# pero SÍ se permite la Guardia (cruzar brazos) y el Desplazamiento evasivo (step back).
 		_reset_super_state()
@@ -224,6 +231,36 @@ func _process(delta: float) -> void:
 			if gesture_tree:
 				gesture_tree._cancel_action("En combate cuerpo a cuerpo")
 				gesture_tree._reset_to_idle()
+		_process_guard()
+		_process_grid_step_movement(delta)
+		_process_hud_toggle(delta)
+		return
+
+	# Si acabamos de salir de una fase de melee, activar pestillo de liberación de mandos y cooldown
+	if was_in_melee_minigame:
+		was_in_melee_minigame = false
+		require_input_release_after_melee = true
+		post_melee_cooldown = 0.8
+		melee_cooldown = 1.0
+		_reset_super_state()
+		if gesture_tree:
+			gesture_tree._reset_to_idle()
+
+	# Pestillo de seguridad post-melee: Exigir soltar grips y gatillos antes de permitir nuevos ataques
+	if require_input_release_after_melee:
+		var l_g = left_controller.get_float("grip")
+		var l_t = left_controller.get_float("trigger")
+		var r_g = right_controller.get_float("grip")
+		var r_t = right_controller.get_float("trigger")
+		if l_g < 0.25 and l_t < 0.25 and r_g < 0.25 and r_t < 0.25:
+			require_input_release_after_melee = false
+		else:
+			_process_guard()
+			_process_grid_step_movement(delta)
+			_process_hud_toggle(delta)
+			return
+
+	if post_melee_cooldown > 0.0:
 		_process_guard()
 		_process_grid_step_movement(delta)
 		_process_hud_toggle(delta)
@@ -299,14 +336,21 @@ func _process_ki_recharge(delta: float) -> void:
 						gesture_tree._reset_to_idle()
 					return
 
-				# Pulso háptico suave continuo indicando concentración en Fase 1
-				_pulse_haptic(left_controller, 50.0, 0.22, delta)
-				_pulse_haptic(right_controller, 50.0, 0.22, delta)
+				# Pulso háptico rítmico indicando concentración en Fase 1
+				ki_haptic_timer += delta
+				if ki_haptic_timer >= 0.08:
+					ki_haptic_timer = 0.0
+					_pulse_haptic(left_controller, 65.0, 0.40, 0.10)
+					_pulse_haptic(right_controller, 65.0, 0.40, 0.10)
 
 				# FASE 2: Detonación de Ki al descender las manos/muñecas a la cintura o caderas
 				if avg_rel_y <= -0.28:
 					is_charging_ki = true
 					ki_prep_phase = false
+					ki_haptic_timer = 0.0
+					# ¡PUNTO 8: EFECTO HÁPTICO DE IMPACTO AL PASAR DE FASE 1 A FASE 2!
+					_pulse_haptic(left_controller, 180.0, 1.0, 0.35)
+					_pulse_haptic(right_controller, 180.0, 1.0, 0.35)
 					if gesture_tree:
 						gesture_tree._trigger_action("recarga_ki")
 						if gesture_tree.has_signal("phase_changed"):
@@ -318,8 +362,12 @@ func _process_ki_recharge(delta: float) -> void:
 			if player and is_instance_valid(player):
 				player.recharge_ki(25.0 * delta)
 				player.increase_np(3000.0 * delta)
-			_pulse_haptic(left_controller, 95.0, 0.50, delta)
-			_pulse_haptic(right_controller, 95.0, 0.50, delta)
+			# ¡PUNTO 9: RUMBLE HÁPTICO PROFUNDO Y CONTINUO DE KI!
+			ki_haptic_timer += delta
+			if ki_haptic_timer >= 0.08:
+				ki_haptic_timer = 0.0
+				_pulse_haptic(left_controller, 130.0, 0.85, 0.12)
+				_pulse_haptic(right_controller, 130.0, 0.85, 0.12)
 	else:
 		# Soltar los gatillos cancela o finaliza la recarga
 		if is_charging_ki or ki_prep_phase:

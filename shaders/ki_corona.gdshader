@@ -52,14 +52,18 @@ void fragment() {
 	float l_val = fbm_lightning(p + vec2(TIME * 0.8, -TIME * 0.5));
 	
 	// Aislamos los filamentos estrechando los bordes con un smoothstep contrastado
-	float glow = smoothstep(0.68, 0.94, l_val);
+	float glow = smoothstep(0.45, 0.90, l_val);
 	
 	// Añadir parpadeo de alta frecuencia (Flicker) tipo aura de Dragon Ball
-	float flicker = 0.75 + 0.25 * sin(TIME * 50.0) * cos(TIME * 35.0);
+	float flicker = 0.85 + 0.15 * sin(TIME * 45.0) * cos(TIME * 30.0);
 	
-	// Aplicar potencia lumínica al color e intensidad de emisión unshaded
-	vec3 final_color = base_color.rgb * glow * flicker * 3.5;
+	// Núcleo blanco incandescente hiper-denso y manto de energía exterior
+	vec3 core_white = vec3(1.0, 1.0, 1.0);
+	vec3 plasma_body = mix(base_color.rgb * 2.2, core_white, 0.45);
+	vec3 lightning_burst = base_color.rgb * glow * flicker * 3.0;
+	vec3 final_color = plasma_body + lightning_burst;
 	
 	ALBEDO = final_color;
-	ALPHA = glow * base_color.a * flicker;
+	// Opacidad sólida y densa: 95% base + pulsaciones eléctricas, nunca transparente
+	ALPHA = clamp((0.92 + glow * 0.15) * flicker, 0.0, 1.0);
 }

@@ -1970,15 +1970,18 @@ func _execute_melee_flurry_barrage(opponent: Node3D, recorded_hits: Array, launc
 
 	_log_combat_event("💥 ¡RÁFAGA DE COMBATE! %d golpes conectados. Daño total: %.0f NP" % [hit_count, total_damage], "success")
 
-	# REQUISITO CANÓNICO 5: Si la secuencia terminó con un golpe cargado, el contrincante sale despedido por los aires
-	# y tras 1 segundo se activa una nueva ventana de Follow-Up Bullet-Time
+	# Expulsión y separación canónica garantizada al concluir la ráfaga
 	if has_charged_hit and launch_vector.length_squared() > 0.1:
-		print("[BulletTime] Ráfaga concluida con golpe cargado. Lanzando al oponente por los aires hacia: %s" % str(launch_vector))
-		_start_followup_airborne_sequence(opponent, launch_vector)
+		print("[BulletTime] Ráfaga concluida con golpe cargado. Expulsando al rival por los aires.")
+		var h_dir = (opponent.global_position - my_pos).normalized()
+		h_dir.y = 0.0
+		var final_impulse = (h_dir * 22.0 + Vector3.UP * 5.0)
+		opponent.set("knockback_drag", 1.8)
+		opponent.set("velocity", final_impulse)
+		opponent.set("is_knocked_back", true)
 	else:
-		# Si no hubo golpe cargado, separación garantizada a la distancia inicial canónica (5.5m)
-		print("[BulletTime] Ráfaga concluida. Separando combatientes a distancia canónica (5.5m).")
-		_separate_fighters_to_canonical_distance(opponent, 5.5)
+		print("[BulletTime] Ráfaga concluida. Separando combatientes a distancia canónica (6.0m).")
+		_separate_fighters_to_canonical_distance(opponent, 6.0)
 
 
 ## Ejecuta el demoledor Martillazo de Dragon Ball Z como Finisher de corte en Bullet-Time
@@ -2048,18 +2051,18 @@ func _execute_hammer_strike_finisher(opponent: Node3D, swing_velocity: float, re
 	# 6. Cálculo cinético de expulsión demoledora (BP atacante vs BP defensor + Ki gastado + velocidad de golpe)
 	var ki_mult: float = 1.0 + (ki_spent / 25.0) * 0.90
 	var swing_mult: float = clampf(v_clean / 2.2, 0.85, 2.2)
-	var launch_base_speed: float = 26.0 # m/s base estilo Dragon Ball Z
+	var launch_base_speed: float = 52.0 # m/s base estilo Dragon Ball Z (doble de distancia)
 	var final_speed: float = launch_base_speed * ratio_bp * ki_mult * swing_mult
 
-	var launch_dir = (fwd * 3.8 + Vector3.UP * 1.8).normalized()
+	var launch_dir = (fwd * 4.5 + Vector3.UP * 2.2).normalized()
 	var final_impulse = launch_dir * final_speed
 
 	# Elevar ligeramente al oponente sobre el suelo para trayectoria parabólica aérea
 	var ground_h = get_ground_elevation(opponent.global_position)
 	opponent.global_position.y = maxf(opponent.global_position.y, ground_h + 0.85)
 
-	# Fricción reducida (1.6 en vez de 24.0) para que vuele 15-25m cruzando la arena
-	opponent.set("knockback_drag", 1.6)
+	# Fricción reducida (0.85 en vez de 1.6) para que vuele el doble de distancia cruzando la arena
+	opponent.set("knockback_drag", 0.85)
 	opponent.set("velocity", final_impulse)
 	opponent.set("is_knocked_back", true)
 
@@ -2077,8 +2080,8 @@ func _execute_hammer_strike_finisher(opponent: Node3D, swing_velocity: float, re
 		gss.emit_signal("phase_changed", "¡FASE LIBRE! (RIVAL EXPULSADO)")
 
 
-## Separa simétricamente a ambos combatientes hacia la distancia canónica de combate (5.5m)
-func _separate_fighters_to_canonical_distance(opponent: Node3D, target_distance: float = 5.5) -> void:
+## Separa a los combatientes garantizando la distancia canónica de combate (6.0m)
+func _separate_fighters_to_canonical_distance(opponent: Node3D, target_distance: float = 6.0) -> void:
 	if not opponent or not is_instance_valid(opponent):
 		return
 
@@ -2090,9 +2093,7 @@ func _separate_fighters_to_canonical_distance(opponent: Node3D, target_distance:
 	var opp_h = Vector3(opponent.global_position.x, 0.0, opponent.global_position.z)
 
 	var current_dist = p_h.distance_to(opp_h)
-	# ¡REQUISITO CANÓNICO! Solo reajustar si la distancia entre los combatientes es menor a la distancia canónica (están pegados / muy juntos).
-	# Si ya cumplen la distancia mínima (por ejemplo porque salieron volando por un golpe cargado o martillo a 8-12m), ¡NO reajustar ni traerlos de vuelta!
-	if current_dist >= (target_distance - 0.3):
+	if current_dist >= target_distance:
 		print("[Combat] Combatientes ya a distancia adecuada (%.1fm >= %.1fm). Sin reajuste necesario." % [current_dist, target_distance])
 		return
 
@@ -2102,36 +2103,23 @@ func _separate_fighters_to_canonical_distance(opponent: Node3D, target_distance:
 		fwd_dir.y = 0.0
 		fwd_dir = fwd_dir.normalized() if fwd_dir.length_squared() > 0.01 else Vector3.FORWARD
 
-	# Punto medio horizontal entre los combatientes
-	var mid = (p_h + opp_h) * 0.5
-	var half_dist = target_distance * 0.5
-
-	# Destino canónico del oponente (alejándose hacia adelante)
-	var target_opp_pos = mid + fwd_dir * half_dist
+	# Destino canónico del oponente: exactamente a target_distance frente a la cabeza del jugador
+	var target_opp_pos = p_h + fwd_dir * target_distance
 	target_opp_pos.y = get_ground_elevation(target_opp_pos)
-
-	# Destino canónico del jugador (alejándose hacia atrás)
-	var target_head_pos = mid - fwd_dir * half_dist
-	var cam_offset = (cam.global_position - my_origin.global_position) if (cam and my_origin) else Vector3.ZERO
-	var target_origin_pos = Vector3(target_head_pos.x - cam_offset.x, my_origin.global_position.y if my_origin else 0.0, target_head_pos.z - cam_offset.z)
 
 	# Frenar velocidades físicas
 	velocity = Vector3.ZERO
 	is_knocked_back = false
+	is_flying_to_opponent = false
 	opponent.set("velocity", Vector3.ZERO)
 	opponent.set("is_knocked_back", false)
+	opponent.set("is_flying_to_opponent", false)
 
-	# Desplazamiento simétrico suave simultáneo (0.45s)
+	# Desplazamiento limpio y suave del oponente hacia la distancia canónica (0.35s)
 	var tw_opp = opponent.create_tween()
-	tw_opp.tween_property(opponent, "global_position", target_opp_pos, 0.45).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-
-	if is_player and my_origin:
-		var tw_p = my_origin.create_tween()
-		tw_p.tween_property(my_origin, "global_position", target_origin_pos, 0.45).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-		tw_p.tween_callback(func(): _clamp_to_arena(my_origin))
-
+	tw_opp.tween_property(opponent, "global_position", target_opp_pos, 0.35).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	tw_opp.tween_callback(func(): _clamp_to_arena(opponent))
-	print("[Combat] Separación simétrica canónica ejecutada: Distancia final=%.1fm." % target_distance)
+	print("[Combat] Separación canónica garantizada: Oponente reubicado a %.1fm." % target_distance)
 
 
 ## Inicia la secuencia de lanzamiento aéreo y activa el Follow-Up Bullet-Time tras 1 segundo

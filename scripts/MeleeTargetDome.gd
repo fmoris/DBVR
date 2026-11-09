@@ -220,12 +220,8 @@ func _process_attack_recording(delta: float) -> void:
 			print("[BulletTimeDome] Tiempo de ataque expirado sin golpes conectados.")
 			finish_without_hits()
 		else:
-			# Si el atacante es la IA, pasar a la defensa rítmica del jugador
-			# Si el atacante es el jugador, terminar para descargar la ráfaga (flurry) sobre el oponente
-			if attacker and not attacker.get("is_player"):
-				start_defense_phase()
-			else:
-				finish_defense_phase()
+			# Pasar a la secuencia rítmica defensiva
+			start_defense_phase()
 
 
 # ==============================================================================
