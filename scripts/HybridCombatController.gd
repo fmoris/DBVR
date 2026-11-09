@@ -1005,11 +1005,11 @@ func _process_melee_punches() -> void:
 	var l_fwd_proj = (left_controller.global_position - cam_pos).dot(cam_fwd)
 	var r_fwd_proj = (right_controller.global_position - cam_pos).dot(cam_fwd)
 
-	# Puño izquierdo lanzado hacia adelante: Grab + Gatillo con velocidad frontal > 1.2 m/s
-	if l_fist and left_velocity.dot(cam_fwd) > 1.2 and l_fwd_proj > 0.10:
+	# Puño izquierdo lanzado hacia adelante: Grab + Gatillo con velocidad frontal > 0.85 m/s
+	if l_fist and left_velocity.dot(cam_fwd) > 0.85 and l_fwd_proj > 0.10:
 		_execute_melee_punch(left_controller)
-	# Puño derecho lanzado hacia adelante: Grab + Gatillo con velocidad frontal > 1.2 m/s
-	elif r_fist and right_velocity.dot(cam_fwd) > 1.2 and r_fwd_proj > 0.10:
+	# Puño derecho lanzado hacia adelante: Grab + Gatillo con velocidad frontal > 0.85 m/s
+	elif r_fist and right_velocity.dot(cam_fwd) > 0.85 and r_fwd_proj > 0.10:
 		_execute_melee_punch(right_controller)
 
 

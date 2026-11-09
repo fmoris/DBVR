@@ -1016,14 +1016,18 @@ func start_flight_to_opponent() -> void:
 		is_in_followup_bullet_time = false
 
 	if is_player and not is_target_locked:
-		_log_combat_event("⚠️ ¡Debes fijar al rival con la mirada antes de embestir!", "warning")
-		var my_origin = get_parent()
-		if my_origin:
-			for hand in ["LeftHand", "RightHand"]:
-				var ctrl = my_origin.get_node_or_null(hand)
-				if ctrl and ctrl.has_method("trigger_haptic_pulse"):
-					ctrl.trigger_haptic_pulse("haptic", 120.0, 0.65, 0.22, 0.0)
-		return
+		var opp = _get_opponent()
+		if opp:
+			is_target_locked = true
+		else:
+			_log_combat_event("⚠️ ¡Debes fijar al rival con la mirada antes de embestir!", "warning")
+			var my_origin = get_parent()
+			if my_origin:
+				for hand in ["LeftHand", "RightHand"]:
+					var ctrl = my_origin.get_node_or_null(hand)
+					if ctrl and ctrl.has_method("trigger_haptic_pulse"):
+						ctrl.trigger_haptic_pulse("haptic", 120.0, 0.65, 0.22, 0.0)
+			return
 	is_flying_to_opponent = true
 	_update_aura_visuals()
 	print("[CharacterInstance] %s: Iniciando vuelo rápido hacia el oponente." % character_data.character_name)
@@ -1878,12 +1882,8 @@ func _on_bullet_time_completed(recorded_hits: Array, launch_vector: Vector3, opp
 		_separate_fighters_to_canonical_distance(opponent, 5.5)
 		return
 
-	# Si la secuencia concluyó con un golpe pesado / martillazo con vector de lanzamiento
-	if launch_vector.length_squared() > 0.1:
-		if opponent and is_instance_valid(opponent) and opponent.has_method("apply_knockback"):
-			opponent.apply_knockback(launch_vector.normalized(), launch_vector.length())
-
-	_separate_fighters_to_canonical_distance(opponent, 5.5)
+	# Descargar ráfaga de puñetazos (flurry) acumulada
+	_execute_melee_flurry_barrage(opponent, recorded_hits, launch_vector)
 
 
 ## Callback al activarse un Finisher (ej. Martillazo bimanual) durante el Bullet-Time

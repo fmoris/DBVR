@@ -131,11 +131,19 @@ func _process(delta: float) -> void:
 
 	# Comprobar si los combatientes se separaron fuera del rango de combate cuerpo a cuerpo
 	if attacker and defender and is_instance_valid(attacker) and is_instance_valid(defender):
-		var p_atk = attacker.get_parent().global_position if (attacker.get("is_player") and attacker.get_parent()) else attacker.global_position
-		var p_def = defender.get_parent().global_position if (defender.get("is_player") and defender.get_parent()) else defender.global_position
+		var p_atk = attacker.global_position
+		var p_def = defender.global_position
+		if attacker.get("is_player"):
+			var orig = attacker.get_parent()
+			var c = orig.get_node_or_null("XRCamera3D") if orig else null
+			if c: p_atk = c.global_position
+		if defender.get("is_player"):
+			var orig = defender.get_parent()
+			var c = orig.get_node_or_null("XRCamera3D") if orig else null
+			if c: p_def = c.global_position
 		p_atk.y = 0.0
 		p_def.y = 0.0
-		if p_atk.distance_to(p_def) > 1.85:
+		if p_atk.distance_to(p_def) > 3.5:
 			print("[BulletTimeDome] Fin del enfrentamiento melee: Separación fuera de rango (%.2fm)." % p_atk.distance_to(p_def))
 			finish_without_hits()
 			return
@@ -206,13 +214,18 @@ func _process_attack_recording(delta: float) -> void:
 	# Detectar colisiones físicas de los mandos del atacante contra las cajas activas
 	_check_controller_punches()
 
-	# Al expirar el tiempo de ataque: pasar a Fase 2 de Defensa Rítmica
+	# Al expirar el tiempo de ataque:
 	if time_left <= 0.0:
 		if hits.is_empty():
 			print("[BulletTimeDome] Tiempo de ataque expirado sin golpes conectados.")
 			finish_without_hits()
 		else:
-			start_defense_phase()
+			# Si el atacante es la IA, pasar a la defensa rítmica del jugador
+			# Si el atacante es el jugador, terminar para descargar la ráfaga (flurry) sobre el oponente
+			if attacker and not attacker.get("is_player"):
+				start_defense_phase()
+			else:
+				finish_defense_phase()
 
 
 # ==============================================================================
@@ -977,13 +990,17 @@ func _check_controller_punches() -> void:
 
 		for hand_data in hand_sources:
 			var hand_idx = hand_data["idx"]
-			if hand_must_retract[hand_idx]:
-				continue
-
 			var hand_pos: Vector3 = hand_data["pos"]
 			var dist: float = hand_pos.distance_to(target_pos)
 
-			if dist <= 0.16:
+			# Resetear retracción si la mano se aleja de la caja
+			if hand_must_retract[hand_idx] and dist > 0.22:
+				hand_must_retract[hand_idx] = false
+
+			if hand_must_retract[hand_idx]:
+				continue
+
+			if dist <= 0.28:
 				var cur_vel = left_velocity if hand_idx == 0 else right_velocity
 				var v_mag = cur_vel.length()
 				if v_mag < 0.35:
@@ -1175,11 +1192,12 @@ func _update_fist_states(delta: float) -> void:
 		var cam_pos = cam.global_position if cam else global_position
 		var dist_to_body = c.global_position.distance_to(cam_pos)
 
-		if hand_must_retract[i] and dist_to_body < 0.38:
+		if hand_must_retract[i] and dist_to_body < 0.50:
 			hand_must_retract[i] = false
 
 		var trig_val = c.get_float("trigger")
-		var is_closed = trig_val > 0.65 or c.is_button_pressed("trigger_click")
+		var grip_val = c.get_float("grip")
+		var is_closed = trig_val > 0.45 or grip_val > 0.45 or c.is_button_pressed("trigger_click") or c.is_button_pressed("grip_click")
 
 		if is_closed:
 			fist_buffer_timers[i] = 0.12
