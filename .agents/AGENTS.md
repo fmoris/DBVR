@@ -21,6 +21,9 @@
 - **Rutas OpenXR:** Rutas canónicas `/user/hand_tracker/left` y `/user/hand_tracker/right`.
 - **Modelos GLB y Escala:** Huesos con nombres OpenXR estándar (`LeftWrist`, etc.) y escala métrica 1.0 en runtime.
 - **Zero Allocations en Hot Paths:** Prohibido instanciar arrays/diccionarios en `_process` o `_physics_process`.
+- **Verificación Previa de Visor para Envío de APK:**
+  - **SIEMPRE**, antes de intentar instalar o enviar el APK a los lentes vía ADB, verificar primero si el dispositivo está conectado (`adb devices`).
+  - Si **NO se detecta ningún visor** en la lista de dispositivos ADB, **OMITIR el envío automáticamente**, avisar que el APK está listo y esperar a que el visor esté conectado.
 
 ---
 
