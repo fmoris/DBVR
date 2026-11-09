@@ -114,7 +114,6 @@ func _find_xr_nodes() -> void:
 		camera = xr_origin.get_node_or_null("XRCamera3D")
 		left_controller = xr_origin.get_node_or_null("LeftHand")
 		right_controller = xr_origin.get_node_or_null("RightHand")
-		_setup_controller_deflection_colliders()
 
 		if in_game_menu == null:
 			var existing = xr_origin.find_child("VRInGameMenu", true, false)
@@ -147,30 +146,6 @@ func _find_xr_nodes() -> void:
 			var opp = get_tree().current_scene.find_child("EnemyCharacterInstance", true, false)
 			var ply = gesture_tree._get_player_instance() if gesture_tree else null
 			ki_lockon_system.setup(camera, ply, opp, left_controller, right_controller)
-
-
-func _setup_controller_deflection_colliders() -> void:
-	if left_controller and not left_controller.has_node("KiCombatFist_Left"):
-		var col_body = StaticBody3D.new()
-		col_body.name = "KiCombatFist_Left"
-		col_body.collision_layer = 2
-		var col_shape = CollisionShape3D.new()
-		var sphere_shape = SphereShape3D.new()
-		sphere_shape.radius = 0.20
-		col_shape.shape = sphere_shape
-		col_body.add_child(col_shape)
-		left_controller.add_child(col_body)
-
-	if right_controller and not right_controller.has_node("KiCombatFist_Right"):
-		var col_body = StaticBody3D.new()
-		col_body.name = "KiCombatFist_Right"
-		col_body.collision_layer = 2
-		var col_shape = CollisionShape3D.new()
-		var sphere_shape = SphereShape3D.new()
-		sphere_shape.radius = 0.20
-		col_shape.shape = sphere_shape
-		col_body.add_child(col_shape)
-		right_controller.add_child(col_body)
 
 
 func _process(delta: float) -> void:
@@ -438,9 +413,8 @@ func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta:
 	var aim_fwd = -controller.global_transform.basis.z.normalized()
 	var dist_from_cam = ctrl_p.distance_to(cam_p)
 
-	# REQUISITO CANÓNICO: Para cargar y disparar Ki Blast, el brazo debe estar estirado hacia adelante (distancia >= 0.36m)
-	# y la palma/mando apuntando hacia el frente en la dirección de la vista (dot product >= 0.35)
-	var is_arm_extended = dist_from_cam >= 0.36 and aim_fwd.dot(cam_fwd) > 0.35
+	# REQUISITO CANÓNICO: Para cargar y disparar Ki Blast, el brazo debe estar orientado hacia adelante
+	var is_arm_extended = dist_from_cam >= 0.28 and aim_fwd.dot(cam_fwd) > 0.10
 
 	if trig_pressed and is_arm_extended:
 		var aim_origin = controller.global_position
@@ -489,8 +463,8 @@ func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta:
 		# Gatillo soltado o brazo retirado: Evaluar disparo (tap rápido o disparo cargado)
 		var held_time = left_charge_time if is_left else right_charge_time
 
-		# Solo dispara si se mantuvo cargando al menos 0.04s Y el brazo sigue estirado al frente
-		if held_time >= 0.04 and is_arm_extended:
+		# Solo dispara si se mantuvo cargando al menos 0.04s
+		if held_time >= 0.04:
 			var is_charged = held_time >= 0.50
 			var action_name = "ki_blast_left" if is_left else "ki_blast_right"
 
@@ -625,7 +599,6 @@ func _process_super_powers(delta: float) -> void:
 			current_super_state = SuperPowerState.CHARGING
 			super_power_type = target_tech
 			super_charge_timer = 0.0
-			var player = gesture_tree._get_player_instance() if gesture_tree else null
 			if player and player.has_method("start_charging_super"):
 				player.start_charging_super()
 			if target_tech == "big_bang":
@@ -924,6 +897,8 @@ func _process_transformations() -> void:
 				print("[Transformation] %s intentó activar %s pero aún no está desbloqueada." % [player.character_data.character_name, target_trans.form_name])
 				_pulse_haptic(right_controller, 90.0, 0.45, 0.15)
 				_pulse_haptic(left_controller, 90.0, 0.45, 0.15)
+				if gesture_tree and gesture_tree.has_signal("gesture_logged"):
+					gesture_tree.emit_signal("gesture_logged", "[BLOQUEADO] %s aún no despertado. ¡Lucha para desbloquearlo!" % target_trans.form_name, "warning")
 				transform_cooldown = 0.35
 				return
 
@@ -941,6 +916,12 @@ func _process_transformations() -> void:
 			transform_cooldown = 0.35
 			_pulse_haptic(left_controller, 120.0, 0.6, 0.25)
 			_pulse_haptic(right_controller, 120.0, 0.6, 0.25)
+			return
+		else:
+			if gesture_tree and gesture_tree.has_signal("gesture_logged"):
+				gesture_tree.emit_signal("gesture_logged", "[FORMA BASE] Ya te encuentras en tu estado normal.", "info")
+			_pulse_haptic(right_controller, 60.0, 0.25, 0.08)
+			transform_cooldown = 0.35
 			return
 
 	# Gesto Canónico de Transformación en VR (Puños a la cintura durante 1.8s)
@@ -1100,8 +1081,11 @@ func _process_grid_step_movement(delta: float) -> void:
 		return
 
 	# A. ELEVACIÓN VERTICAL POR CLIC DE STICK
-	# Clic stick derecho (primary_click): SUBIR un espacio vertical
-	if right_controller.is_button_pressed("primary_click") and vertical_step_cooldown <= 0.0 and not is_step_moving:
+	var r_click: bool = right_controller and (right_controller.is_button_pressed("primary_click") or right_controller.is_button_pressed("secondary_click"))
+	var l_click: bool = left_controller and (left_controller.is_button_pressed("primary_click") or left_controller.is_button_pressed("secondary_click"))
+
+	# Clic stick derecho: SUBIR un espacio vertical
+	if r_click and vertical_step_cooldown <= 0.0 and not is_step_moving:
 		vertical_step_cooldown = 0.35
 		var ground_h = player.get_ground_elevation(xr_origin.global_position)
 		var max_h = ground_h + MAX_VERTICAL_HEIGHT
@@ -1111,8 +1095,8 @@ func _process_grid_step_movement(delta: float) -> void:
 		else:
 			_pulse_haptic(right_controller, 90.0, 0.4, 0.12) # Límite superior alcanzado
 
-	# Clic stick izquierdo (primary_click): BAJAR un espacio vertical
-	elif left_controller.is_button_pressed("primary_click") and vertical_step_cooldown <= 0.0 and not is_step_moving:
+	# Clic stick izquierdo: BAJAR un espacio vertical
+	elif l_click and vertical_step_cooldown <= 0.0 and not is_step_moving:
 		vertical_step_cooldown = 0.35
 		var ground_h = player.get_ground_elevation(xr_origin.global_position)
 		var min_h = ground_h + 0.05
@@ -1125,8 +1109,10 @@ func _process_grid_step_movement(delta: float) -> void:
 		else:
 			_pulse_haptic(left_controller, 90.0, 0.4, 0.12) # Límite inferior (suelo) alcanzado
 
-	# B. DESPLAZAMIENTO HORIZONTAL POR CASILLAS (STICK DERECHO)
-	var stick: Vector2 = right_controller.get_vector2("primary")
+	# B. DESPLAZAMIENTO HORIZONTAL POR CASILLAS (STICK DERECHO O IZQUIERDO)
+	var stick: Vector2 = right_controller.get_vector2("primary") if right_controller else Vector2.ZERO
+	if stick.length() < 0.25 and left_controller:
+		stick = left_controller.get_vector2("primary")
 	var stick_len: float = stick.length()
 
 	if stick_len < 0.25:

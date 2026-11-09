@@ -424,9 +424,6 @@ func _connect_gesture_signals() -> void:
 			if gesture_tree.phase_changed.is_connected(_on_phase_changed):
 				gesture_tree.phase_changed.disconnect(_on_phase_changed)
 			gesture_tree.phase_changed.connect(_on_phase_changed)
-			gesture_tree.hand_states_updated.connect(_on_hand_states_updated)
-		if gesture_tree.has_signal("phase_changed"):
-			gesture_tree.phase_changed.connect(_on_phase_changed)
 
 		var hybrid_ctrl = gesture_tree.get_node_or_null("HybridCombatController")
 		if hybrid_ctrl:
