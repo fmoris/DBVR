@@ -44,7 +44,12 @@ func _physics_process(delta: float) -> void:
 	if is_dead:
 		return
 
-	# 2. Desplazamiento lineal
+	# 2. Comprobar desvío por proximidad de manos a alta velocidad (Ki Deflection)
+	_check_hand_deflection_proximity()
+	if is_dead or is_deflected:
+		return
+
+	# 3. Desplazamiento lineal
 	var step = speed_velocity * delta
 	var prev_pos = global_position
 	global_position += step
@@ -61,7 +66,7 @@ func _physics_process(delta: float) -> void:
 		call_deferred("_trigger_explosion", ground_impact_pos, null)
 		return
 
-	# 3. Raycast continuo para detección de colisiones de alta velocidad
+	# 4. Raycast continuo para detección de colisiones de alta velocidad
 	var space = get_world_3d().direct_space_state
 	if not space:
 		return
@@ -90,8 +95,8 @@ func _physics_process(delta: float) -> void:
 					if ctrl:
 						hand_vel = ctrl.left_velocity if "left" in col_name.to_lower() else ctrl.right_velocity
 
-				# Proyectiles de Tier 1 y 2 se pueden desviar con manotazo veloz (> 1.2 m/s)
-				if tier <= ProjectileTier.CHARGED and hand_vel.length() > 1.2:
+				# Proyectiles de Tier 1 y 2 se pueden desviar con manotazo veloz (>= 0.85 m/s)
+				if tier <= ProjectileTier.CHARGED and hand_vel.length() >= 0.85:
 					_execute_deflection(collision, hand_vel, collider)
 					return
 				else:
@@ -106,6 +111,55 @@ func _physics_process(delta: float) -> void:
 			return
 
 
+## Detección proactiva por proximidad de barrido de manos (previene tunneling a alta velocidad)
+func _check_hand_deflection_proximity() -> void:
+	if is_dead or is_deflected or tier > ProjectileTier.CHARGED:
+		return
+	if (initial_lifetime - lifetime_left) < 0.12:
+		return
+
+	var ctrl = get_tree().current_scene.find_child("HybridCombatController", true, false)
+	if not ctrl or not is_instance_valid(ctrl):
+		return
+
+	# Chequear mano izquierda del jugador
+	if ctrl.left_controller and is_instance_valid(ctrl.left_controller):
+		var l_pos = ctrl.left_controller.global_position
+		if global_position.distance_to(l_pos) <= 0.28:
+			var l_vel = ctrl.left_velocity
+			if l_vel.length() >= 0.85:
+				var col_dict = {
+					"position": global_position,
+					"normal": (global_position - l_pos).normalized()
+				}
+				_execute_deflection(col_dict, l_vel, ctrl.left_controller)
+				return
+
+	# Chequear mano derecha del jugador
+	if ctrl.right_controller and is_instance_valid(ctrl.right_controller):
+		var r_pos = ctrl.right_controller.global_position
+		if global_position.distance_to(r_pos) <= 0.28:
+			var r_vel = ctrl.right_velocity
+			if r_vel.length() >= 0.85:
+				var col_dict = {
+					"position": global_position,
+					"normal": (global_position - r_pos).normalized()
+				}
+				_execute_deflection(col_dict, r_vel, ctrl.right_controller)
+				return
+
+
+## Desvío manual invocado directamente por la IA
+func deflect_by_ai(hand_pos: Vector3, swipe_vel: Vector3, ai_host: Node) -> void:
+	if is_dead or is_deflected:
+		return
+	var col_dict = {
+		"position": global_position,
+		"normal": (global_position - hand_pos).normalized()
+	}
+	_execute_deflection(col_dict, swipe_vel, ai_host)
+
+
 ## Ejecuta la física de desvío angular del proyectil al ser golpeado por una mano
 func _execute_deflection(collision: Dictionary, hand_vel: Vector3, hand_collider: Node) -> void:
 	var swipe_dir = hand_vel.normalized()
@@ -117,8 +171,8 @@ func _execute_deflection(collision: Dictionary, hand_vel: Vector3, hand_collider
 	if new_dir.dot(incoming_dir) > -0.1:
 		new_dir = (new_dir + swipe_dir * 0.5).normalized()
 
-	# Acelerar el proyectil desviado
-	speed_velocity = new_dir * (speed_velocity.length() * 1.3)
+	# Acelerar el proyectil desviado (+40% de velocidad con estela anime)
+	speed_velocity = new_dir * (speed_velocity.length() * 1.4)
 	is_deflected = true
 	deflection_count += 1
 	lifetime_left = 3.5
@@ -128,28 +182,34 @@ func _execute_deflection(collision: Dictionary, hand_vel: Vector3, hand_collider
 	if hand_collider is CollisionObject3D:
 		ray_query_exclude.append(hand_collider.get_rid())
 
-	# Destello de chispas doradas de desvío
+	# Destello de chispas doradas de desvío y sonido metálico de impacto
 	_spawn_deflection_vfx(collision.position)
 
-	# Recompensar con Ki a quien desvió
+	# Identificar defensor que desvió el ataque
 	var defender = hand_collider.get_parent()
 	if defender and not defender.has_method("recharge_ki"):
 		defender = get_tree().current_scene.find_child("PlayerCharacterInstance", true, false)
-	if defender and defender.has_method("recharge_ki"):
-		defender.recharge_ki(15.0)
+	if not defender and hand_collider.has_method("recharge_ki"):
+		defender = hand_collider
+
+	if defender:
+		# Cambiar la autoría del proyectil para que no colisione con el defensor
+		shooter_node = defender
+		if defender.has_method("recharge_ki"):
+			defender.recharge_ki(15.0)
 		if defender.has_method("increase_np"):
-			defender.increase_np(120.0)
+			defender.increase_np(150.0)
 
 	# Pulso háptico en el mando si fue el jugador
 	var ctrl = get_tree().current_scene.find_child("HybridCombatController", true, false)
 	if ctrl:
 		var controller_node = ctrl.left_controller if "left" in hand_collider.name.to_lower() else ctrl.right_controller
 		if controller_node and controller_node.has_method("trigger_haptic_pulse"):
-			controller_node.trigger_haptic_pulse("haptic", 190.0, 0.95, 0.12, 0.0)
+			controller_node.trigger_haptic_pulse("haptic", 180.0, 0.90, 0.10, 0.0)
 
 	var gss = get_tree().root.find_child("GesturePhaseTree", true, false)
 	if gss and gss.has_signal("gesture_logged"):
-		gss.emit_signal("gesture_logged", "[DESVÍO] ¡Ki Blast desviado con la mano! (+15 Ki)", "success")
+		gss.emit_signal("gesture_logged", "[DESVÍO] ¡Ki Blast desviado con la mano! (+15 Ki, +150 BP)", "success")
 
 
 ## Detecta y resuelve colisiones entre proyectiles en vuelo (Choques de Ki)
@@ -408,17 +468,29 @@ func _spawn_visual_explosion(pos: Vector3) -> void:
 func _spawn_deflection_vfx(pos: Vector3) -> void:
 	var spark = MeshInstance3D.new()
 	var sphere = SphereMesh.new()
-	sphere.radius = p_radius * 1.5
-	sphere.height = p_radius * 3.0
+	sphere.radius = p_radius * 1.8
+	sphere.height = p_radius * 3.6
 	spark.mesh = sphere
 
 	var mat = StandardMaterial3D.new()
 	mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
 	mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color(1.0, 0.9, 0.3, 1.0)
+	mat.albedo_color = Color(1.0, 0.92, 0.35, 1.0)
 	spark.material_override = mat
 	get_tree().current_scene.add_child(spark)
 	spark.global_position = pos
+
+	# Audio 3D metálico de ping de desvío anime
+	var sfx = AudioStreamPlayer3D.new()
+	sfx.name = "DeflectSfx"
+	if ResourceLoader.exists("res://assets/audio/gekishin_test/003073_s1.wav"):
+		sfx.stream = load("res://assets/audio/gekishin_test/003073_s1.wav")
+	sfx.unit_size = 5.0
+	sfx.max_distance = 40.0
+	get_tree().current_scene.add_child(sfx)
+	sfx.global_position = pos
+	sfx.play()
+	sfx.finished.connect(sfx.queue_free)
 
 	var tween = get_tree().create_tween().set_parallel(true)
 	tween.tween_property(spark, "scale", Vector3.ONE * 3.5, 0.15).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)

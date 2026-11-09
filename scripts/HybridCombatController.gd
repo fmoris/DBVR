@@ -114,6 +114,7 @@ func _find_xr_nodes() -> void:
 		camera = xr_origin.get_node_or_null("XRCamera3D")
 		left_controller = xr_origin.get_node_or_null("LeftHand")
 		right_controller = xr_origin.get_node_or_null("RightHand")
+		_setup_controller_deflection_colliders()
 
 		if in_game_menu == null:
 			var existing = xr_origin.find_child("VRInGameMenu", true, false)
@@ -146,6 +147,30 @@ func _find_xr_nodes() -> void:
 			var opp = get_tree().current_scene.find_child("EnemyCharacterInstance", true, false)
 			var ply = gesture_tree._get_player_instance() if gesture_tree else null
 			ki_lockon_system.setup(camera, ply, opp, left_controller, right_controller)
+
+
+func _setup_controller_deflection_colliders() -> void:
+	if left_controller and not left_controller.has_node("KiCombatFist_Left"):
+		var col_body = StaticBody3D.new()
+		col_body.name = "KiCombatFist_Left"
+		col_body.collision_layer = 2
+		var col_shape = CollisionShape3D.new()
+		var sphere_shape = SphereShape3D.new()
+		sphere_shape.radius = 0.20
+		col_shape.shape = sphere_shape
+		col_body.add_child(col_shape)
+		left_controller.add_child(col_body)
+
+	if right_controller and not right_controller.has_node("KiCombatFist_Right"):
+		var col_body = StaticBody3D.new()
+		col_body.name = "KiCombatFist_Right"
+		col_body.collision_layer = 2
+		var col_shape = CollisionShape3D.new()
+		var sphere_shape = SphereShape3D.new()
+		sphere_shape.radius = 0.20
+		col_shape.shape = sphere_shape
+		col_body.add_child(col_shape)
+		right_controller.add_child(col_body)
 
 
 func _process(delta: float) -> void:
@@ -600,6 +625,9 @@ func _process_super_powers(delta: float) -> void:
 			current_super_state = SuperPowerState.CHARGING
 			super_power_type = target_tech
 			super_charge_timer = 0.0
+			var player = gesture_tree._get_player_instance() if gesture_tree else null
+			if player and player.has_method("start_charging_super"):
+				player.start_charging_super()
 			if target_tech == "big_bang":
 				var bb_side = 0 if l_grip else 1
 				if gesture_tree:
@@ -815,6 +843,9 @@ func _reset_super_state() -> void:
 	super_power_type = ""
 	super_charge_timer = 0.0
 	super_locked_haptic = false
+	var player = gesture_tree._get_player_instance() if gesture_tree else null
+	if player and player.has_method("stop_charging_super"):
+		player.stop_charging_super()
 	if gesture_tree:
 		gesture_tree._hide_aim_reticle()
 		gesture_tree.set("is_charging_kamehameha", false)
@@ -824,6 +855,18 @@ func _reset_super_state() -> void:
 		gesture_tree.set("is_charging_big_bang", false)
 		if gesture_tree.has_method("_update_special_charge_sphere"):
 			gesture_tree._update_special_charge_sphere(0.0)
+
+
+## Cancela la técnica actual por rotura de concentración (Poise roto por lluvia de Ki Blasts)
+func cancel_super_from_poise_break() -> void:
+	if current_super_state != SuperPowerState.IDLE:
+		_reset_super_state()
+		super_cooldown = 0.8
+		must_release_super_buttons = true
+		_pulse_haptic(left_controller, 200.0, 1.0, 0.35)
+		_pulse_haptic(right_controller, 200.0, 1.0, 0.35)
+		if gesture_tree and gesture_tree.has_signal("gesture_logged"):
+			gesture_tree.emit_signal("gesture_logged", "[CONCENTRACIÓN ROTA] ¡Ataques enemigos interrumpieron tu técnica!", "warning")
 
 
 # --- 4. TRANSFORMACIONES (Botones A / X y B / Y con Edge-Trigger y Progresión Estricta) ---
@@ -1222,11 +1265,11 @@ func _process_guard() -> void:
 		var l_fwd_proj = (l_pos - cam_pos).dot(cam_fwd)
 		var r_fwd_proj = (r_pos - cam_pos).dot(cam_fwd)
 
-		# Altura entre -0.32m y +0.25m respecto a la cabeza, manos juntas (< 0.40m) y al frente
-		if rel_y > -0.32 and rel_y < 0.25 and hands_dist < 0.40 and l_fwd_proj >= 0.10 and r_fwd_proj >= 0.10:
+		# Altura entre -0.35m y +0.20m respecto a la cabeza/pecho, manos juntas (< 0.38m) y al frente
+		if rel_y > -0.35 and rel_y < 0.20 and hands_dist < 0.38 and l_fwd_proj >= 0.10 and r_fwd_proj >= 0.10:
 			_set_player_blocking(true)
-			_pulse_haptic(left_controller, 70.0, 0.12, 0.05)
-			_pulse_haptic(right_controller, 70.0, 0.12, 0.05)
+			_pulse_haptic(left_controller, 80.0, 0.45, 0.08)
+			_pulse_haptic(right_controller, 80.0, 0.45, 0.08)
 			return
 
 	_set_player_blocking(false)
@@ -1238,7 +1281,7 @@ func _set_player_blocking(blocking: bool) -> void:
 		player.set("is_blocking", blocking)
 		if blocking:
 			if gesture_tree and gesture_tree.has_signal("gesture_logged"):
-				gesture_tree.emit_signal("gesture_logged", "[GUARDIA] Postura defensiva de bloqueo activa.", "info")
+				gesture_tree.emit_signal("gesture_logged", "[GUARDIA CRUZADA] Postura defensiva activa (-85% daño a BP).", "info")
 
 
 # --- UTILIDADES HÁPTICAS Y COMUNICACIÓN ---

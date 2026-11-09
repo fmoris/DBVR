@@ -390,29 +390,40 @@ func _connect_gesture_signals() -> void:
 		
 	if gesture_tree:
 		gesture_tree_ref = gesture_tree
-		if gesture_tree.ki_recharge_started.is_connected(_on_recharge_started):
-			gesture_tree.ki_recharge_started.disconnect(_on_recharge_started)
-		if gesture_tree.ki_recharge_stopped.is_connected(_on_recharge_stopped):
-			gesture_tree.ki_recharge_stopped.disconnect(_on_recharge_stopped)
-		if gesture_tree.ki_blast_fired.is_connected(_on_ki_blast_fired):
-			gesture_tree.ki_blast_fired.disconnect(_on_ki_blast_fired)
-		if gesture_tree.has_signal("ki_blast_charging") and gesture_tree.ki_blast_charging.is_connected(_on_ki_blast_charging):
-			gesture_tree.ki_blast_charging.disconnect(_on_ki_blast_charging)
-		if gesture_tree.has_signal("gesture_logged") and gesture_tree.gesture_logged.is_connected(log_gesture_event):
-			gesture_tree.gesture_logged.disconnect(log_gesture_event)
-		if gesture_tree.has_signal("hand_states_updated") and gesture_tree.hand_states_updated.is_connected(_on_hand_states_updated):
-			gesture_tree.hand_states_updated.disconnect(_on_hand_states_updated)
-		if gesture_tree.has_signal("phase_changed") and gesture_tree.phase_changed.is_connected(_on_phase_changed):
-			gesture_tree.phase_changed.disconnect(_on_phase_changed)
+		if gesture_tree.has_signal("ki_recharge_started"):
+			if gesture_tree.ki_recharge_started.is_connected(_on_recharge_started):
+				gesture_tree.ki_recharge_started.disconnect(_on_recharge_started)
+			gesture_tree.ki_recharge_started.connect(_on_recharge_started)
 
-		gesture_tree.ki_recharge_started.connect(_on_recharge_started)
-		gesture_tree.ki_recharge_stopped.connect(_on_recharge_stopped)
-		gesture_tree.ki_blast_fired.connect(_on_ki_blast_fired)
+		if gesture_tree.has_signal("ki_recharge_stopped"):
+			if gesture_tree.ki_recharge_stopped.is_connected(_on_recharge_stopped):
+				gesture_tree.ki_recharge_stopped.disconnect(_on_recharge_stopped)
+			gesture_tree.ki_recharge_stopped.connect(_on_recharge_stopped)
+
+		if gesture_tree.has_signal("ki_blast_fired"):
+			if gesture_tree.ki_blast_fired.is_connected(_on_ki_blast_fired):
+				gesture_tree.ki_blast_fired.disconnect(_on_ki_blast_fired)
+			gesture_tree.ki_blast_fired.connect(_on_ki_blast_fired)
+
 		if gesture_tree.has_signal("ki_blast_charging"):
+			if gesture_tree.ki_blast_charging.is_connected(_on_ki_blast_charging):
+				gesture_tree.ki_blast_charging.disconnect(_on_ki_blast_charging)
 			gesture_tree.ki_blast_charging.connect(_on_ki_blast_charging)
+
 		if gesture_tree.has_signal("gesture_logged"):
+			if gesture_tree.gesture_logged.is_connected(log_gesture_event):
+				gesture_tree.gesture_logged.disconnect(log_gesture_event)
 			gesture_tree.gesture_logged.connect(log_gesture_event)
+
 		if gesture_tree.has_signal("hand_states_updated"):
+			if gesture_tree.hand_states_updated.is_connected(_on_hand_states_updated):
+				gesture_tree.hand_states_updated.disconnect(_on_hand_states_updated)
+			gesture_tree.hand_states_updated.connect(_on_hand_states_updated)
+
+		if gesture_tree.has_signal("phase_changed"):
+			if gesture_tree.phase_changed.is_connected(_on_phase_changed):
+				gesture_tree.phase_changed.disconnect(_on_phase_changed)
+			gesture_tree.phase_changed.connect(_on_phase_changed)
 			gesture_tree.hand_states_updated.connect(_on_hand_states_updated)
 		if gesture_tree.has_signal("phase_changed"):
 			gesture_tree.phase_changed.connect(_on_phase_changed)
@@ -515,7 +526,7 @@ func _update_dbz_hud_elements(delta: float) -> void:
 			guard_badge_label.text = "[ ⚠️ ¡GUARDIA ROTA! (STAGGER) ]"
 			guard_badge_label.label_settings.font_color = Color(1.0, 0.2, 0.2) # Rojo parpadeante
 		elif player_instance.get("is_blocking"):
-			guard_badge_label.text = "[ 🛡️ BLOQUEANDO [-75%] ]"
+			guard_badge_label.text = "[ 🛡️ GUARDIA CRUZADA [-85% BP] ]"
 			guard_badge_label.label_settings.font_color = Color(1.0, 0.9, 0.2) # Amarillo defensivo
 		else:
 			guard_badge_label.text = "[ 🛡️ GUARDIA: LISTA ]"
@@ -899,8 +910,8 @@ func _update_moves_guide_text(is_controller: bool) -> void:
 			text += "• [color=#00e5ff]Big Bang Attack (2 Fases):[/color] 1 Brazo al frente con Grip (Carga) -> Soltar Grip (Fuego)\n"
 			text += "• [color=#00e5ff]Final Flash (2 Fases):[/color] Brazos en cruz (T-Pose Grips) -> Manos juntas al frente y Soltar Grips (Fuego)\n"
 			text += "• [color=#00e5ff]Recarga Ki (2 Fases):[/color] Gatillos a hombros y descender a cintura\n"
-			text += "• [color=#00e5ff]Guardia (-75% daño):[/color] Ambos Grips juntos al pecho/rostro\n"
-			text += "• [color=#00e5ff]Desvío de Ki:[/color] Manotazo veloz contra proyectil entrante\n"
+			text += "• [color=#00e5ff]Guardia Cruzada (-85% BP):[/color] Ambos Grips al pecho en 'X' (4 Ki por impacto)\n"
+			text += "• [color=#00e5ff]Desvío de Ki:[/color] Manotazo veloz contra Ki Blast (+15 Ki, +150 BP)\n"
 			text += "• [color=#00e5ff]Melee Dash (Bullet-Time):[/color] Puñetazo veloz (Grip + Gatillo) -> Golpea las 6 cajas\n"
 			text += "• [color=#ffcc00]Finisher Martillazo DBZ:[/color] En Bullet-Time, junta ambos puños y golpea (Eyección aérea masiva)\n"
 			text += "• [color=#00e5ff]Combate Fuera de Ring:[/color] Libre en llanuras exteriores de Cell Games (85m)\n"
@@ -917,8 +928,8 @@ func _update_moves_guide_text(is_controller: bool) -> void:
 			text += "• [color=#00e5ff]Kamehameha (2 Fases):[/color] Grips en la cadera (Carga) -> Brazos al frente y Soltar Grips (Fuego)\n"
 			text += "• [color=#00e5ff]Genkidama (2 Fases):[/color] Brazos al cielo con Grips (Carga) -> Bajar al frente y Soltar Grips (Fuego)\n"
 			text += "• [color=#00e5ff]Recarga Ki (2 Fases):[/color] Gatillos a hombros y descender a cintura\n"
-			text += "• [color=#00e5ff]Guardia (-75% daño):[/color] Ambos Grips juntos al pecho/rostro\n"
-			text += "• [color=#00e5ff]Desvío de Ki:[/color] Manotazo veloz contra proyectil entrante\n"
+			text += "• [color=#00e5ff]Guardia Cruzada (-85% BP):[/color] Ambos Grips al pecho en 'X' (4 Ki por impacto)\n"
+			text += "• [color=#00e5ff]Desvío de Ki:[/color] Manotazo veloz contra Ki Blast (+15 Ki, +150 BP)\n"
 			text += "• [color=#00e5ff]Melee Dash (Bullet-Time):[/color] Puñetazo veloz (Grip + Gatillo) -> Golpea las 6 cajas\n"
 			text += "• [color=#ffcc00]Finisher Martillazo DBZ:[/color] En Bullet-Time, junta ambos puños y golpea (Eyección aérea masiva)\n"
 			text += "• [color=#00e5ff]Combate Fuera de Ring:[/color] Libre en llanuras exteriores de Cell Games (85m)\n"

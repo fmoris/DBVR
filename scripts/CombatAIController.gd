@@ -278,6 +278,7 @@ func _process_state_kamehameha_charge(delta: float) -> void:
 	# Al completar la carga: ¡DISPARAR!
 	if kamehameha_charge_timer >= KAMEHAMEHA_CHARGE_DURATION:
 		host.is_charging_ki = false
+		host.stop_charging_super()
 		if kamehameha_vfx_sphere and is_instance_valid(kamehameha_vfx_sphere):
 			kamehameha_vfx_sphere.queue_free()
 			kamehameha_vfx_sphere = null
@@ -286,6 +287,20 @@ func _process_state_kamehameha_charge(delta: float) -> void:
 		_spawn_kamehameha_beam(target_pos)
 		attack_cooldown = 5.0
 		_transition_to(AIState.IDLE_SPACING)
+
+
+## Cancela el Kamehameha por rotura de concentración (Poise roto por lluvia de Ki Blasts del jugador)
+func interrupt_kamehameha() -> void:
+	if current_state == AIState.KAMEHAMEHA_CHARGE:
+		host.is_charging_ki = false
+		host.stop_charging_super()
+		if kamehameha_vfx_sphere and is_instance_valid(kamehameha_vfx_sphere):
+			kamehameha_vfx_sphere.queue_free()
+			kamehameha_vfx_sphere = null
+		_play_ai_sfx("hit_light")
+		attack_cooldown = 2.5
+		_transition_to(AIState.IDLE_SPACING)
+		host._log_combat_event("[CONCENTRACIÓN ROTA] ¡El Kamehameha de Goku fue interrumpido por la lluvia de ataques!", "warning")
 
 
 ## Estado 5: Guardia Defensiva
@@ -298,6 +313,9 @@ func _process_state_defensive_block(delta: float) -> void:
 
 ## Transición limpia entre estados
 func _transition_to(new_state: AIState) -> void:
+	if current_state == AIState.KAMEHAMEHA_CHARGE and new_state != AIState.KAMEHAMEHA_CHARGE:
+		host.stop_charging_super()
+
 	state_timer = 0.0
 	current_state = new_state
 
@@ -313,6 +331,7 @@ func _transition_to(new_state: AIState) -> void:
 			blast_interval_timer = 0.20 # Disparo casi inmediato del primer blast
 		AIState.KAMEHAMEHA_CHARGE:
 			kamehameha_charge_timer = 0.0
+			host.start_charging_super()
 		AIState.MELEE_RUSH:
 			host.start_flight_to_opponent()
 			_transition_to(AIState.IDLE_SPACING)
@@ -321,9 +340,10 @@ func _transition_to(new_state: AIState) -> void:
 			block_cooldown = 1.8
 
 
-## Capa reactiva: Detecta proyectiles enemigos entrantes y reacciona con Esquive por pasos o Bloqueo
+## Capa reactiva: Detecta proyectiles enemigos entrantes y reacciona con Desvío con la mano, Esquive por pasos o Guardia Cruzada
 func _check_incoming_threats() -> void:
-	if is_stepping:
+	if is_stepping or current_state == AIState.KAMEHAMEHA_CHARGE:
+		# Durante la carga del Kamehameha, Goku confía en su Super Armor / Poise
 		return
 
 	var my_pos = host.global_position
@@ -333,13 +353,23 @@ func _check_incoming_threats() -> void:
 
 		var p_pos: Vector3 = proj.global_position
 		var dist = my_pos.distance_to(p_pos)
-		if dist < 4.2:
+		if dist < 3.8:
 			var p_vel: Vector3 = proj.get("speed_velocity") if proj.get("speed_velocity") != null else Vector3.ZERO
 			var to_me = (my_pos - p_pos).normalized()
 			# Si el proyectil vuela directo hacia Goku
 			if p_vel.normalized().dot(to_me) > 0.65:
-				# 1. Esquive con paso lateral por casillas si tiene Ki >= 8.0 y no está en cooldown
-				if host.current_ki >= 8.0 and dodge_cooldown <= 0.0:
+				var rand_choice = randf()
+				# A. Desvío activo con la mano (Ki Deflection) si está a corta distancia (< 2.4m)
+				if rand_choice < 0.38 and dist < 2.4 and proj.get("tier") == 1:
+					var hand_pos = my_pos + Vector3(0.2, 1.25, 0.4)
+					var swipe_vel = Vector3(randf_range(-1.5, 1.5), 1.2, -1.8)
+					proj.deflect_by_ai(hand_pos, swipe_vel, host)
+					if host.procedural_animator:
+						host.procedural_animator.trigger_hit_flinch(0.2, -swipe_vel.normalized())
+					host._log_combat_event("[DESVÍO] ¡%s desvió tu Ki Blast con un golpe de mano! (+15 Ki, +150 BP)" % (host.character_data.character_name if host.character_data else "Goku"), "info")
+					return
+				# B. Esquive con paso lateral por casillas si tiene Ki >= 8.0 y no está en cooldown
+				elif host.current_ki >= 8.0 and dodge_cooldown <= 0.0:
 					var right_vec = host.global_transform.basis.x.normalized()
 					var dodge_dir = right_vec * (1.0 if randf() > 0.5 else -1.0)
 					if execute_step_movement(dodge_dir):
@@ -347,7 +377,7 @@ func _check_incoming_threats() -> void:
 						dodge_cooldown = 1.8
 						host._log_combat_event("[ESQUIVE] ¡%s dio un paso lateral evasivo para esquivar el ataque!" % (host.character_data.character_name if host.character_data else "Goku"), "info")
 						return
-				# 2. Bloqueo con guardia si no puede dar un paso
+				# C. Bloqueo con Guardia Cruzada si no puede desviar ni esquivar
 				elif block_cooldown <= 0.0 and current_state != AIState.DEFENSIVE_BLOCK:
 					_transition_to(AIState.DEFENSIVE_BLOCK)
 					return

@@ -40,6 +40,13 @@ var is_blocking: bool = false
 var is_guard_broken: bool = false
 var guard_break_timer: float = 0.0
 
+# --- Estado de Resistencia de Carga (Super Armor / Poise Canónico) ---
+var is_charging_super: bool = false
+var current_charge_poise: float = 500.0
+var max_charge_poise: float = 500.0
+var is_staggered: bool = false
+var stagger_timer: float = 0.0
+
 # Referencias visuales internas
 var body_mesh_instance: Node3D = null
 var aura_particles: Node3D = null
@@ -289,6 +296,12 @@ func _physics_process(delta: float) -> void:
 			is_guard_broken = false
 			print("[Combat] %s recuperó la estabilidad de guardia." % (character_data.character_name if character_data else name))
 
+	# 5. Temporizador de aturdimiento (Stagger por concentración rota)
+	if is_staggered:
+		stagger_timer -= delta
+		if stagger_timer <= 0.0:
+			is_staggered = false
+
 
 func _process(delta: float) -> void:
 	# Manejar temporizador de penalización por fallo de remate
@@ -374,13 +387,112 @@ func _process(delta: float) -> void:
 	# Actualizar aura visual
 	_update_aura_visuals(delta)
 
+func start_charging_super() -> void:
+	is_charging_super = true
+	var opp = _get_opponent()
+	var opp_np = opp.current_np if opp and is_instance_valid(opp) else 10000.0
+	var bp_ratio = clampf(current_np / maxf(opp_np, 100.0), 0.35, 3.5)
+	max_charge_poise = 500.0 * bp_ratio
+	current_charge_poise = max_charge_poise
+
+
+func stop_charging_super() -> void:
+	is_charging_super = false
+
+
+func interrupt_charging_super() -> void:
+	is_charging_super = false
+	is_staggered = true
+	stagger_timer = 0.4
+	
+	_spawn_fizzle_vfx()
+	
+	if is_player:
+		var ctrl = get_tree().current_scene.find_child("HybridCombatController", true, false)
+		if ctrl and ctrl.has_method("cancel_super_from_poise_break"):
+			ctrl.cancel_super_from_poise_break()
+		_log_combat_event("[CONCENTRACIÓN ROTA] ¡La lluvia de ataques interrumpió tu técnica!", "warning")
+	else:
+		var ai_ctrl = get_node_or_null("CombatAIController")
+		if ai_ctrl and ai_ctrl.has_method("interrupt_kamehameha"):
+			ai_ctrl.interrupt_kamehameha()
+		_log_combat_event("[CONCENTRACIÓN ROTA] ¡Concentración rota! Técnica interrumpida.", "warning")
+
+
+func _spawn_fizzle_vfx() -> void:
+	var fizzle = MeshInstance3D.new()
+	var sphere = SphereMesh.new()
+	sphere.radius = 0.25
+	sphere.height = 0.50
+	fizzle.mesh = sphere
+
+	var mat = StandardMaterial3D.new()
+	mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = Color(1.0, 0.4, 0.1, 0.85)
+	fizzle.material_override = mat
+
+	add_child(fizzle)
+	fizzle.position = Vector3(0.0, 1.15, -0.32)
+
+	var tween = get_tree().create_tween().set_parallel(true)
+	tween.tween_property(fizzle, "scale", Vector3.ONE * 2.2, 0.25).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(mat, "albedo_color", Color(1.0, 0.1, 0.0, 0.0), 0.25)
+	tween.chain().tween_callback(fizzle.queue_free)
+
+
+func _trigger_poise_resisted_feedback(hit_direction: Vector3) -> void:
+	var dir = hit_direction
+	if dir.length_squared() < 0.01:
+		dir = -global_transform.basis.z
+
+	# Pequeño retroceso firme de aguante
+	apply_knockback(dir, 1.8)
+
+	if procedural_animator:
+		procedural_animator.trigger_hit_flinch(0.35, dir)
+
+	if is_player:
+		var origin = get_parent()
+		if origin:
+			for hand in ["LeftHand", "RightHand"]:
+				var ctrl = origin.get_node_or_null(hand)
+				if ctrl and ctrl.has_method("trigger_haptic_pulse"):
+					ctrl.trigger_haptic_pulse("haptic", 110.0, 0.45, 0.09, 0.0)
+		_log_combat_event("[SUPER ARMOR] ¡Aguantando la lluvia de ataques! Poise: %.0f/%.0f" % [current_charge_poise, max_charge_poise], "info")
+	else:
+		_log_combat_event("[SUPER ARMOR] ¡Goku aguanta los ataques mientras carga energía!", "info")
+
+
 func take_hit(amount_np: float, hit_direction: Vector3 = Vector3.ZERO) -> void:
-	# Si está en postura de Guardia y no tiene la guardia rota, absorber con Bloqueo
+	# 1. Si está en postura de Guardia y no tiene la guardia rota, absorber con Bloqueo
 	if is_blocking and not is_guard_broken and amount_np >= 10.0:
 		block_hit(amount_np, hit_direction)
 		return
 
-	# Recibir golpes disminuye nuestro NP, pero nunca por debajo de los umbrales irreversibles asegurados (25%, 50%, 75%, 100%)
+	# 2. Si está cargando un Super Poder, aplicar sistema canónico de Poise / Super Armor
+	if is_charging_super and not is_staggered and amount_np >= 10.0:
+		var poise_damage = amount_np * 0.75
+		current_charge_poise -= poise_damage
+
+		# Daño al BP mitigado al 50% mientras resiste la concentración
+		var mitigated_damage = amount_np * 0.50
+		var active_max: float = character_data.max_np
+		if current_transformation:
+			active_max *= current_transformation.np_multiplier
+		var floor_limit: float = max(active_max * secured_np_threshold_ratio, 100.0)
+		current_np = max(current_np - mitigated_damage, floor_limit)
+		_notify_stats()
+		_check_transformation_unlocks()
+
+		if current_charge_poise <= 0.0:
+			interrupt_charging_super()
+			return
+		else:
+			_trigger_poise_resisted_feedback(hit_direction)
+			return
+
+	# 3. Recibir golpes disminuye nuestro BP/NP, pero nunca por debajo de los umbrales irreversibles asegurados (25%, 50%, 75%, 100%)
 	var active_max: float = character_data.max_np
 	if current_transformation:
 		active_max *= current_transformation.np_multiplier
@@ -409,28 +521,30 @@ func take_hit(amount_np: float, hit_direction: Vector3 = Vector3.ZERO) -> void:
 			procedural_animator.trigger_hit_flinch(clampf(amount_np * 0.005, 0.2, 1.2), dir)
 
 
-## Absorbe el impacto reduciendo 75% del daño a cambio de Ki (Mecánica de Bloqueo / Guardia)
+## Absorbe el impacto reduciendo 85% del daño a cambio de Ki (Mecánica de Bloqueo / Guardia Cruzada)
 func block_hit(amount_np: float, hit_direction: Vector3 = Vector3.ZERO) -> void:
-	var ki_cost = clamp(amount_np * 0.04, 6.0, 28.0)
+	var ki_cost = clamp(amount_np * 0.03, 3.5, 18.0)
 	var dir = hit_direction
 	if dir.length_squared() < 0.01:
 		dir = -global_transform.basis.z
 
 	if current_ki >= ki_cost:
 		current_ki -= ki_cost
-		_notify_stats()
 
-		# Daño fuertemente mitigado (-75%)
-		var mitigated_damage = amount_np * 0.25
+		# Daño al BP fuertemente mitigado (-85%)
+		var mitigated_damage = amount_np * 0.15
 		var active_max: float = character_data.max_np
 		if current_transformation:
 			active_max *= current_transformation.np_multiplier
 		var floor_limit: float = max(active_max * secured_np_threshold_ratio, 100.0)
 		current_np = max(current_np - mitigated_damage, floor_limit)
+		
+		# Recompensa mínima de BP (+20 BP), CERO Ki de ganancia (postura de contención pura)
+		increase_np(20.0)
 		_notify_stats()
 
 		# Retroceso firme amortiguado
-		apply_knockback(dir, 4.5)
+		apply_knockback(dir, 3.2)
 
 		# Destello de escudo de choque de Ki
 		_spawn_block_shield_vfx()
@@ -441,8 +555,8 @@ func block_hit(amount_np: float, hit_direction: Vector3 = Vector3.ZERO) -> void:
 				for hand in ["LeftHand", "RightHand"]:
 					var ctrl = origin.get_node_or_null(hand)
 					if ctrl and ctrl.has_method("trigger_haptic_pulse"):
-						ctrl.trigger_haptic_pulse("haptic", 160.0, 0.65, 0.15, 0.0)
-			_log_combat_event("[GUARDIA] ¡Ataque bloqueado! Daño mitigado: %.0f NP (-75%%)" % mitigated_damage, "info")
+						ctrl.trigger_haptic_pulse("haptic", 140.0, 0.55, 0.12, 0.0)
+			_log_combat_event("[GUARDIA] ¡Ataque bloqueado! Daño mitigado al BP (-85%%)", "info")
 	else:
 		# ¡GUARD BREAK! El Ki se agotó bloqueando
 		current_ki = 0.0
@@ -451,12 +565,12 @@ func block_hit(amount_np: float, hit_direction: Vector3 = Vector3.ZERO) -> void:
 		is_guard_broken = true
 		guard_break_timer = 1.2
 
-		# Daño parcial penetra la guardia (55% de daño)
+		# Daño parcial penetra la guardia (55% de daño al BP)
 		var break_damage = amount_np * 0.55
 		current_np = max(current_np - break_damage, 100.0)
 		_notify_stats()
 
-		apply_knockback(dir, 12.0)
+		apply_knockback(dir, 10.0)
 
 		if is_player:
 			var origin = get_parent()
@@ -464,7 +578,7 @@ func block_hit(amount_np: float, hit_direction: Vector3 = Vector3.ZERO) -> void:
 				for hand in ["LeftHand", "RightHand"]:
 					var ctrl = origin.get_node_or_null(hand)
 					if ctrl and ctrl.has_method("trigger_haptic_pulse"):
-						ctrl.trigger_haptic_pulse("haptic", 220.0, 1.0, 0.40, 0.0)
+						ctrl.trigger_haptic_pulse("haptic", 200.0, 1.0, 0.40, 0.0)
 			_log_combat_event("[GUARD BREAK] ¡Guardia rota por agotamiento de Ki!", "error")
 
 
