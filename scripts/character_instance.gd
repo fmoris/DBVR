@@ -274,17 +274,26 @@ func _physics_process(delta: float) -> void:
 		velocity.x = move_toward(velocity.x, 0.0, knockback_drag * delta)
 		velocity.z = move_toward(velocity.z, 0.0, knockback_drag * delta)
 
-		# Gravedad si está en el aire (adaptable dinámicamente al ring Y=0.5 o llanura exterior Y=0.0)
+		# En Dragon Ball los peleadores levitan en el aire (Bukujutsu).
+		# La gravedad SOLO se aplica si el personaje fue arrojado expresamente hacia el suelo (Remate/Martillazo, velocity.y < -4.0)
+		# o si se encuentra en ragdoll / inconsciente. Un Ki blast o golpe normal NUNCA hace caer al suelo.
 		var current_pos = (get_parent().global_position if is_player else global_position)
 		var ground_h = get_ground_elevation(current_pos)
-		if current_pos.y > ground_h + 0.005:
-			velocity.y -= gravity * delta
+		if velocity.y < -4.0 or is_ragdoll_active:
+			if current_pos.y > ground_h + 0.005:
+				velocity.y -= gravity * delta
+			else:
+				# Si caía a gran velocidad hacia el suelo (impacto sísmico / crash damage)
+				if velocity.y < -7.0 and is_knocked_back:
+					_on_ground_crash_impact(abs(velocity.y), current_pos, ground_h)
+				velocity.y = 0.0
+				is_knocked_back = false
 		else:
-			# Si caía a gran velocidad hacia el suelo (impacto sísmico / crash damage)
-			if velocity.y < -7.0 and is_knocked_back:
-				_on_ground_crash_impact(abs(velocity.y), current_pos, ground_h)
-			velocity.y = 0.0
-			is_knocked_back = false
+			# Si el golpe no era un remate hacia abajo, disipamos la velocidad vertical suavemente sin caer al suelo
+			velocity.y = move_toward(velocity.y, 0.0, knockback_drag * delta)
+			if current_pos.y <= ground_h + 0.005:
+				velocity.y = 0.0
+				is_knocked_back = false
 
 	# 3. Colisión mutua de cuerpos anti-clipping (No atravesar al rival)
 	_process_mutual_body_collision()
@@ -1511,7 +1520,7 @@ func _clamp_to_arena(node: Node3D) -> void:
 			var col = space.intersect_ray(ray_params)
 			if col and col.collider:
 				var collider = col.collider
-				if collider.is_in_group("mountains") or collider.has_meta("is_mountain") or "Mountain" in collider.name or "Canyon" in collider.name:
+				if collider.is_in_group("mountains") or collider.has_meta("is_mountain") or "Mountain" in collider.name or "Canyon" in collider.name or "Boulder" in collider.name:
 					hit_mountain = true
 					pos = col.position + col.normal * 0.50
 					_on_boundary_crash_impact(horiz_speed)
@@ -1743,16 +1752,16 @@ func _execute_melee_impact(opponent: Node3D) -> void:
 		_log_combat_event("[Melee] ¡Impacto directo cuerpo a cuerpo! Daño: %.0f NP" % damage, "success")
 
 
-## Calcula la duración dinámica del Bullet-Time (Punto 8: 6.0s en modo test para evaluar golpes y finisher)
+## Calcula la duración dinámica del Bullet-Time canónico (micro-turno de acción rápida)
 func calculate_bullet_time_duration(attacker: Node3D, defender: Node3D) -> float:
 	if not attacker or not defender:
-		return 6.0
+		return 2.2
 	var bp_atk: float = attacker.get("current_np") if attacker.get("current_np") != null else 10000.0
 	var bp_def: float = maxf(defender.get("current_np") if defender.get("current_np") != null else 10000.0, 1000.0)
 	var bp_diff: float = bp_atk - bp_def
 	var ratio: float = bp_diff / bp_def
-	# Modo prueba extendido: Duración base 6.0s (rango 4.5s - 7.5s)
-	return clampf(6.0 + ratio * 1.5, 4.5, 7.5)
+	# Micro-turno dinámico: duración base 2.2s (rango 1.6s - 2.8s según diferencia de BP)
+	return clampf(2.2 + ratio * 0.6, 1.6, 2.8)
 
 
 ## Activa el modo Bullet-Time táctico al conectar el Melee Dash con el oponente

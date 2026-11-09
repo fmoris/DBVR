@@ -852,8 +852,8 @@ func _match_gesture(left_state: Dictionary, right_state: Dictionary, torso_trans
 				if player and player.character_data and player.character_data.character_name == "Vegeta":
 					return "FINAL_FLASH_CHARGE"
 
-	# J. Big Bang Attack - Preparar (Un solo brazo extendido al frente)
-	if not is_charging_big_bang and not is_charging_galick_ho and not is_charging_final_flash:
+	# J. Big Bang Attack - Preparar (Un solo brazo extendido al frente, solo en Hand Tracking puro)
+	if not is_controller_override and not is_charging_big_bang and not is_charging_galick_ho and not is_charging_final_flash:
 		var player = _get_player_instance()
 		if player and player.character_data and player.character_data.character_name == "Vegeta":
 			if right_state.valid and right_state.depth == "FAR" and right_state.height in ["CHEST", "HEAD"]:
@@ -903,8 +903,8 @@ func _match_gesture(left_state: Dictionary, right_state: Dictionary, torso_trans
 		if l_not_open and r_not_open and l_height_ok and r_height_ok and l_side and r_side and hands_not_crossed and l_close and r_close and l_stable and r_stable:
 			return "HANDS_CLOSED_HIP"
 			
-	# 3. Ki Blast Izquierdo - Preparar (REQUISITO 1: Solo con Brazo Estirado al Frente depth == "FAR")
-	if left_state.valid:
+	# 3. Ki Blast Izquierdo - Preparar (Solo si NO estamos en controller override)
+	if not is_controller_override and left_state.valid:
 		var l_open = left_state.shape != "CLOSED"
 		var l_chest = left_state.height == "CHEST" or left_state.height == "HEAD"
 		var l_left = left_state.lateral == "LEFT" or left_state.lateral == "CENTER"
@@ -915,8 +915,8 @@ func _match_gesture(left_state: Dictionary, right_state: Dictionary, torso_trans
 		if l_open and l_chest and l_left and l_far and l_stable and l_palm_fwd and not hands_are_close:
 			return "ARM_STRETCHED_OPEN_LEFT"
 			
-	# 4. Ki Blast Izquierdo - Disparar (REQUISITO 1: Solo con Brazo Estirado al Frente depth == "FAR")
-	if left_state.valid:
+	# 4. Ki Blast Izquierdo - Disparar (Solo si NO estamos en controller override)
+	if not is_controller_override and left_state.valid:
 		var l_height_valid = left_state.height != "LOW"
 		var l_far = left_state.depth == "FAR"
 		var l_fast = left_state.speed == "FAST" or left_state.speed_val > 1.2
@@ -924,8 +924,8 @@ func _match_gesture(left_state: Dictionary, right_state: Dictionary, torso_trans
 		if l_height_valid and l_far and l_fast:
 			return "FAST_THRUST_LEFT"
 			
-	# 5. Ki Blast Derecho - Preparar (REQUISITO 1: Solo con Brazo Estirado al Frente depth == "FAR")
-	if right_state.valid:
+	# 5. Ki Blast Derecho - Preparar (Solo si NO estamos en controller override)
+	if not is_controller_override and right_state.valid:
 		var r_open = right_state.shape != "CLOSED"
 		var r_chest = right_state.height == "CHEST" or right_state.height == "HEAD"
 		var r_right = right_state.lateral == "RIGHT" or right_state.lateral == "CENTER"
@@ -936,8 +936,8 @@ func _match_gesture(left_state: Dictionary, right_state: Dictionary, torso_trans
 		if r_open and r_chest and r_right and r_far and r_stable and r_palm_fwd and not hands_are_close:
 			return "ARM_STRETCHED_OPEN_RIGHT"
 			
-	# 6. Ki Blast Derecho - Disparar (REQUISITO 1: Solo con Brazo Estirado al Frente depth == "FAR")
-	if right_state.valid:
+	# 6. Ki Blast Derecho - Disparar (Solo si NO estamos en controller override)
+	if not is_controller_override and right_state.valid:
 		var r_height_valid = right_state.height != "LOW"
 		var r_far = right_state.depth == "FAR"
 		var r_fast = right_state.speed == "FAST" or right_state.speed_val > 1.2

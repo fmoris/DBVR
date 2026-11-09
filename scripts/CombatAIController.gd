@@ -98,8 +98,22 @@ func _physics_process(delta: float) -> void:
 	if not enabled or not host or not is_instance_valid(host):
 		return
 
+	# Si la IA está siendo atacada en Bullet-Time (Minijuego Melee), reaccionar defensivamente
+	if host.is_in_bullet_time:
+		# Adoptar postura de Guardia (Cross-Arm Guard) para mitigar daño
+		if not host.is_blocking and not host.is_guard_broken and host.current_ki > 5.0:
+			host.is_blocking = true
+			if host.procedural_animator:
+				host.procedural_animator.trigger_guard_stance()
+		# Tras resistir los primeros golpes, intentar un paso evasivo hacia atrás para salir del rango
+		if state_timer > 1.2 and dodge_cooldown <= 0.0:
+			dodge_cooldown = 1.8
+			var back_dir = host.global_transform.basis.z.normalized()
+			execute_step_movement(back_dir)
+		return
+
 	# Si el personaje está en ragdoll, volando o noqueado, pausar toma de decisiones
-	if host.is_ragdoll_active or host.is_flying_to_opponent or host.is_knocked_back or host.is_in_bullet_time or host.wall_stick_timer > 0.0:
+	if host.is_ragdoll_active or host.is_flying_to_opponent or host.is_knocked_back or host.wall_stick_timer > 0.0:
 		if host.is_charging_ki and current_state != AIState.KI_RECHARGE:
 			host.is_charging_ki = false
 		return

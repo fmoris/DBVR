@@ -208,8 +208,8 @@ func _process(delta: float) -> void:
 	var player = gesture_tree._get_player_instance() if gesture_tree else null
 	var in_melee_minigame = player and (player.get("is_in_bullet_time") or player.get("is_flying_to_melee"))
 	if in_melee_minigame:
-		# Durante el combate melee o minijuego de cajas, SOLO se permite golpear las cajas físicamente.
-		# Se bloquea totalmente el lanzamiento de poderes especiales, Ki Blasts, recarga de Ki, guardia y transformaciones.
+		# Durante el combate melee o minijuego de cajas se bloquean poderes y recarga de Ki,
+		# pero SÍ se permite la Guardia (cruzar brazos) y el Desplazamiento evasivo (step back).
 		_reset_super_state()
 		if left_is_charging or right_is_charging:
 			if gesture_tree:
@@ -224,6 +224,8 @@ func _process(delta: float) -> void:
 			if gesture_tree:
 				gesture_tree._cancel_action("En combate cuerpo a cuerpo")
 				gesture_tree._reset_to_idle()
+		_process_guard()
+		_process_grid_step_movement(delta)
 		_process_hud_toggle(delta)
 		return
 
@@ -404,7 +406,7 @@ func _process_ki_blasts(delta: float) -> void:
 
 func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta: float) -> void:
 	var trig_val = controller.get_float("trigger")
-	var trig_pressed = trig_val > 0.35 or controller.is_button_pressed("trigger_click")
+	var trig_pressed = trig_val > 0.65 or controller.is_button_pressed("trigger_click")
 	var is_left = (hand_side == 0)
 
 	var cam_p = camera.global_position if camera else xr_origin.global_position + Vector3(0, 1.6, 0)
@@ -463,8 +465,8 @@ func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta:
 		# Gatillo soltado o brazo retirado: Evaluar disparo (tap rápido o disparo cargado)
 		var held_time = left_charge_time if is_left else right_charge_time
 
-		# Solo dispara si se mantuvo cargando al menos 0.04s
-		if held_time >= 0.04:
+		# Solo dispara si se mantuvo cargando al menos 0.10s (previene disparos accidentales por ruido analógico)
+		if held_time >= 0.10:
 			var is_charged = held_time >= 0.50
 			var action_name = "ki_blast_left" if is_left else "ki_blast_right"
 
@@ -504,17 +506,17 @@ func _process_super_powers(delta: float) -> void:
 		return
 
 	if must_release_super_buttons:
-		var l_g = left_controller.get_float("grip") > 0.55 or left_controller.is_button_pressed("grip_click")
-		var r_g = right_controller.get_float("grip") > 0.55 or right_controller.is_button_pressed("grip_click")
-		var l_t = left_controller.get_float("trigger") > 0.50 or left_controller.is_button_pressed("trigger_click")
-		var r_t = right_controller.get_float("trigger") > 0.50 or right_controller.is_button_pressed("trigger_click")
+		var l_g = left_controller.get_float("grip") > 0.65 or left_controller.is_button_pressed("grip_click")
+		var r_g = right_controller.get_float("grip") > 0.65 or right_controller.is_button_pressed("grip_click")
+		var l_t = left_controller.get_float("trigger") > 0.65 or left_controller.is_button_pressed("trigger_click")
+		var r_t = right_controller.get_float("trigger") > 0.65 or right_controller.is_button_pressed("trigger_click")
 		if not l_g and not r_g and not l_t and not r_t:
 			must_release_super_buttons = false
 		else:
 			return
 
-	var l_trig: bool = left_controller.get_float("trigger") > 0.45 or left_controller.is_button_pressed("trigger_click")
-	var r_trig: bool = right_controller.get_float("trigger") > 0.45 or right_controller.is_button_pressed("trigger_click")
+	var l_trig: bool = left_controller.get_float("trigger") > 0.65 or left_controller.is_button_pressed("trigger_click")
+	var r_trig: bool = right_controller.get_float("trigger") > 0.65 or right_controller.is_button_pressed("trigger_click")
 
 	# Si se está recargando Ki o se sostienen ambos gatillos, cancelar o no entrar a Super Poder
 	if is_charging_ki or ki_prep_phase or (l_trig and r_trig):
@@ -522,8 +524,8 @@ func _process_super_powers(delta: float) -> void:
 			_reset_super_state()
 		return
 
-	var l_grip: bool = left_controller.get_float("grip") > 0.45 or left_controller.is_button_pressed("grip_click")
-	var r_grip: bool = right_controller.get_float("grip") > 0.45 or right_controller.is_button_pressed("grip_click")
+	var l_grip: bool = left_controller.get_float("grip") > 0.65 or left_controller.is_button_pressed("grip_click")
+	var r_grip: bool = right_controller.get_float("grip") > 0.65 or right_controller.is_button_pressed("grip_click")
 
 	var l_pos = left_controller.global_position
 	var r_pos = right_controller.global_position
@@ -706,7 +708,7 @@ func _process_super_powers(delta: float) -> void:
 		match super_power_type:
 			"final_flash": min_fire_time = 1.0
 			"galick_ho": min_fire_time = 0.7
-			"big_bang": min_fire_time = 0.6
+			"big_bang": min_fire_time = 0.85
 			"kamehameha": min_fire_time = 0.8
 			"genkidama": min_fire_time = 1.2
 
@@ -1076,8 +1078,8 @@ func _process_grid_step_movement(delta: float) -> void:
 	if not player:
 		return
 
-	# Si estamos en minijuego melee o en ráfaga de golpes, no se permite movimiento
-	if player.get("is_in_bullet_time") or player.get("is_flying_to_melee") or player.get("is_flying_to_opponent"):
+	# Si estamos volando en dash hacia el rival, no se permite movimiento manual
+	if player.get("is_flying_to_melee") or player.get("is_flying_to_opponent"):
 		return
 
 	# A. ELEVACIÓN VERTICAL POR CLIC DE STICK
@@ -1175,13 +1177,29 @@ func _execute_horizontal_step(move_dir: Vector3) -> void:
 			player._log_combat_event("[MOVIMIENTO] ¡Distancia mínima alcanzada (2.4m)! No puedes avanzar más.", "warning")
 			return
 
-	# 2. Comprobación de límites de la arena
+	# 2. Comprobación de colisión física con obstáculos del entorno (rocas café, pilares, mesetas)
+	if xr_origin and xr_origin.is_inside_tree() and xr_origin.get_world_3d():
+		var space = xr_origin.get_world_3d().direct_space_state
+		if space:
+			var char_y = xr_origin.global_position.y + 0.8
+			var p_from = Vector3(xr_origin.global_position.x, char_y, xr_origin.global_position.z)
+			var p_to = Vector3(target_pos.x, char_y, target_pos.z)
+			var ray = PhysicsRayQueryParameters3D.create(p_from, p_to)
+			ray.collision_mask = 1 # Capa 1: Entorno sólido, rocas y montañas
+			var col = space.intersect_ray(ray)
+			if col and col.collider:
+				print("[Movement] Paso bloqueado por colisión con obstáculo sólido (%s)." % col.collider.name)
+				_pulse_haptic(right_controller, 110.0, 0.45, 0.12)
+				player._log_combat_event("[MOVIMIENTO] Bloqueado por obstáculo del entorno.", "warning")
+				return
+
+	# 3. Comprobación de límites de la arena
 	var dist_center = Vector2(target_pos.x, target_pos.z).length()
 	if dist_center > player.arena_half_limit:
 		_pulse_haptic(right_controller, 90.0, 0.4, 0.15)
 		return
 
-	# 3. Desplazamiento ágil estilo anime (0.16s Tween)
+	# 4. Desplazamiento ágil estilo anime (0.16s Tween)
 	is_step_moving = true
 	_play_step_audio(1.25)
 	_pulse_haptic(right_controller, 140.0, 0.45, 0.08)

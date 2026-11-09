@@ -652,13 +652,15 @@ func _generate_runtime_colliders() -> void:
 			outer_wall_body.add_child(col)
 		add_child(outer_wall_body)
 
-	# H. Colisionadores físicos de las 36 Rocas y Peñascos del llano (Punto 3)
+	# H. Colisionadores físicos de las 36 Rocas y Peñascos del llano (Cuadros café Akira Toriyama)
 	var boulder_node = get_node_or_null("ToriyamaBoulders_MultiMesh") as MultiMeshInstance3D
 	if boulder_node and boulder_node.multimesh:
 		var boulder_body = StaticBody3D.new()
-		boulder_body.name = "ToriyamaBoulders_StaticBody"
+		boulder_body.name = "ToriyamaBoulders_Mountain_StaticBody"
 		boulder_body.collision_layer = 1
 		boulder_body.collision_mask = 1 | 2 | 4
+		boulder_body.add_to_group("mountains")
+		boulder_body.set_meta("is_mountain", true)
 		var b_mm = boulder_node.multimesh
 		for idx in range(b_mm.instance_count):
 			var t = b_mm.get_instance_transform(idx)

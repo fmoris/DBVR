@@ -94,6 +94,20 @@ func _process(delta: float) -> void:
 	if not is_active:
 		return
 
+	# Comprobar si los combatientes se separaron fuera del rango de combate cuerpo a cuerpo
+	if attacker and defender and is_instance_valid(attacker) and is_instance_valid(defender):
+		var p_atk = attacker.get_parent().global_position if (attacker.get("is_player") and attacker.get_parent()) else attacker.global_position
+		var p_def = defender.get_parent().global_position if (defender.get("is_player") and defender.get_parent()) else defender.global_position
+		p_atk.y = 0.0
+		p_def.y = 0.0
+		if p_atk.distance_to(p_def) > 1.85:
+			print("[BulletTimeDome] Fin del enfrentamiento melee: Separación fuera de rango (%.2fm)." % p_atk.distance_to(p_def))
+			finish()
+			return
+
+	# Mantener la posición de la cúpula sincronizada con la cámara
+	_update_dome_transform()
+
 	# Actualizar seguimiento de puño cerrado y acumulación de carga por mando
 	_update_fist_states(delta)
 
