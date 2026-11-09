@@ -24,6 +24,8 @@
 - **Verificación Previa de Visor para Envío de APK:**
   - **SIEMPRE**, antes de intentar instalar o enviar el APK a los lentes vía ADB, verificar primero si el dispositivo está conectado (`adb devices`).
   - Si **NO se detecta ningún visor** en la lista de dispositivos ADB, **OMITIR el envío automáticamente**, avisar que el APK está listo y esperar a que el visor esté conectado.
+- **Informe Final Obligatorio al Completar Tareas:**
+  - Al finalizar cualquier tarea o ciclo de cambios, **SIEMPRE concluir con un informe final detallado** explicando cómo y dónde se aplicaron los cambios, por qué se resolvieron de esa forma y la validación realizada.
 
 ---
 
