@@ -26,8 +26,6 @@ var last_reported_mode: bool = false
 var is_charging_ki: bool = false
 var ki_prep_phase: bool = false
 var ki_haptic_timer: float = 0.0
-var require_input_release_after_melee: bool = false
-var post_melee_cooldown: float = 0.0
 var was_in_melee_minigame: bool = false
 
 # 2. Ki Blasts (Izquierda y Derecha)
@@ -207,8 +205,6 @@ func _process(delta: float) -> void:
 		transform_cooldown -= delta
 	if recharge_exit_cooldown > 0.0:
 		recharge_exit_cooldown -= delta
-	if post_melee_cooldown > 0.0:
-		post_melee_cooldown -= delta
 
 	# 3. Comprobación de estado Melee / Bullet-Time (Minijuego de cajas)
 	var player = gesture_tree._get_player_instance() if gesture_tree else null
@@ -236,35 +232,20 @@ func _process(delta: float) -> void:
 		_process_hud_toggle(delta)
 		return
 
-	# Si acabamos de salir de una fase de melee, activar pestillo de liberación de mandos y cooldown
+	# Si acabamos de salir de una fase de melee, resetear estados y activar protecciones limpias
 	if was_in_melee_minigame:
 		was_in_melee_minigame = false
-		require_input_release_after_melee = true
-		post_melee_cooldown = 0.8
-		melee_cooldown = 1.0
+		melee_cooldown = 0.5
+		must_release_super_buttons = true
 		_reset_super_state()
+		left_charge_time = 0.0
+		right_charge_time = 0.0
+		left_is_charging = false
+		right_is_charging = false
+		is_charging_ki = false
+		ki_prep_phase = false
 		if gesture_tree:
 			gesture_tree._reset_to_idle()
-
-	# Pestillo de seguridad post-melee: Exigir soltar grips y gatillos antes de permitir nuevos ataques
-	if require_input_release_after_melee:
-		var l_g = left_controller.get_float("grip")
-		var l_t = left_controller.get_float("trigger")
-		var r_g = right_controller.get_float("grip")
-		var r_t = right_controller.get_float("trigger")
-		if l_g < 0.25 and l_t < 0.25 and r_g < 0.25 and r_t < 0.25:
-			require_input_release_after_melee = false
-		else:
-			_process_guard()
-			_process_grid_step_movement(delta)
-			_process_hud_toggle(delta)
-			return
-
-	if post_melee_cooldown > 0.0:
-		_process_guard()
-		_process_grid_step_movement(delta)
-		_process_hud_toggle(delta)
-		return
 
 	# 4. Procesar las acciones híbridas en combate libre
 	_process_ki_recharge(delta)
