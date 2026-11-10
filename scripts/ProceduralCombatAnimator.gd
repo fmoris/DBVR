@@ -196,7 +196,25 @@ func _apply_arms_guard(delta: float, is_charging_ki: bool, is_blocking: bool, fl
 		ki_jitter_l = Vector3((randf() - 0.5) * j_scale, (randf() - 0.5) * j_scale, (randf() - 0.5) * j_scale)
 		ki_jitter_r = Vector3((randf() - 0.5) * j_scale, (randf() - 0.5) * j_scale, (randf() - 0.5) * j_scale)
 
-	if is_blocking:
+	var is_firing_beam = character_instance.get("is_firing_beam") if (character_instance and character_instance.get("is_firing_beam") != null) else false
+
+	if is_firing_beam:
+		# Postura canónica de disparo de Super Haz (Final Flash / Galick Ho / Kamehameha):
+		# Ambos brazos firmemente extendidos al frente empujando el torrente de energía con temblor de Ki
+		var beam_jitter_l = Vector3((randf() - 0.5) * 0.08, (randf() - 0.5) * 0.08, (randf() - 0.5) * 0.08)
+		var beam_jitter_r = Vector3((randf() - 0.5) * 0.08, (randf() - 0.5) * 0.08, (randf() - 0.5) * 0.08)
+
+		var beam_arm_l = Quaternion.from_euler(Vector3(deg_to_rad(85.0), deg_to_rad(12.0), deg_to_rad(10.0)) + beam_jitter_l)
+		var beam_forearm_l = Quaternion.from_euler(Vector3(deg_to_rad(10.0), deg_to_rad(-8.0), 0.0) + beam_jitter_l)
+		var beam_arm_r = Quaternion.from_euler(Vector3(deg_to_rad(85.0), deg_to_rad(-12.0), deg_to_rad(-10.0)) + beam_jitter_r)
+		var beam_forearm_r = Quaternion.from_euler(Vector3(deg_to_rad(10.0), deg_to_rad(8.0), 0.0) + beam_jitter_r)
+
+		_set_bone_rot_relative("LeftArm", beam_arm_l)
+		_set_bone_rot_relative("LeftForeArm", beam_forearm_l)
+		_set_bone_rot_relative("RightArm", beam_arm_r)
+		_set_bone_rot_relative("RightForeArm", beam_forearm_r)
+
+	elif is_blocking:
 		# Postura de bloqueo: Ambos antebrazos se cruzan frente al pecho protegiendo rostro
 		var block_arm_l = Quaternion.from_euler(Vector3(deg_to_rad(45.0), deg_to_rad(20.0), deg_to_rad(30.0)))
 		var block_forearm_l = Quaternion.from_euler(Vector3(deg_to_rad(85.0), deg_to_rad(-25.0), deg_to_rad(10.0)))

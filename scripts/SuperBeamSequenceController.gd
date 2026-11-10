@@ -11,6 +11,7 @@ signal beam_clash_initiated(clash_controller: Node3D)
 
 enum BeamState {
 	ADVANCING_BULLET_TIME,
+	IMPACTING,
 	DEFLECTED,
 	BLOCKED,
 	EVADED,
@@ -31,12 +32,15 @@ var is_active: bool = false
 var reaction_duration: float = 2.2
 var time_left: float = 2.2
 var beam_progress: float = 0.0 # 0.0 en atacante, 1.0 en defensor
+var impact_sustain_timer: float = 0.0
+const IMPACT_SUSTAIN_DURATION: float = 0.70
 
 # Posiciones clave
 var start_pos: Vector3 = Vector3.ZERO
 var target_pos: Vector3 = Vector3.ZERO
 var beam_dir: Vector3 = Vector3.FORWARD
 var current_head_pos: Vector3 = Vector3.ZERO
+var prev_head_pos: Vector3 = Vector3.ZERO
 
 # Nodos visuales del haz
 var beam_core_mesh: MeshInstance3D = null
@@ -61,6 +65,49 @@ const ShockwaveShader = preload("res://shaders/shockwave.gdshader")
 const BeamClashControllerClass = preload("res://scripts/BeamClashController.gd")
 
 
+func _get_attacker_hand_position() -> Vector3:
+	if not attacker or not is_instance_valid(attacker):
+		return start_pos
+	
+	if attacker.get("is_player"):
+		var origin = attacker.get_parent() as XROrigin3D
+		if origin:
+			var l_ctrl = origin.get_node_or_null("LeftHand") as XRController3D
+			var r_ctrl = origin.get_node_or_null("RightHand") as XRController3D
+			if l_ctrl and r_ctrl:
+				return (l_ctrl.global_position + r_ctrl.global_position) * 0.5
+			elif r_ctrl:
+				return r_ctrl.global_position
+			elif l_ctrl:
+				return l_ctrl.global_position
+	else:
+		var skel = attacker.get_node_or_null("Armature/Skeleton3D") as Skeleton3D
+		if not skel:
+			skel = attacker.find_child("Skeleton3D", true, false) as Skeleton3D
+		if skel:
+			var rw_idx = skel.find_bone("RightWrist")
+			var lw_idx = skel.find_bone("LeftWrist")
+			if rw_idx != -1 and lw_idx != -1:
+				var r_global = skel.to_global(skel.get_bone_global_pose(rw_idx).origin)
+				var l_global = skel.to_global(skel.get_bone_global_pose(lw_idx).origin)
+				return (r_global + l_global) * 0.5
+		return attacker.global_position + attacker.global_transform.basis * Vector3(0.0, 1.25, 0.55)
+	
+	return attacker.global_position + Vector3(0.0, 1.25, 0.0)
+
+
+func _get_defender_target_position() -> Vector3:
+	if not defender or not is_instance_valid(defender):
+		return target_pos
+	if defender.get("is_player"):
+		var origin = defender.get_parent() as XROrigin3D
+		if origin:
+			var cam = origin.get_node_or_null("XRCamera3D") as Camera3D
+			if cam:
+				return cam.global_position - Vector3(0.0, 0.20, 0.0)
+	return defender.global_position + Vector3(0.0, 1.25, 0.0)
+
+
 func setup(
 	p_attacker: Node3D,
 	p_defender: Node3D,
@@ -82,6 +129,8 @@ func setup(
 	# Notificar a ambos combatientes que están en secuencia de Super Haz
 	if attacker and attacker.has_method("set"):
 		attacker.set("is_in_beam_sequence", true)
+		attacker.set("is_firing_beam", true)
+		attacker.set("beam_tech_name", power_name)
 	if defender and defender.has_method("set"):
 		defender.set("is_in_beam_sequence", true)
 
@@ -89,11 +138,12 @@ func setup(
 	reaction_duration = _calculate_adaptive_reaction_time()
 	time_left = reaction_duration
 
-	# 2. Calcular trayectorias
-	start_pos = attacker.global_position + Vector3(0.0, 1.25, 0.0)
-	target_pos = defender.global_position + Vector3(0.0, 1.25, 0.0)
+	# 2. Calcular trayectorias dinámicas desde las manos del atacante
+	start_pos = _get_attacker_hand_position()
+	target_pos = _get_defender_target_position()
 	beam_dir = (target_pos - start_pos).normalized()
 	current_head_pos = start_pos
+	prev_head_pos = start_pos
 
 	# 3. Aplicar dilatación temporal (Bullet-Time)
 	Engine.time_scale = 0.18
@@ -115,18 +165,25 @@ func _process(delta: float) -> void:
 	if not is_active:
 		return
 
-	# delta real no afectado por time_scale para la cuenta regresiva subjetiva
-	var real_delta = delta / maxf(Engine.time_scale, 0.01)
-	time_left -= real_delta
-
-	# 1. El rayo avanza en cámara lenta hacia el defensor
-	beam_progress = clampf(1.0 - (time_left / maxf(reaction_duration, 0.01)), 0.0, 1.0)
-	current_head_pos = start_pos.lerp(target_pos, beam_progress)
-
-	_update_beam_geometry()
-	_update_hud(time_left)
-
 	if state == BeamState.ADVANCING_BULLET_TIME:
+		# delta real no afectado por time_scale para la cuenta regresiva subjetiva
+		var real_delta = delta / maxf(Engine.time_scale, 0.01)
+		time_left -= real_delta
+
+		# Anclar el origen del rayo en tiempo real a las manos del atacante
+		start_pos = _get_attacker_hand_position()
+		target_pos = _get_defender_target_position()
+		beam_dir = (target_pos - start_pos).normalized()
+
+		# El rayo crece continuamente desde las manos hacia el objetivo
+		prev_head_pos = current_head_pos
+		beam_progress = clampf(1.0 - (time_left / maxf(reaction_duration, 0.01)), 0.0, 1.0)
+		current_head_pos = start_pos.lerp(target_pos, beam_progress)
+
+		_update_beam_geometry()
+		_update_hud(time_left)
+		_pulse_firing_haptics()
+
 		# Actualizar velocidad de los mandos del defensor
 		_update_defender_hand_velocities(real_delta)
 
@@ -136,9 +193,27 @@ func _process(delta: float) -> void:
 		else:
 			_check_ai_defense_trigger()
 
-		# Al expirar el tiempo de reacción o llegar a la posición del defensor: impacto directo
-		if time_left <= 0.0 or beam_progress >= 0.98:
+		# Detección de colisión: cuando la cabeza del rayo alcanza el objetivo, expira el tiempo o toca el suelo
+		var dist_to_target = current_head_pos.distance_to(target_pos)
+		if dist_to_target <= 0.85 or time_left <= 0.0 or beam_progress >= 0.98 or current_head_pos.y <= 0.15:
 			_resolve_direct_hit()
+
+	elif state == BeamState.IMPACTING:
+		impact_sustain_timer -= delta
+		# Mantener el haz extendido desde las manos hasta el punto de impacto
+		start_pos = _get_attacker_hand_position()
+		current_head_pos = target_pos
+		_update_beam_geometry()
+		_pulse_impact_haptics()
+
+		# Destellos y chispas de plasma continuas en el punto de contacto
+		if int(impact_sustain_timer * 20.0) % 3 == 0:
+			_spawn_spark_at(current_head_pos + Vector3(randf_range(-0.25, 0.25), randf_range(-0.25, 0.25), randf_range(-0.25, 0.25)), energy_color)
+
+		if impact_sustain_timer <= 0.0:
+			state = BeamState.HIT_CONFIRMED
+			is_active = false
+			_cleanup_and_finish("direct_hit", base_damage)
 
 
 func _calculate_adaptive_reaction_time() -> float:
@@ -325,39 +400,45 @@ func _resolve_evasion() -> void:
 
 
 func _resolve_direct_hit() -> void:
-	state = BeamState.HIT_CONFIRMED
-	is_active = false
+	if state == BeamState.IMPACTING or state == BeamState.HIT_CONFIRMED:
+		return
+	state = BeamState.IMPACTING
+	impact_sustain_timer = IMPACT_SUSTAIN_DURATION
 	Engine.time_scale = 1.0
 
 	var final_damage = base_damage
 	if attacker and attacker.get("is_in_zenkai_state"):
 		final_damage *= 1.5
 
+	# 1. Aplicar daño y cambio de pose (flinch/stagger) al defensor
 	if defender and is_instance_valid(defender):
 		if defender.has_method("take_hit"):
 			defender.take_hit(final_damage, beam_dir)
 		if defender.has_method("apply_knockback"):
-			defender.apply_knockback(beam_dir, 7.5)
+			defender.apply_knockback(beam_dir, 9.5)
+		if defender.get("procedural_animator"):
+			# Cambio de pose drástico del defensor al recibir el impacto
+			defender.procedural_animator.trigger_hit_flinch(2.2, beam_dir)
 
-	if attacker and is_instance_valid(attacker) and attacker.has_method("increase_np"):
-		attacker.increase_np(final_damage * 0.35)
+	# 2. Notificar al atacante para sostener la pose de empuje de energía
+	if attacker and is_instance_valid(attacker):
+		if attacker.has_method("increase_np"):
+			attacker.increase_np(final_damage * 0.35)
+		attacker.set("is_firing_beam", true)
+		attacker.set("beam_tech_name", power_name)
 
-	_spawn_spark_at(current_head_pos, Color(1.0, 0.3, 0.1))
+	# 3. Onda de choque y chispas masivas en el punto de impacto
+	_spawn_spark_at(current_head_pos, energy_color)
+	_pulse_impact_haptics()
 
-	var origin: XROrigin3D = defender.get_parent() as XROrigin3D if defender.get("is_player") else null
-	if origin:
-		for h in ["LeftHand", "RightHand"]:
-			var ctrl = origin.get_node_or_null(h) as XRController3D
-			if ctrl and ctrl.has_method("trigger_haptic_pulse"):
-				ctrl.trigger_haptic_pulse("haptic", 250.0, 1.0, 0.50, 0.0)
-
-	print("[SuperBeamSequence] 💥 ¡IMPACTO DIRECTO DE SUPER HAZ! Daño masivo %.0f NP." % final_damage)
-	_cleanup_and_finish("direct_hit", final_damage)
+	print("[SuperBeamSequence] 💥 ¡IMPACTO DIRECTO DE SUPER HAZ! %s colisionó con el defensor (Daño: %.0f NP)." % [power_name, final_damage])
 
 
 func _cleanup_and_finish(result: String, dmg: float) -> void:
-	if attacker and is_instance_valid(attacker) and attacker.has_method("set"):
-		attacker.set("is_in_beam_sequence", false)
+	if attacker and is_instance_valid(attacker):
+		attacker.set("is_firing_beam", false)
+		if attacker.has_method("set"):
+			attacker.set("is_in_beam_sequence", false)
 	if defender and is_instance_valid(defender) and defender.has_method("set"):
 		defender.set("is_in_beam_sequence", false)
 
@@ -366,6 +447,33 @@ func _cleanup_and_finish(result: String, dmg: float) -> void:
 	var tw = create_tween()
 	tw.tween_property(self, "scale", Vector3.ZERO, 0.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	tw.tween_callback(queue_free)
+
+
+func _pulse_firing_haptics() -> void:
+	if attacker and attacker.get("is_player"):
+		var orig = attacker.get_parent() as XROrigin3D
+		if orig:
+			for h in ["LeftHand", "RightHand"]:
+				var ctrl = orig.get_node_or_null(h) as XRController3D
+				if ctrl and ctrl.has_method("trigger_haptic_pulse"):
+					ctrl.trigger_haptic_pulse("haptic", 120.0, 0.45, 0.08, 0.0)
+
+
+func _pulse_impact_haptics() -> void:
+	if attacker and attacker.get("is_player"):
+		var orig = attacker.get_parent() as XROrigin3D
+		if orig:
+			for h in ["LeftHand", "RightHand"]:
+				var ctrl = orig.get_node_or_null(h) as XRController3D
+				if ctrl and ctrl.has_method("trigger_haptic_pulse"):
+					ctrl.trigger_haptic_pulse("haptic", 190.0, 0.85, 0.12, 0.0)
+	if defender and defender.get("is_player"):
+		var orig = defender.get_parent() as XROrigin3D
+		if orig:
+			for h in ["LeftHand", "RightHand"]:
+				var ctrl = orig.get_node_or_null(h) as XRController3D
+				if ctrl and ctrl.has_method("trigger_haptic_pulse"):
+					ctrl.trigger_haptic_pulse("haptic", 260.0, 1.0, 0.15, 0.0)
 
 
 func _update_defender_hand_velocities(delta: float) -> void:
@@ -420,6 +528,10 @@ func _update_beam_geometry() -> void:
 	var cyl = beam_core_mesh.mesh as CylinderMesh
 	if cyl:
 		cyl.height = dist
+
+	var inner = beam_core_mesh.get_node_or_null("InnerWhiteCore") as MeshInstance3D
+	if inner and inner.mesh is CylinderMesh:
+		(inner.mesh as CylinderMesh).height = dist
 
 	beam_core_mesh.global_position = (start_pos + current_head_pos) * 0.5
 	var dir = (current_head_pos - start_pos).normalized()

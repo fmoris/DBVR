@@ -18,8 +18,8 @@ power_name = "Galick Ho"
 gesture_trigger = "galick_ho"
 ki_cost = 50.0
 base_damage_np = 1800.0
-projectile_speed = 25.0
-energy_color = Color(0.8, 0.2, 1, 0.95)
+projectile_speed = 28.0
+energy_color = Color(0.78, 0.18, 1, 0.95)
 
 [sub_resource type="Resource" id="Resource_bigbang"]
 script = ExtResource("1_yu3w1")
@@ -27,8 +27,8 @@ power_name = "Big Bang Attack"
 gesture_trigger = "big_bang"
 ki_cost = 65.0
 base_damage_np = 3200.0
-projectile_speed = 22.0
-energy_color = Color(0.2, 0.75, 1, 1)
+projectile_speed = 30.0
+energy_color = Color(1, 0.88, 0.15, 1)
 
 [sub_resource type="Resource" id="Resource_0cf60"]
 script = ExtResource("1_yu3w1")
@@ -37,7 +37,7 @@ gesture_trigger = "final_flash"
 ki_cost = 90.0
 base_damage_np = 99999.0
 projectile_speed = 35.0
-energy_color = Color(1, 0.9, 0.2, 1)
+energy_color = Color(1, 0.92, 0.18, 1)
 is_finisher = true
 
 [sub_resource type="Resource" id="Resource_irx55"]

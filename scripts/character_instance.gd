@@ -42,6 +42,8 @@ var guard_break_timer: float = 0.0
 
 # --- Estado de Resistencia de Carga (Super Armor / Poise Canónico) ---
 var is_charging_super: bool = false
+var is_firing_beam: bool = false
+var beam_tech_name: String = ""
 var current_charge_poise: float = 500.0
 var max_charge_poise: float = 500.0
 var is_staggered: bool = false
@@ -1833,9 +1835,11 @@ func start_super_beam_sequence(tech_name: String, col: Color, dmg: float, tier_l
 	seq.setup(self, opp, tech_name, col, dmg, tier_level)
 	seq.sequence_completed.connect(func(res: String, final_dmg: float):
 		is_in_beam_sequence = false
+		is_firing_beam = false
 		active_beam_sequence = null
 		if is_instance_valid(opp) and opp.has_method("set"):
 			opp.set("is_in_beam_sequence", false)
+			opp.set("is_firing_beam", false)
 	)
 
 

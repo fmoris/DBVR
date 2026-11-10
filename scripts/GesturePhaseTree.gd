@@ -1549,9 +1549,17 @@ func _spawn_special_projectile(power: Resource) -> void:
 
 	var is_ult_tech = power.is_finisher or power.power_name.contains("Super") or power.power_name == "Genkidama"
 	var tier_val = 4 if is_ult_tech else 3
+	var is_big_bang = (power.power_name == "Big Bang Attack")
+	if is_big_bang:
+		projectile_radius = maxf(projectile_radius, 0.55)
+		speed = maxf(speed, 30.0)
+		energy_color = Color(1.0, 0.88, 0.15, 1.0) # Esfera amarilla canónica de Big Bang Attack
 
 	# Activación canónica de la Secuencia Cinemática y Bullet-Time de Super Ataques de Ki
-	if player and player.has_method("start_super_beam_sequence"):
+	# Las técnicas con rayos de energía (Kamehameha, Galick Ho, Final Flash) usan haz continuo;
+	# Big Bang Attack es una esfera de energía viajera de alta potencia (proyectil esférico).
+	var is_beam_tech = (power.power_name != "Big Bang Attack" and power.power_name != "Genkidama")
+	if is_beam_tech and player and player.has_method("start_super_beam_sequence"):
 		var opp = player._get_opponent()
 		if opp and is_instance_valid(opp):
 			player.start_super_beam_sequence(power.power_name, energy_color, base_dmg, tier_val)
@@ -1560,28 +1568,60 @@ func _spawn_special_projectile(power: Resource) -> void:
 	var projectile = Node3D.new()
 	projectile.name = "ProceduralKiProjectile_" + power.power_name.replace(" ", "") + "_" + str(Time.get_ticks_msec())
 	
-	# 1. Malla del núcleo (Core)
+	# 1. Malla del núcleo (Core) con KiSphereShader
 	var mesh_core = MeshInstance3D.new()
 	mesh_core.name = "CoreMesh"
 	var sphere_core = SphereMesh.new()
 	sphere_core.radius = projectile_radius
 	sphere_core.height = projectile_radius * 2.0
+	sphere_core.radial_segments = 24
+	sphere_core.rings = 12
 	mesh_core.mesh = sphere_core
 	
-	var mat_core = StandardMaterial3D.new()
-	mat_core.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
-	mat_core.blend_mode = StandardMaterial3D.BLEND_MODE_ADD
-	mat_core.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
-	mat_core.albedo_color = Color(energy_color.r, energy_color.g, energy_color.b, 0.55)
+	var mat_core = ShaderMaterial.new()
+	mat_core.shader = KiSphereShader
+	mat_core.set_shader_parameter("base_color", Color(energy_color.r, energy_color.g, energy_color.b, 0.95))
+	mat_core.set_shader_parameter("core_glow", 5.5 if is_big_bang else 4.5)
 	mesh_core.material_override = mat_core
 	projectile.add_child(mesh_core)
 	
-	# 2. Luz dinámica interna (suave para no enceguecer el visor VR)
+	# 1.1 Núcleo blanco incandescente interno (White-Hot Inner Core)
+	var mesh_inner = MeshInstance3D.new()
+	mesh_inner.name = "InnerWhiteCore"
+	var sphere_inner = SphereMesh.new()
+	sphere_inner.radius = projectile_radius * 0.65
+	sphere_inner.height = projectile_radius * 1.30
+	sphere_inner.radial_segments = 16
+	sphere_inner.rings = 8
+	mesh_inner.mesh = sphere_inner
+	var mat_inner = StandardMaterial3D.new()
+	mat_inner.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+	mat_inner.albedo_color = Color(1.0, 1.0, 1.0, 1.0)
+	mesh_inner.material_override = mat_inner
+	projectile.add_child(mesh_inner)
+
+	# 1.2 Malla de corona exterior de plasma
+	var mesh_corona = MeshInstance3D.new()
+	mesh_corona.name = "CoronaMesh"
+	var sphere_corona = SphereMesh.new()
+	sphere_corona.radius = projectile_radius * 1.25
+	sphere_corona.height = projectile_radius * 2.50
+	sphere_corona.radial_segments = 20
+	sphere_corona.rings = 10
+	mesh_corona.mesh = sphere_corona
+	var mat_corona = ShaderMaterial.new()
+	mat_corona.shader = KiCoronaShader
+	mat_corona.set_shader_parameter("base_color", Color(energy_color.r, energy_color.g, energy_color.b, 0.85))
+	mat_corona.set_shader_parameter("vertex_displacement", 0.08 if is_big_bang else 0.04)
+	mesh_corona.material_override = mat_corona
+	projectile.add_child(mesh_corona)
+
+	# 2. Luz dinámica interna
 	var light = OmniLight3D.new()
 	light.name = "ProjectileLight"
 	light.light_color = energy_color
-	light.light_energy = 2.8
-	light.omni_range = projectile_radius * 4.5
+	light.light_energy = 4.5 if is_big_bang else 2.8
+	light.omni_range = projectile_radius * 6.0
 	projectile.add_child(light)
 	
 	# 3. Vincular el script de proyectil de Ki
@@ -1591,7 +1631,7 @@ func _spawn_special_projectile(power: Resource) -> void:
 	projectile.set("p_color", energy_color)
 	projectile.set("tier", tier_val)
 	projectile.set("base_damage", base_dmg)
-	projectile.set("explosion_radius", 8.5 if is_ult_tech else 4.8)
+	projectile.set("explosion_radius", 7.5 if is_big_bang else (8.5 if is_ult_tech else 4.8))
 	
 	# Almacenar referencia al recurso del poder y tiempo de carga
 	projectile.set_meta("power_ref", power)

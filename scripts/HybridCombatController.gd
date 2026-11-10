@@ -693,7 +693,7 @@ func _process_super_powers(delta: float) -> void:
 			var aim_origin = (left_controller.global_position + right_controller.global_position) * 0.5
 			var aim_dir = -camera.global_transform.basis.z if camera else Vector3.FORWARD
 			if super_power_type == "big_bang":
-				aim_color = Color(0.2, 0.7, 1.0) # Azul Big Bang
+				aim_color = Color(1.0, 0.90, 0.15) # Amarillo Big Bang
 				var bb_side = gesture_tree.get("big_bang_hand") if gesture_tree else 1
 				var bb_ctrl = left_controller if bb_side == 0 else right_controller
 				if bb_ctrl:
