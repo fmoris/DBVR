@@ -236,7 +236,8 @@ func _check_player_defense_options() -> void:
 	# OPCIÓN 1: CHOQUE DE PODERES (BEAM CLASH)
 	# Si el jugador está concentrando o liberando un Super Haz con Ki >= 40
 	if defender.get("is_charging_super"):
-		_trigger_beam_clash(defender, "Galick Ho" if "VEGETA" in defender.name.to_upper() else "Kamehameha", Color(0.9, 0.2, 1.0))
+		var counter_info: Dictionary = _get_signature_counter_beam(defender)
+		_trigger_beam_clash(defender, String(counter_info["name"]), counter_info["color"])
 		return
 
 	# OPCIÓN 2: DESVÍO FÍSICO CON LA MANO (KI DEFLECTION / BATTING)
@@ -289,11 +290,40 @@ func _check_ai_defense_trigger() -> void:
 	if reaction_duration - time_left >= ai_action_time:
 		match ai_planned_action:
 			"clash":
-				_trigger_beam_clash(defender, "Kamehameha", Color(0.2, 0.8, 1.0))
+				var counter_info: Dictionary = _get_signature_counter_beam(defender)
+				_trigger_beam_clash(defender, String(counter_info["name"]), counter_info["color"])
 			"vanish":
 				_resolve_evasion()
 			"block":
 				_resolve_containment_block()
+
+
+func _get_signature_counter_beam(fighter: Node3D) -> Dictionary:
+	var fallback_name: String = "Kamehameha"
+	var fallback_col: Color = Color(0.2, 0.8, 1.0)
+	if not fighter or not is_instance_valid(fighter):
+		return { "name": fallback_name, "color": fallback_col }
+
+	var cdata = fighter.get("character_data")
+	if cdata:
+		var cname: String = String(cdata.get("character_name")).to_upper()
+		var cur_trans = fighter.get("current_transformation")
+		var cur_form: String = String(cur_trans.get("form_name")) if cur_trans else ""
+		if "VEGETA" in cname:
+			fallback_name = "Final Flash" if ("SSJ" in cur_form.to_upper()) else "Galick Ho"
+			fallback_col = Color(1.0, 0.85, 0.15) if ("SSJ" in cur_form.to_upper()) else Color(0.85, 0.25, 1.0)
+		var powers = cdata.get("powers")
+		if powers is Array:
+			for p in powers:
+				if p:
+					var trig_u: String = String(p.gesture_trigger).to_upper()
+					var pname_u: String = String(p.power_name).to_upper()
+					var is_beam: bool = ("KAMEHAMEHA" in trig_u or "GALICK" in trig_u or "FINAL_FLASH" in trig_u or "KAMEHAMEHA" in pname_u or "GALICK" in pname_u or "FINAL FLASH" in pname_u)
+					if is_beam and not p.forbidden_transformations.has(cur_form):
+						if p.unlock_requirement_transformation == "" or (fighter.has_method("is_transformation_unlocked") and fighter.is_transformation_unlocked(p.unlock_requirement_transformation)):
+							var p_col: Color = p.energy_color if p.energy_color.a > 0.05 else fallback_col
+							return { "name": p.power_name, "color": p_col }
+	return { "name": fallback_name, "color": fallback_col }
 
 
 func _trigger_beam_clash(clash_defender: Node3D, counter_tech: String, counter_color: Color) -> void:
@@ -427,8 +457,10 @@ func _resolve_direct_hit() -> void:
 		attacker.set("is_firing_beam", true)
 		attacker.set("beam_tech_name", power_name)
 
-	# 3. Onda de choque y chispas masivas en el punto de impacto
+	# 3. Onda de choque, cráter de plasma y chispas masivas en el punto de impacto
 	_spawn_spark_at(current_head_pos, energy_color)
+	if current_head_pos.y <= 3.0:
+		_spawn_plasma_crater(Vector3(current_head_pos.x, 0.12, current_head_pos.z), 2.4, energy_color)
 	_pulse_impact_haptics()
 
 	print("[SuperBeamSequence] 💥 ¡IMPACTO DIRECTO DE SUPER HAZ! %s colisionó con el defensor (Daño: %.0f NP)." % [power_name, final_damage])
@@ -649,6 +681,7 @@ func _build_audio() -> void:
 	audio_player.max_distance = 45.0
 	if ResourceLoader.exists("res://assets/sfx/Kamehameha Regular.mp3"):
 		audio_player.stream = load("res://assets/sfx/Kamehameha Regular.mp3")
+		audio_player.pitch_scale = randf_range(0.92, 1.08)
 		audio_player.play()
 	add_child(audio_player)
 
@@ -671,6 +704,34 @@ func _spawn_spark_at(pos: Vector3, col: Color) -> void:
 	tw.tween_property(sw, "scale", Vector3.ONE * 3.5, 0.40).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tw.parallel().tween_property(mat, "shader_parameter/ring_color:a", 0.0, 0.40)
 	tw.tween_callback(sw.queue_free)
+
+
+func _spawn_plasma_crater(pos: Vector3, radius: float, col: Color) -> void:
+	if not is_inside_tree() or not get_tree() or not get_tree().current_scene:
+		return
+	var disc := MeshInstance3D.new()
+	disc.name = "BeamPlasmaCrater"
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = radius
+	cyl.bottom_radius = radius * 1.15
+	cyl.height = 0.02
+	cyl.radial_segments = 16
+	disc.mesh = cyl
+
+	var mat := StandardMaterial3D.new()
+	mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
+	mat.blend_mode = StandardMaterial3D.BLEND_MODE_ADD
+	mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = Color(col.r, col.g, col.b, 0.78)
+	disc.material_override = mat
+
+	get_tree().current_scene.add_child(disc)
+	disc.global_position = pos
+
+	var fade_tw := get_tree().create_tween()
+	if fade_tw:
+		fade_tw.tween_property(mat, "albedo_color", Color(col.r, col.g, col.b, 0.0), 4.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		fade_tw.tween_callback(disc.queue_free)
 
 
 func _get_active_camera() -> Camera3D:

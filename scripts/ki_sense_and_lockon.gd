@@ -31,12 +31,26 @@ var ki_pointer_root: Node3D = null
 var pointer_label: Label3D = null
 var pointer_arrow_mesh: MeshInstance3D = null
 
+var alert_banner_root: Node3D = null
+var alert_title_label: Label3D = null
+var alert_sub_label: Label3D = null
+var alert_bg_mat: StandardMaterial3D = null
+var _alert_timer: float = 0.0
+var _alert_duration: float = 2.4
+var _alert_tween: Tween = null
+var _alert_color: Color = Color(1.0, 0.85, 0.15)
+var _prev_player_zenkai: bool = false
+var _prev_opp_charging_super: bool = false
+var _connected_player_id: int = 0
+var _connected_opp_id: int = 0
+
 var audio_player: AudioStreamPlayer3D = null
 var sfx_locked: AudioStream = null
 
 func _ready() -> void:
 	_build_lockon_reticle()
 	_build_ki_pointer()
+	_build_scouter_alert_banner()
 	_setup_audio()
 
 
@@ -46,6 +60,7 @@ func setup(p_cam: XRCamera3D, p_player: Node3D, p_opp: Node3D, p_left: XRControl
 	opponent_instance = p_opp
 	left_controller = p_left
 	right_controller = p_right
+	_bind_combat_alerts()
 
 
 func _setup_audio() -> void:
@@ -178,6 +193,9 @@ func _process(delta: float) -> void:
 	else:
 		ki_pointer_root.visible = false
 
+	# 3. ALERTAS TÁCTICAS DE COMBATE Y BANNER PERIFÉRICO
+	_poll_combat_alerts(delta)
+
 
 func _show_reticle_charging(pos: Vector3, progress: float) -> void:
 	lockon_reticle_root.visible = true
@@ -280,3 +298,132 @@ func _ensure_references() -> void:
 		opponent_instance = get_tree().current_scene.find_child("EnemyCharacterInstance", true, false)
 	if not player_instance and get_tree() and get_tree().current_scene:
 		player_instance = get_tree().current_scene.find_child("PlayerCharacterInstance", true, false)
+	_bind_combat_alerts()
+
+
+func _build_scouter_alert_banner() -> void:
+	alert_banner_root = Node3D.new()
+	alert_banner_root.name = "ScouterAlertBanner"
+	alert_banner_root.visible = false
+	add_child(alert_banner_root)
+
+	var bg_mesh := MeshInstance3D.new()
+	bg_mesh.name = "AlertBackdrop"
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.56, 0.11)
+	bg_mesh.mesh = quad
+	alert_bg_mat = StandardMaterial3D.new()
+	alert_bg_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	alert_bg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	alert_bg_mat.albedo_color = Color(0.03, 0.07, 0.08, 0.78)
+	alert_bg_mat.no_depth_test = true
+	alert_bg_mat.render_priority = 95
+	bg_mesh.material_override = alert_bg_mat
+	bg_mesh.position = Vector3(0.0, 0.0, -0.01)
+	alert_banner_root.add_child(bg_mesh)
+
+	alert_title_label = Label3D.new()
+	alert_title_label.name = "AlertTitleLabel"
+	alert_title_label.text = "⚡ ALERTA SCOUTER"
+	alert_title_label.font_size = 34
+	alert_title_label.pixel_size = 0.0009
+	alert_title_label.outline_size = 8
+	alert_title_label.modulate = _alert_color
+	alert_title_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.95)
+	alert_title_label.no_depth_test = true
+	alert_title_label.render_priority = 96
+	alert_title_label.position = Vector3(0.0, 0.016, 0.0)
+	alert_banner_root.add_child(alert_title_label)
+
+	alert_sub_label = Label3D.new()
+	alert_sub_label.name = "AlertSubLabel"
+	alert_sub_label.text = ""
+	alert_sub_label.font_size = 20
+	alert_sub_label.pixel_size = 0.0008
+	alert_sub_label.outline_size = 5
+	alert_sub_label.modulate = Color(0.88, 0.95, 1.0, 1.0)
+	alert_sub_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.9)
+	alert_sub_label.no_depth_test = true
+	alert_sub_label.render_priority = 96
+	alert_sub_label.position = Vector3(0.0, -0.022, 0.0)
+	alert_banner_root.add_child(alert_sub_label)
+
+
+func _bind_combat_alerts() -> void:
+	if player_instance and is_instance_valid(player_instance):
+		var pid: int = player_instance.get_instance_id()
+		if pid != _connected_player_id:
+			_connected_player_id = pid
+			if player_instance.has_signal("transformation_unlocked") and not player_instance.transformation_unlocked.is_connected(_on_player_transformation_alert):
+				player_instance.transformation_unlocked.connect(_on_player_transformation_alert)
+			_prev_player_zenkai = (player_instance.get("is_in_zenkai_state") == true)
+
+	if opponent_instance and is_instance_valid(opponent_instance):
+		var oid: int = opponent_instance.get_instance_id()
+		if oid != _connected_opp_id:
+			_connected_opp_id = oid
+			if opponent_instance.has_signal("transformation_unlocked") and not opponent_instance.transformation_unlocked.is_connected(_on_enemy_transformation_alert):
+				opponent_instance.transformation_unlocked.connect(_on_enemy_transformation_alert)
+			_prev_opp_charging_super = (opponent_instance.get("is_charging_super") == true)
+
+
+func _on_player_transformation_alert(form_name: String) -> void:
+	show_scouter_alert("⚡ ¡DESPERTAR: %s!" % form_name.to_upper(), "Poder e ímpetu Saiyan incrementados", Color(1.0, 0.88, 0.18), 2.5)
+
+
+func _on_enemy_transformation_alert(form_name: String) -> void:
+	show_scouter_alert("⚠️ ¡RIVAL TRANSFORMADO: %s!" % form_name.to_upper(), "El nivel de poder enemigo ha aumentado", Color(1.0, 0.38, 0.15), 2.6)
+
+
+func _poll_combat_alerts(delta: float) -> void:
+	if player_instance and is_instance_valid(player_instance):
+		var z_now: bool = (player_instance.get("is_in_zenkai_state") == true)
+		if z_now and not _prev_player_zenkai:
+			show_scouter_alert("🔥 ¡ESTADO ZENKAI ACTIVO!", "¡Finisher disponible — Lanza tu Super o Melee!", Color(1.0, 0.82, 0.1), 2.6)
+		_prev_player_zenkai = z_now
+
+	if opponent_instance and is_instance_valid(opponent_instance):
+		var opp_charging: bool = (opponent_instance.get("is_charging_super") == true)
+		if opp_charging and not _prev_opp_charging_super:
+			show_scouter_alert("🚨 ¡SUPER ENEMIGO INMINENTE!", "Prepárate para Bloqueo, Choque o Esquive", Color(1.0, 0.22, 0.25), 2.2)
+		_prev_opp_charging_super = opp_charging
+
+	if alert_banner_root and alert_banner_root.visible and camera and is_instance_valid(camera):
+		var cam_basis: Basis = camera.global_transform.basis
+		alert_banner_root.global_position = camera.global_position + (cam_basis * Vector3(0.0, 0.24, -0.84))
+		alert_banner_root.global_transform.basis = cam_basis
+		if _alert_timer > 0.0:
+			_alert_timer -= delta
+			var fade: float = clampf(_alert_timer / 0.45, 0.0, 1.0) if _alert_timer < 0.45 else 1.0
+			if alert_title_label:
+				alert_title_label.modulate = Color(_alert_color.r, _alert_color.g, _alert_color.b, fade)
+			if alert_sub_label:
+				alert_sub_label.modulate = Color(0.88, 0.95, 1.0, fade)
+			if alert_bg_mat:
+				alert_bg_mat.albedo_color = Color(0.03, 0.07, 0.08, 0.78 * fade)
+			if _alert_timer <= 0.0:
+				alert_banner_root.visible = false
+
+
+func show_scouter_alert(title: String, subtitle: String = "", alert_color: Color = Color(1.0, 0.85, 0.15), duration: float = 2.4) -> void:
+	if not alert_banner_root:
+		return
+	_alert_color = alert_color
+	_alert_duration = maxf(0.8, duration)
+	_alert_timer = _alert_duration
+	if alert_title_label:
+		alert_title_label.text = title
+		alert_title_label.modulate = alert_color
+	if alert_sub_label:
+		alert_sub_label.text = subtitle
+		alert_sub_label.modulate = Color(0.88, 0.95, 1.0, 1.0)
+	if alert_bg_mat:
+		alert_bg_mat.albedo_color = Color(0.03, 0.07, 0.08, 0.78)
+	alert_banner_root.visible = true
+	alert_banner_root.scale = Vector3.ONE * 0.72
+	if _alert_tween and is_instance_valid(_alert_tween):
+		_alert_tween.kill()
+	if is_inside_tree():
+		_alert_tween = create_tween()
+		if _alert_tween:
+			_alert_tween.tween_property(alert_banner_root, "scale", Vector3.ONE, 0.22).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)

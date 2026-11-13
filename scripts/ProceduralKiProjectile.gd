@@ -5,6 +5,8 @@ extends Node3D
 ## Optimizado para Meta Quest 3 en Godot 4.3+/4.8.
 
 const ShockwaveShader = preload("res://shaders/shockwave.gdshader")
+static var _shared_spark_mesh: SphereMesh = null
+static var _shared_spark_mat: StandardMaterial3D = null
 
 enum ProjectileTier { RAPID = 1, CHARGED = 2, SUPER_BEAM = 3, ULTIMATE = 4 }
 
@@ -23,6 +25,7 @@ var explosion_radius: float = 1.2
 var is_deflected: bool = false
 var deflection_count: int = 0
 var shooter_node: Node = null
+var was_launched_in_zenkai: bool = false
 
 
 func _ready() -> void:
@@ -327,7 +330,7 @@ func _trigger_explosion(pos: Vector3, collider: Node) -> void:
 					char_node.recharge_ki(ki_gain)
 
 				# Recompensa canónica de agresión (Punto 7): El atacante gana BP/NP al conectar
-				var caster = get_meta("attacker") if has_meta("attacker") else null
+				var caster = get_meta("attacker") if has_meta("attacker") else shooter_node
 				if not caster and get_tree() and get_tree().current_scene:
 					caster = get_tree().current_scene.find_child("PlayerCharacterInstance", true, false)
 				if caster and is_instance_valid(caster) and char_node != caster and caster.has_method("increase_np"):
@@ -335,19 +338,21 @@ func _trigger_explosion(pos: Vector3, collider: Node) -> void:
 					caster.check_zenkai_conditions(char_node.current_np)
 					char_node.check_zenkai_conditions(caster.current_np)
 
-					if power and power.is_finisher and caster.get("is_in_zenkai_state"):
+					if power and power.is_finisher and (was_launched_in_zenkai or caster.get("is_in_zenkai_state")):
 						caster.execute_finisher_hit(power)
 
 	# Si el objetivo directo no estaba en la consulta de área (fallback directo)
 	if direct_target and not damaged_characters.has(direct_target):
 		direct_target.take_hit(final_damage, hit_dir)
-		var caster = get_meta("attacker") if has_meta("attacker") else null
+		var caster = get_meta("attacker") if has_meta("attacker") else shooter_node
 		if not caster and get_tree() and get_tree().current_scene:
 			caster = get_tree().current_scene.find_child("PlayerCharacterInstance", true, false)
 		if caster and is_instance_valid(caster) and direct_target != caster and caster.has_method("increase_np"):
 			caster.increase_np(final_damage * 0.35)
 			caster.check_zenkai_conditions(direct_target.current_np)
 			direct_target.check_zenkai_conditions(caster.current_np)
+			if power and power.is_finisher and (was_launched_in_zenkai or caster.get("is_in_zenkai_state")):
+				caster.execute_finisher_hit(power)
 
 	# 2. Disipar proyectiles menores dentro de la onda expansiva
 	for proj in get_tree().get_nodes_in_group("ki_projectiles"):
@@ -410,48 +415,41 @@ func _spawn_visual_explosion(pos: Vector3) -> void:
 	)
 	wave_tween.chain().tween_callback(shockwave.queue_free)
 
-	# --- 3. EXPULSIÓN FÍSICA DE CHISPAS DE ENERGÍA KI (DEBRIS DINÁMICOS) ---
-	var spark_count = 10 if tier >= 3 else (7 if tier == 2 else 5)
-	for i in range(spark_count):
-		var spark = RigidBody3D.new()
-		var spark_visual = MeshInstance3D.new()
-		var spark_mesh = SphereMesh.new()
-		var spark_r = p_radius * 0.25
-		spark_mesh.radius = spark_r
-		spark_mesh.height = spark_r * 2.0
-		spark_visual.mesh = spark_mesh
-		
-		var spark_mat = StandardMaterial3D.new()
-		spark_mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
-		spark_mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
-		spark_mat.albedo_color = Color(p_color.r, p_color.g, p_color.b, 0.95)
-		spark_visual.material_override = spark_mat
-		spark.add_child(spark_visual)
-		
-		var spark_col = CollisionShape3D.new()
-		var spark_shape = SphereShape3D.new()
-		spark_shape.radius = spark_r
-		spark_col.shape = spark_shape
-		spark.add_child(spark_col)
-		
-		spark.gravity_scale = 0.5
-		spark.linear_damp = 0.8
-		spark.collision_layer = 0
-		spark.collision_mask = 1
-		get_tree().current_scene.add_child(spark)
-		spark.global_position = pos
-		
-		var random_dir = Vector3(
-			randf_range(-1.0, 1.0),
-			randf_range(0.3, 1.3),
-			randf_range(-1.0, 1.0)
-		).normalized()
-		var force = randf_range(2.5, 6.0) * (1.5 if tier >= 3 else 1.0)
-		spark.apply_central_impulse(random_dir * force)
-		
-		var sp_tween = get_tree().create_tween()
-		sp_tween.tween_property(spark_visual, "scale", Vector3.ZERO, randf_range(0.35, 0.65)).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-		sp_tween.chain().tween_callback(spark.queue_free)
+	# --- 3. EXPULSIÓN GPU/CPU LIGERA DE CHISPAS KI (Zero RigidBody3D en Meta Quest) ---
+	if _shared_spark_mesh == null:
+		_shared_spark_mesh = SphereMesh.new()
+		_shared_spark_mesh.radius = 0.04
+		_shared_spark_mesh.height = 0.08
+		_shared_spark_mesh.radial_segments = 8
+		_shared_spark_mesh.rings = 4
+	if _shared_spark_mat == null:
+		_shared_spark_mat = StandardMaterial3D.new()
+		_shared_spark_mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+		_shared_spark_mat.vertex_color_use_as_albedo = true
+		_shared_spark_mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
+	_shared_spark_mesh.material = _shared_spark_mat
+
+	var sparks := CPUParticles3D.new()
+	sparks.mesh = _shared_spark_mesh
+	sparks.amount = 14 if tier >= 3 else (9 if tier == 2 else 6)
+	sparks.one_shot = true
+	sparks.explosiveness = 1.0
+	sparks.lifetime = 0.55
+	sparks.direction = Vector3.UP
+	sparks.spread = 180.0
+	sparks.initial_velocity_min = 3.0 * (1.5 if tier >= 3 else 1.0)
+	sparks.initial_velocity_max = 6.5 * (1.5 if tier >= 3 else 1.0)
+	sparks.gravity = Vector3(0.0, -4.5, 0.0)
+	sparks.damping_min = 1.5
+	sparks.damping_max = 2.5
+	var s_scale: float = clampf(p_radius * 6.0, 0.4, 2.5)
+	sparks.scale_amount_min = s_scale * 0.6
+	sparks.scale_amount_max = s_scale * 1.2
+	sparks.color = Color(p_color.r, p_color.g, p_color.b, 0.95)
+	get_tree().current_scene.add_child(sparks)
+	sparks.global_position = pos
+	sparks.emitting = true
+	sparks.finished.connect(sparks.queue_free)
 
 	# --- 4. FLASH DE LUZ OMNIDIRECCIONAL PUNTUAL ---
 	var exp_light = OmniLight3D.new()
@@ -463,6 +461,37 @@ func _spawn_visual_explosion(pos: Vector3) -> void:
 	var light_tween = get_tree().create_tween()
 	light_tween.tween_property(exp_light, "light_energy", 0.0, 0.25).set_trans(Tween.TRANS_QUAD)
 	light_tween.chain().tween_callback(exp_light.queue_free)
+
+	if tier >= 2 and pos.y <= 2.5:
+		_spawn_plasma_crater(Vector3(pos.x, 0.12, pos.z), clampf(explosion_radius * 0.55, 0.9, 2.8), p_color)
+
+
+func _spawn_plasma_crater(pos: Vector3, radius: float, col: Color) -> void:
+	if not is_inside_tree() or not get_tree() or not get_tree().current_scene:
+		return
+	var disc := MeshInstance3D.new()
+	disc.name = "PlasmaCraterDisc"
+	var cyl := CylinderMesh.new()
+	cyl.top_radius = radius
+	cyl.bottom_radius = radius * 1.15
+	cyl.height = 0.02
+	cyl.radial_segments = 16
+	disc.mesh = cyl
+
+	var mat := StandardMaterial3D.new()
+	mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
+	mat.blend_mode = StandardMaterial3D.BLEND_MODE_ADD
+	mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = Color(col.r, col.g, col.b, 0.72)
+	disc.material_override = mat
+
+	get_tree().current_scene.add_child(disc)
+	disc.global_position = pos
+
+	var fade_tw := get_tree().create_tween()
+	if fade_tw:
+		fade_tw.tween_property(mat, "albedo_color", Color(col.r, col.g, col.b, 0.0), 4.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+		fade_tw.tween_callback(disc.queue_free)
 
 
 func _spawn_deflection_vfx(pos: Vector3) -> void:
@@ -489,6 +518,7 @@ func _spawn_deflection_vfx(pos: Vector3) -> void:
 	sfx.max_distance = 40.0
 	get_tree().current_scene.add_child(sfx)
 	sfx.global_position = pos
+	sfx.pitch_scale = randf_range(0.92, 1.08)
 	sfx.play()
 	sfx.finished.connect(sfx.queue_free)
 

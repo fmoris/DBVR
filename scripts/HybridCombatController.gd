@@ -1255,7 +1255,7 @@ func _execute_vertical_step(target_pos: Vector3, is_up: bool) -> void:
 func _play_step_audio(pitch: float = 1.25) -> void:
 	if step_audio_player and snd_step:
 		step_audio_player.stream = snd_step
-		step_audio_player.pitch_scale = pitch
+		step_audio_player.pitch_scale = pitch * randf_range(0.92, 1.08)
 		step_audio_player.volume_db = -5.0
 		step_audio_player.play()
 
@@ -1336,15 +1336,16 @@ func _process_bio_haptics(delta: float) -> void:
 		bio_haptic_timer = 0.0
 		return
 
-	var current_ki = float(player.get("current_ki") if player.get("current_ki") != null else 0.0)
-	var max_ki = float(player.get("max_ki") if player.get("max_ki") != null else 100.0)
-	var ki_ratio = clampf(current_ki / maxf(max_ki, 1.0), 0.0, 1.0)
+	var cdata = player.get("character_data")
+	var current_ki: float = float(player.get("current_ki") if player.get("current_ki") != null else 0.0)
+	var max_ki: float = float(cdata.base_ki) if (cdata and cdata.get("base_ki") != null) else 100.0
+	var ki_ratio: float = clampf(current_ki / maxf(max_ki, 1.0), 0.0, 1.0)
 
-	# Multiplicador según la transformación actual
+	# Multiplicador según la transformación actual (form_name canónico en TransformationData)
 	var trans_mult: float = 1.0
 	var trans = player.get("current_transformation")
-	if trans != null and trans.get("transformation_name") != null:
-		var t_name: String = String(trans.get("transformation_name")).to_lower()
+	if trans != null and trans.get("form_name") != null:
+		var t_name: String = String(trans.get("form_name")).to_lower()
 		if "kaioken" in t_name:
 			trans_mult = 1.35
 		elif "ssj2" in t_name or "super saiyan 2" in t_name:

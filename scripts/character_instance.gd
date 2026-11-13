@@ -74,13 +74,24 @@ func get_spatial_root() -> Node3D:
 			return p
 	return self
 
-# Índices óseos para Cinemática Inversa (IK) de brazos en 1ra persona
+# Índices óseos para Cinemática Inversa (IK) de brazos en 1ra persona y NPCs
 var left_arm_idx: int = -1
 var left_forearm_idx: int = -1
 var left_hand_idx: int = -1
 var right_arm_idx: int = -1
 var right_forearm_idx: int = -1
 var right_hand_idx: int = -1
+
+# Calibración automática de rig agnóstica de personaje (Goku/Vegeta) y cachés O(1)
+var _rig_calibrated: bool = false
+var _skel_char_basis: Basis = Basis.IDENTITY
+var _left_hand_align_basis: Basis = Basis.IDENTITY
+var _right_hand_align_basis: Basis = Basis.IDENTITY
+var _arm_reach_left_skel: float = 0.56
+var _arm_reach_right_skel: float = 0.56
+var _finger_curl_cache: Dictionary = {}
+var cached_exclude_rids: Array[RID] = []
+var cached_ai_controller: Node = null
 
 const KiCoronaShader = preload("res://shaders/ki_corona.gdshader")
 const MeleeTargetDomeClass = preload("res://scripts/MeleeTargetDome.gd")
@@ -154,6 +165,20 @@ func setup_character() -> void:
 			skeleton = _find_skeleton(body_mesh_instance)
 			if skeleton:
 				skeleton.name = "Skeleton3D" # Asegura resolución exacta de tracks para AnimationPlayer y Ragdoll
+				neck_bone_idx = skeleton.find_bone("Neck")
+				if neck_bone_idx == -1:
+					neck_bone_idx = skeleton.find_bone("neck")
+
+				left_arm_idx = skeleton.find_bone("LeftArm")
+				left_forearm_idx = skeleton.find_bone("LeftForeArm")
+				left_hand_idx = skeleton.find_bone("LeftHand")
+
+				right_arm_idx = skeleton.find_bone("RightArm")
+				right_forearm_idx = skeleton.find_bone("RightForeArm")
+				right_hand_idx = skeleton.find_bone("RightHand")
+
+				_calibrate_skeleton_rig()
+
 				if is_player:
 					head_bone_idx = skeleton.find_bone("Head")
 					if head_bone_idx == -1:
@@ -181,18 +206,6 @@ func setup_character() -> void:
 						if i == head_bone_idx or is_head_descendant or "hair" in b_name or "eye" in b_name or "face" in b_name or "jaw" in b_name or "brow" in b_name or "mouth" in b_name:
 							hidden_head_bone_indices.append(i)
 							skeleton.set_bone_pose_scale(i, Vector3.ZERO)
-						
-					neck_bone_idx = skeleton.find_bone("Neck")
-					if neck_bone_idx == -1:
-						neck_bone_idx = skeleton.find_bone("neck")
-
-					left_arm_idx = skeleton.find_bone("LeftArm")
-					left_forearm_idx = skeleton.find_bone("LeftForeArm")
-					left_hand_idx = skeleton.find_bone("LeftHand")
-
-					right_arm_idx = skeleton.find_bone("RightArm")
-					right_forearm_idx = skeleton.find_bone("RightForeArm")
-					right_hand_idx = skeleton.find_bone("RightHand")
 
 					var cam = get_parent().get_node_or_null("XRCamera3D") if get_parent() else null
 					torso_yaw = cam.rotation.y if cam else 0.0
@@ -200,8 +213,6 @@ func setup_character() -> void:
 					print("[CharacterInstance] Cuerpo 1ra persona configurado. Head: %d, Neck: %d, ArmIK: [L:%d, R:%d]" % [head_bone_idx, neck_bone_idx, left_arm_idx, right_arm_idx])
 				else:
 					# 1. Configurar animador procedural para dar vida orgánica al oponente en VR
-					# Utiliza la anatomía y rest pose canónica de Dragon Ball (Look-At interactivo, respiración, guardia DBZ, Ki jitter y flinch)
-					# No se aplica animación Mixamo FBX ya que colapsa los huesos y rota la pelvis 180°
 					procedural_animator = ProceduralCombatAnimatorClass.new()
 					procedural_animator.setup(skeleton, self)
 
@@ -219,6 +230,7 @@ func setup_character() -> void:
 							ai_ctrl.name = "CombatAIController"
 							ai_ctrl.set_script(ai_script)
 							add_child(ai_ctrl)
+					cached_ai_controller = ai_ctrl
 			_disable_frustum_culling_in_children(body_mesh_instance)
 			
 	# Instanciar el modelo de las manos en runtime (solo si ES el jugador, para ver nuestras manos en primera persona)
@@ -229,6 +241,46 @@ func setup_character() -> void:
 	_setup_character_physics()
 
 	_notify_stats()
+
+
+func swap_character_data(new_data: CharacterData) -> void:
+	if not new_data:
+		return
+	current_transformation = null
+	secured_np_threshold_ratio = 0.0
+	is_in_zenkai_state = false
+	is_comeback_zenkai = false
+	is_charging_ki = false
+	is_charging_super = false
+	is_firing_beam = false
+	is_blocking = false
+	is_guard_broken = false
+	is_staggered = false
+	is_ragdoll_active = false
+	ragdoll_recovery_timer = 0.0
+	velocity = Vector3.ZERO
+
+	if aura_node and is_instance_valid(aura_node):
+		aura_node.visible = false
+	if aura_particles and is_instance_valid(aura_particles):
+		aura_particles.queue_free()
+		aura_particles = null
+	if body_mesh_instance and is_instance_valid(body_mesh_instance):
+		remove_child(body_mesh_instance)
+		body_mesh_instance.queue_free()
+		body_mesh_instance = null
+
+	skeleton = null
+	procedural_animator = null
+	ragdoll_simulator = null
+	_rig_calibrated = false
+	_finger_curl_cache.clear()
+	cached_exclude_rids.clear()
+
+	character_data = new_data
+	setup_character()
+	if not is_player and cached_ai_controller and is_instance_valid(cached_ai_controller) and cached_ai_controller.has_method("reset_ai_for_character"):
+		cached_ai_controller.reset_ai_for_character()
 
 func _physics_process(delta: float) -> void:
 	if Engine.is_editor_hint():
@@ -388,16 +440,17 @@ func _process(delta: float) -> void:
 				var target_yaw: float = cam_yaw - sign(yaw_diff) * max_neck_angle
 				torso_yaw = lerp_angle(torso_yaw, target_yaw, 8.0 * delta)
 				
-			# Offset hacia atrás del torso respecto a los ojos (10cm) para alineación anatómica
-			var torso_back: Vector3 = Vector3(sin(torso_yaw), 0.0, cos(torso_yaw)) * 0.10
-			var cam_world: Vector3 = camera.global_position
+			# Offset hacia atrás del torso respecto a los ojos (10cm) usando rotación mundial real
 			var origin_node: Node3D = get_parent() as Node3D
+			var origin_rot_y: float = origin_node.global_rotation.y if origin_node else 0.0
+			var world_torso_yaw: float = origin_rot_y + torso_yaw
+			var torso_back: Vector3 = Vector3(sin(world_torso_yaw), 0.0, cos(world_torso_yaw)) * 0.10
+			var cam_world: Vector3 = camera.global_position
 			var floor_y: float = origin_node.global_position.y if origin_node else global_position.y
 			
 			# Anclaje mundial absoluto: El cuerpo siempre está exactamente debajo de la cabeza en el mundo real
 			body_mesh_instance.global_position = Vector3(cam_world.x + torso_back.x, floor_y, cam_world.z + torso_back.z)
-			var origin_rot_y: float = origin_node.global_rotation.y if origin_node else 0.0
-			body_mesh_instance.global_rotation = Vector3(0.0, origin_rot_y + torso_yaw + PI, 0.0)
+			body_mesh_instance.global_rotation = Vector3(0.0, world_torso_yaw + PI, 0.0)
 			
 			if skeleton:
 				# Ocultar todos los huesos de cabeza, cabello y rostro a escala cero para evitar cualquier visión en 3ra persona
@@ -405,11 +458,11 @@ func _process(delta: float) -> void:
 					if skeleton.get_bone_pose_scale(b_idx) != Vector3.ZERO:
 						skeleton.set_bone_pose_scale(b_idx, Vector3.ZERO)
 				
-				# Mover el cuello para acompañar la mirada del jugador (Pitch y Yaw natural)
+				# Mover el cuello en espacio de personaje (compatible con Goku y Vegeta)
 				if neck_bone_idx != -1:
 					var neck_yaw: float = wrapf(cam_yaw - torso_yaw, -PI, PI)
 					var neck_pitch: float = camera.rotation.x
-					var neck_rot = Quaternion.from_euler(Vector3(neck_pitch * 0.65, neck_yaw * 0.65, 0.0))
+					var neck_rot: Quaternion = get_bone_rotation_char_space(neck_bone_idx, Vector3(neck_pitch * 0.65, neck_yaw * 0.65, 0.0))
 					skeleton.set_bone_pose_rotation(neck_bone_idx, neck_rot)
 
 	# Cinemática Inversa (IK) de brazos y animación de dedos en primera persona
@@ -1250,7 +1303,207 @@ func _process_player_arms_ik() -> void:
 		_apply_finger_curls_to_skeleton(skeleton, "Right", r_trig, r_grip)
 
 
-## Algoritmo analítico de 2 huesos (Hombro -> Codo -> Mano) con orientación de muñeca y pole vector
+## Auto-calibración universal del rig en reposo (agnóstico a Goku -90° X y Vegeta +Y up)
+func _calibrate_skeleton_rig() -> void:
+	_rig_calibrated = false
+	_finger_curl_cache.clear()
+	if not skeleton:
+		return
+
+	var spine_idx: int = skeleton.find_bone("Spine")
+	if spine_idx == -1:
+		spine_idx = skeleton.find_bone("Hips")
+	var neck_idx: int = neck_bone_idx if neck_bone_idx != -1 else skeleton.find_bone("Head")
+
+	if spine_idx != -1 and neck_idx != -1 and left_arm_idx != -1 and right_arm_idx != -1:
+		var spine_p: Vector3 = skeleton.get_bone_global_rest(spine_idx).origin
+		var neck_p: Vector3 = skeleton.get_bone_global_rest(neck_idx).origin
+		var skel_up: Vector3 = (neck_p - spine_p).normalized()
+		if skel_up.length_squared() < 0.001:
+			skel_up = Vector3.UP
+
+		var l_arm_p: Vector3 = skeleton.get_bone_global_rest(left_arm_idx).origin
+		var r_arm_p: Vector3 = skeleton.get_bone_global_rest(right_arm_idx).origin
+		var span: Vector3 = l_arm_p - r_arm_p
+		var skel_left: Vector3 = (span - skel_up * span.dot(skel_up)).normalized()
+		if skel_left.length_squared() < 0.001:
+			skel_left = Vector3.RIGHT
+		var skel_fwd: Vector3 = skel_left.cross(skel_up).normalized()
+		_skel_char_basis = Basis(skel_left, skel_up, skel_fwd).orthonormalized()
+	else:
+		_skel_char_basis = Basis.IDENTITY
+
+	if left_arm_idx != -1 and left_forearm_idx != -1 and left_hand_idx != -1:
+		var l1: float = (skeleton.get_bone_global_rest(left_forearm_idx).origin - skeleton.get_bone_global_rest(left_arm_idx).origin).length()
+		var l2: float = (skeleton.get_bone_global_rest(left_hand_idx).origin - skeleton.get_bone_global_rest(left_forearm_idx).origin).length()
+		_arm_reach_left_skel = maxf(l1 + l2, 0.05)
+
+	if right_arm_idx != -1 and right_forearm_idx != -1 and right_hand_idx != -1:
+		var r1: float = (skeleton.get_bone_global_rest(right_forearm_idx).origin - skeleton.get_bone_global_rest(right_arm_idx).origin).length()
+		var r2: float = (skeleton.get_bone_global_rest(right_hand_idx).origin - skeleton.get_bone_global_rest(right_forearm_idx).origin).length()
+		_arm_reach_right_skel = maxf(r1 + r2, 0.05)
+
+	_left_hand_align_basis = _compute_hand_align_basis("Left", left_hand_idx)
+	_right_hand_align_basis = _compute_hand_align_basis("Right", right_hand_idx)
+	_build_finger_curl_cache("Left")
+	_build_finger_curl_cache("Right")
+	_rig_calibrated = true
+
+
+func _compute_hand_align_basis(prefix: String, hand_idx: int) -> Basis:
+	if not skeleton or hand_idx == -1:
+		return Basis.IDENTITY
+	var is_left: bool = (prefix == "Left")
+	var hand_grest: Transform3D = skeleton.get_bone_global_rest(hand_idx)
+	var hand_pos: Vector3 = hand_grest.origin
+	var hand_rot_inv: Basis = hand_grest.basis.orthonormalized().inverse()
+	var skel_up: Vector3 = _skel_char_basis.y
+
+	var idx1: int = skeleton.find_bone(prefix + "Index1")
+	if idx1 == -1: idx1 = skeleton.find_bone(prefix + "IndexProximal")
+	var mid1: int = skeleton.find_bone(prefix + "Middle1")
+	if mid1 == -1: mid1 = skeleton.find_bone(prefix + "MiddleProximal")
+	var pnk1: int = skeleton.find_bone(prefix + "Pinky1")
+	if pnk1 == -1: pnk1 = skeleton.find_bone(prefix + "PinkyProximal")
+
+	if idx1 == -1 or mid1 == -1 or pnk1 == -1:
+		if is_left:
+			return Basis(Vector3(-0.605083, 0.0, -0.796162), Vector3(-0.796162, 0.0, 0.605083), Vector3(0.0, 1.0, 0.0))
+		return Basis(Vector3(-0.605083, 0.0, 0.796162), Vector3(0.796162, 0.0, 0.605083), Vector3(0.0, 1.0, 0.0))
+
+	var finger_dir_skel: Vector3 = (skeleton.get_bone_global_rest(mid1).origin - hand_pos).normalized()
+	var raw_thumb_skel: Vector3 = skeleton.get_bone_global_rest(idx1).origin - skeleton.get_bone_global_rest(pnk1).origin
+	var thumb_skel: Vector3 = (raw_thumb_skel - finger_dir_skel * raw_thumb_skel.dot(finger_dir_skel)).normalized()
+	var palm_in_skel: Vector3 = finger_dir_skel.cross(thumb_skel).normalized()
+	if palm_in_skel.dot(-skel_up) < 0.0:
+		palm_in_skel = -palm_in_skel
+
+	var f_loc: Vector3 = (hand_rot_inv * finger_dir_skel).normalized()
+	var t_loc: Vector3 = (hand_rot_inv * thumb_skel).normalized()
+	var p_loc: Vector3 = (hand_rot_inv * palm_in_skel).normalized()
+	var x_loc: Vector3 = p_loc if is_left else -p_loc
+	return Basis(x_loc, t_loc, -f_loc).orthonormalized().inverse()
+
+
+func _build_finger_curl_cache(prefix: String) -> void:
+	if not skeleton:
+		return
+	var hand_idx: int = skeleton.find_bone(prefix + "Hand")
+	var idx1: int = skeleton.find_bone(prefix + "Index1")
+	var pnk1: int = skeleton.find_bone(prefix + "Pinky1")
+	var skel_up: Vector3 = _skel_char_basis.y
+	var n_palm_skel: Vector3 = -skel_up
+	if hand_idx != -1 and idx1 != -1 and pnk1 != -1:
+		var v_idx: Vector3 = skeleton.get_bone_global_rest(idx1).origin - skeleton.get_bone_global_rest(hand_idx).origin
+		var v_pnk: Vector3 = skeleton.get_bone_global_rest(pnk1).origin - skeleton.get_bone_global_rest(hand_idx).origin
+		var cross_p: Vector3 = v_idx.cross(v_pnk)
+		if cross_p.length_squared() > 0.000001:
+			n_palm_skel = cross_p.normalized()
+			if n_palm_skel.dot(-skel_up) < 0.0:
+				n_palm_skel = -n_palm_skel
+
+	var finger_data: Dictionary = {}
+	var finger_names: Array[String] = ["Index", "Middle", "Ring", "Pinky", "Thumb"]
+	for fname in finger_names:
+		var b1: int = skeleton.find_bone(prefix + fname + "1")
+		var b2: int = skeleton.find_bone(prefix + fname + "2")
+		var b3: int = skeleton.find_bone(prefix + fname + "3")
+		if b1 == -1: b1 = skeleton.find_bone(prefix + fname + "Proximal")
+		if b2 == -1: b2 = skeleton.find_bone(prefix + fname + "Intermediate")
+		if b3 == -1: b3 = skeleton.find_bone(prefix + fname + "Distal")
+
+		var curl_local: Vector3 = Vector3(0.0, 0.0, -1.0 if prefix == "Left" else 1.0)
+		var opp_local: Vector3 = Vector3(0.0, 1.0 if prefix == "Left" else -1.0, 0.0)
+		var rest_1: Quaternion = Quaternion.IDENTITY
+		var rest_2: Quaternion = Quaternion.IDENTITY
+		var rest_3: Quaternion = Quaternion.IDENTITY
+
+		if b1 != -1:
+			rest_1 = skeleton.get_bone_rest(b1).basis.orthonormalized().get_rotation_quaternion()
+		if b2 != -1:
+			rest_2 = skeleton.get_bone_rest(b2).basis.orthonormalized().get_rotation_quaternion()
+		if b3 != -1:
+			rest_3 = skeleton.get_bone_rest(b3).basis.orthonormalized().get_rotation_quaternion()
+
+		if b1 != -1 and b2 != -1:
+			var f_dir_skel: Vector3 = (skeleton.get_bone_global_rest(b2).origin - skeleton.get_bone_global_rest(b1).origin).normalized()
+			var r_b1_inv: Basis = skeleton.get_bone_global_rest(b1).basis.orthonormalized().inverse()
+			if fname == "Thumb" and idx1 != -1 and pnk1 != -1:
+				var across: Vector3 = (skeleton.get_bone_global_rest(pnk1).origin - skeleton.get_bone_global_rest(idx1).origin).normalized()
+				var thumb_target: Vector3 = (across * 0.7 + n_palm_skel * 0.7).normalized()
+				var c_skel: Vector3 = f_dir_skel.cross(thumb_target)
+				if c_skel.length_squared() > 0.0001:
+					curl_local = (r_b1_inv * c_skel.normalized()).normalized()
+				var opp_skel: Vector3 = f_dir_skel.cross(across)
+				if opp_skel.length_squared() > 0.0001:
+					opp_local = (r_b1_inv * opp_skel.normalized()).normalized()
+			else:
+				var c_skel: Vector3 = f_dir_skel.cross(n_palm_skel)
+				if c_skel.length_squared() > 0.0001:
+					curl_local = (r_b1_inv * c_skel.normalized()).normalized()
+
+		finger_data[fname] = {
+			"b1": b1, "b2": b2, "b3": b3,
+			"rest_1": rest_1, "rest_2": rest_2, "rest_3": rest_3,
+			"curl_axis": curl_local,
+			"opp_axis": opp_local
+		}
+	_finger_curl_cache[prefix] = finger_data
+
+
+func get_skel_char_basis() -> Basis:
+	return _skel_char_basis
+
+
+## Convierte una rotación de Euler en espacio canónico de personaje (+X=Izq, +Y=Arriba, +Z=Frente) al espacio local del hueso
+func get_bone_rotation_char_space(bone_idx: int, euler_char: Vector3) -> Quaternion:
+	if not skeleton or bone_idx == -1:
+		return Quaternion.IDENTITY
+	var bone_grest_basis: Basis = skeleton.get_bone_global_rest(bone_idx).basis.orthonormalized()
+	var bone_rest_quat: Quaternion = skeleton.get_bone_rest(bone_idx).basis.orthonormalized().get_rotation_quaternion()
+	var offset_char_basis: Basis = Basis.from_euler(euler_char)
+	var skel_delta: Basis = _skel_char_basis * offset_char_basis * _skel_char_basis.inverse()
+	var local_delta: Quaternion = (bone_grest_basis.inverse() * skel_delta * bone_grest_basis).get_rotation_quaternion()
+	return (bone_rest_quat * local_delta).normalized()
+
+
+## Resuelve IK del brazo desde posiciones y rotaciones expresadas en espacio canónico de personaje (en metros respecto al hombro)
+func solve_character_arm_ik_local(is_left: bool, hand_offset_from_shoulder_m: Vector3, hand_euler_char: Vector3) -> void:
+	solve_character_arm_ik_basis(is_left, hand_offset_from_shoulder_m, Basis.from_euler(hand_euler_char))
+
+
+## Sobrecarga directa con Basis en espacio canónico de personaje (+X=Izq, +Y=Arriba, +Z=Frente)
+func solve_character_arm_ik_basis(is_left: bool, hand_offset_from_shoulder_m: Vector3, hand_basis_char: Basis) -> void:
+	if not skeleton or not _rig_calibrated:
+		return
+	var s_idx: int = left_arm_idx if is_left else right_arm_idx
+	var f_idx: int = left_forearm_idx if is_left else right_forearm_idx
+	var h_idx: int = left_hand_idx if is_left else right_hand_idx
+	if s_idx == -1 or f_idx == -1 or h_idx == -1:
+		return
+	var reach_skel: float = _arm_reach_left_skel if is_left else _arm_reach_right_skel
+	var scale_to_skel: float = reach_skel / 0.56
+	var s_origin_skel: Vector3 = skeleton.get_bone_global_rest(s_idx).origin
+	var target_skel_pos: Vector3 = s_origin_skel + (_skel_char_basis * hand_offset_from_shoulder_m) * scale_to_skel
+	var target_basis_skel: Basis = (_skel_char_basis * hand_basis_char).orthonormalized()
+	_solve_arm_ik_skel(s_idx, f_idx, h_idx, target_skel_pos, target_basis_skel, is_left)
+
+
+func _safe_from_to_quat(from_dir: Vector3, to_dir: Vector3, fallback_axis: Vector3) -> Quaternion:
+	var a: Vector3 = from_dir.normalized()
+	var b: Vector3 = to_dir.normalized()
+	var d: float = a.dot(b)
+	if d > 0.99999:
+		return Quaternion.IDENTITY
+	if d < -0.9999:
+		var ax: Vector3 = fallback_axis
+		if ax.length_squared() < 0.0001 or absf(ax.normalized().dot(a)) > 0.98:
+			ax = a.cross(Vector3.UP if absf(a.y) < 0.9 else Vector3.RIGHT)
+		return Quaternion(ax.normalized(), PI)
+	return Quaternion(a, b)
+
+
+## Algoritmo analítico de 2 huesos (Hombro -> Codo -> Mano) en coordenadas globales para VR
 func _solve_arm_ik(
 	shoulder_idx: int,
 	forearm_idx: int,
@@ -1261,175 +1514,187 @@ func _solve_arm_ik(
 ) -> void:
 	if shoulder_idx == -1 or forearm_idx == -1 or hand_idx == -1 or not skeleton:
 		return
+	var skel_inv: Transform3D = skeleton.global_transform.affine_inverse()
+	var target_skel: Vector3 = skel_inv * target_global_pos
+	var target_basis_skel: Basis = (skel_inv.basis * target_global_basis).orthonormalized()
+	_solve_arm_ik_skel(shoulder_idx, forearm_idx, hand_idx, target_skel, target_basis_skel, is_left)
 
-	# Transformar objetivo desde coordenadas mundiales al espacio local del Skeleton3D
-	var skel_inv = skeleton.global_transform.affine_inverse()
-	var target_skel = skel_inv * target_global_pos
 
-	var s_rest = skeleton.get_bone_global_rest(shoulder_idx).origin
-	var e_rest = skeleton.get_bone_global_rest(forearm_idx).origin
-	var w_rest = skeleton.get_bone_global_rest(hand_idx).origin
+## Núcleo IK jerárquico de 2 pasos: sin flips antipodales + pole vector continuo + reparto de pronación 50/50
+func _solve_arm_ik_skel(
+	shoulder_idx: int,
+	forearm_idx: int,
+	hand_idx: int,
+	target_skel: Vector3,
+	target_basis_skel: Basis,
+	is_left: bool
+) -> void:
+	var s_rest: Vector3 = skeleton.get_bone_global_rest(shoulder_idx).origin
+	var e_rest: Vector3 = skeleton.get_bone_global_rest(forearm_idx).origin
+	var w_rest: Vector3 = skeleton.get_bone_global_rest(hand_idx).origin
 
-	var L1 = (e_rest - s_rest).length()
-	var L2 = (w_rest - e_rest).length()
+	var upper_rest_vec: Vector3 = e_rest - s_rest
+	var lower_rest_vec: Vector3 = w_rest - e_rest
+	var L1: float = upper_rest_vec.length()
+	var L2: float = lower_rest_vec.length()
+	if L1 < 0.0001 or L2 < 0.0001:
+		return
 
-	var v = target_skel - s_rest
-	var d = clampf(v.length(), 0.08, (L1 + L2) * 0.98)
-	var v_dir = v.normalized()
+	var v: Vector3 = target_skel - s_rest
+	var min_d: float = maxf(0.10 * (L1 + L2), absf(L1 - L2) + 0.005 * (L1 + L2))
+	var d: float = clampf(v.length(), min_d, (L1 + L2) * 0.992)
+	var v_dir: Vector3 = v.normalized() if v.length_squared() > 0.000001 else _skel_char_basis.z
 
-	# Ley de cosenos para los ángulos del triángulo del brazo
-	var cos_alpha = clampf((L1 * L1 + d * d - L2 * L2) / (2.0 * L1 * d), -1.0, 1.0)
-	var alpha = acos(cos_alpha)
+	# Ley de cosenos para ángulo de apertura del triángulo Hombro-Codo-Muñeca
+	var cos_alpha: float = clampf((L1 * L1 + d * d - L2 * L2) / (2.0 * L1 * d), -1.0, 1.0)
+	var alpha: float = acos(cos_alpha)
 
-	# Pole vector para flexión anatómica: codos hacia afuera (+X izq, -X der), abajo (-Y) y atrás (-Z en local)
-	var pole_dir = Vector3(0.6, -0.6, -0.5).normalized() if is_left else Vector3(-0.6, -0.6, -0.5).normalized()
-	var plane_norm = v_dir.cross(pole_dir).normalized()
-	if plane_norm.length_squared() < 0.001:
-		plane_norm = Vector3.UP
+	# Pole vector continuo en espacio de personaje -> Skeleton3D (codos afuera/abajo/atrás, sin saltos)
+	var v_char: Vector3 = _skel_char_basis.inverse() * v_dir
+	var side_sign: float = 1.0 if is_left else -1.0
+	var pole_char: Vector3 = Vector3(
+		side_sign * 0.65,
+		-0.60 - clampf(v_char.y, -0.4, 0.6) * 0.15,
+		-0.45 - clampf(v_char.z, -0.3, 0.5) * 0.20
+	).normalized()
+	var pole_skel: Vector3 = (_skel_char_basis * pole_char).normalized()
 
-	var bend_dir = plane_norm.cross(v_dir).normalized()
-	var elbow_target = s_rest + v_dir * (L1 * cos(alpha)) + bend_dir * (L1 * sin(alpha))
+	var bend_proj: Vector3 = pole_skel - v_dir * pole_skel.dot(v_dir)
+	if bend_proj.length_squared() < 0.0001:
+		bend_proj = v_dir.cross(_skel_char_basis.x)
+		if bend_proj.length_squared() < 0.0001:
+			bend_proj = v_dir.cross(_skel_char_basis.y)
+	var bend_dir: Vector3 = bend_proj.normalized()
+	var elbow_target: Vector3 = s_rest + v_dir * (L1 * cos_alpha) + bend_dir * (L1 * sin(alpha))
 
-	# 1. Rotación del hombro / brazo superior
-	var rest_upper_dir = (e_rest - s_rest).normalized()
-	var des_upper_dir = (elbow_target - s_rest).normalized()
-	var q_shoulder = Quaternion(rest_upper_dir, des_upper_dir)
+	# Paso 1: Rotación jerárquica del hombro (soporta huesos rest no-identidad como Goku)
+	var rest_upper_dir: Vector3 = upper_rest_vec.normalized()
+	var des_upper_dir: Vector3 = (elbow_target - s_rest).normalized()
+	var hinge_fallback: Vector3 = _skel_char_basis.z
+	var q_shoulder_delta: Quaternion = _safe_from_to_quat(rest_upper_dir, des_upper_dir, hinge_fallback)
 
-	# 2. Rotación del antebrazo / codo
-	var rest_lower_dir = (w_rest - e_rest).normalized()
-	var des_lower_dir = (target_skel - elbow_target).normalized()
-	var q_forearm_world = Quaternion(rest_lower_dir, des_lower_dir)
-	var q_forearm_local = q_shoulder.inverse() * q_forearm_world
+	var R_arm_grest: Basis = skeleton.get_bone_global_rest(shoulder_idx).basis.orthonormalized()
+	var R_arm_desired: Basis = (Basis(q_shoulder_delta) * R_arm_grest).orthonormalized()
+	var arm_parent: int = skeleton.get_bone_parent(shoulder_idx)
+	var R_arm_parent_cur: Basis = skeleton.get_bone_global_pose(arm_parent).basis.orthonormalized() if arm_parent != -1 else Basis.IDENTITY
+	var q_shoulder_local: Quaternion = (R_arm_parent_cur.inverse() * R_arm_desired).get_rotation_quaternion()
+	skeleton.set_bone_pose_rotation(shoulder_idx, q_shoulder_local)
 
-	skeleton.set_bone_pose_rotation(shoulder_idx, q_shoulder)
+	# Paso 2: Flexión jerárquica de bisagra en el codo (desde el antebrazo ya rotado por el hombro -> cero flip 180°)
+	var rest_lower_dir: Vector3 = lower_rest_vec.normalized()
+	var current_lower_dir: Vector3 = (q_shoulder_delta * rest_lower_dir).normalized()
+	var des_lower_dir: Vector3 = (target_skel - elbow_target).normalized()
+	var elbow_axis_hint: Vector3 = des_upper_dir.cross(bend_dir).normalized()
+	var q_elbow_hinge: Quaternion = _safe_from_to_quat(current_lower_dir, des_lower_dir, elbow_axis_hint)
+	var q_forearm_delta_base: Quaternion = (q_elbow_hinge * q_shoulder_delta).normalized()
+
+	var R_forearm_grest: Basis = skeleton.get_bone_global_rest(forearm_idx).basis.orthonormalized()
+	var R_forearm_base: Basis = (Basis(q_forearm_delta_base) * R_forearm_grest).orthonormalized()
+
+	# Paso 3: Descomposición Swing-Twist de la muñeca y reparto anatómico 50% ForeArm / 50% Hand
+	var align_basis: Basis = _left_hand_align_basis if is_left else _right_hand_align_basis
+	var R_hand_desired: Basis = (target_basis_skel * align_basis).orthonormalized()
+	var R_hand_grest: Basis = skeleton.get_bone_global_rest(hand_idx).basis.orthonormalized()
+	var R_hand_rel_rest: Basis = R_forearm_grest.inverse() * R_hand_grest
+	var R_hand_base: Basis = R_forearm_base * R_hand_rel_rest
+
+	var q_wrist_total: Quaternion = (R_hand_desired * R_hand_base.inverse()).get_rotation_quaternion()
+	var q_vec: Vector3 = Vector3(q_wrist_total.x, q_wrist_total.y, q_wrist_total.z)
+	var proj_twist: Vector3 = des_lower_dir * q_vec.dot(des_lower_dir)
+	var q_twist: Quaternion = Quaternion(proj_twist.x, proj_twist.y, proj_twist.z, q_wrist_total.w)
+	var twist_angle: float = 0.0
+	if q_twist.length_squared() > 0.00001:
+		q_twist = q_twist.normalized()
+		if q_twist.w < 0.0:
+			q_twist = -q_twist
+		var sin_half: float = Vector3(q_twist.x, q_twist.y, q_twist.z).dot(des_lower_dir)
+		twist_angle = clampf(2.0 * atan2(sin_half, q_twist.w), -deg_to_rad(135.0), deg_to_rad(135.0))
+
+	var q_forearm_twist: Quaternion = Quaternion(des_lower_dir, twist_angle * 0.5)
+	var R_forearm_final: Basis = (Basis(q_forearm_twist) * R_forearm_base).orthonormalized()
+	var q_forearm_local: Quaternion = (R_arm_desired.inverse() * R_forearm_final).get_rotation_quaternion()
 	skeleton.set_bone_pose_rotation(forearm_idx, q_forearm_local)
 
-	# 3. Orientación matemática canónica de la muñeca según la cinemática del modelo y mandos OpenXR
-	var target_basis_skel = skel_inv.basis * target_global_basis
-
-	# Matriz ortonormal canónica que alinea el espacio de reposo de la mano en A-pose con el mando OpenXR:
-	# En el mando: -Z es hacia adelante (dedos), +Y es hacia arriba (pulgar), +X/-X es hacia la palma/dorso.
-	# En el modelo: el brazo y mano caen a -37.23° (A-pose) con dedos en +X/-X, pulgar en +Z, palma en -Y.
-	var align_basis: Basis
-	if is_left:
-		align_basis = Basis(
-			Vector3(-0.605083, 0.0, -0.796162),
-			Vector3(-0.796162, 0.0, 0.605083),
-			Vector3(0.0, 1.0, 0.0)
-		)
-	else:
-		align_basis = Basis(
-			Vector3(-0.605083, 0.0, 0.796162),
-			Vector3(0.796162, 0.0, 0.605083),
-			Vector3(0.0, 1.0, 0.0)
-		)
-
-	var desired_hand_basis = target_basis_skel * align_basis
-
-	# Usamos la orientación mundial exacta del antebrazo calculada analíticamente en este frame
-	# para evitar la caché desactualizada de 1 frame de get_bone_global_pose() en Godot 4
-	var forearm_world_basis = Basis(q_forearm_world)
-	var rest_hand_basis = skeleton.get_bone_rest(hand_idx).basis
-	var local_hand_basis = rest_hand_basis.inverse() * forearm_world_basis.inverse() * desired_hand_basis
-	skeleton.set_bone_pose_rotation(hand_idx, local_hand_basis.get_rotation_quaternion())
+	var q_hand_local: Quaternion = (R_forearm_final.inverse() * R_hand_desired).get_rotation_quaternion()
+	skeleton.set_bone_pose_rotation(hand_idx, q_hand_local)
 
 
-## Aplica flexión reactiva de dedos en el esqueleto del cuerpo con distribución anatómica natural
+## Aplica flexión reactiva de dedos con ejes calibrados y caché sin allocs por frame
 func _apply_finger_curls_to_skeleton(skel: Skeleton3D, prefix: String, trigger: float, grip: float) -> void:
 	if not skel:
 		return
-	var is_left = (prefix == "Left")
 
-	# Ejes anatómicos canónicos de flexión (dir_hueso x normal_palma)
-	# Para Índice, Medio y Anular: rotación perpendicular pura en Z
-	var curl_axis = Vector3(0.0, 0.0, -1.0) if is_left else Vector3(0.0, 0.0, 1.0)
-	# Para Meñique: compensación del ángulo rest pose de 37° en Z
-	var pinky_axis = Vector3(0.5794, -0.3436, -0.7390) if is_left else Vector3(0.5765, 0.3419, 0.7421)
-	# Para Pulgar: flexión hacia la palma con leve oposición hacia -Z
-	var thumb_curl_axis = Vector3(0.0, 0.0, -1.0) if is_left else Vector3(0.0, 0.0, 1.0)
-	var thumb_opp_axis = Vector3(0.0, 1.0, 0.0) if is_left else Vector3(0.0, -1.0, 0.0)
+	var eff_grip: float = clampf(grip, 0.0, 1.0)
+	var eff_trig: float = clampf(trigger, 0.0, 1.0)
 
-	var eff_grip = clampf(grip, 0.0, 1.0)
-	var eff_trig = clampf(trigger, 0.0, 1.0)
+	var bend_mid_j1: float = 0.28 + eff_grip * 0.45
+	var bend_mid_j2: float = 0.32 + eff_grip * 0.55
+	var bend_mid_j3: float = 0.22 + eff_grip * 0.40
+	var bend_idx_j1: float = 0.16 + eff_trig * 0.52
+	var bend_idx_j2: float = 0.20 + eff_trig * 0.62
+	var bend_idx_j3: float = 0.14 + eff_trig * 0.48
+	var thumb_val: float = clampf(eff_trig * 0.45 + eff_grip * 0.55, 0.0, 1.0)
+	var th_bend_1: float = 0.12 + thumb_val * 0.35
+	var th_bend_2: float = 0.16 + thumb_val * 0.42
+	var th_bend_3: float = 0.14 + thumb_val * 0.38
 
-	# Postura ergonómica base al empuñar el mando (descanso natural sin botones) + flexión activa al apretar
-	# Dedos de agarre (Medio y Anular)
-	var bend_mid_j1 = 0.28 + eff_grip * 0.45
-	var bend_mid_j2 = 0.32 + eff_grip * 0.55
-	var bend_mid_j3 = 0.22 + eff_grip * 0.40
-	var rot_j1 = Quaternion(curl_axis, bend_mid_j1)
-	var rot_j2 = Quaternion(curl_axis, bend_mid_j2)
-	var rot_j3 = Quaternion(curl_axis, bend_mid_j3)
+	if skel == skeleton and _finger_curl_cache.has(prefix):
+		var side_cache: Dictionary = _finger_curl_cache[prefix]
+		for fname in ["Middle", "Ring", "Pinky"]:
+			var d_f: Dictionary = side_cache[fname]
+			var ax: Vector3 = d_f["curl_axis"]
+			if d_f["b1"] != -1: skel.set_bone_pose_rotation(d_f["b1"], d_f["rest_1"] * Quaternion(ax, bend_mid_j1))
+			if d_f["b2"] != -1: skel.set_bone_pose_rotation(d_f["b2"], d_f["rest_2"] * Quaternion(ax, bend_mid_j2))
+			if d_f["b3"] != -1: skel.set_bone_pose_rotation(d_f["b3"], d_f["rest_3"] * Quaternion(ax, bend_mid_j3))
 
-	# Meñique (con su eje propio compensado)
-	var rot_pinky_j1 = Quaternion(pinky_axis, bend_mid_j1)
-	var rot_pinky_j2 = Quaternion(pinky_axis, bend_mid_j2)
-	var rot_pinky_j3 = Quaternion(pinky_axis, bend_mid_j3)
+		var d_i: Dictionary = side_cache["Index"]
+		var ax_i: Vector3 = d_i["curl_axis"]
+		if d_i["b1"] != -1: skel.set_bone_pose_rotation(d_i["b1"], d_i["rest_1"] * Quaternion(ax_i, bend_idx_j1))
+		if d_i["b2"] != -1: skel.set_bone_pose_rotation(d_i["b2"], d_i["rest_2"] * Quaternion(ax_i, bend_idx_j2))
+		if d_i["b3"] != -1: skel.set_bone_pose_rotation(d_i["b3"], d_i["rest_3"] * Quaternion(ax_i, bend_idx_j3))
 
-	# Índice (curvatura natural en gatillo + flexión total al apretar)
-	var bend_idx_j1 = 0.16 + eff_trig * 0.52
-	var bend_idx_j2 = 0.20 + eff_trig * 0.62
-	var bend_idx_j3 = 0.14 + eff_trig * 0.48
-	var idx_rot_j1 = Quaternion(curl_axis, bend_idx_j1)
-	var idx_rot_j2 = Quaternion(curl_axis, bend_idx_j2)
-	var idx_rot_j3 = Quaternion(curl_axis, bend_idx_j3)
+		var d_t: Dictionary = side_cache["Thumb"]
+		var ax_tc: Vector3 = d_t["curl_axis"]
+		var ax_to: Vector3 = d_t["opp_axis"]
+		if d_t["b1"] != -1: skel.set_bone_pose_rotation(d_t["b1"], d_t["rest_1"] * Quaternion(ax_tc, th_bend_1) * Quaternion(ax_to, 0.20 + thumb_val * 0.30))
+		if d_t["b2"] != -1: skel.set_bone_pose_rotation(d_t["b2"], d_t["rest_2"] * Quaternion(ax_tc, th_bend_2))
+		if d_t["b3"] != -1: skel.set_bone_pose_rotation(d_t["b3"], d_t["rest_3"] * Quaternion(ax_tc, th_bend_3))
+		return
 
-	# Pulgar (descanso sobre el plato superior + oposición al cerrar puño)
-	var thumb_val = clampf(eff_trig * 0.45 + eff_grip * 0.55, 0.0, 1.0)
-	var th_bend_1 = 0.12 + thumb_val * 0.35
-	var th_bend_2 = 0.16 + thumb_val * 0.42
-	var th_bend_3 = 0.14 + thumb_val * 0.38
-	var thumb_rot_1 = Quaternion(thumb_curl_axis, th_bend_1) * Quaternion(thumb_opp_axis, 0.20 + thumb_val * 0.30)
-	var thumb_rot_2 = Quaternion(thumb_curl_axis, th_bend_2)
-	var thumb_rot_3 = Quaternion(thumb_curl_axis, th_bend_3)
-
-	# Aplicar a Medio y Anular
-	for b_name in [prefix + "Middle1", prefix + "Ring1", prefix + "MiddleProximal", prefix + "RingProximal"]:
-		var idx = skel.find_bone(b_name)
+	# Fallback por si se llama en esqueleto de mano independiente
+	var is_left: bool = (prefix == "Left")
+	var curl_axis: Vector3 = Vector3(0.0, 0.0, -1.0 if is_left else 1.0)
+	var thumb_opp_axis: Vector3 = Vector3(0.0, 1.0 if is_left else -1.0, 0.0)
+	var rot_j1: Quaternion = Quaternion(curl_axis, bend_mid_j1)
+	var rot_j2: Quaternion = Quaternion(curl_axis, bend_mid_j2)
+	var rot_j3: Quaternion = Quaternion(curl_axis, bend_mid_j3)
+	for b_name in [prefix + "Middle1", prefix + "Ring1", prefix + "Pinky1", prefix + "MiddleProximal", prefix + "RingProximal", prefix + "PinkyProximal"]:
+		var idx: int = skel.find_bone(b_name)
 		if idx != -1: skel.set_bone_pose_rotation(idx, rot_j1)
-	for b_name in [prefix + "Middle2", prefix + "Ring2", prefix + "MiddleIntermediate", prefix + "RingIntermediate"]:
-		var idx = skel.find_bone(b_name)
+	for b_name in [prefix + "Middle2", prefix + "Ring2", prefix + "Pinky2", prefix + "MiddleIntermediate", prefix + "RingIntermediate", prefix + "PinkyIntermediate"]:
+		var idx: int = skel.find_bone(b_name)
 		if idx != -1: skel.set_bone_pose_rotation(idx, rot_j2)
-	for b_name in [prefix + "Middle3", prefix + "Ring3", prefix + "MiddleDistal", prefix + "RingDistal"]:
-		var idx = skel.find_bone(b_name)
+	for b_name in [prefix + "Middle3", prefix + "Ring3", prefix + "Pinky3", prefix + "MiddleDistal", prefix + "RingDistal", prefix + "PinkyDistal"]:
+		var idx: int = skel.find_bone(b_name)
 		if idx != -1: skel.set_bone_pose_rotation(idx, rot_j3)
-
-	# Aplicar a Meñique
-	for b_name in [prefix + "Pinky1", prefix + "PinkyProximal"]:
-		var idx = skel.find_bone(b_name)
-		if idx != -1: skel.set_bone_pose_rotation(idx, rot_pinky_j1)
-	for b_name in [prefix + "Pinky2", prefix + "PinkyIntermediate"]:
-		var idx = skel.find_bone(b_name)
-		if idx != -1: skel.set_bone_pose_rotation(idx, rot_pinky_j2)
-	for b_name in [prefix + "Pinky3", prefix + "PinkyDistal"]:
-		var idx = skel.find_bone(b_name)
-		if idx != -1: skel.set_bone_pose_rotation(idx, rot_pinky_j3)
-
-	# Índice
-	var idx_b1 = skel.find_bone(prefix + "Index1")
+	var idx_b1: int = skel.find_bone(prefix + "Index1")
 	if idx_b1 == -1: idx_b1 = skel.find_bone(prefix + "IndexProximal")
-	if idx_b1 != -1: skel.set_bone_pose_rotation(idx_b1, idx_rot_j1)
-
-	var idx_b2 = skel.find_bone(prefix + "Index2")
+	if idx_b1 != -1: skel.set_bone_pose_rotation(idx_b1, Quaternion(curl_axis, bend_idx_j1))
+	var idx_b2: int = skel.find_bone(prefix + "Index2")
 	if idx_b2 == -1: idx_b2 = skel.find_bone(prefix + "IndexIntermediate")
-	if idx_b2 != -1: skel.set_bone_pose_rotation(idx_b2, idx_rot_j2)
-
-	var idx_b3 = skel.find_bone(prefix + "Index3")
+	if idx_b2 != -1: skel.set_bone_pose_rotation(idx_b2, Quaternion(curl_axis, bend_idx_j2))
+	var idx_b3: int = skel.find_bone(prefix + "Index3")
 	if idx_b3 == -1: idx_b3 = skel.find_bone(prefix + "IndexDistal")
-	if idx_b3 != -1: skel.set_bone_pose_rotation(idx_b3, idx_rot_j3)
-
-	# Pulgar
-	var th_b1 = skel.find_bone(prefix + "Thumb1")
+	if idx_b3 != -1: skel.set_bone_pose_rotation(idx_b3, Quaternion(curl_axis, bend_idx_j3))
+	var th_b1: int = skel.find_bone(prefix + "Thumb1")
 	if th_b1 == -1: th_b1 = skel.find_bone(prefix + "ThumbProximal")
-	if th_b1 != -1: skel.set_bone_pose_rotation(th_b1, thumb_rot_1)
-
-	var th_b2 = skel.find_bone(prefix + "Thumb2")
+	if th_b1 != -1: skel.set_bone_pose_rotation(th_b1, Quaternion(curl_axis, th_bend_1) * Quaternion(thumb_opp_axis, 0.20 + thumb_val * 0.30))
+	var th_b2: int = skel.find_bone(prefix + "Thumb2")
 	if th_b2 == -1: th_b2 = skel.find_bone(prefix + "ThumbIntermediate")
-	if th_b2 != -1: skel.set_bone_pose_rotation(th_b2, thumb_rot_2)
-
-	var th_b3 = skel.find_bone(prefix + "Thumb3")
+	if th_b2 != -1: skel.set_bone_pose_rotation(th_b2, Quaternion(curl_axis, th_bend_2))
+	var th_b3: int = skel.find_bone(prefix + "Thumb3")
 	if th_b3 == -1: th_b3 = skel.find_bone(prefix + "ThumbDistal")
-	if th_b3 != -1: skel.set_bone_pose_rotation(th_b3, thumb_rot_3)
+	if th_b3 != -1: skel.set_bone_pose_rotation(th_b3, Quaternion(curl_axis, th_bend_3))
 
 func _get_wrist_transform_in_glb(skel: Skeleton3D, wrist_bone_name: String, hand_instance: Node3D) -> Transform3D:
 	var bone_idx = skel.find_bone(wrist_bone_name)
@@ -1524,7 +1789,16 @@ func _setup_character_physics() -> void:
 	hitbox.add_child(hit_col)
 	add_child(hitbox)
 
+	cached_exclude_rids.clear()
+	cached_exclude_rids.append(physical_body.get_rid())
+	cached_exclude_rids.append(hitbox.get_rid())
+
 	print("[Physics] Cuerpo físico y Hitbox de cápsula (%.2fm alt, %.2fm rad) configurados para %s." % [char_height, char_radius, character_data.character_name if character_data else name])
+
+
+## Retorna RIDs cacheados en O(1) para excluir del raycast/colisión de proyectiles propios
+func get_projectile_exclude_rids() -> Array[RID]:
+	return cached_exclude_rids
 
 
 func apply_knockback(dir: Vector3, force: float) -> void:

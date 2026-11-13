@@ -26,7 +26,14 @@ enum AIState {
 	DEFENSIVE_BLOCK
 }
 
+enum AIDifficulty {
+	TRAINING = 0,
+	NORMAL = 1,
+	Z_HARD = 2
+}
+
 @export var enabled: bool = true
+@export var difficulty: AIDifficulty = AIDifficulty.NORMAL
 
 # Referencias
 var host: CharacterInstance = null
@@ -188,37 +195,48 @@ func _process_state_idle_spacing(delta: float) -> void:
 			# Paso lateral (órbita)
 			execute_step_movement(lateral)
 
-	# Evaluación de transiciones tácticas cada 0.35s
+	# Evaluación de transiciones tácticas según dificultad
 	if decision_timer <= 0.0:
-		decision_timer = 0.35
+		decision_timer = 0.85 if difficulty == AIDifficulty.TRAINING else (0.22 if difficulty == AIDifficulty.Z_HARD else 0.35)
 		_evaluate_tactical_transition(dist)
 
 
-## Evalúa el cambio de estado según Ki, distancia y estado del jugador
+## Evalúa el cambio de estado según Ki, distancia, dificultad y CharacterData
 func _evaluate_tactical_transition(dist: float) -> void:
-	# 1. Si el Ki de Goku está bajo (< 32.0), priorizar recarga
-	if host.current_ki < 32.0:
+	var host_max_ki: float = host.character_data.base_ki if host.character_data else 100.0
+	var recharge_thresh: float = host_max_ki * 0.32
+	if host.current_ki < recharge_thresh:
 		_transition_to(AIState.KI_RECHARGE)
 		return
 
-	# Si los ataques están en cooldown, seguir en Spacing
 	if attack_cooldown > 0.0:
 		return
 
-	# 2. Si tiene Ki suficiente (>= 50) y distancia media/larga, probabilidad de Kamehameha
-	if host.current_ki >= 50.0 and dist >= 3.5 and dist <= 10.0 and randf() < 0.45:
+	if difficulty == AIDifficulty.TRAINING:
+		# En modo entrenamiento solo lanza ráfagas esporádicas para practicar desvíos/esquives
+		if host.current_ki >= 20.0 and dist >= 3.0 and randf() < 0.30:
+			_transition_to(AIState.KI_BLAST_VOLLEY)
+		else:
+			attack_cooldown = 2.8
+		return
+
+	var super_chance: float = 0.62 if difficulty == AIDifficulty.Z_HARD else 0.45
+	var super_info: Dictionary = _select_ai_super_power()
+	var super_cost: float = float(super_info.get("ki_cost", 50.0))
+	if host.current_ki >= super_cost and dist >= 3.5 and dist <= 12.0 and randf() < super_chance:
 		_transition_to(AIState.KAMEHAMEHA_CHARGE)
 		return
 
-	# 3. Disparar ráfaga de Ki Blasts
-	if host.current_ki >= 18.0 and dist >= 3.0 and randf() < 0.70:
+	var volley_chance: float = 0.82 if difficulty == AIDifficulty.Z_HARD else 0.70
+	if host.current_ki >= 18.0 and dist >= 3.0 and randf() < volley_chance:
 		_transition_to(AIState.KI_BLAST_VOLLEY)
 		return
 
-	# 4. Melee Dash ofensivo (táctico o de castigo a corta-media distancia)
+	var melee_chance: float = 0.60 if difficulty == AIDifficulty.Z_HARD else 0.40
 	if host.current_ki >= 22.0 and dist <= 7.5:
-		if player.current_ki < 20.0 or player.is_penalized or randf() < 0.40:
-			attack_cooldown = randf_range(3.5, 6.0)
+		if player.current_ki < 20.0 or player.is_penalized or randf() < melee_chance:
+			var cd_mult: float = 0.65 if difficulty == AIDifficulty.Z_HARD else 1.0
+			attack_cooldown = randf_range(3.5, 6.0) * cd_mult
 			_transition_to(AIState.MELEE_RUSH)
 			return
 
@@ -226,9 +244,9 @@ func _evaluate_tactical_transition(dist: float) -> void:
 ## Estado 2: Recarga táctica de Ki
 func _process_state_ki_recharge(delta: float) -> void:
 	host.is_charging_ki = true
-	host.recharge_ki(18.0 * delta)
+	var rate: float = 24.0 if difficulty == AIDifficulty.Z_HARD else 18.0
+	host.recharge_ki(rate * delta)
 
-	# Retroceder lentamente mientras recarga para mantener distancia
 	var diff = player.global_position - host.global_position
 	diff.y = 0.0
 	if diff.length() < 5.0:
@@ -236,33 +254,36 @@ func _process_state_ki_recharge(delta: float) -> void:
 		host.global_position += back_dir * 1.5 * delta
 		host._clamp_to_arena(host)
 
-	# Salir de recarga si el Ki llega al 75% o si pasó el tiempo límite
-	if host.current_ki >= 75.0 or state_timer >= 3.2:
+	var max_ki: float = host.character_data.base_ki if host.character_data else 100.0
+	if host.current_ki >= max_ki * 0.75 or state_timer >= 3.2:
 		host.is_charging_ki = false
-		attack_cooldown = 0.8
+		attack_cooldown = 0.5 if difficulty == AIDifficulty.Z_HARD else 0.8
 		_transition_to(AIState.IDLE_SPACING)
 
 
 ## Estado 3: Ráfaga de Ki Blasts rápidos hacia el jugador
 func _process_state_ki_blast_volley(delta: float) -> void:
 	blast_interval_timer += delta
-	if blast_interval_timer >= 0.28:
+	var interval: float = 0.20 if difficulty == AIDifficulty.Z_HARD else (0.42 if difficulty == AIDifficulty.TRAINING else 0.28)
+	if blast_interval_timer >= interval:
 		blast_interval_timer = 0.0
-		var target_pos = player.global_position + Vector3(0.0, 1.35, 0.0) # Apuntar al pecho
+		var target_pos = player.global_position + Vector3(0.0, 1.35, 0.0)
 		_spawn_ki_blast(target_pos, false)
 		blast_volley_count += 1
 
 		if blast_volley_count >= blast_volley_target:
-			attack_cooldown = randf_range(2.0, 3.8)
+			var mult: float = 2.0 if difficulty == AIDifficulty.TRAINING else (0.65 if difficulty == AIDifficulty.Z_HARD else 1.0)
+			attack_cooldown = randf_range(2.0, 3.8) * mult
 			_transition_to(AIState.IDLE_SPACING)
 
 
-## Estado 4: Carga y disparo del Kamehameha
+## Estado 4: Carga y disparo del Super Ataque dinámico (Kamehameha / Galick Ho / Final Flash)
 func _process_state_kamehameha_charge(delta: float) -> void:
 	kamehameha_charge_timer += delta
 	host.is_charging_ki = true
+	var super_info: Dictionary = _select_ai_super_power()
+	var s_color: Color = super_info.get("color", _get_host_energy_color())
 
-	# Crear y expandir esfera de Ki azul entre las manos
 	if not kamehameha_vfx_sphere or not is_instance_valid(kamehameha_vfx_sphere):
 		kamehameha_vfx_sphere = MeshInstance3D.new()
 		var sphere = SphereMesh.new()
@@ -274,21 +295,17 @@ func _process_state_kamehameha_charge(delta: float) -> void:
 
 		var mat = ShaderMaterial.new()
 		mat.shader = KiSphereShader
-		mat.set_shader_parameter("base_color", Color(0.1, 0.75, 1.0, 0.95))
+		mat.set_shader_parameter("base_color", Color(s_color.r, s_color.g, s_color.b, 0.95))
 		mat.set_shader_parameter("core_glow", 5.0)
 		kamehameha_vfx_sphere.material_override = mat
 
 		host.add_child(kamehameha_vfx_sphere)
 		kamehameha_vfx_sphere.position = Vector3(0.18, 1.05, 0.35)
-
-		# Reproducir audio de Kamehameha
 		_play_ai_sfx("kamehameha_charge")
 	else:
-		# Escalar con la carga
 		var progress = clampf(kamehameha_charge_timer / KAMEHAMEHA_CHARGE_DURATION, 0.1, 1.0)
 		kamehameha_vfx_sphere.scale = Vector3.ONE * (0.8 + progress * 1.5)
 
-	# Al completar la carga: ¡DISPARAR!
 	if kamehameha_charge_timer >= KAMEHAMEHA_CHARGE_DURATION:
 		host.is_charging_ki = false
 		host.stop_charging_super()
@@ -298,11 +315,11 @@ func _process_state_kamehameha_charge(delta: float) -> void:
 
 		var target_pos = player.global_position + Vector3(0.0, 1.35, 0.0)
 		_spawn_kamehameha_beam(target_pos)
-		attack_cooldown = 5.0
+		attack_cooldown = 3.6 if difficulty == AIDifficulty.Z_HARD else 5.0
 		_transition_to(AIState.IDLE_SPACING)
 
 
-## Cancela el Kamehameha por rotura de concentración (Poise roto por lluvia de Ki Blasts del jugador)
+## Cancela el Super Ataque por rotura de concentración
 func interrupt_kamehameha() -> void:
 	if current_state == AIState.KAMEHAMEHA_CHARGE:
 		host.is_charging_ki = false
@@ -313,7 +330,8 @@ func interrupt_kamehameha() -> void:
 		_play_ai_sfx("hit_light")
 		attack_cooldown = 2.5
 		_transition_to(AIState.IDLE_SPACING)
-		host._log_combat_event("[CONCENTRACIÓN ROTA] ¡El Kamehameha de Goku fue interrumpido por la lluvia de ataques!", "warning")
+		var super_name: String = String(_select_ai_super_power().get("name", "Super Ataque"))
+		host._log_combat_event("[CONCENTRACIÓN ROTA] ¡El %s de %s fue interrumpido!" % [super_name, _get_host_name()], "warning")
 
 
 ## Estado 5: Guardia Defensiva
@@ -369,29 +387,30 @@ func _check_incoming_threats() -> void:
 		if dist < 3.8:
 			var p_vel: Vector3 = proj.get("speed_velocity") if proj.get("speed_velocity") != null else Vector3.ZERO
 			var to_me = (my_pos - p_pos).normalized()
-			# Si el proyectil vuela directo hacia Goku
+			# Si el proyectil vuela directo hacia el rival IA
 			if p_vel.normalized().dot(to_me) > 0.65:
+				var deflect_thresh: float = 0.15 if difficulty == AIDifficulty.TRAINING else (0.58 if difficulty == AIDifficulty.Z_HARD else 0.38)
 				var rand_choice = randf()
 				# A. Desvío activo con la mano (Ki Deflection) si está a corta distancia (< 2.4m)
-				if rand_choice < 0.38 and dist < 2.4 and proj.get("tier") == 1:
+				if rand_choice < deflect_thresh and dist < 2.4 and proj.get("tier") == 1:
 					var hand_pos = my_pos + Vector3(0.2, 1.25, 0.4)
 					var swipe_vel = Vector3(randf_range(-1.5, 1.5), 1.2, -1.8)
 					proj.deflect_by_ai(hand_pos, swipe_vel, host)
 					if host.procedural_animator:
 						host.procedural_animator.trigger_hit_flinch(0.2, -swipe_vel.normalized())
-					host._log_combat_event("[DESVÍO] ¡%s desvió tu Ki Blast con un golpe de mano! (+15 Ki, +150 BP)" % (host.character_data.character_name if host.character_data else "Goku"), "info")
+					host._log_combat_event("[DESVÍO] ¡%s desvió tu Ki Blast con un golpe de mano! (+15 Ki, +150 BP)" % _get_host_name(), "info")
 					return
 				# B. Esquive con paso lateral por casillas si tiene Ki >= 8.0 y no está en cooldown
-				elif host.current_ki >= 8.0 and dodge_cooldown <= 0.0:
+				elif difficulty != AIDifficulty.TRAINING and host.current_ki >= 8.0 and dodge_cooldown <= 0.0:
 					var right_vec = host.global_transform.basis.x.normalized()
 					var dodge_dir = right_vec * (1.0 if randf() > 0.5 else -1.0)
 					if execute_step_movement(dodge_dir):
 						host.consume_ki(8.0)
-						dodge_cooldown = 1.8
-						host._log_combat_event("[ESQUIVE] ¡%s dio un paso lateral evasivo para esquivar el ataque!" % (host.character_data.character_name if host.character_data else "Goku"), "info")
+						dodge_cooldown = 1.1 if difficulty == AIDifficulty.Z_HARD else 1.8
+						host._log_combat_event("[ESQUIVE] ¡%s dio un paso lateral evasivo para esquivar el ataque!" % _get_host_name(), "info")
 						return
 				# C. Bloqueo con Guardia Cruzada si no puede desviar ni esquivar
-				elif block_cooldown <= 0.0 and current_state != AIState.DEFENSIVE_BLOCK:
+				elif difficulty != AIDifficulty.TRAINING and block_cooldown <= 0.0 and current_state != AIState.DEFENSIVE_BLOCK:
 					_transition_to(AIState.DEFENSIVE_BLOCK)
 					return
 
@@ -459,34 +478,122 @@ func execute_vertical_step(is_up: bool) -> bool:
 	return true
 
 
-## Despierta transformaciones para Goku en tiempo real según el peligro
+## Cambia el nivel de dificultad en caliente y retorna su etiqueta legible
+func set_difficulty(new_diff: int) -> void:
+	difficulty = clampi(new_diff, AIDifficulty.TRAINING, AIDifficulty.Z_HARD) as AIDifficulty
+	if host and is_instance_valid(host):
+		host._log_combat_event("[IA] Dificultad ajustada a: %s" % get_difficulty_label(), "info")
+
+
+func get_difficulty_label() -> String:
+	match difficulty:
+		AIDifficulty.TRAINING: return "ENTRENAMIENTO"
+		AIDifficulty.Z_HARD: return "Z-HARD"
+		_: return "NORMAL"
+
+
+func reset_ai_for_character() -> void:
+	if kamehameha_vfx_sphere and is_instance_valid(kamehameha_vfx_sphere):
+		kamehameha_vfx_sphere.queue_free()
+		kamehameha_vfx_sphere = null
+	attack_cooldown = 1.5
+	dodge_cooldown = 0.0
+	block_cooldown = 0.0
+	_transition_to(AIState.IDLE_SPACING)
+
+
+func _get_host_name() -> String:
+	if host and host.character_data and host.character_data.character_name != "":
+		return host.character_data.character_name
+	return host.name if host else "Rival"
+
+
+func _get_host_energy_color() -> Color:
+	if host and host.character_data:
+		var t: Variant = host.current_transformation
+		if t and t.get("form_name") != null and "SSJ" in String(t.get("form_name")).to_upper():
+			return Color(1.0, 0.85, 0.15, 0.95)
+		if "VEGETA" in host.character_data.character_name.to_upper():
+			return Color(0.85, 0.25, 1.0, 0.95)
+	return Color(0.15, 0.65, 1.0, 0.95)
+
+
+func _select_ai_super_power() -> Dictionary:
+	var fallback_color: Color = _get_host_energy_color()
+	if not host or not host.character_data or host.character_data.powers.is_empty():
+		return { "name": "Kamehameha", "color": fallback_color, "damage": 1800.0, "ki_cost": 50.0, "tier": 3 }
+
+	var current_form: String = host.current_transformation.form_name if host.current_transformation else ""
+	var chosen: PowerData = null
+	for p in host.character_data.powers:
+		if not p:
+			continue
+		var trig_u: String = p.gesture_trigger.to_upper()
+		var pname_u: String = p.power_name.to_upper()
+		# Seleccionar super ataques tipo haz (excluyendo Ki Blast básico y esferas como Big Bang / Genkidama)
+		var is_beam: bool = ("KAMEHAMEHA" in trig_u or "GALICK" in trig_u or "FINAL_FLASH" in trig_u or "KAMEHAMEHA" in pname_u or "GALICK" in pname_u or "FINAL FLASH" in pname_u)
+		if not is_beam:
+			continue
+		if p.forbidden_transformations.has(current_form):
+			continue
+		if p.unlock_requirement_transformation != "" and not host.is_transformation_unlocked(p.unlock_requirement_transformation):
+			continue
+		if chosen == null or p.base_damage_np > chosen.base_damage_np:
+			if host.current_ki >= p.ki_cost:
+				chosen = p
+
+	if chosen:
+		var p_col: Color = chosen.energy_color if chosen.energy_color.a > 0.05 else fallback_color
+		return {
+			"name": chosen.power_name,
+			"color": p_col,
+			"damage": chosen.base_damage_np,
+			"ki_cost": chosen.ki_cost,
+			"tier": 4 if chosen.is_finisher else 3
+		}
+	return { "name": "Super Beam", "color": fallback_color, "damage": 1800.0, "ki_cost": 50.0, "tier": 3 }
+
+
+## Despierta transformaciones progresivas para cualquier personaje en CharacterData según NP o rival
 func _check_ai_transformation() -> void:
 	if not host or not host.character_data or host.character_data.transformations.is_empty():
 		return
-	if host.current_transformation != null:
+	if difficulty == AIDifficulty.TRAINING:
 		return
 
-	var active_max: float = host.character_data.max_np
-	var hp_ratio: float = host.current_np / maxf(1.0, active_max)
+	var base_max: float = maxf(1.0, host.character_data.max_np)
+	var np_ratio: float = host.current_np / base_max
 	var player_trans = player.get("current_transformation") if (player and is_instance_valid(player)) else null
+	var player_mult: float = float(player_trans.np_multiplier) if (player_trans and player_trans.get("np_multiplier") != null) else 1.0
 
-	# Si el jugador se transformó o Goku tiene daño crítico (<= 65% NP):
-	if player_trans != null or hp_ratio <= 0.65:
-		var target_idx = 0
-		# Si el jugador ya está en SSJ y Goku tiene SSJ disponible, igualar a SSJ
-		if player_trans != null and host.character_data.transformations.size() > 1:
-			target_idx = 1
+	var current_idx: int = -1
+	if host.current_transformation:
+		current_idx = host.character_data.transformations.find(host.current_transformation)
 
-		var trans = host.character_data.transformations[target_idx]
+	var desired_idx: int = current_idx
+	var total_forms: int = host.character_data.transformations.size()
+
+	# Igualar forma si el jugador supera en multiplicador, o despertar por presión de combate
+	for i in range(total_forms):
+		var form_cand: TransformationData = host.character_data.transformations[i]
+		if not form_cand:
+			continue
+		var pressure_trigger: bool = (i == 0 and np_ratio <= 0.75) or (i == 1 and np_ratio <= 0.50) or (i >= 2 and np_ratio <= 0.30)
+		var match_player: bool = (player_trans != null and form_cand.np_multiplier <= player_mult + 0.1)
+		var z_hard_early: bool = (difficulty == AIDifficulty.Z_HARD and np_ratio <= 0.85 and i <= 1)
+		if i > desired_idx and (pressure_trigger or match_player or z_hard_early):
+			desired_idx = i
+
+	if desired_idx > current_idx and desired_idx >= 0 and desired_idx < total_forms:
+		var trans = host.character_data.transformations[desired_idx]
 		if not host.is_transformation_unlocked(trans.form_name):
 			host.unlock_transformation(trans.form_name)
-
-		host.transform_to(target_idx)
+		host.transform_to(desired_idx)
 		_play_ai_sfx("aura")
-		host._log_combat_event("🔥 ¡Goku ha despertado %s para igualar la batalla!" % trans.form_name, "warning")
+		host._log_combat_event("🔥 ¡%s ha despertado %s para igualar la batalla!" % [_get_host_name(), trans.form_name], "warning")
 
 
-## Instancia un Ki Blast procedural de Goku
+## Instancia un Ki Blast procedural dinámico según CharacterData del rival
 func _spawn_ki_blast(target_pos: Vector3, is_charged: bool = false) -> void:
 	if not host.consume_ki(14.0 if is_charged else 6.0):
 		return
@@ -501,7 +608,7 @@ func _spawn_ki_blast(target_pos: Vector3, is_charged: bool = false) -> void:
 
 	var projectile_radius = 0.16 if is_charged else 0.06
 	var speed = 16.0 if is_charged else 26.0
-	var energy_color = Color(0.15, 0.65, 1.0, 0.95) # Celeste de Goku
+	var energy_color = _get_host_energy_color()
 
 	var projectile = Node3D.new()
 	projectile.name = "EnemyKiProjectile_" + str(Time.get_ticks_msec())
@@ -550,11 +657,15 @@ func _spawn_ki_blast(target_pos: Vector3, is_charged: bool = false) -> void:
 	projectile.set("base_damage", 550.0 if is_charged else 220.0)
 	projectile.set("explosion_radius", 2.0 if is_charged else 1.2)
 	projectile.set("shooter_node", host)
+	projectile.set("was_launched_in_zenkai", bool(host.get("is_in_zenkai_state")))
 
 	var excludes: Array[RID] = []
-	for child in host.find_children("*", "CollisionObject3D", true, false):
-		if child is CollisionObject3D:
-			excludes.append(child.get_rid())
+	if host.has_method("get_projectile_exclude_rids"):
+		excludes = host.get_projectile_exclude_rids().duplicate()
+	else:
+		for child in host.get_children():
+			if child is CollisionObject3D:
+				excludes.append(child.get_rid())
 	projectile.set("ray_query_exclude", excludes)
 
 	var current_scene = host.get_tree().current_scene
@@ -564,16 +675,23 @@ func _spawn_ki_blast(target_pos: Vector3, is_charged: bool = false) -> void:
 	_play_ai_sfx("ki_blast")
 
 
-## Instancia el Super Kamehameha de Goku
+## Instancia el Super Haz dinámico según CharacterData del rival
 func _spawn_kamehameha_beam(target_pos: Vector3) -> void:
-	if not host.consume_ki(50.0):
+	var super_info: Dictionary = _select_ai_super_power()
+	var s_name: String = String(super_info.get("name", "Kamehameha"))
+	var s_color: Color = super_info.get("color", _get_host_energy_color())
+	var s_dmg: float = float(super_info.get("damage", 1800.0))
+	var s_cost: float = float(super_info.get("ki_cost", 50.0))
+	var s_tier: int = int(super_info.get("tier", 3))
+
+	if not host.consume_ki(s_cost):
 		return
 
 	# Activación de la Secuencia Cinemática y Bullet-Time de Super Ataque para la IA
 	if host and host.has_method("start_super_beam_sequence"):
 		var opp = host._get_opponent()
 		if opp and is_instance_valid(opp):
-			host.start_super_beam_sequence("Kamehameha", Color(0.25, 0.85, 1.0), 1800.0, 3)
+			host.start_super_beam_sequence(s_name, s_color, s_dmg, s_tier)
 			_play_ai_sfx("kamehameha_fire")
 			return
 
@@ -585,10 +703,10 @@ func _spawn_kamehameha_beam(target_pos: Vector3) -> void:
 	var dir = (target_pos - spawn_pos).normalized()
 	var projectile_radius = 0.36
 	var speed = 30.0
-	var energy_color = Color(0.12, 0.78, 1.0, 0.98)
+	var energy_color = Color(s_color.r, s_color.g, s_color.b, 0.98)
 
 	var projectile = Node3D.new()
-	projectile.name = "EnemyKamehameha_" + str(Time.get_ticks_msec())
+	projectile.name = "EnemySuper_" + s_name.replace(" ", "") + "_" + str(Time.get_ticks_msec())
 
 	var mesh_core = MeshInstance3D.new()
 	var sphere_core = SphereMesh.new()
@@ -634,11 +752,15 @@ func _spawn_kamehameha_beam(target_pos: Vector3) -> void:
 	projectile.set("base_damage", 1800.0)
 	projectile.set("explosion_radius", 3.2)
 	projectile.set("shooter_node", host)
+	projectile.set("was_launched_in_zenkai", bool(host.get("is_in_zenkai_state")))
 
 	var excludes: Array[RID] = []
-	for child in host.find_children("*", "CollisionObject3D", true, false):
-		if child is CollisionObject3D:
-			excludes.append(child.get_rid())
+	if host.has_method("get_projectile_exclude_rids"):
+		excludes = host.get_projectile_exclude_rids().duplicate()
+	else:
+		for child in host.get_children():
+			if child is CollisionObject3D:
+				excludes.append(child.get_rid())
 	projectile.set("ray_query_exclude", excludes)
 
 	var current_scene = host.get_tree().current_scene
@@ -659,12 +781,12 @@ func _play_ai_sfx(sfx_type: String) -> void:
 		"kamehameha_charge":
 			if snd_kamehameha:
 				audio_player_3d.stream = snd_kamehameha
-				audio_player_3d.pitch_scale = 1.0
+				audio_player_3d.pitch_scale = randf_range(0.92, 1.08)
 				audio_player_3d.play()
 		"kamehameha_fire":
 			if snd_ki_blast:
 				audio_player_3d.stream = snd_ki_blast
-				audio_player_3d.pitch_scale = 0.85
+				audio_player_3d.pitch_scale = 0.85 * randf_range(0.92, 1.08)
 				audio_player_3d.play()
 		"ki_blast":
 			if snd_ki_blast:
@@ -674,7 +796,7 @@ func _play_ai_sfx(sfx_type: String) -> void:
 		"aura":
 			if snd_aura:
 				audio_player_3d.stream = snd_aura
-				audio_player_3d.pitch_scale = 1.0
+				audio_player_3d.pitch_scale = randf_range(0.92, 1.08)
 				audio_player_3d.play()
 		"step", "vanish":
 			if snd_vanish:

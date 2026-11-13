@@ -22,9 +22,11 @@ var button_panels: Array[Panel] = []
 var button_labels: Array[Label] = []
 
 const BUTTON_DEFS = [
-	{ "id": 0, "title": "🔄 RESETEAR JUEGO", "desc": "Reiniciar el combate actual desde el inicio", "action": "reset" },
-	{ "id": 1, "title": "🎯 CALIBRAR VISTA", "desc": "Centrar posición y orientación física del visor", "action": "calibrate" },
-	{ "id": 2, "title": "🚪 SALIR DEL JUEGO", "desc": "Cerrar la aplicación y salir a Horizon Home", "action": "quit" }
+	{ "id": 0, "title": "🥋 CAMBIAR LUCHADOR (VEGETA ⇄ GOKU)", "desc": "Alternar entre Vegeta y Goku en tiempo real", "action": "swap_character" },
+	{ "id": 1, "title": "⚔️ DIFICULTAD IA: NORMAL", "desc": "Alternar nivel táctico del rival (Entrenamiento / Normal / Z-Hard)", "action": "cycle_difficulty" },
+	{ "id": 2, "title": "📖 MOSTRAR / OCULTAR GUÍA", "desc": "Alternar panel holográfico de técnicas y gestos", "action": "toggle_guide" },
+	{ "id": 3, "title": "🔄 RESETEAR COMBATE", "desc": "Reiniciar el combate actual desde el inicio", "action": "reset" },
+	{ "id": 4, "title": "🎯 CALIBRAR VISTA VR", "desc": "Centrar posición y orientación física del visor", "action": "calibrate" }
 ]
 
 
@@ -48,7 +50,7 @@ func _build_scouter_menu_ui() -> void:
 	sub_viewport.name = "MenuSubViewport"
 	sub_viewport.size = Vector2i(1024, 768)
 	sub_viewport.transparent_bg = true
-	sub_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	sub_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 	add_child(sub_viewport)
 
 	# 2. Contenedor base de Control
@@ -81,14 +83,14 @@ func _build_scouter_menu_ui() -> void:
 
 	var vbox = VBoxContainer.new()
 	vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
-	vbox.add_theme_constant_override("separation", 24)
+	vbox.add_theme_constant_override("separation", 12)
 	main_panel.add_child(vbox)
 
 	# 4. Título Estilo Dragon Ball Scouter
 	var title = Label.new()
 	title.text = "⚡ DRAGON BALL VR // MENÚ TÁCTICO ⚡"
 	var t_set = LabelSettings.new()
-	t_set.font_size = 38
+	t_set.font_size = 32
 	t_set.font_color = Color(1.0, 0.88, 0.15) # Oro Saiyan
 	t_set.shadow_size = 6
 	t_set.shadow_color = Color(0.0, 0.0, 0.0, 0.9)
@@ -99,7 +101,7 @@ func _build_scouter_menu_ui() -> void:
 	var sub_title = Label.new()
 	sub_title.text = "PAUSA DE COMBATE — SELECCIONA CON STICK / GATILLO"
 	var st_set = LabelSettings.new()
-	st_set.font_size = 20
+	st_set.font_size = 17
 	st_set.font_color = Color(0.3, 0.9, 0.75, 0.85)
 	sub_title.label_settings = st_set
 	sub_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -116,7 +118,7 @@ func _build_scouter_menu_ui() -> void:
 	for i in range(BUTTON_DEFS.size()):
 		var def = BUTTON_DEFS[i]
 		var btn_panel = Panel.new()
-		btn_panel.custom_minimum_size = Vector2(0, 110)
+		btn_panel.custom_minimum_size = Vector2(0, 82)
 
 		var btn_style = StyleBoxFlat.new()
 		btn_style.bg_color = Color(0.02, 0.08, 0.06, 0.85)
@@ -125,10 +127,10 @@ func _build_scouter_menu_ui() -> void:
 		btn_style.border_width_right = 3
 		btn_style.border_width_bottom = 3
 		btn_style.border_color = Color(0.15, 0.65, 0.50, 0.6)
-		btn_style.corner_radius_top_left = 16
-		btn_style.corner_radius_top_right = 16
-		btn_style.corner_radius_bottom_left = 16
-		btn_style.corner_radius_bottom_right = 16
+		btn_style.corner_radius_top_left = 14
+		btn_style.corner_radius_top_right = 14
+		btn_style.corner_radius_bottom_left = 14
+		btn_style.corner_radius_bottom_right = 14
 		btn_panel.add_theme_stylebox_override("panel", btn_style)
 		vbox.add_child(btn_panel)
 
@@ -140,7 +142,7 @@ func _build_scouter_menu_ui() -> void:
 		var lbl_title = Label.new()
 		lbl_title.text = def["title"]
 		var l_set = LabelSettings.new()
-		l_set.font_size = 32
+		l_set.font_size = 25
 		l_set.font_color = Color.WHITE
 		lbl_title.label_settings = l_set
 		lbl_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -149,7 +151,7 @@ func _build_scouter_menu_ui() -> void:
 		var lbl_desc = Label.new()
 		lbl_desc.text = def["desc"]
 		var d_set = LabelSettings.new()
-		d_set.font_size = 18
+		d_set.font_size = 15
 		d_set.font_color = Color(0.65, 0.80, 0.80)
 		lbl_desc.label_settings = d_set
 		lbl_desc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -197,6 +199,10 @@ func toggle_menu() -> void:
 
 	if is_open:
 		_reposition_in_front_of_player()
+		_refresh_dynamic_labels()
+		_update_selection_visuals()
+		if sub_viewport and is_instance_valid(sub_viewport):
+			sub_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 		if menu_mesh and is_instance_valid(menu_mesh):
 			menu_mesh.scale = Vector3.ZERO
 			if is_inside_tree():
@@ -207,6 +213,8 @@ func toggle_menu() -> void:
 		if left_controller and is_instance_valid(left_controller) and left_controller.has_method("trigger_haptic_pulse"):
 			left_controller.trigger_haptic_pulse("haptic", 120.0, 0.5, 0.1, 0.0)
 	else:
+		if sub_viewport and is_instance_valid(sub_viewport):
+			sub_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 		if left_controller and is_instance_valid(left_controller) and left_controller.has_method("trigger_haptic_pulse"):
 			left_controller.trigger_haptic_pulse("haptic", 80.0, 0.3, 0.05, 0.0)
 
@@ -304,6 +312,8 @@ func _update_selection_visuals() -> void:
 			style.border_width_right = 3
 			style.border_width_bottom = 3
 			l.label_settings.font_color = Color(0.85, 0.98, 0.92, 1.0)
+	if sub_viewport and is_instance_valid(sub_viewport):
+		sub_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE if is_open else SubViewport.UPDATE_DISABLED
 
 
 func _process_interactions() -> void:
@@ -328,6 +338,21 @@ func _activate_action(action_name: String) -> void:
 		left_controller.trigger_haptic_pulse("haptic", 200.0, 0.9, 0.2, 0.0)
 
 	match action_name:
+		"swap_character":
+			_execute_character_swap()
+			_refresh_dynamic_labels()
+
+		"cycle_difficulty":
+			_cycle_ai_difficulty()
+			_refresh_dynamic_labels()
+
+		"toggle_guide":
+			if is_inside_tree() and get_tree() and get_tree().root:
+				var hud = get_tree().root.find_child("VRHUD", true, false)
+				if hud and hud.has_method("toggle_moves_guide"):
+					hud.toggle_moves_guide()
+			toggle_menu()
+
 		"reset":
 			print("[VRInGameMenu] 🔄 Reiniciando combate...")
 			toggle_menu()
@@ -345,7 +370,77 @@ func _activate_action(action_name: String) -> void:
 			else:
 				_reposition_in_front_of_player()
 
-		"quit":
-			print("[VRInGameMenu] 🚪 Saliendo del juego...")
-			if is_inside_tree() and get_tree():
-				get_tree().quit()
+
+func _refresh_dynamic_labels() -> void:
+	if not is_inside_tree() or not get_tree() or not get_tree().current_scene:
+		return
+	var scene: Node = get_tree().current_scene
+	var player: Node = scene.find_child("PlayerCharacterInstance", true, false)
+	var enemy: Node = scene.find_child("EnemyCharacterInstance", true, false)
+
+	if button_labels.size() > 0 and player and player.get("character_data"):
+		var p_name: String = str(player.character_data.character_name).to_upper()
+		var opp_name: String = "GOKU" if "VEGETA" in p_name else "VEGETA"
+		button_labels[0].text = "🥋 CAMBIAR LUCHADOR (%s ➔ %s)" % [p_name, opp_name]
+
+	if button_labels.size() > 1 and enemy:
+		var ai_ctrl: Node = enemy.get_node_or_null("CombatAIController")
+		if ai_ctrl and ai_ctrl.has_method("get_difficulty_label"):
+			button_labels[1].text = "⚔️ DIFICULTAD IA: %s" % ai_ctrl.get_difficulty_label()
+
+	if sub_viewport and is_instance_valid(sub_viewport):
+		sub_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE if is_open else SubViewport.UPDATE_DISABLED
+
+
+func _execute_character_swap() -> void:
+	if not is_inside_tree() or not get_tree() or not get_tree().current_scene:
+		return
+	var scene: Node = get_tree().current_scene
+	var player: Node = scene.find_child("PlayerCharacterInstance", true, false)
+	var enemy: Node = scene.find_child("EnemyCharacterInstance", true, false)
+	if not player or not enemy:
+		return
+
+	var goku_res: CharacterData = load("res://resources/goku.tres")
+	var vegeta_res: CharacterData = load("res://resources/vegeta.tres")
+	if not goku_res or not vegeta_res:
+		push_warning("[VRInGameMenu] No se pudieron cargar goku.tres o vegeta.tres para intercambio.")
+		return
+
+	var p_is_vegeta: bool = false
+	if player.get("character_data"):
+		p_is_vegeta = "VEGETA" in str(player.character_data.character_name).to_upper()
+
+	var new_player_data: CharacterData = goku_res if p_is_vegeta else vegeta_res
+	var new_enemy_data: CharacterData = vegeta_res if p_is_vegeta else goku_res
+
+	if player.has_method("swap_character_data"):
+		player.swap_character_data(new_player_data)
+	if enemy.has_method("swap_character_data"):
+		enemy.swap_character_data(new_enemy_data)
+
+	var hud: Node = get_tree().root.find_child("VRHUD", true, false)
+	if hud and hud.has_method("refresh_for_character_swap"):
+		hud.refresh_for_character_swap()
+
+	var lockon: Node = scene.find_child("KiSenseAndLockOn", true, false)
+	if lockon and lockon.has_method("show_scouter_alert"):
+		lockon.show_scouter_alert("🥋 LUCHADOR: %s" % new_player_data.character_name.to_upper(), "Combate renovado vs %s" % new_enemy_data.character_name.to_upper(), Color(0.25, 0.9, 1.0), 2.2)
+
+	print("[VRInGameMenu] 🥋 Intercambio completado: Jugador=%s | Rival=%s" % [new_player_data.character_name, new_enemy_data.character_name])
+
+
+func _cycle_ai_difficulty() -> void:
+	if not is_inside_tree() or not get_tree() or not get_tree().current_scene:
+		return
+	var enemy: Node = get_tree().current_scene.find_child("EnemyCharacterInstance", true, false)
+	if not enemy:
+		return
+	var ai_ctrl: Node = enemy.get_node_or_null("CombatAIController")
+	if not ai_ctrl or not ai_ctrl.has_method("set_difficulty"):
+		return
+	var current_diff: int = int(ai_ctrl.get("difficulty"))
+	var next_diff: int = (current_diff + 1) % 3
+	ai_ctrl.set_difficulty(next_diff)
+	var label_str: String = ai_ctrl.get_difficulty_label() if ai_ctrl.has_method("get_difficulty_label") else str(next_diff)
+	print("[VRInGameMenu] ⚔️ Dificultad IA cambiada a: %s" % label_str)

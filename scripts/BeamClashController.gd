@@ -26,6 +26,8 @@ var clash_sphere: MeshInstance3D = null
 var clash_light: OmniLight3D = null
 var beam_mesh_atk: MeshInstance3D = null
 var beam_mesh_def: MeshInstance3D = null
+var beam_inner_atk: MeshInstance3D = null
+var beam_inner_def: MeshInstance3D = null
 var shockwave_mesh: MeshInstance3D = null
 var header_label: Label3D = null
 
@@ -33,11 +35,15 @@ var header_label: Label3D = null
 var audio_loop: AudioStreamPlayer3D = null
 var audio_clash_impact: AudioStreamPlayer3D = null
 
-# Detección de bombeo de mandos para el jugador VR
+# Detección de bombeo y empuje físico VR con manos hacia adelante
 var prev_l_trig: bool = false
 var prev_r_trig: bool = false
 var prev_l_grip: bool = false
 var prev_r_grip: bool = false
+var _prev_l_hand_pos: Vector3 = Vector3.ZERO
+var _prev_r_hand_pos: Vector3 = Vector3.ZERO
+var _hand_track_init: bool = false
+var _physical_push_cd: float = 0.0
 
 const KiCoronaShader = preload("res://shaders/ki_corona.gdshader")
 const KiBeamShader = preload("res://shaders/ki_beam.gdshader")
@@ -137,15 +143,34 @@ func _process_player_inputs(real_delta: float) -> void:
 	prev_l_grip = l_grip
 	prev_r_grip = r_grip
 
-	if did_pulse:
-		var push_power = 0.045
+	# Detección de empuje físico VR real de ambas manos hacia el punto de choque
+	if _physical_push_cd > 0.0:
+		_physical_push_cd -= real_delta
+	var did_physical_push: bool = false
+	if l_ctrl and r_ctrl and l_ctrl.get_is_active() and r_ctrl.get_is_active():
+		var l_pos: Vector3 = l_ctrl.global_position
+		var r_pos: Vector3 = r_ctrl.global_position
+		if _hand_track_init and real_delta > 0.0001 and _physical_push_cd <= 0.0:
+			var opp_node: Node3D = defender if player == attacker else attacker
+			var push_dir: Vector3 = (opp_node.global_position - player.global_position).normalized() if (opp_node and is_instance_valid(opp_node)) else Vector3.FORWARD
+			var l_fwd_speed: float = ((l_pos - _prev_l_hand_pos) / real_delta).dot(push_dir)
+			var r_fwd_speed: float = ((r_pos - _prev_r_hand_pos) / real_delta).dot(push_dir)
+			if l_fwd_speed > 1.35 or r_fwd_speed > 1.35:
+				did_physical_push = true
+				_physical_push_cd = 0.22
+		_prev_l_hand_pos = l_pos
+		_prev_r_hand_pos = r_pos
+		_hand_track_init = true
+
+	if did_pulse or did_physical_push:
+		var push_power = 0.055 if did_physical_push else 0.045
 		# Bonificación de empuje si está en modo Furia o Zenkai
 		if player.get("is_in_zenkai_state"):
 			push_power *= 1.45
 
-		# Consumo de Ki por cada bombeo de energía
+		# Consumo de Ki por cada bombeo o empuje físico
 		if player.has_method("consume_ki_or_life_force"):
-			player.consume_ki_or_life_force(4.0)
+			player.consume_ki_or_life_force(3.5 if did_physical_push else 4.0)
 
 		# Si el jugador es el atacante, empuja clash_ratio hacia 0.0; si es defensor, hacia 1.0
 		if player == attacker:
@@ -153,7 +178,7 @@ func _process_player_inputs(real_delta: float) -> void:
 		else:
 			clash_ratio = minf(clash_ratio + push_power, 0.95)
 
-		_pulse_haptic_burst(origin, 220.0, 1.0, 0.15)
+		_pulse_haptic_burst(origin, 220.0, 1.0, 0.16)
 		_spawn_clash_shockwave()
 
 
@@ -185,12 +210,40 @@ func _process_ai_resistance(real_delta: float) -> void:
 		clash_ratio = minf(clash_ratio + ai_push, 0.95)
 
 
+func _get_fighter_hand_origin(fighter: Node3D, aim_toward: Vector3) -> Vector3:
+	if not fighter or not is_instance_valid(fighter):
+		return Vector3.ZERO
+	if fighter.get("is_player"):
+		var orig: Node = fighter.get_parent()
+		if orig:
+			var l_ctrl: XRController3D = orig.get_node_or_null("LeftHand") as XRController3D
+			var r_ctrl: XRController3D = orig.get_node_or_null("RightHand") as XRController3D
+			if l_ctrl and r_ctrl and l_ctrl.get_is_active() and r_ctrl.get_is_active():
+				return (l_ctrl.global_position + r_ctrl.global_position) * 0.5
+			elif r_ctrl and r_ctrl.get_is_active():
+				return r_ctrl.global_position
+			elif l_ctrl and l_ctrl.get_is_active():
+				return l_ctrl.global_position
+	var skel: Skeleton3D = fighter.get("skeleton") as Skeleton3D
+	if skel and is_instance_valid(skel):
+		var lh_idx: Variant = fighter.get("left_hand_idx")
+		var rh_idx: Variant = fighter.get("right_hand_idx")
+		if lh_idx is int and rh_idx is int and int(lh_idx) != -1 and int(rh_idx) != -1:
+			var l_w: Vector3 = skel.global_transform * skel.get_bone_global_pose(int(lh_idx)).origin
+			var r_w: Vector3 = skel.global_transform * skel.get_bone_global_pose(int(rh_idx)).origin
+			return (l_w + r_w) * 0.5
+	var fwd: Vector3 = (aim_toward - fighter.global_position).normalized()
+	if fwd.length_squared() < 0.001:
+		fwd = -fighter.global_transform.basis.z
+	return fighter.global_position + Vector3(0.0, 1.25, 0.0) + fwd * 0.45
+
+
 func _update_beam_transforms() -> void:
 	if not attacker or not defender or not is_instance_valid(attacker) or not is_instance_valid(defender):
 		return
 
-	var p_atk = attacker.global_position + Vector3(0.0, 1.25, 0.0)
-	var p_def = defender.global_position + Vector3(0.0, 1.25, 0.0)
+	var p_atk: Vector3 = _get_fighter_hand_origin(attacker, defender.global_position)
+	var p_def: Vector3 = _get_fighter_hand_origin(defender, attacker.global_position)
 
 	# Punto central del choque interpolado por clash_ratio
 	# clash_ratio = 0.0 -> cerca del defensor
@@ -213,13 +266,17 @@ func _update_beam_transforms() -> void:
 			header_label.look_at(player_cam.global_position, Vector3.UP)
 			header_label.rotate_y(PI)
 
-	# 1. Haz del Atacante (desde p_atk hasta clash_pos)
+	# 1. Haz exterior y núcleo blanco del Atacante (desde manos del atacante hasta clash_pos)
 	if beam_mesh_atk and is_instance_valid(beam_mesh_atk):
 		_position_beam(beam_mesh_atk, p_atk, clash_pos, 0.38)
+	if beam_inner_atk and is_instance_valid(beam_inner_atk):
+		_position_beam(beam_inner_atk, p_atk, clash_pos, 0.17)
 
-	# 2. Haz del Defensor (desde p_def hasta clash_pos)
+	# 2. Haz exterior y núcleo blanco del Defensor (desde manos del defensor hasta clash_pos)
 	if beam_mesh_def and is_instance_valid(beam_mesh_def):
 		_position_beam(beam_mesh_def, p_def, clash_pos, 0.38)
+	if beam_inner_def and is_instance_valid(beam_inner_def):
+		_position_beam(beam_inner_def, p_def, clash_pos, 0.17)
 
 
 func _position_beam(mesh_inst: MeshInstance3D, p_from: Vector3, p_to: Vector3, radius: float) -> void:
@@ -332,7 +389,7 @@ func _build_visuals() -> void:
 	clash_light.omni_range = 8.0
 	add_child(clash_light)
 
-	# 3. Haz del Atacante
+	# 3. Haz del Atacante + Núcleo blanco incandescente interno
 	beam_mesh_atk = MeshInstance3D.new()
 	beam_mesh_atk.name = "BeamAtk"
 	var cyl_atk = CylinderMesh.new()
@@ -348,7 +405,19 @@ func _build_visuals() -> void:
 	beam_mesh_atk.material_override = mat_atk
 	add_child(beam_mesh_atk)
 
-	# 4. Haz del Defensor
+	var mat_inner_white := StandardMaterial3D.new()
+	mat_inner_white.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+	mat_inner_white.albedo_color = Color(1.0, 1.0, 1.0, 0.96)
+
+	beam_inner_atk = MeshInstance3D.new()
+	beam_inner_atk.name = "BeamInnerAtk"
+	var cyl_inner_atk = CylinderMesh.new()
+	cyl_inner_atk.radial_segments = 12
+	beam_inner_atk.mesh = cyl_inner_atk
+	beam_inner_atk.material_override = mat_inner_white
+	add_child(beam_inner_atk)
+
+	# 4. Haz del Defensor + Núcleo blanco incandescente interno
 	beam_mesh_def = MeshInstance3D.new()
 	beam_mesh_def.name = "BeamDef"
 	var cyl_def = CylinderMesh.new()
@@ -363,6 +432,14 @@ func _build_visuals() -> void:
 	mat_def.set_shader_parameter("core_intensity", 3.8)
 	beam_mesh_def.material_override = mat_def
 	add_child(beam_mesh_def)
+
+	beam_inner_def = MeshInstance3D.new()
+	beam_inner_def.name = "BeamInnerDef"
+	var cyl_inner_def = CylinderMesh.new()
+	cyl_inner_def.radial_segments = 12
+	beam_inner_def.mesh = cyl_inner_def
+	beam_inner_def.material_override = mat_inner_white
+	add_child(beam_inner_def)
 
 	# 5. HUD 3D de balance
 	header_label = Label3D.new()

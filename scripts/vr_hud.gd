@@ -59,6 +59,17 @@ var left_wrist_node: Node3D = null
 var is_wrist_mode: bool = false
 var wrist_hud_scale: float = 0.0
 
+# Caché dirty-flag para eliminar asignaciones de texto y redraws redundantes del SubViewport (90 FPS VR)
+var _hud_dirty: bool = true
+var _last_ki_int: int = -1
+var _last_max_ki_int: int = -1
+var _last_np_int: int = -1
+var _last_np_pct_tier: int = -1
+var _last_recharging: bool = false
+var _last_enemy_np_int: int = -1
+var _last_guard_state: int = -1
+var _last_zenkai_state: bool = false
+
 func _ready() -> void:
 	if not sub_viewport or not hud_mesh:
 		return
@@ -101,6 +112,8 @@ func _setup_wrist_hud() -> void:
 		hud_mesh.scale = Vector3.ZERO
 		hud_mesh.visible = false
 		wrist_hud_scale = 0.0
+	if sub_viewport and is_instance_valid(sub_viewport):
+		sub_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
 
 	is_wrist_mode = true
 	set_process(true)
@@ -481,6 +494,12 @@ func _process(delta: float) -> void:
 		wrist_hud_scale = move_toward(wrist_hud_scale, target_scale, delta * 6.5)
 		hud_mesh.scale = Vector3.ONE * wrist_hud_scale
 		hud_mesh.visible = (wrist_hud_scale > 0.02)
+		if sub_viewport and is_instance_valid(sub_viewport):
+			if not hud_mesh.visible:
+				sub_viewport.render_target_update_mode = SubViewport.UPDATE_DISABLED
+			elif _hud_dirty:
+				sub_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
+				_hud_dirty = false
 		
 	# Búsqueda dinámica de la instancia del jugador
 	if player_instance == null or not is_instance_valid(player_instance):
@@ -511,35 +530,48 @@ func _process(delta: float) -> void:
 
 
 func _update_dbz_hud_elements(delta: float) -> void:
-	# 1. Actualizar datos del Rival en el Scouter
+	# 1. Actualizar datos del Rival en el Scouter (solo si cambia el BP entero)
 	if enemy_instance and is_instance_valid(enemy_instance) and rival_scouter_label:
-		var e_name = enemy_instance.character_data.character_name.to_upper() if enemy_instance.character_data else "RIVAL"
-		var e_np = int(enemy_instance.current_np)
-		rival_scouter_label.text = "[ 🎯 RIVAL: %s // BP %s ]" % [e_name, format_number_with_commas(e_np)]
+		var e_np: int = int(enemy_instance.current_np)
+		if e_np != _last_enemy_np_int:
+			_last_enemy_np_int = e_np
+			var e_name: String = enemy_instance.character_data.character_name.to_upper() if enemy_instance.character_data else "RIVAL"
+			rival_scouter_label.text = "[ 🎯 RIVAL: %s // BP %s ]" % [e_name, format_number_with_commas(e_np)]
+			_hud_dirty = true
 
-	# 2. Actualizar estado de guardia y bloqueo
+	# 2. Actualizar estado de guardia y bloqueo (dirty check)
 	if player_instance and is_instance_valid(player_instance) and guard_badge_label:
-		if player_instance.get("is_guard_broken"):
-			guard_badge_label.text = "[ ⚠️ ¡GUARDIA ROTA! (STAGGER) ]"
-			guard_badge_label.label_settings.font_color = Color(1.0, 0.2, 0.2) # Rojo parpadeante
-		elif player_instance.get("is_blocking"):
-			guard_badge_label.text = "[ 🛡️ GUARDIA CRUZADA [-85% BP] ]"
-			guard_badge_label.label_settings.font_color = Color(1.0, 0.9, 0.2) # Amarillo defensivo
-		else:
-			guard_badge_label.text = "[ 🛡️ GUARDIA: LISTA ]"
-			guard_badge_label.label_settings.font_color = Color(0.2, 0.9, 0.4) # Verde listo
+		var g_state: int = 2 if player_instance.get("is_guard_broken") else (1 if player_instance.get("is_blocking") else 0)
+		if g_state != _last_guard_state:
+			_last_guard_state = g_state
+			if g_state == 2:
+				guard_badge_label.text = "[ ⚠️ ¡GUARDIA ROTA! (STAGGER) ]"
+				guard_badge_label.label_settings.font_color = Color(1.0, 0.2, 0.2)
+			elif g_state == 1:
+				guard_badge_label.text = "[ 🛡️ GUARDIA CRUZADA [-85% BP] ]"
+				guard_badge_label.label_settings.font_color = Color(1.0, 0.9, 0.2)
+			else:
+				guard_badge_label.text = "[ 🛡️ GUARDIA: LISTA ]"
+				guard_badge_label.label_settings.font_color = Color(0.2, 0.9, 0.4)
+			_hud_dirty = true
 
 	# 3. Animar pulso de Zenkai / Furia
 	if player_instance and is_instance_valid(player_instance) and zenkai_badge_label:
-		if player_instance.get("is_in_zenkai_state"):
-			zenkai_pulse_timer += delta * 6.0
-			var pulse_val = (sin(zenkai_pulse_timer) + 1.0) * 0.5
-			var z_col = Color(1.0, 0.2 + pulse_val * 0.6, 0.1)
-			zenkai_badge_label.text = "[ 🔥 ¡ESTADO ZENKAI ACTIVO! - FINISHER K.O. DISPONIBLE 🔥 ]"
-			zenkai_badge_label.label_settings.font_color = z_col
-		else:
+		var z_active: bool = bool(player_instance.get("is_in_zenkai_state"))
+		if z_active:
+			if not _last_zenkai_state:
+				_last_zenkai_state = true
+				zenkai_badge_label.text = "[ 🔥 ¡ESTADO ZENKAI ACTIVO! - FINISHER K.O. DISPONIBLE 🔥 ]"
+			if hud_mesh and hud_mesh.visible:
+				zenkai_pulse_timer += delta * 6.0
+				var pulse_val: float = (sin(zenkai_pulse_timer) + 1.0) * 0.5
+				zenkai_badge_label.label_settings.font_color = Color(1.0, 0.2 + pulse_val * 0.6, 0.1)
+				_hud_dirty = true
+		elif _last_zenkai_state or zenkai_badge_label.text == "":
+			_last_zenkai_state = false
 			zenkai_badge_label.text = "[ ⚡ ESTADO: NORMAL ]"
 			zenkai_badge_label.label_settings.font_color = Color(0.7, 0.8, 0.9)
+			_hud_dirty = true
 
 
 func _on_player_stats_changed(ki: float, np: float, _is_zenkai: bool) -> void:
@@ -628,9 +660,17 @@ func _update_combat_stats(delta: float) -> void:
 # --- APIs Públicas para Actualización de la Interfaz ---
 
 func update_ki(current: float, max_val: float) -> void:
-	var percent = (current / max_val) * 100.0 if max_val > 0 else 0.0
+	var cur_int: int = int(current)
+	var max_int: int = int(max_val)
+	if cur_int == _last_ki_int and max_int == _last_max_ki_int and is_recharging == _last_recharging:
+		return
+	_last_ki_int = cur_int
+	_last_max_ki_int = max_int
+	_last_recharging = is_recharging
+	_hud_dirty = true
+	var percent: float = (current / max_val) * 100.0 if max_val > 0 else 0.0
 	if ki_text_label:
-		ki_text_label.text = "⚡ KI: %d / %d  [%d%%]" % [int(current), int(max_val), int(percent)]
+		ki_text_label.text = "⚡ KI: %d / %d  [%d%%]" % [cur_int, max_int, int(percent)]
 	if ki_progress_bar:
 		ki_progress_bar.max_value = max_val
 		ki_progress_bar.value = current
@@ -644,9 +684,16 @@ func update_ki(current: float, max_val: float) -> void:
 				fill.bg_color = Color(0.0, 0.85, 1.0, 0.95) # Cian estándar
 
 func update_power_level(current: float, max_val: float) -> void:
-	var percent = (current / max_val) * 100.0 if max_val > 0 else 0.0
+	var cur_int: int = int(current)
+	var percent: float = (current / max_val) * 100.0 if max_val > 0 else 0.0
+	var tier_mask: int = (1 if percent >= 25.0 else 0) | (2 if percent >= 50.0 else 0) | (4 if percent >= 75.0 else 0) | (8 if percent >= 100.0 else 0)
+	if cur_int == _last_np_int and tier_mask == _last_np_pct_tier:
+		return
+	_last_np_int = cur_int
+	_last_np_pct_tier = tier_mask
+	_hud_dirty = true
 	if bp_value_label:
-		bp_value_label.text = "BP: %s" % format_number_with_commas(int(current))
+		bp_value_label.text = "BP: %s" % format_number_with_commas(cur_int)
 
 	# Actualizar hitos de umbrales irreversibles (25%, 50%, 75%, 100%)
 	var thresh_pcts = [25.0, 50.0, 75.0, 100.0]
@@ -662,6 +709,7 @@ func update_status_text(text: String, color: Color = Color(0.9, 0.9, 0.9)) -> vo
 	if action_status_label:
 		action_status_label.text = "▶ %s" % text
 		action_status_label.label_settings.font_color = color
+		_hud_dirty = true
 
 func format_number_with_commas(n: int) -> String:
 	var s = str(n)
@@ -686,7 +734,7 @@ func _setup_debug_tooltip() -> void:
 	tooltip_viewport.name = "VRDebugTooltipViewport"
 	tooltip_viewport.size = Vector2i(900, 450)
 	tooltip_viewport.transparent_bg = true
-	tooltip_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	tooltip_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 	add_child(tooltip_viewport)
 	
 	var tooltip_layout = Control.new()
@@ -763,6 +811,8 @@ func _setup_debug_tooltip() -> void:
 func _on_hand_states_updated(left_desc: String, right_desc: String) -> void:
 	if tooltip_live_joints:
 		tooltip_live_joints.text = "L: %s\nR: %s" % [left_desc, right_desc]
+		if tooltip_viewport and is_instance_valid(tooltip_viewport) and tooltip_mesh and tooltip_mesh.visible:
+			tooltip_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 
 
 func log_gesture_event(msg: String, type: String = "info") -> void:
@@ -790,6 +840,8 @@ func _update_tooltip_logs() -> void:
 	for entry in debug_history:
 		text_block += entry + "\n"
 	tooltip_debug_logs.text = text_block
+	if tooltip_viewport and is_instance_valid(tooltip_viewport):
+		tooltip_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE if (tooltip_mesh and tooltip_mesh.visible) else SubViewport.UPDATE_DISABLED
 
 
 # --- Guía de Movimientos y Controles (Abajo a la derecha) ---
@@ -802,7 +854,7 @@ func _setup_moves_guide_hud() -> void:
 	moves_guide_viewport.name = "VRMovesGuideViewport"
 	moves_guide_viewport.size = Vector2i(900, 950)
 	moves_guide_viewport.transparent_bg = true
-	moves_guide_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	moves_guide_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 	add_child(moves_guide_viewport)
 
 	var layout = Control.new()
@@ -963,8 +1015,33 @@ func _update_moves_guide_text(is_controller: bool) -> void:
 			text += "• [color=#00e5ff]Transformar:[/color] Manos a la cadera con Ki 100% y extender dedos\n"
 			text += "• [color=#ff5555]Último Aliento:[/color] Si lanzas sin Ki, quemarás Fuerza Vital (BP)\n"
 	moves_guide_label.text = text
+	if moves_guide_viewport and is_instance_valid(moves_guide_viewport):
+		moves_guide_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE if (moves_guide_mesh and moves_guide_mesh.visible) else SubViewport.UPDATE_DISABLED
 
 
 func toggle_moves_guide() -> void:
 	if moves_guide_mesh and is_instance_valid(moves_guide_mesh):
 		moves_guide_mesh.visible = not moves_guide_mesh.visible
+		if moves_guide_viewport and is_instance_valid(moves_guide_viewport):
+			moves_guide_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE if moves_guide_mesh.visible else SubViewport.UPDATE_DISABLED
+
+
+func refresh_for_character_swap() -> void:
+	_last_ki_int = -1
+	_last_max_ki_int = -1
+	_last_np_int = -1
+	_last_np_pct_tier = -1
+	_last_enemy_np_int = -1
+	_last_guard_state = -1
+	_hud_dirty = true
+	if player_instance and is_instance_valid(player_instance):
+		if ki_cost_label and player_instance.character_data:
+			var cname: String = player_instance.character_data.character_name.to_upper()
+			if "VEGETA" in cname:
+				ki_cost_label.text = "[BLAST: 6 | GALICK: 50 | BIG BANG: 65 | FINAL FLASH: 90]"
+			else:
+				ki_cost_label.text = "[BLAST: 6 | KAMEHAMEHA: 50 | GENKIDAMA: 90]"
+		_on_player_stats_changed(player_instance.current_ki, player_instance.current_np, player_instance.is_in_zenkai_state)
+	_update_moves_guide_text(current_controller_mode)
+	if sub_viewport and is_instance_valid(sub_viewport):
+		sub_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE

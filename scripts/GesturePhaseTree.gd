@@ -247,33 +247,33 @@ func _process(delta: float) -> void:
 	var torso_offset_y = clamp(camera_height_local * 0.24, 0.25, 0.42)
 	var torso_pos = camera.global_position - Vector3(0, torso_offset_y * origin_scale_y, 0)
 	
-	# Obtener la dirección horizontal actual de la mirada de la cámara
-	var cam_fwd = -camera.global_transform.basis.z
-	cam_fwd.y = 0.0
-	var cam_fwd_norm = Vector3.FORWARD
-	if cam_fwd.length_squared() > 0.001:
-		cam_fwd_norm = cam_fwd.normalized()
-		
-	# Calcular el ángulo Yaw actual de la cámara
-	var current_cam_yaw = atan2(cam_fwd_norm.x, cam_fwd_norm.z)
-	
-	# Inicializar en el primer frame válido
-	if not torso_yaw_initialized:
-		torso_yaw = current_cam_yaw
+	# Sincronizar torso_yaw con la orientación canónica del torso en CharacterInstance cuando esté disponible
+	if player_check and is_instance_valid(player_check) and player_check.get("torso_yaw") != null:
+		var orig_y: float = xr_origin.global_rotation.y if xr_origin else 0.0
+		torso_yaw = orig_y + float(player_check.torso_yaw) + PI
 		torso_yaw_initialized = true
 	else:
-		# Calcular la diferencia angular más corta entre el torso actual y la cabeza
-		var angle_diff = angle_difference(torso_yaw, current_cam_yaw)
-		# Si la cabeza gira más de 35 grados (0.61086 rad), el torso es arrastrado por ella
-		var max_head_turn = deg_to_rad(35.0)
-		if abs(angle_diff) > max_head_turn:
-			if angle_diff > 0.0:
-				torso_yaw = current_cam_yaw - max_head_turn
-			else:
-				torso_yaw = current_cam_yaw + max_head_turn
+		# Obtener la dirección horizontal actual de la mirada de la cámara
+		var cam_fwd = -camera.global_transform.basis.z
+		cam_fwd.y = 0.0
+		var cam_fwd_norm = Vector3.FORWARD
+		if cam_fwd.length_squared() > 0.001:
+			cam_fwd_norm = cam_fwd.normalized()
+			
+		var current_cam_yaw = atan2(cam_fwd_norm.x, cam_fwd_norm.z)
+		if not torso_yaw_initialized:
+			torso_yaw = current_cam_yaw
+			torso_yaw_initialized = true
 		else:
-			# Centrado pasivo suave hacia la cabeza (lerp de 5.0 * delta)
-			torso_yaw = torso_yaw + angle_diff * (5.0 * delta)
+			var angle_diff = angle_difference(torso_yaw, current_cam_yaw)
+			var max_head_turn = deg_to_rad(35.0)
+			if abs(angle_diff) > max_head_turn:
+				if angle_diff > 0.0:
+					torso_yaw = current_cam_yaw - max_head_turn
+				else:
+					torso_yaw = current_cam_yaw + max_head_turn
+			else:
+				torso_yaw = torso_yaw + angle_diff * (5.0 * delta)
 				
 	# Reconstruir el vector forward del torso a partir del torso_yaw
 	var forward_xz = Vector3(sin(torso_yaw), 0.0, cos(torso_yaw)).normalized()
@@ -869,21 +869,19 @@ func _match_gesture(left_state: Dictionary, right_state: Dictionary, torso_trans
 				if l_open and l_stable and r_not_extended and not hands_are_close:
 					return "BIG_BANG_CHARGE"
 
-	# 1. Recarga KI - Paso 1: Puños cerrados o relajados frente al pecho (no cruzados)
+	# 1. Recarga KI - Paso 1: Brazos/puños juntos o cruzados delante del pecho (Fase 1 canónica DBVR)
 	if left_state.valid and right_state.valid:
 		var l_not_open = left_state.shape != "OPEN"
 		var r_not_open = right_state.shape != "OPEN"
 		var l_chest = left_state.height == "CHEST"
 		var r_chest = right_state.height == "CHEST"
-		var l_side = left_state.lateral == "LEFT" or left_state.lateral == "CENTER"
-		var r_side = right_state.lateral == "RIGHT" or right_state.lateral == "CENTER"
-		var hands_not_crossed = left_state.pos_local.x < right_state.pos_local.x
+		var hands_in_chest_zone = absf(left_state.pos_local.x) < 0.35 and absf(right_state.pos_local.x) < 0.35 and absf(left_state.pos_local.x - right_state.pos_local.x) < 0.42
 		var l_close = left_state.depth == "CLOSE" or left_state.depth == "MEDIUM"
 		var r_close = right_state.depth == "CLOSE" or right_state.depth == "MEDIUM"
 		var l_stable = left_state.speed_val < 2.0
 		var r_stable = right_state.speed_val < 2.0
 		
-		if l_not_open and r_not_open and l_chest and r_chest and l_side and r_side and hands_not_crossed and l_close and r_close and l_stable and r_stable:
+		if l_not_open and r_not_open and l_chest and r_chest and hands_in_chest_zone and l_close and r_close and l_stable and r_stable:
 			return "RECHARGE_PREP"
 			
 	# 2. Recarga KI - Paso 2: Ambos puños cerrados/relajados a los costados del cuerpo (no cruzados, abiertos hacia los laterales)
@@ -985,6 +983,7 @@ func _feed_trie(gesture_name: String) -> void:
 						emit_signal("phase_changed", "KAMEHAMEHA: CARGANDO")
 						emit_signal("gesture_logged", "Manos unidas en la cadera. ¡Cargando Kamehameha!", "info")
 					if ki_blast_charge_player:
+						ki_blast_charge_player.pitch_scale = randf_range(0.92, 1.08)
 						ki_blast_charge_player.play()
 				else:
 					emit_signal("gesture_logged", "No se pudo cargar Kamehameha.", "warning")
@@ -1009,6 +1008,7 @@ func _feed_trie(gesture_name: String) -> void:
 						emit_signal("phase_changed", "GENKIDAMA: REUNIENDO ENERGÍA")
 						emit_signal("gesture_logged", "Brazos alzados al cielo. ¡Reuniendo energía para la Genkidama!", "info")
 					if ki_blast_charge_player:
+						ki_blast_charge_player.pitch_scale = randf_range(0.92, 1.08)
 						ki_blast_charge_player.play()
 				else:
 					emit_signal("gesture_logged", "No se pudo reunir la Genkidama.", "warning")
@@ -1033,6 +1033,7 @@ func _feed_trie(gesture_name: String) -> void:
 						emit_signal("phase_changed", "GALICK HO: CARGANDO")
 						emit_signal("gesture_logged", "Manos unidas al hombro. ¡Cargando Galick Ho!", "info")
 					if ki_blast_charge_player:
+						ki_blast_charge_player.pitch_scale = randf_range(0.92, 1.08)
 						ki_blast_charge_player.play()
 				else:
 					emit_signal("gesture_logged", "No se pudo cargar Galick Ho.", "warning")
@@ -1057,6 +1058,7 @@ func _feed_trie(gesture_name: String) -> void:
 						emit_signal("phase_changed", "FINAL FLASH: CARGANDO RELÁMPAGOS")
 						emit_signal("gesture_logged", "Brazos en cruz acumulando relámpagos. ¡Cargando Final Flash!", "info")
 					if ki_blast_charge_player:
+						ki_blast_charge_player.pitch_scale = randf_range(0.92, 1.08)
 						ki_blast_charge_player.play()
 				else:
 					emit_signal("gesture_logged", "No se pudo cargar Final Flash.", "warning")
@@ -1081,6 +1083,7 @@ func _feed_trie(gesture_name: String) -> void:
 						emit_signal("phase_changed", "BIG BANG: CARGANDO ENERGÍA")
 						emit_signal("gesture_logged", "Brazo extendido con palma abierta. ¡Cargando Big Bang Attack!", "info")
 					if ki_blast_charge_player:
+						ki_blast_charge_player.pitch_scale = randf_range(0.92, 1.08)
 						ki_blast_charge_player.play()
 				else:
 					emit_signal("gesture_logged", "No se pudo cargar Big Bang Attack.", "warning")
@@ -1096,6 +1099,7 @@ func _feed_trie(gesture_name: String) -> void:
 				emit_signal("phase_changed", "KI BLAST IZQ: CARGANDO")
 				emit_signal("gesture_logged", "Brazo Izquierdo estirado al frente. ¡Cargando Ki Blast!", "info")
 				if ki_blast_charge_player:
+					ki_blast_charge_player.pitch_scale = randf_range(0.92, 1.08)
 					ki_blast_charge_player.play()
 		elif gesture_name == "ARM_STRETCHED_OPEN_RIGHT":
 			if ki_blast_charge_time_right <= 0.01:
@@ -1103,6 +1107,7 @@ func _feed_trie(gesture_name: String) -> void:
 				emit_signal("phase_changed", "KI BLAST DER: CARGANDO")
 				emit_signal("gesture_logged", "Brazo Derecho estirado al frente. ¡Cargando Ki Blast!", "info")
 				if ki_blast_charge_player:
+					ki_blast_charge_player.pitch_scale = randf_range(0.92, 1.08)
 					ki_blast_charge_player.play()
 			
 		# Comprobar si se ha alcanzado una acción final
@@ -1124,8 +1129,10 @@ func _trigger_action(action_name: String) -> void:
 		
 		# Reproducir sonidos de recarga de Ki
 		if aura_start_player:
+			aura_start_player.pitch_scale = randf_range(0.92, 1.08)
 			aura_start_player.play()
 		if aura_loop_player:
+			aura_loop_player.pitch_scale = randf_range(0.92, 1.08)
 			aura_loop_player.play()
 		
 	elif action_name == "ki_blast_left":
@@ -1466,13 +1473,18 @@ func _spawn_ki_blast_projectile(hand_side: int, is_charged: bool) -> void:
 	projectile.set("tier", 2 if is_charged else 1)
 	projectile.set("base_damage", 700.0 if is_charged else 200.0)
 	projectile.set("explosion_radius", 2.6 if is_charged else 1.2)
+	projectile.set("shooter_node", player)
+	projectile.set("was_launched_in_zenkai", bool(player and is_instance_valid(player) and player.get("is_in_zenkai_state")))
 	
-	# Excluir colisionadores del propio jugador para que el proyectil no choque consigo mismo al salir
+	# Excluir colisionadores del propio jugador en O(1) usando caché
 	var exclude_rids: Array[RID] = []
 	if player:
-		for child in player.get_children():
-			if child is CollisionObject3D:
-				exclude_rids.append(child.get_rid())
+		if player.has_method("get_projectile_exclude_rids"):
+			exclude_rids = player.get_projectile_exclude_rids().duplicate()
+		else:
+			for child in player.get_children():
+				if child is CollisionObject3D:
+					exclude_rids.append(child.get_rid())
 		var origin = player.get_parent()
 		if origin:
 			for child in origin.get_children():
@@ -1632,34 +1644,34 @@ func _spawn_special_projectile(power: Resource) -> void:
 	projectile.set("tier", tier_val)
 	projectile.set("base_damage", base_dmg)
 	projectile.set("explosion_radius", 7.5 if is_big_bang else (8.5 if is_ult_tech else 4.8))
+	projectile.set("shooter_node", player)
+	projectile.set("was_launched_in_zenkai", bool(player and is_instance_valid(player) and player.get("is_in_zenkai_state")))
 	
 	# Almacenar referencia al recurso del poder y tiempo de carga
 	projectile.set_meta("power_ref", power)
 	projectile.set_meta("charge_time", charge_time)
-	
-	if player and is_instance_valid(player) and player.get("is_comeback_zenkai"):
-		projectile.set_meta("is_comeback_shot", true)
+	if player and is_instance_valid(player):
+		projectile.set_meta("attacker", player)
+		if player.get("is_comeback_zenkai"):
+			projectile.set_meta("is_comeback_shot", true)
 		
 	var exclude_rids: Array[RID] = []
-	var current_scene = get_tree().current_scene
-	if current_scene:
-		var stack = [current_scene]
-		while stack.size() > 0:
-			var node = stack.pop_back()
-			if node is CollisionObject3D:
-				if node.name.begins_with("KiCombatFist"):
-					exclude_rids.append(node.get_rid())
-			for child in node.get_children():
-				stack.push_back(child)
-		if player:
+	if player:
+		if player.has_method("get_projectile_exclude_rids"):
+			exclude_rids = player.get_projectile_exclude_rids().duplicate()
+		else:
 			for child in player.get_children():
 				if child is CollisionObject3D:
 					exclude_rids.append(child.get_rid())
-			var origin = player.get_parent()
-			if origin:
-				for child in origin.get_children():
-					if child is CollisionObject3D:
-						exclude_rids.append(child.get_rid())
+		var origin = player.get_parent()
+		if origin:
+			for child in origin.get_children():
+				if child is CollisionObject3D:
+					exclude_rids.append(child.get_rid())
+				elif child.name in ["LeftHand", "RightHand"]:
+					for sub in child.get_children():
+						if sub is CollisionObject3D and sub.name.begins_with("KiCombatFist"):
+							exclude_rids.append(sub.get_rid())
 	projectile.set("ray_query_exclude", exclude_rids)
 	
 	var special_target_parent: Node = get_parent() if (get_parent() and get_parent() is Node3D) else (get_tree().current_scene if get_tree() else null)
