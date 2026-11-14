@@ -6,6 +6,7 @@ signal transformed(transformation: Resource)
 signal transformation_unlocked(form_name: String)
 signal power_unlocked(power_name: String)
 signal game_finished(winner_name: String)
+signal match_finished(winner: Node3D, loser: Node3D, tech_name: String)
 signal zenkai_activated(source: String) # "brecha", "comeback"
 
 @export var character_data: Resource
@@ -15,12 +16,17 @@ var current_ki: float = 50.0
 var current_np: float = 9000.0
 
 var current_transformation: Resource = null
+var current_transformation_index: int = -1
+var _active_np_multiplier: float = 1.0
+var _bp_popup_cooldown: float = 0.0
+var _pending_bp_popup_accum: float = 0.0
 var unlocked_powers: Array[String] = []
 var unlocked_transformations: Array[String] = []
 
 # Estado de Zenkai y Comebacks
 var is_in_zenkai_state: bool = false
 var is_comeback_zenkai: bool = false # Si es true, el Zenkai se activó por remontada y dura solo un ataque
+var is_match_over: bool = false
 var is_penalized: bool = false
 var penalty_timer: float = 0.0
 # Umbrales irreversibles de NP (Canon GDD: 25%, 50%, 75%, 100%)
@@ -132,6 +138,11 @@ func _ready() -> void:
 func setup_character() -> void:
 	current_ki = character_data.base_ki / 2.0
 	current_np = character_data.base_np
+	current_transformation = null
+	current_transformation_index = -1
+	_active_np_multiplier = 1.0
+	_bp_popup_cooldown = 0.0
+	_pending_bp_popup_accum = 0.0
 	_update_secured_threshold(character_data.max_np)
 	
 	is_player = get_parent() is XROrigin3D
@@ -147,6 +158,7 @@ func setup_character() -> void:
 		scale = Vector3.ONE * character_data.scale_factor
 	
 	# Desbloquear técnicas base
+	is_match_over = false
 	unlocked_powers.clear()
 	unlocked_transformations.clear()
 	for power in character_data.powers:
@@ -231,6 +243,8 @@ func setup_character() -> void:
 							ai_ctrl.set_script(ai_script)
 							add_child(ai_ctrl)
 					cached_ai_controller = ai_ctrl
+					if cached_ai_controller and is_instance_valid(cached_ai_controller):
+						cached_ai_controller.set("enabled", true)
 			_disable_frustum_culling_in_children(body_mesh_instance)
 			
 	# Instanciar el modelo de las manos en runtime (solo si ES el jugador, para ver nuestras manos en primera persona)
@@ -247,9 +261,14 @@ func swap_character_data(new_data: CharacterData) -> void:
 	if not new_data:
 		return
 	current_transformation = null
+	current_transformation_index = -1
+	_active_np_multiplier = 1.0
+	_bp_popup_cooldown = 0.0
+	_pending_bp_popup_accum = 0.0
 	secured_np_threshold_ratio = 0.0
 	is_in_zenkai_state = false
 	is_comeback_zenkai = false
+	is_match_over = false
 	is_charging_ki = false
 	is_charging_super = false
 	is_firing_beam = false
@@ -279,8 +298,10 @@ func swap_character_data(new_data: CharacterData) -> void:
 
 	character_data = new_data
 	setup_character()
-	if not is_player and cached_ai_controller and is_instance_valid(cached_ai_controller) and cached_ai_controller.has_method("reset_ai_for_character"):
-		cached_ai_controller.reset_ai_for_character()
+	if not is_player and cached_ai_controller and is_instance_valid(cached_ai_controller):
+		cached_ai_controller.set("enabled", true)
+		if cached_ai_controller.has_method("reset_ai_for_character"):
+			cached_ai_controller.reset_ai_for_character()
 
 func _physics_process(delta: float) -> void:
 	if Engine.is_editor_hint():
@@ -292,10 +313,14 @@ func _physics_process(delta: float) -> void:
 
 	# Control de simulación y recuperación Ragdoll
 	if is_ragdoll_active:
-		if ragdoll_recovery_timer > 0.0:
+		if not is_match_over and ragdoll_recovery_timer > 0.0:
 			ragdoll_recovery_timer -= delta
 			if ragdoll_recovery_timer <= 0.0:
 				stop_ragdoll()
+		return
+
+	if is_match_over:
+		velocity = velocity.lerp(Vector3.ZERO, clampf(delta * 4.0, 0.0, 1.0))
 		return
 
 	# 0. Temporizador de Follow-Up Bullet-Time en el aire
@@ -397,6 +422,9 @@ func _process(delta: float) -> void:
 	# Asegurar bloqueo rígido permanente del Transform del jugador al XROrigin3D
 	if is_player:
 		transform = Transform3D.IDENTITY
+
+	if _bp_popup_cooldown > 0.0:
+		_bp_popup_cooldown -= delta
 
 	# Manejar temporizador de penalización por fallo de remate
 	if is_penalized:
@@ -572,20 +600,27 @@ func take_hit(amount_np: float, hit_direction: Vector3 = Vector3.ZERO) -> void:
 		block_hit(amount_np, hit_direction)
 		return
 
+	var old_np: float = current_np
+	var active_max: float = get_active_max_np()
+
 	# 2. Si está cargando un Super Poder, aplicar sistema canónico de Poise / Super Armor
 	if is_charging_super and not is_staggered and amount_np >= 10.0:
-		var poise_damage = amount_np * 0.75
+		var poise_damage: float = amount_np * 0.75
 		current_charge_poise -= poise_damage
 
 		# Daño al BP mitigado al 50% mientras resiste la concentración
-		var mitigated_damage = amount_np * 0.50
-		var active_max: float = character_data.max_np
-		if current_transformation:
-			active_max *= current_transformation.np_multiplier
-		var floor_limit: float = max(active_max * secured_np_threshold_ratio, 100.0)
-		current_np = max(current_np - mitigated_damage, floor_limit)
+		var mitigated_damage: float = amount_np * 0.50
+		var floor_limit_poise: float = maxf(active_max * secured_np_threshold_ratio, 100.0)
+		current_np = maxf(current_np - mitigated_damage, floor_limit_poise)
 		_notify_stats()
 		_check_transformation_unlocks()
+		if old_np - current_np >= 80.0:
+			_spawn_bp_delta_popup(-(old_np - current_np), "")
+		var opp_p: Node3D = _get_opponent()
+		if opp_p and is_instance_valid(opp_p):
+			check_zenkai_conditions(opp_p.current_np)
+			if opp_p.has_method("check_zenkai_conditions"):
+				opp_p.check_zenkai_conditions(current_np)
 
 		if current_charge_poise <= 0.0:
 			interrupt_charging_super()
@@ -595,13 +630,17 @@ func take_hit(amount_np: float, hit_direction: Vector3 = Vector3.ZERO) -> void:
 			return
 
 	# 3. Recibir golpes disminuye nuestro BP/NP, pero nunca por debajo de los umbrales irreversibles asegurados (25%, 50%, 75%, 100%)
-	var active_max: float = character_data.max_np
-	if current_transformation:
-		active_max *= current_transformation.np_multiplier
-	var floor_limit: float = max(active_max * secured_np_threshold_ratio, 100.0)
-	current_np = max(current_np - amount_np, floor_limit)
+	var floor_limit: float = maxf(active_max * secured_np_threshold_ratio, 100.0)
+	current_np = maxf(current_np - amount_np, floor_limit)
 	_notify_stats()
 	_check_transformation_unlocks()
+	if old_np - current_np >= 80.0:
+		_spawn_bp_delta_popup(-(old_np - current_np), "")
+	var opp_hit: Node3D = _get_opponent()
+	if opp_hit and is_instance_valid(opp_hit):
+		check_zenkai_conditions(opp_hit.current_np)
+		if opp_hit.has_method("check_zenkai_conditions"):
+			opp_hit.check_zenkai_conditions(current_np)
 
 	# Solo aplicar retroceso físico a impactos reales (no a decaimiento pasivo por delta)
 	if amount_np >= 10.0:
@@ -634,12 +673,13 @@ func block_hit(amount_np: float, hit_direction: Vector3 = Vector3.ZERO) -> void:
 		current_ki -= ki_cost
 
 		# Daño al BP fuertemente mitigado (-85%)
-		var mitigated_damage = amount_np * 0.15
-		var active_max: float = character_data.max_np
-		if current_transformation:
-			active_max *= current_transformation.np_multiplier
-		var floor_limit: float = max(active_max * secured_np_threshold_ratio, 100.0)
-		current_np = max(current_np - mitigated_damage, floor_limit)
+		var old_np: float = current_np
+		var mitigated_damage: float = amount_np * 0.15
+		var active_max: float = get_active_max_np()
+		var floor_limit: float = maxf(active_max * secured_np_threshold_ratio, 100.0)
+		current_np = maxf(current_np - mitigated_damage, floor_limit)
+		if old_np - current_np >= 80.0:
+			_spawn_bp_delta_popup(-(old_np - current_np), "BLOQUEADO")
 		
 		# Recompensa mínima de BP (+20 BP), CERO Ki de ganancia (postura de contención pura)
 		increase_np(20.0)
@@ -668,9 +708,12 @@ func block_hit(amount_np: float, hit_direction: Vector3 = Vector3.ZERO) -> void:
 		guard_break_timer = 1.2
 
 		# Daño parcial penetra la guardia (55% de daño al BP)
-		var break_damage = amount_np * 0.55
-		current_np = max(current_np - break_damage, 100.0)
+		var old_np_gb: float = current_np
+		var break_damage: float = amount_np * 0.55
+		current_np = maxf(current_np - break_damage, 100.0)
 		_notify_stats()
+		if old_np_gb - current_np >= 80.0:
+			_spawn_bp_delta_popup(-(old_np_gb - current_np), "GUARDIA ROTA")
 
 		apply_knockback(dir, 10.0)
 
@@ -761,15 +804,113 @@ func consume_ki_or_life_force(ki_amount: float) -> Dictionary:
 		
 	return { "success": true, "sacrificed_np": np_cost, "is_life_sacrifice": true }
 
+func get_transformation_multiplier() -> float:
+	if current_transformation and current_transformation.get("np_multiplier") != null:
+		var m: float = float(current_transformation.np_multiplier)
+		if m > 0.0:
+			return m
+	if current_transformation_index >= 0 and character_data and current_transformation_index < character_data.transformations.size():
+		var trans: TransformationData = character_data.transformations[current_transformation_index]
+		if trans and trans.np_multiplier > 0.0:
+			return trans.np_multiplier
+	return 1.0
+
+
+func get_active_max_np() -> float:
+	var base_max: float = character_data.max_np if character_data else 20000.0
+	return base_max * get_transformation_multiplier()
+
+
+func _format_bp_number(n: int) -> String:
+	var neg: bool = n < 0
+	var s: String = str(abs(n))
+	var res: String = ""
+	var count: int = 0
+	for i in range(s.length() - 1, -1, -1):
+		res = s[i] + res
+		count += 1
+		if count == 3 and i > 0:
+			res = "," + res
+			count = 0
+	return ("-" + res) if neg else res
+
+
+func _spawn_bp_delta_popup(delta_bp: float, custom_tag: String = "") -> void:
+	if absf(delta_bp) < 80.0 and custom_tag == "":
+		return
+	if not is_inside_tree() or not get_tree() or not get_tree().current_scene:
+		return
+	var cam: Camera3D = get_viewport().get_camera_3d()
+	if not cam or not is_instance_valid(cam):
+		return
+
+	var lbl := Label3D.new()
+	lbl.name = "BPDeltaPopup_" + str(Time.get_ticks_msec())
+	lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	lbl.no_depth_test = true
+	lbl.pixel_size = 0.0020
+	lbl.font_size = 28
+	lbl.outline_size = 10
+	lbl.render_priority = 115
+
+	var int_delta: int = int(roundf(delta_bp))
+	var sign_str: String = "+" if int_delta >= 0 else "-"
+	var abs_str: String = _format_bp_number(abs(int_delta))
+	var prefix_who: String = "TU BP" if is_player else "RIVAL BP"
+	var tag_suffix: String = ("  %s" % custom_tag) if custom_tag != "" else ""
+	if int_delta == 0 and custom_tag != "":
+		lbl.text = "%s: %s" % [prefix_who, custom_tag]
+	else:
+		lbl.text = "%s: %s%s BP%s" % [prefix_who, sign_str, abs_str, tag_suffix]
+
+	var col: Color = Color(0.25, 1.0, 0.45) if int_delta >= 0 else Color(1.0, 0.30, 0.28)
+	if "TRANSFORMACI" in custom_tag:
+		col = Color(1.0, 0.88, 0.18)
+	lbl.modulate = col
+	lbl.outline_modulate = Color(0.0, 0.0, 0.0, 0.95)
+
+	get_tree().current_scene.add_child(lbl)
+	var cam_basis: Basis = cam.global_transform.basis
+	var cam_fwd: Vector3 = -cam_basis.z.normalized()
+	var cam_right: Vector3 = cam_basis.x.normalized()
+	var cam_up: Vector3 = cam_basis.y.normalized()
+	var side_off: float = -0.30 if is_player else 0.30
+	var jitter_y: float = randf_range(-0.04, 0.06)
+	var start_pos: Vector3 = cam.global_position + cam_fwd * 1.65 + cam_right * side_off + cam_up * (0.20 + jitter_y)
+	lbl.global_position = start_pos
+
+	var tw: Tween = lbl.create_tween().set_parallel(true)
+	tw.tween_property(lbl, "global_position", start_pos + cam_up * 0.22, 1.15).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(lbl, "modulate:a", 0.0, 1.15).set_delay(0.30)
+	tw.tween_property(lbl, "outline_modulate:a", 0.0, 1.15).set_delay(0.30)
+	tw.chain().tween_callback(lbl.queue_free)
+
+
 func increase_np(amount: float) -> void:
+	var scaled_amount: float = amount * get_transformation_multiplier()
 	if is_penalized:
-		amount *= 0.25 # Penalización reduce drásticamente la ganancia de NP
-	var active_max: float = character_data.max_np
-	if current_transformation:
-		active_max *= current_transformation.np_multiplier
-	current_np = min(current_np + amount, active_max)
+		scaled_amount *= 0.25 # Penalización reduce drásticamente la ganancia de NP
+	var active_max: float = get_active_max_np()
+	var old_np: float = current_np
+	current_np = minf(current_np + scaled_amount, active_max)
 	_update_secured_threshold(active_max)
 	_notify_stats()
+
+	var delta_gained: float = current_np - old_np
+	if delta_gained >= 80.0:
+		_spawn_bp_delta_popup(delta_gained, "")
+	elif delta_gained > 0.0:
+		_pending_bp_popup_accum += delta_gained
+		if _pending_bp_popup_accum >= 250.0 and _bp_popup_cooldown <= 0.0:
+			_spawn_bp_delta_popup(_pending_bp_popup_accum, "")
+			_pending_bp_popup_accum = 0.0
+			_bp_popup_cooldown = 0.45
+
+	var opp: Node3D = _get_opponent()
+	if opp and is_instance_valid(opp):
+		check_zenkai_conditions(opp.current_np)
+		if opp.has_method("check_zenkai_conditions"):
+			opp.check_zenkai_conditions(current_np)
 
 func _update_secured_threshold(active_max: float) -> void:
 	if active_max <= 0.0:
@@ -785,17 +926,17 @@ func _update_secured_threshold(active_max: float) -> void:
 		secured_np_threshold_ratio = max(secured_np_threshold_ratio, 0.25)
 
 func check_zenkai_conditions(opponent_np: float) -> void:
+	if is_match_over:
+		return
 	# Evitar recalcular si el Zenkai se activó por Comeback (ya que dura exactamente 1 ataque)
 	if is_comeback_zenkai:
 		return
 		
-	var active_max = character_data.max_np
-	if current_transformation:
-		active_max *= current_transformation.np_multiplier
+	var active_max: float = get_active_max_np()
 		
-	# Trigger 1: Brecha notable de NP a nuestro favor (ej. +40% de ventaja)
-	var ratio_diff = (current_np - opponent_np) / active_max
-	if ratio_diff >= 0.40:
+	# Trigger 1: Brecha notable de NP a nuestro favor (+35% o >=85% del máximo activo superando al rival por +15%)
+	var ratio_diff: float = (current_np - opponent_np) / maxf(active_max, 1.0)
+	if ratio_diff >= 0.35 or (current_np >= active_max * 0.85 and current_np > opponent_np * 1.15):
 		if not is_in_zenkai_state:
 			is_in_zenkai_state = true
 			emit_signal("zenkai_activated", "brecha")
@@ -902,23 +1043,37 @@ func transform_to(index: int) -> void:
 			_log_combat_event("[TRANSFORMACIÓN] %s bloqueada. ¡Aumenta tu furia en combate para despertarla!" % trans.form_name, "warning")
 			return
 
+		var prev_mult: float = _active_np_multiplier if _active_np_multiplier > 0.0 else 1.0
 		current_transformation = trans
-		
+		current_transformation_index = index
+		var new_mult: float = trans.np_multiplier if trans.np_multiplier > 0.0 else 1.0
+		_active_np_multiplier = new_mult
+		var old_np: float = current_np
+		var ratio_mult: float = new_mult / prev_mult
+		current_np = clampf(current_np * ratio_mult, 1000.0, get_active_max_np())
+
 		# Desbloquear técnicas de esta fase
 		for power in character_data.powers:
 			if power.unlock_requirement_transformation == trans.form_name:
 				if not unlocked_powers.has(power.power_name):
 					unlocked_powers.append(power.power_name)
 					emit_signal("power_unlocked", power.power_name)
-					
+
 		emit_signal("transformed", trans)
 		_notify_stats()
 		_update_aura_visuals()
+		_spawn_bp_delta_popup(current_np - old_np, "¡%s x%.1f!" % [trans.form_name.to_upper(), new_mult])
+
+		var opp: Node3D = _get_opponent()
+		if opp and is_instance_valid(opp):
+			check_zenkai_conditions(opp.current_np)
+			if opp.has_method("check_zenkai_conditions"):
+				opp.check_zenkai_conditions(current_np)
 
 		# Feedback cinemático y onda expansiva de transformación
 		_spawn_melee_shockwave(global_position + Vector3(0, 1.0, 0))
 		var char_name = character_data.character_name if character_data else name
-		_log_combat_event("[TRANSFORMACIÓN] ¡%s se ha transformado en %s! (NP x%.1f)" % [char_name, trans.form_name, trans.np_multiplier], "success")
+		_log_combat_event("[TRANSFORMACIÓN] ¡%s se ha transformado en %s! (NP x%.1f -> BP %s)" % [char_name, trans.form_name, new_mult, _format_bp_number(int(current_np))], "success")
 
 func revert_to_base() -> void:
 	if current_transformation == null:
@@ -928,10 +1083,23 @@ func revert_to_base() -> void:
 	if char_name == "Freezer" or char_name == "Frieza":
 		return
 	print("[CharacterInstance] %s: ¡Ki agotado! Destransformación forzada al estado base." % char_name)
+	var prev_mult: float = _active_np_multiplier if _active_np_multiplier > 0.0 else 1.0
 	current_transformation = null
+	current_transformation_index = -1
+	_active_np_multiplier = 1.0
+	var old_np: float = current_np
+	if prev_mult > 1.0:
+		current_np = clampf(current_np / prev_mult, 1000.0, get_active_max_np())
 	emit_signal("transformed", null)
 	_notify_stats()
 	_update_aura_visuals()
+	if absf(current_np - old_np) >= 50.0:
+		_spawn_bp_delta_popup(current_np - old_np, "FORMA BASE")
+	var opp: Node3D = _get_opponent()
+	if opp and is_instance_valid(opp):
+		check_zenkai_conditions(opp.current_np)
+		if opp.has_method("check_zenkai_conditions"):
+			opp.check_zenkai_conditions(current_np)
 
 func is_power_usable(power: Resource) -> bool:
 	if is_penalized:
@@ -949,12 +1117,91 @@ func is_power_usable(power: Resource) -> bool:
 	return true
 
 func execute_finisher_hit(power: Resource) -> void:
-	if power.is_finisher:
-		# ¡Partida finalizada! Activar ragdoll definitivo de K.O.
-		if not is_player:
-			start_ragdoll(Vector3.BACK * 35.0 + Vector3.DOWN * 15.0)
-			ragdoll_recovery_timer = -1.0 # Permanece derribado por K.O.
-		emit_signal("game_finished", character_data.character_name)
+	if power and power.is_finisher:
+		var opp: Node3D = _get_opponent()
+		var p_name: String = power.power_name if "power_name" in power else "Finisher"
+		trigger_zenkai_match_finish(self, opp, p_name)
+
+
+func trigger_zenkai_match_finish(winner: Node3D, loser: Node3D, tech_name: String) -> void:
+	if is_match_over:
+		return
+	Engine.time_scale = 1.0
+	is_match_over = true
+	is_charging_super = false
+	is_firing_beam = false
+	if cached_ai_controller and is_instance_valid(cached_ai_controller):
+		cached_ai_controller.set("enabled", false)
+
+	if loser and is_instance_valid(loser):
+		loser.set("is_match_over", true)
+		loser.set("is_charging_super", false)
+		loser.set("is_firing_beam", false)
+		loser.set("current_ki", 0.0)
+		if loser.has_method("stop_charging_super"):
+			loser.stop_charging_super()
+		var loser_ai: Node = loser.get("cached_ai_controller")
+		if loser_ai and is_instance_valid(loser_ai):
+			loser_ai.set("enabled", false)
+		var knock_dir: Vector3 = (loser.global_position - global_position).normalized()
+		if knock_dir.length_squared() < 0.01:
+			knock_dir = Vector3.BACK
+		if loser.has_method("start_ragdoll"):
+			loser.start_ragdoll(knock_dir * 16.0)
+		loser.set("ragdoll_recovery_timer", -1.0)
+		if loser.has_method("_notify_stats"):
+			loser._notify_stats()
+
+	var w_name: String = character_data.character_name if character_data else name
+	if winner and is_instance_valid(winner) and winner.get("character_data"):
+		var w_data: Resource = winner.get("character_data")
+		if w_data and "character_name" in w_data:
+			w_name = w_data.character_name
+	emit_signal("game_finished", w_name)
+	emit_signal("match_finished", winner, loser, tech_name)
+	_spawn_zenkai_finish_banner(winner, loser, tech_name)
+
+
+func _spawn_zenkai_finish_banner(winner: Node3D, _loser: Node3D, tech_name: String) -> void:
+	var tree: SceneTree = get_tree()
+	if not tree:
+		return
+	var cam: Camera3D = get_viewport().get_camera_3d() if get_viewport() else null
+	if not cam or not is_instance_valid(cam):
+		return
+
+	var w_name: String = character_data.character_name if character_data else name
+	if winner and is_instance_valid(winner) and winner.get("character_data"):
+		var w_data: Resource = winner.get("character_data")
+		if w_data and "character_name" in w_data:
+			w_name = w_data.character_name
+
+	var banner := Label3D.new()
+	banner.name = "ZenkaiMatchFinishBanner"
+	banner.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	banner.no_depth_test = true
+	banner.render_priority = 120
+	banner.pixel_size = 0.0022
+	banner.font_size = 34
+	banner.outline_size = 10
+	banner.outline_color = Color(0.0, 0.0, 0.0, 0.96)
+	var winner_is_player: bool = (winner == self and is_player) or (winner != null and is_instance_valid(winner) and bool(winner.get("is_player")))
+	banner.modulate = Color(1.0, 0.88, 0.15) if winner_is_player else Color(1.0, 0.22, 0.25)
+	banner.text = "🏆 ¡K.O. ZENKAI DEFINITIVO! 🏆\nGANADOR: %s\nTécnica Final: %s\n[Usa el Menú (☰) para Reiniciar Combate]" % [w_name.to_upper(), tech_name.to_upper()]
+
+	var parent_node: Node = tree.current_scene if tree.current_scene else self
+	parent_node.add_child(banner)
+
+	var fwd: Vector3 = -cam.global_transform.basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized() if fwd.length_squared() > 0.001 else Vector3.FORWARD
+	banner.global_position = cam.global_position + fwd * 1.70 + Vector3(0.0, 0.08, 0.0)
+
+	var finish_timer: SceneTreeTimer = tree.create_timer(8.0)
+	finish_timer.timeout.connect(func() -> void:
+		if is_instance_valid(banner):
+			banner.queue_free()
+	)
 
 func _update_aura_visuals(delta: float = 0.0) -> void:
 	# El Aura de Ki SIEMPRE está activa, reflejando el BP y el Ki restante (Punto 12)
@@ -2079,15 +2326,31 @@ func _execute_melee_impact(opponent: Node3D) -> void:
 
 
 ## Calcula la duración dinámica del Bullet-Time canónico (micro-turno de acción rápida)
-func calculate_bullet_time_duration(attacker: Node3D, defender: Node3D) -> float:
-	if not attacker or not defender:
-		return 2.2
-	var bp_atk: float = attacker.get("current_np") if attacker.get("current_np") != null else 10000.0
-	var bp_def: float = maxf(defender.get("current_np") if defender.get("current_np") != null else 10000.0, 1000.0)
-	var bp_diff: float = bp_atk - bp_def
-	var ratio: float = bp_diff / bp_def
-	# Micro-turno dinámico: duración base 2.2s (rango 1.6s - 2.8s según diferencia de BP)
-	return clampf(2.2 + ratio * 0.6, 1.6, 2.8)
+func calculate_bullet_time_duration(p_attacker: Node3D, p_defender: Node3D) -> float:
+	var n_hits: int = calculate_melee_attack_count(p_attacker, p_defender)
+	return float(n_hits) * 1.35 + 0.80
+
+
+## Calcula la cantidad estratégica de golpes permitidos según Transformación y Ratio de BP (1..5 golpes)
+func calculate_melee_attack_count(p_attacker: Node3D, p_defender: Node3D) -> int:
+	var count: int = 2
+	if p_attacker and is_instance_valid(p_attacker):
+		var t_idx_val: Variant = p_attacker.get("current_transformation_index")
+		var t_idx: int = int(t_idx_val) if t_idx_val != null else -1
+		if t_idx == 0:
+			count += 1
+		elif t_idx == 1:
+			count += 2
+		elif t_idx >= 2:
+			count += 3
+	var atk_bp: float = float(p_attacker.get("current_np")) if (p_attacker and is_instance_valid(p_attacker) and p_attacker.get("current_np") != null) else 9000.0
+	var def_bp: float = float(p_defender.get("current_np")) if (p_defender and is_instance_valid(p_defender) and p_defender.get("current_np") != null) else 9000.0
+	var ratio: float = atk_bp / maxf(def_bp, 100.0)
+	if ratio >= 1.35:
+		count += 1
+	elif ratio < 0.75:
+		count -= 1
+	return clampi(count, 1, 5)
 
 
 ## Activa la secuencia cinemática y Bullet-Time de Super Ataque de Ki
@@ -2127,8 +2390,9 @@ func _start_melee_bullet_time(opponent: Node3D) -> void:
 	is_in_bullet_time = true
 	if opponent.has_method("set"):
 		opponent.set("is_in_bullet_time", true)
-	var duration: float = calculate_bullet_time_duration(self, opponent)
-	print("[CharacterInstance] ¡Iniciando Melee Bullet-Time! Duración calculada: %.2fs" % duration)
+	var allowed_hits: int = calculate_melee_attack_count(self, opponent)
+	var duration: float = float(allowed_hits) * 1.35 + 0.80
+	print("[CharacterInstance] ¡Iniciando Melee Secuencial! Golpes permitidos: %d | Duración: %.2fs" % [allowed_hits, duration])
 
 	# 0. Alinear milimétricamente a distancia cuerpo a cuerpo
 	if is_player:
@@ -2159,10 +2423,10 @@ func _start_melee_bullet_time(opponent: Node3D) -> void:
 		global_position.z = player_h.z + to_ai_dir.z * 0.65
 		_clamp_to_arena(self)
 
-	# Instanciar la cúpula holográfica anime con las cajas de impacto
+	# Instanciar la cúpula holográfica anime con las cajas de impacto secuenciales
 	active_target_dome = MeleeTargetDomeClass.new()
 	get_tree().current_scene.add_child(active_target_dome)
-	active_target_dome.setup(self, opponent, duration)
+	active_target_dome.setup(self, opponent, duration, allowed_hits)
 	active_target_dome.bullet_time_completed.connect(_on_bullet_time_completed.bind(opponent))
 	active_target_dome.finisher_triggered.connect(_on_bullet_time_finisher.bind(opponent))
 	active_target_dome.perfect_parry_triggered.connect(_on_perfect_parry_turnover)
@@ -2175,7 +2439,7 @@ func _start_melee_bullet_time(opponent: Node3D) -> void:
 			if ctrl and ctrl.has_method("trigger_haptic_pulse"):
 				ctrl.trigger_haptic_pulse("haptic", 180.0, 0.7, 0.15, 0.0)
 
-	_log_combat_event("⚡ ¡COMBATE MELEE RÍTMICO! Descarga tus golpes (%.1fs)" % duration, "success")
+	_log_combat_event("⚡ ¡COMBATE MELEE SECUENCIAL! (%d golpes disponibles en %.1fs)" % [allowed_hits, duration], "success")
 	var gss = _get_gesture_tree()
 	if gss and gss.has_signal("phase_changed"):
 		gss.emit_signal("phase_changed", "¡FASE DE ATAQUE MELEE!")

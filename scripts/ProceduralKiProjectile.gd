@@ -322,6 +322,7 @@ func _trigger_explosion(pos: Vector3, collider: Node) -> void:
 					radial_dir = hit_dir
 
 				# Aplicar daño con soporte automático de bloqueo (Guardia)
+				var was_char_blocking: bool = bool(char_node.get("is_blocking")) and not bool(char_node.get("is_guard_broken"))
 				char_node.take_hit(effective_damage, radial_dir)
 
 				# El defensor gana Ki de contraataque por absorber la explosión
@@ -340,9 +341,13 @@ func _trigger_explosion(pos: Vector3, collider: Node) -> void:
 
 					if power and power.is_finisher and (was_launched_in_zenkai or caster.get("is_in_zenkai_state")):
 						caster.execute_finisher_hit(power)
+					elif tier >= 2 and not was_char_blocking and (was_launched_in_zenkai or bool(caster.get("is_in_zenkai_state"))) and caster.has_method("trigger_zenkai_match_finish"):
+						var p_title: String = power.power_name if (power and "power_name" in power) else ("Super Esfera Ki" if tier >= 3 else "Ki Blast Cargado")
+						caster.trigger_zenkai_match_finish(caster, char_node, p_title)
 
 	# Si el objetivo directo no estaba en la consulta de área (fallback directo)
 	if direct_target and not damaged_characters.has(direct_target):
+		var was_direct_blocking: bool = bool(direct_target.get("is_blocking")) and not bool(direct_target.get("is_guard_broken"))
 		direct_target.take_hit(final_damage, hit_dir)
 		var caster = get_meta("attacker") if has_meta("attacker") else shooter_node
 		if not caster and get_tree() and get_tree().current_scene:
@@ -353,6 +358,9 @@ func _trigger_explosion(pos: Vector3, collider: Node) -> void:
 			direct_target.check_zenkai_conditions(caster.current_np)
 			if power and power.is_finisher and (was_launched_in_zenkai or caster.get("is_in_zenkai_state")):
 				caster.execute_finisher_hit(power)
+			elif tier >= 2 and not was_direct_blocking and (was_launched_in_zenkai or bool(caster.get("is_in_zenkai_state"))) and caster.has_method("trigger_zenkai_match_finish"):
+				var p_title_direct: String = power.power_name if (power and "power_name" in power) else ("Super Esfera Ki" if tier >= 3 else "Ki Blast Cargado")
+				caster.trigger_zenkai_match_finish(caster, direct_target, p_title_direct)
 
 	# 2. Disipar proyectiles menores dentro de la onda expansiva
 	for proj in get_tree().get_nodes_in_group("ki_projectiles"):

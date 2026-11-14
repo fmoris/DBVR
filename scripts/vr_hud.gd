@@ -2,7 +2,7 @@
 extends Node3D
 
 # --- Parámetros de Posicionamiento Fijo (Simulador/Fallback) ---
-@export var distance_from_camera: float = 1.15
+@export var distance_from_camera: float = 1.55
 @export var horizontal_offset: float = 0.0
 @export var vertical_offset: float = -0.34
 @export var tilt_angle_degrees: float = 14.0
@@ -65,8 +65,11 @@ var _last_ki_int: int = -1
 var _last_max_ki_int: int = -1
 var _last_np_int: int = -1
 var _last_np_pct_tier: int = -1
+var _last_bp_mult: float = -1.0
 var _last_recharging: bool = false
 var _last_enemy_np_int: int = -1
+var _last_player_np_comp: int = -1
+var _last_enemy_mult: float = -1.0
 var _last_guard_state: int = -1
 var _last_zenkai_state: bool = false
 
@@ -251,7 +254,7 @@ func _build_dragon_ball_hud() -> void:
 	header_hbox.add_child(spacer)
 
 	rival_scouter_label = Label.new()
-	rival_scouter_label.text = "[ 🎯 RIVAL: GOKU // BP 2,800,000,000 ]"
+	rival_scouter_label.text = "[ 🎯 GOKU: 9,000 BP | DIFF +1,000 ]"
 	var r_settings = LabelSettings.new()
 	r_settings.font_size = 28
 	r_settings.font_color = Color(0.2, 1.0, 0.4) # Verde Scouter
@@ -294,7 +297,7 @@ func _build_dragon_ball_hud() -> void:
 		threshold_labels.append(t_lbl)
 
 	bp_value_label = Label.new()
-	bp_value_label.text = "BP: 2,800,000,000"
+	bp_value_label.text = "BP: 10,000"
 	var bp_v_settings = LabelSettings.new()
 	bp_v_settings.font_size = 72
 	bp_v_settings.font_color = Color(0.15, 1.0, 0.45) # Verde Scouter fluorescente
@@ -530,13 +533,20 @@ func _process(delta: float) -> void:
 
 
 func _update_dbz_hud_elements(delta: float) -> void:
-	# 1. Actualizar datos del Rival en el Scouter (solo si cambia el BP entero)
+	# 1. Actualizar datos comparativos del Rival en el Scouter (dirty check)
 	if enemy_instance and is_instance_valid(enemy_instance) and rival_scouter_label:
 		var e_np: int = int(enemy_instance.current_np)
-		if e_np != _last_enemy_np_int:
+		var p_np_comp: int = int(player_instance.current_np) if (player_instance and is_instance_valid(player_instance)) else e_np
+		var e_mult: float = enemy_instance.get_transformation_multiplier() if enemy_instance.has_method("get_transformation_multiplier") else 1.0
+		if e_np != _last_enemy_np_int or p_np_comp != _last_player_np_comp or absf(e_mult - _last_enemy_mult) > 0.05:
 			_last_enemy_np_int = e_np
+			_last_player_np_comp = p_np_comp
+			_last_enemy_mult = e_mult
 			var e_name: String = enemy_instance.character_data.character_name.to_upper() if enemy_instance.character_data else "RIVAL"
-			rival_scouter_label.text = "[ 🎯 RIVAL: %s // BP %s ]" % [e_name, format_number_with_commas(e_np)]
+			var diff_bp: int = p_np_comp - e_np
+			var sign_d: String = "+" if diff_bp >= 0 else ""
+			var mult_tag: String = (" x%.1f" % e_mult) if e_mult > 1.01 else ""
+			rival_scouter_label.text = "[ 🎯 %s%s: %s BP | %s%s ]" % [e_name, mult_tag, format_number_with_commas(e_np), sign_d, format_number_with_commas(diff_bp)]
 			_hud_dirty = true
 
 	# 2. Actualizar estado de guardia y bloqueo (dirty check)
@@ -685,15 +695,22 @@ func update_ki(current: float, max_val: float) -> void:
 
 func update_power_level(current: float, max_val: float) -> void:
 	var cur_int: int = int(current)
+	var mult: float = 1.0
+	if player_instance and is_instance_valid(player_instance) and player_instance.has_method("get_transformation_multiplier"):
+		mult = player_instance.get_transformation_multiplier()
 	var percent: float = (current / max_val) * 100.0 if max_val > 0 else 0.0
 	var tier_mask: int = (1 if percent >= 25.0 else 0) | (2 if percent >= 50.0 else 0) | (4 if percent >= 75.0 else 0) | (8 if percent >= 100.0 else 0)
-	if cur_int == _last_np_int and tier_mask == _last_np_pct_tier:
+	if cur_int == _last_np_int and tier_mask == _last_np_pct_tier and absf(mult - _last_bp_mult) <= 0.05:
 		return
 	_last_np_int = cur_int
 	_last_np_pct_tier = tier_mask
+	_last_bp_mult = mult
 	_hud_dirty = true
 	if bp_value_label:
-		bp_value_label.text = "BP: %s" % format_number_with_commas(cur_int)
+		if mult > 1.01:
+			bp_value_label.text = "BP: %s (x%.1f)" % [format_number_with_commas(cur_int), mult]
+		else:
+			bp_value_label.text = "BP: %s" % format_number_with_commas(cur_int)
 
 	# Actualizar hitos de umbrales irreversibles (25%, 50%, 75%, 100%)
 	var thresh_pcts = [25.0, 50.0, 75.0, 100.0]
@@ -789,7 +806,7 @@ func _setup_debug_tooltip() -> void:
 	tooltip_mesh = MeshInstance3D.new()
 	tooltip_mesh.name = "VRDebugTooltipMesh"
 	var quad = QuadMesh.new()
-	quad.size = Vector2(0.9, 0.45)
+	quad.size = Vector2(0.95, 0.48)
 	tooltip_mesh.mesh = quad
 	
 	var mat = StandardMaterial3D.new()
@@ -801,7 +818,7 @@ func _setup_debug_tooltip() -> void:
 	tooltip_mesh.material_override = mat
 	
 	camera.add_child(tooltip_mesh)
-	tooltip_mesh.position = Vector3(0.0, 0.38, -1.15)
+	tooltip_mesh.position = Vector3(0.0, 0.42, -1.65)
 	tooltip_mesh.rotation = Vector3.ZERO
 	tooltip_mesh.visible = false # Oculto por defecto para no saturar la vista
 	
@@ -909,7 +926,7 @@ func _setup_moves_guide_hud() -> void:
 	moves_guide_mesh = MeshInstance3D.new()
 	moves_guide_mesh.name = "VRMovesGuideMesh"
 	var quad = QuadMesh.new()
-	quad.size = Vector2(0.52, 0.56)
+	quad.size = Vector2(0.70, 0.62)
 	moves_guide_mesh.mesh = quad
 
 	var mat = StandardMaterial3D.new()
@@ -921,7 +938,7 @@ func _setup_moves_guide_hud() -> void:
 	moves_guide_mesh.material_override = mat
 
 	camera.add_child(moves_guide_mesh)
-	moves_guide_mesh.position = Vector3(0.50, -0.15, -1.05)
+	moves_guide_mesh.position = Vector3(0.62, -0.15, -1.55)
 	moves_guide_mesh.rotation = Vector3(deg_to_rad(10), deg_to_rad(-14), 0)
 	moves_guide_mesh.visible = false # Oculto en combate para vista limpia e inmersiva
 
@@ -1031,7 +1048,10 @@ func refresh_for_character_swap() -> void:
 	_last_max_ki_int = -1
 	_last_np_int = -1
 	_last_np_pct_tier = -1
+	_last_bp_mult = -1.0
 	_last_enemy_np_int = -1
+	_last_player_np_comp = -1
+	_last_enemy_mult = -1.0
 	_last_guard_state = -1
 	_hud_dirty = true
 	if player_instance and is_instance_valid(player_instance):

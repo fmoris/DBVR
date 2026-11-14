@@ -164,7 +164,7 @@ func _build_scouter_menu_ui() -> void:
 	menu_mesh = MeshInstance3D.new()
 	menu_mesh.name = "MenuQuadMesh"
 	var quad = QuadMesh.new()
-	quad.size = Vector2(0.88, 0.66)
+	quad.size = Vector2(1.05, 0.78)
 	menu_mesh.mesh = quad
 
 	var mat = StandardMaterial3D.new()
@@ -232,7 +232,7 @@ func _reposition_in_front_of_player() -> void:
 	if not cam or not is_instance_valid(cam) or not cam.is_inside_tree():
 		return
 
-	# Proyectar flotando a 1.25m exactamente frente a la mirada del jugador
+	# Proyectar flotando a 1.65m exactamente frente a la mirada del jugador
 	var cam_pos = cam.global_position
 	var fwd = -cam.global_transform.basis.z.normalized()
 	fwd.y = 0.0 # Mantener nivelado con el horizonte para evitar cabeceo incómodo
@@ -240,7 +240,7 @@ func _reposition_in_front_of_player() -> void:
 		fwd = Vector3.FORWARD
 	fwd = fwd.normalized()
 
-	global_position = cam_pos + fwd * 1.25 + Vector3(0.0, -0.05, 0.0)
+	global_position = cam_pos + fwd * 1.65 + Vector3(0.0, -0.05, 0.0)
 	if global_position.distance_squared_to(cam_pos) > 0.01:
 		look_at(cam_pos, Vector3.UP)
 		rotate_y(PI) # Alinear la normal frontal del Quad hacia los ojos

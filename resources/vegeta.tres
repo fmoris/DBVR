@@ -43,28 +43,28 @@ is_finisher = true
 [sub_resource type="Resource" id="Resource_irx55"]
 script = ExtResource("3_f203u")
 form_name = "SSJ"
-np_multiplier = 5.0
+np_multiplier = 2.5
 aura_color = Color(1, 0.85, 0.1, 0.85)
 
 [sub_resource type="Resource" id="Resource_uhbuo"]
 script = ExtResource("3_f203u")
 form_name = "Super Vegeta"
-np_multiplier = 8.0
+np_multiplier = 3.5
 ki_drain_per_sec = 2.0
 aura_color = Color(1, 0.9, 0, 1)
 
 [sub_resource type="Resource" id="Resource_7skgi"]
 script = ExtResource("3_f203u")
 form_name = "SSB"
-np_multiplier = 25.0
+np_multiplier = 5.0
 ki_drain_per_sec = 5.0
 aura_color = Color(0.1, 0.7, 1, 0.9)
 
 [resource]
 script = ExtResource("2_w2v2a")
 character_name = "Vegeta"
-base_np = 2800000000.0
-max_np = 14000000000.0
+base_np = 10000.0
+max_np = 20000.0
 scale_factor = 0.94
 model_asset_scale = 8.291948
 body_model_path = "res://assets/models/vegeta_optimized.glb"

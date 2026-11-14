@@ -41,6 +41,8 @@ var _alert_tween: Tween = null
 var _alert_color: Color = Color(1.0, 0.85, 0.15)
 var _prev_player_zenkai: bool = false
 var _prev_opp_charging_super: bool = false
+var _prev_opp_zenkai_attack: bool = false
+var _zenkai_reminder_timer: float = 0.0
 var _connected_player_id: int = 0
 var _connected_opp_id: int = 0
 
@@ -136,6 +138,7 @@ func _build_ki_pointer() -> void:
 	pointer_label = Label3D.new()
 	pointer_label.text = "⚡ KI: 15.0m ⚡"
 	pointer_label.font_size = 20
+	pointer_label.pixel_size = 0.0016
 	pointer_label.outline_size = 6
 	pointer_label.modulate = Color(1.0, 0.9, 0.2)
 	pointer_label.outline_modulate = Color.BLACK
@@ -197,6 +200,32 @@ func _process(delta: float) -> void:
 	_poll_combat_alerts(delta)
 
 
+func _fmt_bp(n: int) -> String:
+	var s: String = str(abs(n))
+	var res: String = ""
+	var count: int = 0
+	for i in range(s.length() - 1, -1, -1):
+		res = s[i] + res
+		count += 1
+		if count == 3 and i > 0:
+			res = "," + res
+			count = 0
+	return ("-" + res) if n < 0 else res
+
+
+func _get_comparative_bp_line() -> String:
+	var p_bp: int = int(player_instance.current_np) if (player_instance and is_instance_valid(player_instance) and player_instance.get("current_np") != null) else 0
+	var e_bp: int = int(opponent_instance.current_np) if (opponent_instance and is_instance_valid(opponent_instance) and opponent_instance.get("current_np") != null) else 0
+	var p_mult: float = player_instance.get_transformation_multiplier() if (player_instance and is_instance_valid(player_instance) and player_instance.has_method("get_transformation_multiplier")) else 1.0
+	var e_mult: float = opponent_instance.get_transformation_multiplier() if (opponent_instance and is_instance_valid(opponent_instance) and opponent_instance.has_method("get_transformation_multiplier")) else 1.0
+	var p_tag: String = (" (x%.1f)" % p_mult) if p_mult > 1.01 else ""
+	var e_tag: String = (" (x%.1f)" % e_mult) if e_mult > 1.01 else ""
+	var diff: int = p_bp - e_bp
+	var status_tag: String = "VENTAJA" if diff >= 0 else "DESVENTAJA"
+	var sign_d: String = "+" if diff >= 0 else ""
+	return "TU BP: %s%s vs RIVAL: %s%s [%s %s%s]" % [_fmt_bp(p_bp), p_tag, _fmt_bp(e_bp), e_tag, status_tag, sign_d, _fmt_bp(diff)]
+
+
 func _show_reticle_charging(pos: Vector3, progress: float) -> void:
 	lockon_reticle_root.visible = true
 	lockon_reticle_root.global_position = pos
@@ -209,7 +238,7 @@ func _show_reticle_charging(pos: Vector3, progress: float) -> void:
 		mat.albedo_color = Color(0.2, 0.85, 1.0, 0.5 + progress * 0.45)
 
 	var pct_str = int(progress * 100.0)
-	reticle_label.text = "[ FIJANDO KI: %d%% ]" % pct_str
+	reticle_label.text = "[ FIJANDO KI: %d%% ]\n%s" % [pct_str, _get_comparative_bp_line()]
 	reticle_label.modulate = Color(0.2, 0.85, 1.0)
 
 
@@ -222,7 +251,7 @@ func _show_reticle_locked(pos: Vector3) -> void:
 	if mat:
 		mat.albedo_color = Color(1.0, 0.88, 0.15, 0.95)
 
-	reticle_label.text = "🎯 [ OBJETIVO FIJADO ] 🎯"
+	reticle_label.text = "🎯 [ OBJETIVO FIJADO ] 🎯\n%s" % _get_comparative_bp_line()
 	reticle_label.modulate = Color(1.0, 0.95, 0.2)
 
 
@@ -279,16 +308,16 @@ func _update_peripheral_ki_pointer(cam_pos: Vector3, opp_pos: Vector3, dist_m: f
 		screen_dir = -screen_dir
 
 	# Posicionar el puntero en la periferia de visión (0.42m del centro a 0.85m de profundidad)
-	var pointer_offset_local = Vector3(screen_dir.x * 0.40, screen_dir.y * 0.28, -0.80)
+	var pointer_offset_local = Vector3(screen_dir.x * 0.68, screen_dir.y * 0.46, -1.45)
 	ki_pointer_root.global_position = camera.global_position + (cam_basis * pointer_offset_local)
 
 	# Orientar la flecha para que apunte en la dirección screen_dir
 	var arrow_angle = atan2(screen_dir.y, screen_dir.x)
 	pointer_arrow_mesh.rotation = Vector3(0.0, 0.0, arrow_angle - PI * 0.5)
 
-	# Actualizar texto con la distancia de Ki
+	# Actualizar texto con la distancia de Ki y comparativa de BP
 	var opp_name = opponent_instance.get("character_data").character_name if opponent_instance.get("character_data") else "RIVAL"
-	pointer_label.text = "⚡ KI DE %s: %.1fm ⚡" % [opp_name.to_upper(), dist_m]
+	pointer_label.text = "⚡ KI DE %s: %.1fm ⚡\n%s" % [opp_name.to_upper(), dist_m, _get_comparative_bp_line()]
 
 
 func _ensure_references() -> void:
@@ -310,7 +339,7 @@ func _build_scouter_alert_banner() -> void:
 	var bg_mesh := MeshInstance3D.new()
 	bg_mesh.name = "AlertBackdrop"
 	var quad := QuadMesh.new()
-	quad.size = Vector2(0.56, 0.11)
+	quad.size = Vector2(0.82, 0.16)
 	bg_mesh.mesh = quad
 	alert_bg_mat = StandardMaterial3D.new()
 	alert_bg_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -326,26 +355,26 @@ func _build_scouter_alert_banner() -> void:
 	alert_title_label.name = "AlertTitleLabel"
 	alert_title_label.text = "⚡ ALERTA SCOUTER"
 	alert_title_label.font_size = 34
-	alert_title_label.pixel_size = 0.0009
+	alert_title_label.pixel_size = 0.0015
 	alert_title_label.outline_size = 8
 	alert_title_label.modulate = _alert_color
 	alert_title_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.95)
 	alert_title_label.no_depth_test = true
 	alert_title_label.render_priority = 96
-	alert_title_label.position = Vector3(0.0, 0.016, 0.0)
+	alert_title_label.position = Vector3(0.0, 0.028, 0.0)
 	alert_banner_root.add_child(alert_title_label)
 
 	alert_sub_label = Label3D.new()
 	alert_sub_label.name = "AlertSubLabel"
 	alert_sub_label.text = ""
 	alert_sub_label.font_size = 20
-	alert_sub_label.pixel_size = 0.0008
+	alert_sub_label.pixel_size = 0.0012
 	alert_sub_label.outline_size = 5
 	alert_sub_label.modulate = Color(0.88, 0.95, 1.0, 1.0)
 	alert_sub_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.9)
 	alert_sub_label.no_depth_test = true
 	alert_sub_label.render_priority = 96
-	alert_sub_label.position = Vector3(0.0, -0.022, 0.0)
+	alert_sub_label.position = Vector3(0.0, -0.036, 0.0)
 	alert_banner_root.add_child(alert_sub_label)
 
 
@@ -378,19 +407,34 @@ func _on_enemy_transformation_alert(form_name: String) -> void:
 func _poll_combat_alerts(delta: float) -> void:
 	if player_instance and is_instance_valid(player_instance):
 		var z_now: bool = (player_instance.get("is_in_zenkai_state") == true)
-		if z_now and not _prev_player_zenkai:
-			show_scouter_alert("🔥 ¡ESTADO ZENKAI ACTIVO!", "¡Finisher disponible — Lanza tu Super o Melee!", Color(1.0, 0.82, 0.1), 2.6)
+		var match_over: bool = (player_instance.get("is_match_over") == true)
+		if z_now and not _prev_player_zenkai and not match_over:
+			show_scouter_alert("🔥 ¡ZENKAI LISTO PARA GANAR! 🔥", "¡Acierta un Super Poder con éxito para lograr el K.O. definitivo!", Color(1.0, 0.85, 0.12), 3.4)
+			_zenkai_reminder_timer = 0.0
+		elif z_now and not match_over:
+			_zenkai_reminder_timer += delta
+			if _zenkai_reminder_timer >= 8.0:
+				_zenkai_reminder_timer = 0.0
+				show_scouter_alert("🔥 ¡ZENKAI LISTO PARA GANAR! 🔥", "¡Acierta un Super Poder con éxito para lograr el K.O. definitivo!", Color(1.0, 0.85, 0.12), 2.6)
+		else:
+			_zenkai_reminder_timer = 0.0
 		_prev_player_zenkai = z_now
 
 	if opponent_instance and is_instance_valid(opponent_instance):
 		var opp_charging: bool = (opponent_instance.get("is_charging_super") == true)
-		if opp_charging and not _prev_opp_charging_super:
+		var opp_firing: bool = (opponent_instance.get("is_firing_beam") == true)
+		var opp_zenkai: bool = (opponent_instance.get("is_in_zenkai_state") == true)
+		var opp_super_active: bool = opp_charging or opp_firing
+		if opp_zenkai and opp_super_active and not _prev_opp_zenkai_attack:
+			show_scouter_alert("💀 ¡PELIGRO: ATAQUE ZENKAI DE K.O. ENTRANTE! 💀", "¡BLOQUEA, DESVÍA, ESQUIVA O CHOCA EL PODER!", Color(1.0, 0.15, 0.18), 3.2)
+		elif opp_charging and not _prev_opp_charging_super:
 			show_scouter_alert("🚨 ¡SUPER ENEMIGO INMINENTE!", "Prepárate para Bloqueo, Choque o Esquive", Color(1.0, 0.22, 0.25), 2.2)
 		_prev_opp_charging_super = opp_charging
+		_prev_opp_zenkai_attack = (opp_zenkai and opp_super_active)
 
 	if alert_banner_root and alert_banner_root.visible and camera and is_instance_valid(camera):
 		var cam_basis: Basis = camera.global_transform.basis
-		alert_banner_root.global_position = camera.global_position + (cam_basis * Vector3(0.0, 0.24, -0.84))
+		alert_banner_root.global_position = camera.global_position + (cam_basis * Vector3(0.0, 0.25, -1.60))
 		alert_banner_root.global_transform.basis = cam_basis
 		if _alert_timer > 0.0:
 			_alert_timer -= delta

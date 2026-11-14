@@ -45,6 +45,9 @@ var super_power_type: String = "" # "kamehameha", "galick_ho", "final_flash", "g
 var super_charge_timer: float = 0.0
 var super_locked_haptic: bool = false
 const SUPER_MIN_CHARGE_TIME: float = 1.0
+var candidate_super_tech: String = ""
+var candidate_hold_timer: float = 0.0
+const SUPER_POSE_HOLD_TIME: float = 0.18
 
 # 3b. Bio-Hápticos de Ki y Transformación (Heartbeat continuo no invasivo)
 var bio_haptic_timer: float = 0.0
@@ -55,6 +58,8 @@ var prev_right_pos: Vector3 = Vector3.ZERO
 var left_velocity: Vector3 = Vector3.ZERO
 var right_velocity: Vector3 = Vector3.ZERO
 var melee_cooldown: float = 0.0
+var left_punch_cocked: bool = false
+var right_punch_cocked: bool = false
 var super_cooldown: float = 0.0
 var super_fatigue_timer: float = 0.0
 var must_release_super_buttons: bool = false
@@ -236,6 +241,8 @@ func _process(delta: float) -> void:
 	if was_in_melee_minigame:
 		was_in_melee_minigame = false
 		melee_cooldown = 0.5
+		left_punch_cocked = false
+		right_punch_cocked = false
 		must_release_super_buttons = true
 		_reset_super_state()
 		left_charge_time = 0.0
@@ -528,10 +535,41 @@ func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta:
 
 
 # --- 3. SUPER PODERES (Galick Ho / Final Flash / Big Bang Attack / Kamehameha / Genkidama) ---
-# Sistema canónico de 2 fases: Fase 1 (Carga con postura específica) + Fase 2 (Disparo hacia adelante)
+# Sistema canónico de 2 fases: Fase 1 (Carga con postura específica en torso-space) + Fase 2 (Extensión hacia adelante)
+func _get_torso_yaw(player: Node) -> float:
+	var origin_yaw: float = xr_origin.global_rotation.y if (xr_origin and is_instance_valid(xr_origin)) else 0.0
+	if player and is_instance_valid(player) and player.get("torso_yaw") != null:
+		return origin_yaw + float(player.get("torso_yaw"))
+	if camera and is_instance_valid(camera):
+		return camera.global_rotation.y
+	return origin_yaw
+
+
+func _is_valid_super_release_pose(tech_name: String, l_local_z: float, r_local_z: float, avg_local_y: float, avg_local_z: float, hands_dist: float, bb_side: int) -> bool:
+	match tech_name:
+		"final_flash":
+			return l_local_z >= 0.26 and r_local_z >= 0.26 and hands_dist <= 0.46
+		"galick_ho", "kamehameha":
+			return l_local_z >= 0.26 and r_local_z >= 0.26 and hands_dist <= 0.42
+		"big_bang":
+			var active_z: float = l_local_z if bb_side == 0 else r_local_z
+			return active_z >= 0.32
+		"genkidama":
+			return avg_local_z >= 0.18 or avg_local_y <= 0.35
+	return true
+
+
 func _process_super_powers(delta: float) -> void:
+	var player: Node = gesture_tree._get_player_instance() if gesture_tree else null
+	if player and is_instance_valid(player) and bool(player.get("is_match_over")):
+		if current_super_state != SuperPowerState.IDLE:
+			_reset_super_state()
+		return
+
 	# REQUISITO 4: Prevenir efecto metralleta con cooldown estricto y suelta obligatoria de botones
 	if super_cooldown > 0.0:
+		candidate_super_tech = ""
+		candidate_hold_timer = 0.0
 		return
 
 	if must_release_super_buttons:
@@ -551,99 +589,146 @@ func _process_super_powers(delta: float) -> void:
 	if is_charging_ki or ki_prep_phase or (l_trig and r_trig):
 		if current_super_state != SuperPowerState.IDLE:
 			_reset_super_state()
+		candidate_super_tech = ""
+		candidate_hold_timer = 0.0
 		return
 
 	var l_grip: bool = left_controller.get_float("grip") > 0.65 or left_controller.is_button_pressed("grip_click")
 	var r_grip: bool = right_controller.get_float("grip") > 0.65 or right_controller.is_button_pressed("grip_click")
 
-	var l_pos = left_controller.global_position
-	var r_pos = right_controller.global_position
-	var hands_dist = l_pos.distance_to(r_pos)
-	var cam_pos = camera.global_position if camera else xr_origin.global_position + Vector3(0, 1.6, 0)
-	var cam_fwd = -camera.global_transform.basis.z if camera else Vector3.FORWARD
+	var l_pos: Vector3 = left_controller.global_position
+	var r_pos: Vector3 = right_controller.global_position
+	var hands_dist: float = l_pos.distance_to(r_pos)
+	var cam_pos: Vector3 = camera.global_position if camera else xr_origin.global_position + Vector3(0, 1.6, 0)
+	var cam_fwd: Vector3 = -camera.global_transform.basis.z if camera else Vector3.FORWARD
 	cam_fwd.y = 0.0
 	cam_fwd = cam_fwd.normalized() if cam_fwd.length_squared() > 0.01 else Vector3.FORWARD
 
-	# Proyecciones hacia adelante respecto a la orientación de la cabeza
-	var l_fwd_proj = (l_pos - cam_pos).dot(cam_fwd)
-	var r_fwd_proj = (r_pos - cam_pos).dot(cam_fwd)
+	# Sistema de coordenadas relativo al torso del jugador (chest_pos + torso_yaw)
+	var torso_yaw: float = _get_torso_yaw(player)
+	var torso_basis: Basis = Basis(Vector3.UP, torso_yaw)
+	var torso_fwd: Vector3 = -torso_basis.z
+	torso_fwd.y = 0.0
+	torso_fwd = torso_fwd.normalized() if torso_fwd.length_squared() > 0.01 else cam_fwd
+	var torso_right: Vector3 = torso_basis.x
+	torso_right.y = 0.0
+	torso_right = torso_right.normalized() if torso_right.length_squared() > 0.01 else Vector3.RIGHT
+	var chest_pos: Vector3 = cam_pos - Vector3(0.0, 0.28, 0.0)
 
-	# REQUISITO 8: Prohibir activación de super poderes detrás del cuerpo (solo cancelar si están claramente detrás de la espalda)
-	if l_fwd_proj < -0.15 and r_fwd_proj < -0.15:
+	var l_rel: Vector3 = l_pos - chest_pos
+	var r_rel: Vector3 = r_pos - chest_pos
+	var l_local_x: float = l_rel.dot(torso_right)
+	var r_local_x: float = r_rel.dot(torso_right)
+	var l_local_y: float = l_rel.y
+	var r_local_y: float = r_rel.y
+	var l_local_z: float = l_rel.dot(torso_fwd)
+	var r_local_z: float = r_rel.dot(torso_fwd)
+	var avg_local_x: float = (l_local_x + r_local_x) * 0.5
+	var avg_local_y: float = (l_local_y + r_local_y) * 0.5
+	var avg_local_z: float = (l_local_z + r_local_z) * 0.5
+
+	# Prohibir activación de super poderes claramente detrás de la espalda respecto al torso
+	if l_local_z < -0.25 and r_local_z < -0.25:
 		if current_super_state != SuperPowerState.IDLE:
 			_reset_super_state()
+		candidate_super_tech = ""
+		candidate_hold_timer = 0.0
 		return
 
-	var avg_y = (l_pos.y + r_pos.y) / 2.0
-	var rel_y = avg_y - cam_pos.y
-	var avg_pos = (l_pos + r_pos) * 0.5
-	var cam_right = camera.global_transform.basis.x if camera else Vector3.RIGHT
-	var avg_local_x = (avg_pos - cam_pos).dot(cam_right)
+	var avg_y: float = (l_pos.y + r_pos.y) * 0.5
+	var rel_y: float = avg_y - cam_pos.y
 
-	# Excluir la postura de guardia ÚNICAMENTE si está en reposo (IDLE), manos centradas al pecho (abs(x) < 0.12)
-	var is_guard_pose = (current_super_state == SuperPowerState.IDLE) and (rel_y > -0.28 and rel_y < 0.22 and hands_dist < 0.30 and abs(avg_local_x) < 0.12)
+	# Excluir la postura de guardia ÚNICAMENTE si está en reposo (IDLE), manos centradas al pecho
+	var is_guard_pose: bool = (current_super_state == SuperPowerState.IDLE) and (rel_y > -0.28 and rel_y < 0.22 and hands_dist < 0.30 and absf(avg_local_x) < 0.12)
 	if is_guard_pose:
+		candidate_super_tech = ""
+		candidate_hold_timer = 0.0
 		return
 
 	# Identificar personaje activo
-	var char_name = "Goku"
-	var player = gesture_tree._get_player_instance() if gesture_tree else null
+	var char_name: String = "Goku"
 	if player and player.character_data:
 		char_name = player.character_data.character_name
-	var is_vegeta = "VEGETA" in char_name.to_upper()
+	var is_vegeta: bool = "VEGETA" in char_name.to_upper()
 
-	# --- FASE 1: DETECCIÓN E INICIO DE CARGA ---
+	# Condiciones geométricas estrictas por zona del torso
+	var vegeta_final_flash_pose: bool = is_vegeta and l_grip and r_grip and hands_dist >= 0.52 and l_local_x <= -0.22 and r_local_x >= 0.22 and avg_local_y >= -0.22 and avg_local_y <= 0.35 and l_local_z >= -0.15 and r_local_z >= -0.15
+	var vegeta_galick_ho_pose: bool = is_vegeta and l_grip and r_grip and hands_dist <= 0.36 and absf(avg_local_x) >= 0.14 and avg_local_y >= -0.25 and avg_local_y <= 0.32 and (l_local_z >= -0.12 or r_local_z >= -0.12)
+
+	# --- FASE 1: DETECCIÓN E INICIO DE CARGA (CON ESTABILIZACIÓN DE 0.18s) ---
 	if current_super_state == SuperPowerState.IDLE:
-		var target_tech = ""
-		var target_display = ""
+		var target_tech: String = ""
+		var target_display: String = ""
 
 		if is_vegeta:
-			# VEGETA:
-			# 1. Final Flash: REQUISITO 3 - Brazos estirados hacia afuera en cruz (T-pose > 0.48m) sosteniendo ambos grips
-			if l_grip and r_grip and hands_dist >= 0.48 and rel_y > -0.35 and rel_y < 0.35 and l_fwd_proj >= -0.12 and r_fwd_proj >= -0.12:
+			if vegeta_final_flash_pose:
 				target_tech = "final_flash"
 				target_display = "Final Flash"
-			# 2. Galick Ho: Ambas manos juntas al hombro o cuello (hands_dist < 0.45m, rel_y > -0.32m, cerca del hombro)
-			elif l_grip and r_grip and hands_dist < 0.45 and rel_y > -0.32 and (l_fwd_proj >= -0.10 or r_fwd_proj >= -0.10):
+			elif vegeta_galick_ho_pose:
 				target_tech = "galick_ho"
 				target_display = "Galick Ho"
-			# 3. Big Bang Attack: Un solo brazo extendido al frente con grip presionado EXCLUSIVAMENTE (SIN gatillo para no confundir con Melee)
 			elif (l_grip != r_grip) and melee_cooldown <= 0.0:
-				var is_l = l_grip
-				var active_ctrl = left_controller if is_l else right_controller
-				var active_trig = l_trig if is_l else r_trig
-				if not active_trig and _is_arm_extended(active_ctrl):
+				var is_l: bool = l_grip
+				var active_trig: bool = l_trig if is_l else r_trig
+				var active_z: float = l_local_z if is_l else r_local_z
+				var active_x: float = l_local_x if is_l else r_local_x
+				var active_y: float = l_local_y if is_l else r_local_y
+				if not active_trig and active_z >= 0.36 and absf(active_x) <= 0.32 and active_y >= -0.22 and active_y <= 0.32:
 					target_tech = "big_bang"
 					target_display = "Big Bang Attack"
 		else:
-			# GOKU:
-			# 1. Genkidama: Brazos elevados por encima de la cabeza (rel_y >= 0.25m, hands_dist >= 0.28m)
-			if l_grip and r_grip and rel_y >= 0.25 and hands_dist >= 0.28:
+			if l_grip and r_grip and (l_pos.y - cam_pos.y) >= 0.22 and (r_pos.y - cam_pos.y) >= 0.22 and hands_dist >= 0.26:
 				target_tech = "genkidama"
 				target_display = "Genkidama"
-			# 2. Kamehameha: Manos juntas a la cadera/costado (rel_y <= -0.20m, hands_dist < 0.32m)
-			elif l_grip and r_grip and rel_y <= -0.20 and hands_dist < 0.32:
+			elif l_grip and r_grip and hands_dist <= 0.34 and avg_local_y <= -0.05 and (absf(avg_local_x) >= 0.10 or avg_local_z <= 0.28):
 				target_tech = "kamehameha"
 				target_display = "Kamehameha"
 
 		if target_tech != "":
-			current_super_state = SuperPowerState.CHARGING
-			super_power_type = target_tech
-			super_charge_timer = 0.0
-			if player and player.has_method("start_charging_super"):
-				player.start_charging_super()
-			if target_tech == "big_bang":
-				var bb_side = 0 if l_grip else 1
-				if gesture_tree:
-					gesture_tree.set("big_bang_hand", bb_side)
-			_set_gesture_tree_charging_flag(super_power_type, true)
-			if gesture_tree and gesture_tree.has_signal("phase_changed"):
-				gesture_tree.emit_signal("phase_changed", "%s: CARGANDO (FASE 1)" % target_display.to_upper())
-			if gesture_tree and gesture_tree.has_signal("gesture_logged"):
-				gesture_tree.emit_signal("gesture_logged", "¡Cargando %s! Mantén los grips y concentra tu Ki." % target_display, "info")
+			if target_tech == candidate_super_tech:
+				candidate_hold_timer += delta
+			else:
+				candidate_super_tech = target_tech
+				candidate_hold_timer = delta
 
-	# --- MANTENIMIENTO DE CARGA Y CONSUMO DE KI (O QUEMA DE FUERZA VITAL) ---
+			if candidate_hold_timer >= SUPER_POSE_HOLD_TIME:
+				candidate_super_tech = ""
+				candidate_hold_timer = 0.0
+				current_super_state = SuperPowerState.CHARGING
+				super_power_type = target_tech
+				super_charge_timer = 0.0
+				if player and player.has_method("start_charging_super"):
+					player.start_charging_super()
+				if target_tech == "big_bang":
+					var bb_side_init: int = 0 if l_grip else 1
+					if gesture_tree:
+						gesture_tree.set("big_bang_hand", bb_side_init)
+				_set_gesture_tree_charging_flag(super_power_type, true)
+				if gesture_tree and gesture_tree.has_signal("phase_changed"):
+					gesture_tree.emit_signal("phase_changed", "%s: CARGANDO (FASE 1)" % target_display.to_upper())
+				if gesture_tree and gesture_tree.has_signal("gesture_logged"):
+					gesture_tree.emit_signal("gesture_logged", "¡Cargando %s! Mantén los grips y concentra tu Ki." % target_display, "info")
+		else:
+			candidate_super_tech = ""
+			candidate_hold_timer = 0.0
+
+	# --- MANTENIMIENTO DE CARGA, AUTO-UPGRADE Y CONSUMO DE KI ---
 	if current_super_state == SuperPowerState.CHARGING:
+		# Ventana de auto-upgrade (<= 0.40s): si inició Big Bang antes de cerrar el segundo grip para Final Flash / Galick Ho
+		if super_power_type == "big_bang" and super_charge_timer <= 0.40 and l_grip and r_grip and is_vegeta:
+			if vegeta_final_flash_pose or vegeta_galick_ho_pose:
+				var upgraded_tech: String = "final_flash" if vegeta_final_flash_pose else "galick_ho"
+				var upgraded_display: String = "Final Flash" if vegeta_final_flash_pose else "Galick Ho"
+				_set_gesture_tree_charging_flag("big_bang", false)
+				_set_gesture_tree_charge_time("big_bang", 0.0)
+				super_power_type = upgraded_tech
+				_set_gesture_tree_charging_flag(super_power_type, true)
+				_set_gesture_tree_charge_time(super_power_type, super_charge_timer)
+				if gesture_tree and gesture_tree.has_signal("phase_changed"):
+					gesture_tree.emit_signal("phase_changed", "%s: CARGANDO (FASE 1)" % upgraded_display.to_upper())
+				if gesture_tree and gesture_tree.has_signal("gesture_logged"):
+					gesture_tree.emit_signal("gesture_logged", "¡Técnica actualizada a %s! Mantén los grips y concentra tu Ki." % upgraded_display, "info")
+
 		# Si se está cargando Big Bang y el usuario aprieta el gatillo de esa mano, formó puño para Melee -> Cancelar Big Bang
 		if super_power_type == "big_bang":
 			var bb_side = gesture_tree.get("big_bang_hand") if gesture_tree else (0 if l_grip else 1)
@@ -715,21 +800,13 @@ func _process_super_powers(delta: float) -> void:
 			gesture_tree._update_aim_reticle(aim_origin, aim_dir, aim_color)
 
 		# --- FASE 1 EN CURSO: MANTENIMIENTO DE CARGA Y EVALUACIÓN DE SALIDA ---
-		# REGLA CANÓNICA DEL JUGADOR:
-		# "cuando se esta en una fase 1 de algun gesto, solo existen 2 posibilidades:
-		#  1. Ir a la fase 2 (disparar al soltar los botones con carga lista)
-		#  2. Cancelar la acción soltando los botones (si se suelta antes de tiempo)
-		# MIENTRAS SE MANTENGAN APRETADOS LOS BOTONES, NINGÚN OTRO GESTO PUEDE ACTIVARSE NI INTERRUMPIR."
-
-		var bb_side = gesture_tree.get("big_bang_hand") if gesture_tree else (0 if l_grip else 1)
+		var bb_side: int = int(gesture_tree.get("big_bang_hand")) if gesture_tree else (0 if l_grip else 1)
 		var active_grip = l_grip if bb_side == 0 else r_grip
 
 		var buttons_held: bool = false
 		if super_power_type == "big_bang":
 			buttons_held = active_grip
 		else:
-			# Para técnicas de dos manos (Final Flash, Galick Ho, Kamehameha, Genkidama):
-			# Mientras mantenga al menos uno o ambos grips apretados, la carga se sostiene inamoviblemente
 			buttons_held = l_grip or r_grip
 
 		# Tiempo mínimo de carga requerida para que la Fase 1 quede LISTA y permita el disparo
@@ -748,23 +825,28 @@ func _process_super_powers(delta: float) -> void:
 				_pulse_haptic(left_controller, 180.0, 1.0, 0.20)
 				_pulse_haptic(right_controller, 180.0, 1.0, 0.20)
 				if gesture_tree and gesture_tree.has_signal("phase_changed"):
-					gesture_tree.emit_signal("phase_changed", "¡%s LISTO! (SUELTA PARA DISPARAR)" % super_power_type.to_upper())
+					gesture_tree.emit_signal("phase_changed", "¡%s LISTO! (EXTIENDE Y SUELTA PARA DISPARAR)" % super_power_type.to_upper())
 				if gesture_tree and gesture_tree.has_signal("gesture_logged"):
-					gesture_tree.emit_signal("gesture_logged", "¡%s listo para lanzar! Suelta los botones o sigue concentrando." % super_power_type.capitalize(), "success")
+					gesture_tree.emit_signal("gesture_logged", "¡%s listo! Extiende las manos al frente y suelta los grips para disparar." % super_power_type.capitalize(), "success")
 			elif int(super_charge_timer * 10) % 5 == 0:
 				if gesture_tree and gesture_tree.has_signal("phase_changed"):
-					gesture_tree.emit_signal("phase_changed", "¡%s MÁXIMA ENERGÍA! (SUELTA PARA DISPARAR)" % super_power_type.to_upper())
+					gesture_tree.emit_signal("phase_changed", "¡%s MÁXIMA ENERGÍA! (EXTIENDE Y SUELTA)" % super_power_type.to_upper())
 
 		# POSIBILIDAD A: Mientras los botones sigan apretados, permanecer en Fase 1 concentrando energía
 		if buttons_held:
 			return
 
-		# POSIBILIDAD B: Se soltaron los botones -> Evaluar si dispara (Fase 2) o cancela
+		# POSIBILIDAD B: Se soltaron los botones -> Validar Fase 2 (postura de disparo hacia adelante)
 		if super_charge_timer >= min_fire_time:
-			# ¡FASE 2: DISPARO DE TÉCNICA!
-			_execute_super_fire(super_power_type)
+			if _is_valid_super_release_pose(super_power_type, l_local_z, r_local_z, avg_local_y, avg_local_z, hands_dist, bb_side):
+				_execute_super_fire(super_power_type)
+			else:
+				if gesture_tree:
+					gesture_tree._cancel_action("%s cancelado: extiende las manos al frente al soltar para disparar" % super_power_type.capitalize())
+					gesture_tree._reset_to_idle()
+				super_cooldown = 0.20
+				_reset_super_state()
 		else:
-			# Cancelación por soltar botones antes de tiempo
 			if gesture_tree:
 				gesture_tree._cancel_action("%s cancelado (botones soltados antes de completar carga)" % super_power_type.capitalize())
 				gesture_tree._reset_to_idle()
@@ -847,6 +929,8 @@ func _reset_super_state() -> void:
 	super_power_type = ""
 	super_charge_timer = 0.0
 	super_locked_haptic = false
+	candidate_super_tech = ""
+	candidate_hold_timer = 0.0
 	var player = gesture_tree._get_player_instance() if gesture_tree else null
 	if player and player.has_method("stop_charging_super"):
 		player.stop_charging_super()
@@ -1004,57 +1088,116 @@ func _process_transformations() -> void:
 		gesture_transform_timer = 0.0
 
 
-# --- 5. GOLPES MELEE CINEMÁTICOS (LANZAMIENTO HACIA EL RIVAL) ---
+# --- 5. GOLPES MELEE CINEMÁTICOS (LANZAMIENTO HACIA EL RIVAL EN 2 ETAPAS REALES) ---
 func _process_melee_punches() -> void:
-	if melee_cooldown > 0.0 or is_charging_ki or startup_cooldown > 0.0:
+	var player: Node = gesture_tree._get_player_instance() if gesture_tree else null
+	if player and is_instance_valid(player) and bool(player.get("is_match_over")):
+		left_punch_cocked = false
+		right_punch_cocked = false
 		return
 
-	var l_grip = left_controller.get_float("grip") > 0.40 or left_controller.is_button_pressed("grip_click")
-	var l_trig = left_controller.get_float("trigger") > 0.40 or left_controller.is_button_pressed("trigger_click")
-	# REQUISITO CANÓNICO: Puño cerrado simulado con Grab + Gatillo (ambos botones presionados)
-	var l_fist = l_grip and l_trig
+	if melee_cooldown > 0.0 or is_charging_ki or startup_cooldown > 0.0:
+		left_punch_cocked = false
+		right_punch_cocked = false
+		return
 
-	var r_grip = right_controller.get_float("grip") > 0.40 or right_controller.is_button_pressed("grip_click")
-	var r_trig = right_controller.get_float("trigger") > 0.40 or right_controller.is_button_pressed("trigger_click")
+	var l_grip: bool = left_controller.get_float("grip") > 0.40 or left_controller.is_button_pressed("grip_click")
+	var l_trig: bool = left_controller.get_float("trigger") > 0.40 or left_controller.is_button_pressed("trigger_click")
 	# REQUISITO CANÓNICO: Puño cerrado simulado con Grab + Gatillo (ambos botones presionados)
-	var r_fist = r_grip and r_trig
+	var l_fist: bool = l_grip and l_trig
+
+	var r_grip: bool = right_controller.get_float("grip") > 0.40 or right_controller.is_button_pressed("grip_click")
+	var r_trig: bool = right_controller.get_float("trigger") > 0.40 or right_controller.is_button_pressed("trigger_click")
+	# REQUISITO CANÓNICO: Puño cerrado simulado con Grab + Gatillo (ambos botones presionados)
+	var r_fist: bool = r_grip and r_trig
+
+	# Si ambos puños están cerrados a la vez, se reserva para Recarga de Ki o Transformación (nunca Melee)
+	if l_fist and r_fist:
+		left_punch_cocked = false
+		right_punch_cocked = false
+		return
 
 	# Si se estaba cargando Big Bang y el usuario cierra el puño completo (grab + gatillo), priorizar Melee
 	if current_super_state == SuperPowerState.CHARGING and super_power_type == "big_bang":
 		if l_fist or r_fist:
 			_reset_super_state()
 	elif current_super_state != SuperPowerState.IDLE:
+		left_punch_cocked = false
+		right_punch_cocked = false
 		return
 
-	var cam_pos = camera.global_position if camera else xr_origin.global_position + Vector3(0, 1.6, 0)
-	var cam_fwd = -camera.global_transform.basis.z if camera else Vector3.FORWARD
+	var cam_pos: Vector3 = camera.global_position if camera else xr_origin.global_position + Vector3(0, 1.6, 0)
+	var cam_fwd: Vector3 = -camera.global_transform.basis.z if camera else Vector3.FORWARD
 	cam_fwd.y = 0.0
 	cam_fwd = cam_fwd.normalized() if cam_fwd.length_squared() > 0.01 else Vector3.FORWARD
 
-	var l_fwd_proj = (left_controller.global_position - cam_pos).dot(cam_fwd)
-	var r_fwd_proj = (right_controller.global_position - cam_pos).dot(cam_fwd)
+	var torso_yaw: float = _get_torso_yaw(player)
+	var torso_basis: Basis = Basis(Vector3.UP, torso_yaw)
+	var torso_fwd: Vector3 = -torso_basis.z
+	torso_fwd.y = 0.0
+	torso_fwd = torso_fwd.normalized() if torso_fwd.length_squared() > 0.01 else cam_fwd
+	var torso_right: Vector3 = torso_basis.x
+	torso_right.y = 0.0
+	torso_right = torso_right.normalized() if torso_right.length_squared() > 0.01 else Vector3.RIGHT
+	var chest_pos: Vector3 = cam_pos - Vector3(0.0, 0.28, 0.0)
 
-	# Puño izquierdo lanzado hacia adelante: Grab + Gatillo con velocidad frontal > 0.85 m/s
-	if l_fist and left_velocity.dot(cam_fwd) > 0.85 and l_fwd_proj > 0.10:
+	var l_rel: Vector3 = left_controller.global_position - chest_pos
+	var r_rel: Vector3 = right_controller.global_position - chest_pos
+	var l_local_x: float = l_rel.dot(torso_right)
+	var r_local_x: float = r_rel.dot(torso_right)
+	var l_local_y: float = l_rel.y
+	var r_local_y: float = r_rel.y
+	var l_local_z: float = l_rel.dot(torso_fwd)
+	var r_local_z: float = r_rel.dot(torso_fwd)
+
+	# ETAPA 1: Armado del puño cerca del pecho / hombro
+	if l_fist:
+		if l_local_z <= 0.28 and absf(l_local_x) <= 0.42 and l_local_y >= -0.35 and l_local_y <= 0.28:
+			left_punch_cocked = true
+	else:
+		left_punch_cocked = false
+
+	if r_fist:
+		if r_local_z <= 0.28 and absf(r_local_x) <= 0.42 and r_local_y >= -0.35 and r_local_y <= 0.28:
+			right_punch_cocked = true
+	else:
+		right_punch_cocked = false
+
+	# ETAPA 2: Extensión explosiva hacia adelante tras armado real
+	if l_fist and left_punch_cocked and l_local_z >= 0.34 and left_velocity.dot(torso_fwd) >= 1.65:
+		left_punch_cocked = false
 		_execute_melee_punch(left_controller)
-	# Puño derecho lanzado hacia adelante: Grab + Gatillo con velocidad frontal > 0.85 m/s
-	elif r_fist and right_velocity.dot(cam_fwd) > 0.85 and r_fwd_proj > 0.10:
+	elif r_fist and right_punch_cocked and r_local_z >= 0.34 and right_velocity.dot(torso_fwd) >= 1.65:
+		right_punch_cocked = false
 		_execute_melee_punch(right_controller)
 
 
 func _execute_melee_punch(controller: XRController3D) -> void:
-	melee_cooldown = 0.45
 	_reset_super_state()
 	left_charge_time = 0.0
 	right_charge_time = 0.0
 	left_is_charging = false
 	right_is_charging = false
 
-	var player = gesture_tree._get_player_instance() if gesture_tree else null
+	var player: Node = gesture_tree._get_player_instance() if gesture_tree else null
 	# Si ya estamos en Bullet-Time cuerpo a cuerpo, el golpe impacta la cúpula táctica
 	if player and player.get("is_in_bullet_time"):
+		melee_cooldown = 0.45
 		_pulse_haptic(controller, 200.0, 0.95, 0.12)
 		return
+
+	if player and is_instance_valid(player):
+		var curr_ki: float = float(player.get("current_ki")) if player.get("current_ki") != null else 0.0
+		if curr_ki < 15.0:
+			melee_cooldown = 0.6
+			_pulse_haptic(controller, 90.0, 0.35, 0.12)
+			if gesture_tree and gesture_tree.has_signal("gesture_logged"):
+				gesture_tree.emit_signal("gesture_logged", "¡Ki insuficiente para embestida Melee (15 Ki)!", "warning")
+			return
+		if player.has_method("consume_ki"):
+			player.consume_ki(15.0)
+
+	melee_cooldown = 2.5
 
 	# Auto-fijar al rival si no está bloqueado para garantizar embestida instantánea
 	if player and is_instance_valid(player):

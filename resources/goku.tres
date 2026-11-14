@@ -52,21 +52,21 @@ aura_color = Color(1, 0.1, 0.1, 1)
 [sub_resource type="Resource" id="Resource_i1tb2"]
 script = ExtResource("3_30s5j")
 form_name = "SSJ"
-np_multiplier = 5.0
+np_multiplier = 2.5
 aura_color = Color(1, 0.85, 0.1, 0.85)
 
 [sub_resource type="Resource" id="Resource_luo4d"]
 script = ExtResource("3_30s5j")
 form_name = "SSB"
-np_multiplier = 25.0
+np_multiplier = 5.0
 ki_drain_per_sec = 5.0
 aura_color = Color(0.1, 0.7, 1, 0.9)
 
 [resource]
 script = ExtResource("2_whopp")
 character_name = "Goku"
-base_np = 3000000000.0
-max_np = 15000000000.0
+base_np = 9000.0
+max_np = 18000.0
 body_model_path = "res://assets/models/goku_optimized.glb"
 hands_model_path = "res://assets/models/goku_hands_optimized.glb"
 powers = Array[Resource]([SubResource("Resource_gy1yg"), SubResource("Resource_x82nt"), SubResource("Resource_012ef"), SubResource("Resource_biqls")])

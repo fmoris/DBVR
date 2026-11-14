@@ -465,6 +465,10 @@ func _resolve_direct_hit() -> void:
 
 	print("[SuperBeamSequence] 💥 ¡IMPACTO DIRECTO DE SUPER HAZ! %s colisionó con el defensor (Daño: %.0f NP)." % [power_name, final_damage])
 
+	if attacker and is_instance_valid(attacker) and bool(attacker.get("is_in_zenkai_state")) and defender and is_instance_valid(defender) and not bool(defender.get("is_blocking")):
+		if attacker.has_method("trigger_zenkai_match_finish"):
+			attacker.trigger_zenkai_match_finish(attacker, defender, power_name)
+
 
 func _cleanup_and_finish(result: String, dmg: float) -> void:
 	if attacker and is_instance_valid(attacker):
@@ -583,20 +587,33 @@ func _update_hud(rem_time: float) -> void:
 	if not alert_label or not is_instance_valid(alert_label):
 		return
 
-	var target_head = defender.global_position + Vector3(0.0, 1.6, 0.0) if defender else global_position
-	alert_label.global_position = target_head + Vector3(0.0, 0.45, 0.0)
-
 	var cam = _get_active_camera()
-	if cam:
+	if cam and is_instance_valid(cam):
+		var cam_fwd: Vector3 = -cam.global_transform.basis.z.normalized()
+		alert_label.global_position = cam.global_position + cam_fwd * 1.80 + Vector3(0.0, 0.18, 0.0)
 		alert_label.look_at(cam.global_position, Vector3.UP)
 		alert_label.rotate_y(PI)
+	else:
+		var target_head = defender.global_position + Vector3(0.0, 1.6, 0.0) if defender else global_position
+		alert_label.global_position = target_head + Vector3(0.0, 0.45, 0.0)
 
 	var pct = clampf(rem_time / maxf(reaction_duration, 0.01), 0.0, 1.0)
 	var bar_len = int(pct * 10.0)
 	var bar = "█".repeat(bar_len) + "░".repeat(10 - bar_len)
 
-	alert_label.text = "⚡ ¡%s ENTRANTE! ⚡\n[ %s ] %.1fs\n[Z-VANISH | DESVÍO CON MANO | BLOQUEO | CHOQUE]" % [
-		power_name.to_upper(), bar, maxf(rem_time, 0.0)
+	var zenkai_prefix: String = ""
+	if attacker and is_instance_valid(attacker) and bool(attacker.get("is_in_zenkai_state")):
+		if bool(attacker.get("is_player")):
+			zenkai_prefix = "🔥 ¡ATAQUE ZENKAI DE VICTORIA EN CURSO! 🔥\n"
+			alert_label.modulate = Color(1.0, 0.88, 0.15)
+		else:
+			zenkai_prefix = "💀 ¡ATAQUE ZENKAI K.O. ENTRANTE! 💀\n"
+			alert_label.modulate = Color(1.0, 0.22, 0.22)
+	else:
+		alert_label.modulate = Color(1.0, 0.8, 0.2)
+
+	alert_label.text = "%s⚡ ¡%s ENTRANTE! ⚡\n[ %s ] %.1fs\n[Z-VANISH | DESVÍO CON MANO | BLOQUEO | CHOQUE]" % [
+		zenkai_prefix, power_name.to_upper(), bar, maxf(rem_time, 0.0)
 	]
 
 
@@ -667,7 +684,10 @@ func _build_visual_beam() -> void:
 func _build_reticle_and_hud() -> void:
 	alert_label = Label3D.new()
 	alert_label.name = "BeamAlertHUD"
-	alert_label.font_size = 28
+	alert_label.font_size = 26
+	alert_label.pixel_size = 0.0022
+	alert_label.no_depth_test = true
+	alert_label.render_priority = 115
 	alert_label.outline_size = 8
 	alert_label.outline_color = Color(0.0, 0.0, 0.0, 0.95)
 	alert_label.modulate = Color(1.0, 0.8, 0.2)

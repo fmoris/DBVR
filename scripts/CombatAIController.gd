@@ -102,7 +102,7 @@ func _ready() -> void:
 
 
 func _physics_process(delta: float) -> void:
-	if not enabled or not host or not is_instance_valid(host):
+	if not enabled or not host or not is_instance_valid(host) or bool(host.get("is_match_over")):
 		return
 
 	# Si la IA está en Bullet-Time (Minijuego Melee Rítmico), mantener guardia y esperar resolución rítmica

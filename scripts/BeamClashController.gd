@@ -260,11 +260,17 @@ func _update_beam_transforms() -> void:
 		clash_light.global_position = clash_pos
 
 	if header_label and is_instance_valid(header_label):
-		header_label.global_position = clash_pos + Vector3(0.0, 1.1, 0.0)
+		var target_pos: Vector3 = clash_pos + Vector3(0.0, 1.1, 0.0)
 		var player_cam = _get_active_camera()
-		if player_cam:
+		if player_cam and is_instance_valid(player_cam):
+			if target_pos.distance_to(player_cam.global_position) < 1.75:
+				var cam_fwd: Vector3 = -player_cam.global_transform.basis.z.normalized()
+				target_pos = player_cam.global_position + cam_fwd * 1.75 + Vector3(0.0, 0.22, 0.0)
+			header_label.global_position = target_pos
 			header_label.look_at(player_cam.global_position, Vector3.UP)
 			header_label.rotate_y(PI)
+		else:
+			header_label.global_position = target_pos
 
 	# 1. Haz exterior y núcleo blanco del Atacante (desde manos del atacante hasta clash_pos)
 	if beam_mesh_atk and is_instance_valid(beam_mesh_atk):
@@ -352,6 +358,8 @@ func _resolve_clash(winner: Node3D, loser: Node3D, winning_tech: String) -> void
 			winner.recharge_ki(45.0)
 		if winner.has_method("increase_np"):
 			winner.increase_np(600.0)
+		if bool(winner.get("is_in_zenkai_state")) and winner.has_method("trigger_zenkai_match_finish"):
+			winner.trigger_zenkai_match_finish(winner, loser, winning_tech)
 
 	_spawn_colossal_explosion()
 
@@ -445,7 +453,10 @@ func _build_visuals() -> void:
 	header_label = Label3D.new()
 	header_label.name = "ClashHUD"
 	header_label.text = "⚡ ¡CHOQUE DE PODERES! ⚡"
-	header_label.font_size = 32
+	header_label.font_size = 28
+	header_label.pixel_size = 0.0022
+	header_label.no_depth_test = true
+	header_label.render_priority = 115
 	header_label.outline_size = 10
 	header_label.outline_color = Color(0.0, 0.0, 0.0, 0.95)
 	add_child(header_label)
