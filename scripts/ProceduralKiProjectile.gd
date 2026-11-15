@@ -339,9 +339,10 @@ func _trigger_explosion(pos: Vector3, collider: Node) -> void:
 					caster.check_zenkai_conditions(char_node.current_np)
 					char_node.check_zenkai_conditions(caster.current_np)
 
+					var is_zenkai_finisher: bool = (tier >= 3 or (power and power.is_finisher)) and (was_launched_in_zenkai or bool(caster.get("is_in_zenkai_state")) or bool(caster.get("is_comeback_zenkai")))
 					if power and power.is_finisher and (was_launched_in_zenkai or caster.get("is_in_zenkai_state")):
 						caster.execute_finisher_hit(power)
-					elif tier >= 2 and not was_char_blocking and (was_launched_in_zenkai or bool(caster.get("is_in_zenkai_state"))) and caster.has_method("trigger_zenkai_match_finish"):
+					elif (is_zenkai_finisher or (tier >= 2 and not was_char_blocking and (was_launched_in_zenkai or bool(caster.get("is_in_zenkai_state"))))) and caster.has_method("trigger_zenkai_match_finish"):
 						var p_title: String = power.power_name if (power and "power_name" in power) else ("Super Esfera Ki" if tier >= 3 else "Ki Blast Cargado")
 						caster.trigger_zenkai_match_finish(caster, char_node, p_title)
 
@@ -356,9 +357,10 @@ func _trigger_explosion(pos: Vector3, collider: Node) -> void:
 			caster.increase_np(final_damage * 0.35)
 			caster.check_zenkai_conditions(direct_target.current_np)
 			direct_target.check_zenkai_conditions(caster.current_np)
+			var is_zenkai_direct: bool = (tier >= 3 or (power and power.is_finisher)) and (was_launched_in_zenkai or bool(caster.get("is_in_zenkai_state")) or bool(caster.get("is_comeback_zenkai")))
 			if power and power.is_finisher and (was_launched_in_zenkai or caster.get("is_in_zenkai_state")):
 				caster.execute_finisher_hit(power)
-			elif tier >= 2 and not was_direct_blocking and (was_launched_in_zenkai or bool(caster.get("is_in_zenkai_state"))) and caster.has_method("trigger_zenkai_match_finish"):
+			elif (is_zenkai_direct or (tier >= 2 and not was_direct_blocking and (was_launched_in_zenkai or bool(caster.get("is_in_zenkai_state"))))) and caster.has_method("trigger_zenkai_match_finish"):
 				var p_title_direct: String = power.power_name if (power and "power_name" in power) else ("Super Esfera Ki" if tier >= 3 else "Ki Blast Cargado")
 				caster.trigger_zenkai_match_finish(caster, direct_target, p_title_direct)
 

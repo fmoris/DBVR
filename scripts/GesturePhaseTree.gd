@@ -101,6 +101,7 @@ var final_flash_charge_time: float = 0.0
 var is_charging_big_bang: bool = false
 var big_bang_charge_time: float = 0.0
 var big_bang_hand: int = 1
+var _ki_already_consumed_by_hybrid: bool = false
 
 # Referencias a controladores VR activos provistos por HybridCombatController
 var left_controller_node: XRController3D = null
@@ -1233,15 +1234,20 @@ func _trigger_action(action_name: String) -> void:
 						power = p
 						break
 					
-			# Si el jugador está en Zenkai, disparar la versión Finisher de su técnica (Super Kamehameha o Final Flash)
-			if player.is_in_zenkai_state:
+			# Promoción Zenkai solo para Kamehameha -> Super Kamehameha (conservar la técnica real elegida para el resto)
+			if player.is_in_zenkai_state and action_name == "kamehameha":
 				for p in player.character_data.powers:
-					if p.is_finisher:
+					if p and p.power_name == "Super Kamehameha":
 						power = p
 						break
-			
+
+			var was_consumed_by_hybrid: bool = _ki_already_consumed_by_hybrid
+			_ki_already_consumed_by_hybrid = false
+
 			if power:
-				if player.is_power_usable(power):
+				if player.is_in_zenkai_state or player.is_power_usable(power):
+					if not was_consumed_by_hybrid and player.has_method("consume_ki_or_life_force") and not is_controller_override:
+						player.consume_ki_or_life_force(power.ki_cost)
 					emit_signal("phase_changed", "¡%s LANZADO!" % power.power_name.to_upper())
 					emit_signal("gesture_logged", "¡Gesto completado! Lanzando %s" % power.power_name, "success")
 					if ki_blast_charge_player:
@@ -1514,27 +1520,35 @@ func _spawn_special_projectile(power: Resource) -> void:
 	spawn_pos += velocity_dir * 0.40 + Vector3(0.0, -0.16, 0.0)
 	
 	# Capturar y limpiar tiempos de carga
+	var fallback_charge: float = maxf(
+		kamehameha_charge_time,
+		maxf(genkidama_charge_time, maxf(galick_ho_charge_time, maxf(final_flash_charge_time, big_bang_charge_time)))
+	)
 	var charge_time = 0.0
 	if power.power_name.contains("Kamehameha"):
 		charge_time = kamehameha_charge_time
-		kamehameha_charge_time = 0.0
-		is_charging_kamehameha = false
 	elif power.power_name == "Genkidama":
 		charge_time = genkidama_charge_time
-		genkidama_charge_time = 0.0
-		is_charging_genkidama = false
 	elif power.power_name == "Galick Ho":
 		charge_time = galick_ho_charge_time
-		galick_ho_charge_time = 0.0
-		is_charging_galick_ho = false
 	elif power.power_name == "Final Flash":
 		charge_time = final_flash_charge_time
-		final_flash_charge_time = 0.0
-		is_charging_final_flash = false
 	elif power.power_name == "Big Bang Attack":
 		charge_time = big_bang_charge_time
-		big_bang_charge_time = 0.0
-		is_charging_big_bang = false
+
+	if charge_time <= 0.01:
+		charge_time = maxf(fallback_charge, 1.0)
+
+	kamehameha_charge_time = 0.0
+	is_charging_kamehameha = false
+	genkidama_charge_time = 0.0
+	is_charging_genkidama = false
+	galick_ho_charge_time = 0.0
+	is_charging_galick_ho = false
+	final_flash_charge_time = 0.0
+	is_charging_final_flash = false
+	big_bang_charge_time = 0.0
+	is_charging_big_bang = false
 		
 	# Limpiar esferas de previsualización
 	_update_special_charge_sphere(0.0)
@@ -1559,7 +1573,7 @@ func _spawn_special_projectile(power: Resource) -> void:
 	if power.is_finisher and not (player and player.is_in_zenkai_state):
 		base_dmg = 4500.0
 
-	var is_ult_tech = power.is_finisher or power.power_name.contains("Super") or power.power_name == "Genkidama"
+	var is_ult_tech = power.is_finisher or power.power_name.contains("Super") or power.power_name == "Genkidama" or bool(player and player.is_in_zenkai_state)
 	var tier_val = 4 if is_ult_tech else 3
 	var is_big_bang = (power.power_name == "Big Bang Attack")
 	if is_big_bang:

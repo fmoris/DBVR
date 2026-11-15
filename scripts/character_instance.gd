@@ -433,7 +433,8 @@ func _process(delta: float) -> void:
 			is_penalized = false
 			print("[CharacterInstance] %s: Penalización finalizada." % character_data.character_name)
 
-	# Consumo de Ki por segundo si está transformado
+	# Consumo de Ki por segundo si está transformado (no revertir a mitad de un Super / Beam / estado Zenkai)
+	var busy_with_super_or_zenkai: bool = is_charging_super or is_firing_beam or is_in_beam_sequence or is_in_zenkai_state
 	if current_transformation:
 		var drain = current_transformation.ki_drain_per_sec * delta
 		if current_ki > drain:
@@ -441,10 +442,11 @@ func _process(delta: float) -> void:
 			_notify_stats()
 		else:
 			current_ki = 0.0
-			revert_to_base()
+			if not busy_with_super_or_zenkai:
+				revert_to_base()
 
 	# Reversión canónica a estado base si el Ki se agota por cualquier causa (Punto 13)
-	if current_transformation and current_ki <= 0.0:
+	if current_transformation and current_ki <= 0.0 and not busy_with_super_or_zenkai:
 		revert_to_base()
 
 	# Alinear el aura con la cámara para el jugador en primera persona
@@ -931,6 +933,9 @@ func check_zenkai_conditions(opponent_np: float) -> void:
 	# Evitar recalcular si el Zenkai se activó por Comeback (ya que dura exactamente 1 ataque)
 	if is_comeback_zenkai:
 		return
+	# No revocar Zenkai en medio de la carga o disparo de un Super Poder (ej: sacrificio de NP)
+	if is_charging_super or is_firing_beam or is_in_beam_sequence:
+		return
 		
 	var active_max: float = get_active_max_np()
 		
@@ -964,18 +969,12 @@ func notify_attack_launched(p_power: Resource) -> void:
 		if not ("ki blast" in p_name):
 			_end_followup_bullet_time(false)
 
-	# Si lanzamos un ataque siendo Comeback Zenkai, consumimos el intento
-	if is_comeback_zenkai:
-		# Dejamos de estar en estado Zenkai Comeback inmediatamente (se consume el tiro)
-		is_in_zenkai_state = false
-		is_comeback_zenkai = false
-		_notify_stats()
-		
-		# Guardamos una referencia para validar si impactó o falló
-		# En este caso, si falla (es esquivado/desviado), el combate penalizará al personaje.
-		# La llamada a `notify_attack_failed()` se hará desde el proyectil o colisión.
+	# Conservar is_in_zenkai_state activo mientras el Super Poder viaja para que el impacto ejecute el K.O. Zenkai.
+	# Si era Comeback Zenkai y falla/es bloqueado o esquivado, notify_attack_failed() limpiará el estado.
 
 func notify_attack_failed() -> void:
+	is_in_zenkai_state = false
+	is_comeback_zenkai = false
 	# Penalización severa por fallar el remate en Comeback:
 	# 1. NP cae a la mitad (o un valor mínimo).
 	# 2. Ki cae a 0.
@@ -1102,12 +1101,13 @@ func revert_to_base() -> void:
 			opp.check_zenkai_conditions(current_np)
 
 func is_power_usable(power: Resource) -> bool:
-	if is_penalized:
+	if is_penalized and not is_in_zenkai_state:
 		return false
-	# 1. ¿Está desbloqueado o es técnica base/finisher en Zenkai?
+	# En Estado Zenkai se exime todo bloqueo de transformación para permitir lanzar cualquier Super Poder
+	if is_in_zenkai_state:
+		return true
+	# 1. ¿Está desbloqueado o es técnica base?
 	var is_unlocked = unlocked_powers.has(power.power_name) or power.unlock_requirement_transformation == ""
-	if is_in_zenkai_state and power.is_finisher:
-		is_unlocked = true
 	if not is_unlocked:
 		return false
 	# 2. ¿Prohibido en esta forma?
@@ -2358,6 +2358,10 @@ func start_super_beam_sequence(tech_name: String, col: Color, dmg: float, tier_l
 	var opp = _get_opponent()
 	if not opp or not is_instance_valid(opp):
 		return
+	if is_in_beam_sequence and not is_instance_valid(active_beam_sequence):
+		is_in_beam_sequence = false
+	if is_in_bullet_time and not is_instance_valid(active_target_dome):
+		is_in_bullet_time = false
 	if is_in_beam_sequence or is_in_bullet_time:
 		return
 
@@ -2394,7 +2398,13 @@ func _start_melee_bullet_time(opponent: Node3D) -> void:
 	var duration: float = float(allowed_hits) * 1.35 + 0.80
 	print("[CharacterInstance] ¡Iniciando Melee Secuencial! Golpes permitidos: %d | Duración: %.2fs" % [allowed_hits, duration])
 
-	# 0. Alinear milimétricamente a distancia cuerpo a cuerpo
+	# 0. Alinear milimétricamente a distancia cuerpo a cuerpo y frenar inercia
+	velocity = Vector3.ZERO
+	is_knocked_back = false
+	if opponent.has_method("set"):
+		opponent.set("velocity", Vector3.ZERO)
+		opponent.set("is_knocked_back", false)
+
 	if is_player:
 		var my_origin = get_parent()
 		var cam = my_origin.get_node_or_null("XRCamera3D") if my_origin else null

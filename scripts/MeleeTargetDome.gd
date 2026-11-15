@@ -23,6 +23,7 @@ var phase: DomePhase = DomePhase.ATTACK_RECORDING
 
 var attacker: Node3D = null
 var defender: Node3D = null
+var locked_atk_to_def_dir: Vector3 = Vector3.FORWARD
 var duration: float = 4.85
 var time_left: float = 4.85
 var is_active: bool = false
@@ -32,6 +33,7 @@ var hits: Array = []
 var max_allowed_hits: int = 3
 var planned_attack_zones: Array[int] = []
 var current_attack_step: int = 0
+var attack_step_cooldown: float = 0.0
 
 # Seguimiento de velocidad para velocímetro y Martillazo
 var prev_left_pos: Vector3 = Vector3.ZERO
@@ -126,6 +128,7 @@ func start_attack_phase(p_attacker: Node3D, p_defender: Node3D, p_duration: floa
 	defender = p_defender
 	hits.clear()
 	current_attack_step = 0
+	attack_step_cooldown = 0.20
 
 	if p_max_hits > 0:
 		max_allowed_hits = p_max_hits
@@ -142,16 +145,17 @@ func start_attack_phase(p_attacker: Node3D, p_defender: Node3D, p_duration: floa
 
 	# Si el atacante es la IA, genera su secuencia por BP y pasa a Fase de Defensa del jugador
 	if attacker and not attacker.get("is_player"):
+		_generate_planned_attack_sequence(max_allowed_hits)
 		generate_ai_attack_sequence()
 		start_defense_phase()
 	else:
-		_generate_planned_attack_sequence(max_allowed_hits)
+		# Elección libre de cuadros para el jugador atacante (sin imponer caja objetivo)
+		planned_attack_zones.clear()
 		_update_sequential_target_highlights()
-		if header_label and is_instance_valid(header_label) and planned_attack_zones.size() > 0:
-			var first_name: String = String(ZONE_DEFINITIONS[planned_attack_zones[0]]["name"])
-			header_label.text = "🥊 ATAQUE SECUENCIAL (GOLPE 1/%d) | %.1fs\nGolpea [1] %s" % [max_allowed_hits, time_left, first_name]
+		if header_label and is_instance_valid(header_label):
+			header_label.text = "⚔️ ¡ELIGE DÓNDE GOLPEAR! (GOLPE 1/%d) | %.1fs\nGolpea cualquiera de los 6 cuadros" % [max_allowed_hits, time_left]
 
-	print("[BulletTimeDome] Cúpula secuencial lista: %d golpes permitidos en %.2fs." % [max_allowed_hits, duration])
+	print("[BulletTimeDome] Cúpula lista (elección libre jugador): %d golpes permitidos en %.2fs." % [max_allowed_hits, duration])
 
 
 func _generate_planned_attack_sequence(n_hits: int) -> void:
@@ -173,6 +177,39 @@ func _reset_all_timing_rings() -> void:
 
 
 func _update_sequential_target_highlights() -> void:
+	var player_free_choice: bool = attacker != null and is_instance_valid(attacker) and bool(attacker.get("is_player"))
+	if player_free_choice:
+		for zone in target_zones:
+			var z_id: int = int(zone["id"])
+			var z_node: Node3D = zone["node"] as Node3D
+			var box_mat: StandardMaterial3D = zone.get("box_mat") as StandardMaterial3D
+			var inner_mat: StandardMaterial3D = zone.get("inner_mat") as StandardMaterial3D
+			var step_lbl: Label3D = zone.get("step_label") as Label3D
+			var orig_col: Color = zone["color"] as Color
+
+			if z_node and is_instance_valid(z_node):
+				z_node.scale = Vector3.ONE
+			if box_mat:
+				box_mat.albedo_color = Color(orig_col.r, orig_col.g, orig_col.b, 0.58)
+				box_mat.emission = Color(orig_col.r, orig_col.g, orig_col.b)
+				box_mat.emission_energy_multiplier = 1.25
+			if inner_mat:
+				inner_mat.albedo_color = Color(orig_col.r, orig_col.g, orig_col.b, 0.90)
+
+			if step_lbl and is_instance_valid(step_lbl):
+				var last_step_on_zone: int = -1
+				for idx in range(hits.size()):
+					if int(hits[idx].get("zone_id", -1)) == z_id:
+						last_step_on_zone = idx + 1
+				if last_step_on_zone > 0:
+					step_lbl.text = "✓%d" % last_step_on_zone
+					step_lbl.modulate = Color(1.0, 0.95, 0.25, 1.0)
+					step_lbl.visible = true
+				else:
+					step_lbl.text = ""
+					step_lbl.visible = false
+		return
+
 	var active_zone_id: int = -1
 	if current_attack_step >= 0 and current_attack_step < planned_attack_zones.size() and current_attack_step < max_allowed_hits:
 		active_zone_id = planned_attack_zones[current_attack_step]
@@ -250,20 +287,17 @@ func _process(delta: float) -> void:
 
 	# Comprobar si los combatientes se separaron fuera del rango de combate cuerpo a cuerpo
 	if attacker and defender and is_instance_valid(attacker) and is_instance_valid(defender):
-		var p_atk = attacker.global_position
-		var p_def = defender.global_position
-		if attacker.get("is_player"):
-			var orig = attacker.get_parent()
-			var c = orig.get_node_or_null("XRCamera3D") if orig else null
-			if c: p_atk = c.global_position
-		if defender.get("is_player"):
-			var orig = defender.get_parent()
-			var c = orig.get_node_or_null("XRCamera3D") if orig else null
-			if c: p_def = c.global_position
+		if attacker.get("velocity") != null:
+			attacker.set("velocity", Vector3.ZERO)
+		if defender.get("velocity") != null:
+			defender.set("velocity", Vector3.ZERO)
+		var p_atk: Vector3 = _get_fighter_chest_pos(attacker)
+		var p_def: Vector3 = _get_fighter_chest_pos(defender)
 		p_atk.y = 0.0
 		p_def.y = 0.0
-		if p_atk.distance_to(p_def) > 3.5:
-			print("[BulletTimeDome] Fin del enfrentamiento melee: Separación fuera de rango (%.2fm)." % p_atk.distance_to(p_def))
+		var sep_dist: float = p_atk.distance_to(p_def)
+		if sep_dist > 5.5:
+			print("[BulletTimeDome] Fin del enfrentamiento melee: Separación fuera de rango (%.2fm)." % sep_dist)
 			finish_without_hits()
 			return
 
@@ -278,7 +312,10 @@ func _process(delta: float) -> void:
 # ==============================================================================
 
 func _process_attack_recording(delta: float) -> void:
-	# Mantener la posición de la cúpula sincronizada con la cámara del atacante
+	if attack_step_cooldown > 0.0:
+		attack_step_cooldown -= delta
+
+	# Mantener la posición de la cúpula anclada al atacante
 	_update_dome_transform()
 
 	# Actualizar seguimiento de puño cerrado y acumulación de carga por mando
@@ -306,9 +343,6 @@ func _process_attack_recording(delta: float) -> void:
 		var bar_len = int(pct * 12.0)
 		var bar_str = "█".repeat(bar_len) + "░".repeat(12 - bar_len)
 		var step_shown: int = mini(current_attack_step + 1, max_allowed_hits)
-		var active_z_name: String = ""
-		if current_attack_step < planned_attack_zones.size():
-			active_z_name = String(ZONE_DEFINITIONS[planned_attack_zones[current_attack_step]]["name"])
 		if hammer_charge_time >= 2.0:
 			header_label.text = "⚡ ¡MARTILLAZO LISTO! ⚡\n¡DESCARGA AMBOS PUÑOS HACIA ABAJO!"
 		elif is_charging_hammer:
@@ -317,7 +351,17 @@ func _process_attack_recording(delta: float) -> void:
 				bar_str,
 				maxf(time_left, 0.0)
 			]
+		elif attacker and attacker.get("is_player"):
+			header_label.text = "⚔️ ¡ELIGE DÓNDE GOLPEAR! (GOLPE %d/%d) | %.1fs\n[ %s ]\nGolpea cualquiera de los 6 cuadros" % [
+				step_shown,
+				max_allowed_hits,
+				maxf(time_left, 0.0),
+				bar_str
+			]
 		else:
+			var active_z_name: String = ""
+			if current_attack_step < planned_attack_zones.size():
+				active_z_name = String(ZONE_DEFINITIONS[planned_attack_zones[current_attack_step]]["name"])
 			header_label.text = "🥊 ATAQUE SECUENCIAL (GOLPE %d/%d) | %.1fs\n[ %s ]\nGolpea [%d]: %s" % [
 				step_shown,
 				max_allowed_hits,
@@ -327,7 +371,7 @@ func _process_attack_recording(delta: float) -> void:
 				active_z_name
 			]
 
-	# Detectar colisiones físicas de los mandos del atacante SOLO contra la caja objetivo actual
+	# Detectar colisiones físicas de los mandos del atacante contra cualquiera de los 6 cuadros
 	_check_controller_punches()
 	if phase != DomePhase.ATTACK_RECORDING:
 		return
@@ -758,6 +802,7 @@ func restart_as_attacker() -> void:
 	phase = DomePhase.ATTACK_RECORDING
 	hits.clear()
 	current_attack_step = 0
+	attack_step_cooldown = 0.25
 	if attacker and is_instance_valid(attacker) and attacker.has_method("calculate_melee_attack_count"):
 		max_allowed_hits = attacker.calculate_melee_attack_count(attacker, defender)
 	else:
@@ -776,7 +821,7 @@ func restart_as_attacker() -> void:
 
 	# Reconfigurar HUD superior
 	if header_label and is_instance_valid(header_label):
-		header_label.text = "⚡ ¡INVERSIÓN DE ROLES! ¡TU TURNO (%d GOLPES)! ⚡\n%.1fs" % [max_allowed_hits, duration]
+		header_label.text = "⚡ ¡INVERSIÓN DE ROLES! ¡ELIGE DÓNDE GOLPEAR (%d GOLPES)! ⚡\n%.1fs" % [max_allowed_hits, duration]
 		header_label.modulate = Color(1.0, 0.95, 0.3)
 
 	# Restaurar color de cúpula exterior ofensiva
@@ -793,10 +838,11 @@ func restart_as_attacker() -> void:
 
 	# Si el nuevo atacante es la IA, genera su combo y transiciona a la defensa del jugador
 	if attacker and not attacker.get("is_player"):
+		_generate_planned_attack_sequence(max_allowed_hits)
 		generate_ai_attack_sequence()
 		start_defense_phase()
 	else:
-		_generate_planned_attack_sequence(max_allowed_hits)
+		planned_attack_zones.clear()
 		_update_sequential_target_highlights()
 
 
@@ -1062,61 +1108,70 @@ func _build_header_hud() -> void:
 	header_label.modulate = Color(1.0, 0.95, 0.3)
 	header_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.95)
 	header_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	header_label.position = Vector3(0.0, 0.32, -0.85)
+	header_label.position = Vector3(0.0, 0.36, -0.75)
 	add_child(header_label)
 
 
-func _update_dome_transform() -> void:
-	var cam: Camera3D = null
+func _get_fighter_chest_pos(fighter: Node3D) -> Vector3:
+	if not fighter or not is_instance_valid(fighter):
+		return global_position
+	if fighter.get("is_player"):
+		var my_origin: Node = fighter.get_parent()
+		var cam: Camera3D = my_origin.get_node_or_null("XRCamera3D") as Camera3D if my_origin else null
+		if cam and is_instance_valid(cam):
+			return cam.global_position - Vector3(0.0, 0.22, 0.0)
+	return fighter.global_position + Vector3(0.0, 1.22, 0.0)
+
+
+func _get_atk_to_def_dir() -> Vector3:
+	if attacker and defender and is_instance_valid(attacker) and is_instance_valid(defender):
+		var atk_c: Vector3 = _get_fighter_chest_pos(attacker)
+		var def_c: Vector3 = _get_fighter_chest_pos(defender)
+		var diff: Vector3 = Vector3(def_c.x - atk_c.x, 0.0, def_c.z - atk_c.z)
+		if diff.length_squared() >= 0.0025:
+			locked_atk_to_def_dir = diff.normalized()
+			return locked_atk_to_def_dir
+	if locked_atk_to_def_dir.length_squared() >= 0.01:
+		return locked_atk_to_def_dir.normalized()
 	if attacker and is_instance_valid(attacker):
-		var my_origin = attacker.get_parent()
-		if my_origin:
-			cam = my_origin.get_node_or_null("XRCamera3D")
-	if not cam:
-		var vp = get_viewport()
-		if vp:
-			cam = vp.get_camera_3d()
+		var f: Vector3 = -attacker.global_transform.basis.z
+		f.y = 0.0
+		if f.length_squared() >= 0.01:
+			return f.normalized()
+	return Vector3.FORWARD
 
-	var cam_pos = cam.global_position if cam else (attacker.global_position + Vector3(0.0, 1.45, 0.0) if attacker else global_position)
-	var fwd = -cam.global_transform.basis.z if cam else ((-attacker.global_transform.basis.z) if attacker else Vector3.FORWARD)
-	fwd.y = 0.0
-	if fwd.length_squared() < 0.01:
-		if defender and is_instance_valid(defender):
-			fwd = (defender.global_position - cam_pos)
-			fwd.y = 0.0
-		if fwd.length_squared() < 0.01:
-			fwd = Vector3.FORWARD
-	fwd = fwd.normalized()
 
-	global_position = cam_pos + fwd * 0.64 + Vector3(0.0, -0.16, 0.0)
-	rotation.y = atan2(-fwd.x, -fwd.z)
+func _update_dome_transform() -> void:
+	var atk_chest: Vector3 = _get_fighter_chest_pos(attacker) if (attacker and is_instance_valid(attacker)) else global_position
+	var def_chest: Vector3 = _get_fighter_chest_pos(defender) if (defender and is_instance_valid(defender)) else (atk_chest + Vector3.FORWARD * 0.65)
+	var dir_to_def: Vector3 = _get_atk_to_def_dir()
+	var horiz_dist: float = Vector2(def_chest.x - atk_chest.x, def_chest.z - atk_chest.z).length()
+	var dome_offset: float = clampf(horiz_dist * 0.62, 0.36, 0.52) if horiz_dist > 0.05 else 0.45
+	var dome_y: float = (atk_chest.y + def_chest.y) * 0.5 - 0.03
+
+	global_position = Vector3(atk_chest.x, dome_y, atk_chest.z) + dir_to_def * dome_offset
+	rotation.y = atan2(-dir_to_def.x, -dir_to_def.z)
 	rotation.x = 0.0
 
 
 func _update_dome_transform_for_defender() -> void:
-	var cam: Camera3D = null
-	if defender and is_instance_valid(defender):
-		var my_origin = defender.get_parent()
-		if my_origin:
-			cam = my_origin.get_node_or_null("XRCamera3D")
-	if not cam:
-		var vp = get_viewport()
-		if vp:
-			cam = vp.get_camera_3d()
+	var atk_chest: Vector3 = _get_fighter_chest_pos(attacker) if (attacker and is_instance_valid(attacker)) else global_position
+	var def_chest: Vector3 = _get_fighter_chest_pos(defender) if (defender and is_instance_valid(defender)) else (atk_chest + Vector3.FORWARD * 0.65)
+	var dir_atk_to_def: Vector3 = _get_atk_to_def_dir()
+	var horiz_dist: float = Vector2(def_chest.x - atk_chest.x, def_chest.z - atk_chest.z).length()
+	var dome_y: float = (atk_chest.y + def_chest.y) * 0.5 - 0.03
 
-	var cam_pos = cam.global_position if cam else (defender.global_position + Vector3(0.0, 1.45, 0.0) if defender else global_position)
-	var fwd = -cam.global_transform.basis.z if cam else ((-defender.global_transform.basis.z) if defender else Vector3.FORWARD)
-	fwd.y = 0.0
-	if fwd.length_squared() < 0.01:
-		if attacker and is_instance_valid(attacker):
-			fwd = (attacker.global_position - cam_pos)
-			fwd.y = 0.0
-		if fwd.length_squared() < 0.01:
-			fwd = Vector3.FORWARD
-	fwd = fwd.normalized()
-
-	global_position = cam_pos + fwd * 0.64 + Vector3(0.0, -0.16, 0.0)
-	rotation.y = atan2(-fwd.x, -fwd.z)
+	# Anclar el UI siempre al ATACANTE (independiente de hacia dónde gire la cabeza el defensor)
+	if attacker and is_instance_valid(attacker) and bool(attacker.get("is_player")):
+		var atk_offset: float = clampf(horiz_dist * 0.62, 0.36, 0.52) if horiz_dist > 0.05 else 0.45
+		global_position = Vector3(atk_chest.x, dome_y, atk_chest.z) + dir_atk_to_def * atk_offset
+		rotation.y = atan2(-dir_atk_to_def.x, -dir_atk_to_def.z)
+	else:
+		# IA atacante: los cuadros quedan pegados frente al cuerpo del atacante mirando hacia el defensor
+		var atk_front_offset: float = clampf(horiz_dist - 0.40, 0.22, 0.38) if horiz_dist > 0.05 else 0.28
+		global_position = Vector3(atk_chest.x, dome_y, atk_chest.z) + dir_atk_to_def * atk_front_offset
+		var dir_def_to_atk: Vector3 = -dir_atk_to_def
+		rotation.y = atan2(-dir_def_to_atk.x, -dir_def_to_atk.z)
 	rotation.x = 0.0
 
 
@@ -1127,7 +1182,7 @@ func _update_dome_transform_for_defender() -> void:
 func _check_controller_punches() -> void:
 	if not attacker or not is_instance_valid(attacker):
 		return
-	if current_attack_step >= max_allowed_hits or current_attack_step >= planned_attack_zones.size():
+	if current_attack_step >= max_allowed_hits or attack_step_cooldown > 0.0:
 		return
 
 	var origin: XROrigin3D = attacker.get_parent() as XROrigin3D if attacker.get("is_player") else null
@@ -1143,42 +1198,62 @@ func _check_controller_punches() -> void:
 	if right_ctrl:
 		hand_sources.append({ "pos": right_ctrl.global_position, "name": "RightHand", "ctrl": right_ctrl, "idx": 1 })
 
-	# Evaluar ÚNICAMENTE la caja objetivo activa del paso actual (secuencia ordenada 1-por-1)
-	var active_zone_id: int = planned_attack_zones[current_attack_step]
-	if active_zone_id < 0 or active_zone_id >= target_zones.size():
-		return
-	var zone: Dictionary = target_zones[active_zone_id]
-	if zone.get("cooldown", 0.0) > 0.0:
-		return
-
-	var target_pos: Vector3 = zone["node"].global_position
+	var hit_radius: float = 0.22
+	var best_zone: Dictionary = {}
+	var best_hand: Dictionary = {}
+	var best_dist: float = hit_radius + 0.01
+	var best_vel: Vector3 = Vector3.ZERO
+	var best_vmag: float = 0.0
 
 	for hand_data in hand_sources:
 		var hand_idx: int = int(hand_data["idx"])
 		var hand_pos: Vector3 = hand_data["pos"]
-		var dist: float = hand_pos.distance_to(target_pos)
+		var min_dist_to_any_zone: float = 999.0
 
-		# Resetear retracción si la mano se aleja de la caja
-		if hand_must_retract[hand_idx] and dist > 0.24:
+		for zone in target_zones:
+			var z_node: Node3D = zone.get("node") as Node3D
+			if not z_node or not is_instance_valid(z_node):
+				continue
+			var d_any: float = hand_pos.distance_to(z_node.global_position)
+			if d_any < min_dist_to_any_zone:
+				min_dist_to_any_zone = d_any
+
+		# Resetear retracción cuando el puño retrocede fuera del umbral de todas las cajas
+		if hand_must_retract[hand_idx] and min_dist_to_any_zone > 0.24:
 			hand_must_retract[hand_idx] = false
 
 		if hand_must_retract[hand_idx]:
 			continue
 
-		if dist <= 0.21:
-			var cur_vel: Vector3 = left_velocity if hand_idx == 0 else right_velocity
-			var v_mag: float = cur_vel.length()
-			# Exigir velocidad real de puñetazo (sin registrar toques estáticos accidentales)
-			if v_mag < 0.75:
-				continue
+		var cur_vel: Vector3 = left_velocity if hand_idx == 0 else right_velocity
+		var v_mag: float = cur_vel.length()
+		if v_mag < 0.80:
+			continue
 
-			_register_hit(zone, hand_data["ctrl"], hand_data["name"], hand_idx, cur_vel, v_mag)
-			hand_must_retract[hand_idx] = true
-			break
+		# Buscar la zona más cercana dentro de las 6 disponibles (elección libre del atacante)
+		for zone in target_zones:
+			if zone.get("cooldown", 0.0) > 0.0:
+				continue
+			var z_node: Node3D = zone.get("node") as Node3D
+			if not z_node or not is_instance_valid(z_node):
+				continue
+			var d: float = hand_pos.distance_to(z_node.global_position)
+			if d <= hit_radius and d < best_dist:
+				best_dist = d
+				best_zone = zone
+				best_hand = hand_data
+				best_vel = cur_vel
+				best_vmag = v_mag
+
+	if not best_zone.is_empty() and not best_hand.is_empty():
+		var chosen_hand_idx: int = int(best_hand["idx"])
+		attack_step_cooldown = 0.28
+		_register_hit(best_zone, best_hand["ctrl"], best_hand["name"], chosen_hand_idx, best_vel, best_vmag)
+		hand_must_retract[chosen_hand_idx] = true
 
 
 func _register_hit(zone: Dictionary, ctrl_node: XRController3D, hand_name: String, hand_idx: int, cur_vel: Vector3, v_mag: float) -> void:
-	zone["cooldown"] = 0.16
+	zone["cooldown"] = 0.28
 	var hit_pos: Vector3 = zone["node"].global_position
 
 	var charge_t = fist_charge_times[hand_idx]
@@ -1234,11 +1309,11 @@ func _register_hit(zone: Dictionary, ctrl_node: XRController3D, hand_name: Strin
 		var scale_mult = 1.45 if is_charged else 1.28
 		var tw = create_tween().set_parallel(true)
 		tw.tween_property(zone["node"], "scale", Vector3.ONE * scale_mult, 0.07).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-		tw.chain().tween_property(zone["node"], "scale", Vector3.ONE * 0.72, 0.08).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+		tw.chain().tween_property(zone["node"], "scale", Vector3.ONE, 0.09).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
 		if mat:
-			tw.parallel().tween_property(mat, "albedo_color", Color(orig_col.r, orig_col.g, orig_col.b, 0.12), 0.12)
-			tw.parallel().tween_property(mat, "emission", Color(orig_col.r, orig_col.g, orig_col.b), 0.12)
-			tw.parallel().tween_property(mat, "emission_energy_multiplier", 0.15, 0.12)
+			tw.parallel().tween_property(mat, "albedo_color", Color(orig_col.r, orig_col.g, orig_col.b, 0.58), 0.14)
+			tw.parallel().tween_property(mat, "emission", Color(orig_col.r, orig_col.g, orig_col.b), 0.14)
+			tw.parallel().tween_property(mat, "emission_energy_multiplier", 1.25, 0.14)
 
 	if audio_player:
 		audio_player.global_position = hit_pos

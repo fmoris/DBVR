@@ -44,6 +44,9 @@ var current_super_state: SuperPowerState = SuperPowerState.IDLE
 var super_power_type: String = "" # "kamehameha", "galick_ho", "final_flash", "genkidama"
 var super_charge_timer: float = 0.0
 var super_locked_haptic: bool = false
+var super_phase2_latched: bool = false
+var super_phase2_grace_timer: float = 0.0
+var super_phase2_ready_notified: bool = false
 const SUPER_MIN_CHARGE_TIME: float = 1.0
 var candidate_super_tech: String = ""
 var candidate_hold_timer: float = 0.0
@@ -545,17 +548,19 @@ func _get_torso_yaw(player: Node) -> float:
 	return origin_yaw
 
 
-func _is_valid_super_release_pose(tech_name: String, l_local_z: float, r_local_z: float, avg_local_y: float, avg_local_z: float, hands_dist: float, bb_side: int) -> bool:
+func _is_valid_super_release_pose(tech_name: String, l_local_z: float, r_local_z: float, _avg_local_y: float, _avg_local_z: float, hands_dist: float, bb_side: int, l_cam_z: float = -999.0, r_cam_z: float = -999.0) -> bool:
+	var eff_l_z: float = maxf(l_local_z, l_cam_z)
+	var eff_r_z: float = maxf(r_local_z, r_cam_z)
 	match tech_name:
 		"final_flash":
-			return l_local_z >= 0.26 and r_local_z >= 0.26 and hands_dist <= 0.46
+			return eff_l_z >= 0.14 and eff_r_z >= 0.14 and hands_dist <= 0.72
 		"galick_ho", "kamehameha":
-			return l_local_z >= 0.26 and r_local_z >= 0.26 and hands_dist <= 0.42
+			return eff_l_z >= 0.15 and eff_r_z >= 0.15 and hands_dist <= 0.58
 		"big_bang":
-			var active_z: float = l_local_z if bb_side == 0 else r_local_z
-			return active_z >= 0.32
+			var active_z: float = eff_l_z if bb_side == 0 else eff_r_z
+			return active_z >= 0.16
 		"genkidama":
-			return avg_local_z >= 0.18 or avg_local_y <= 0.35
+			return true
 	return true
 
 
@@ -585,8 +590,9 @@ func _process_super_powers(delta: float) -> void:
 	var l_trig: bool = left_controller.get_float("trigger") > 0.65 or left_controller.is_button_pressed("trigger_click")
 	var r_trig: bool = right_controller.get_float("trigger") > 0.65 or right_controller.is_button_pressed("trigger_click")
 
-	# Si se está recargando Ki o se sostienen ambos gatillos, cancelar o no entrar a Super Poder
-	if is_charging_ki or ki_prep_phase or (l_trig and r_trig):
+	# Si se está recargando Ki, cancelar o bloquear entrada; no cancelar CHARGING activo por rozar ambos gatillos
+	var block_super_entry: bool = is_charging_ki or (current_super_state == SuperPowerState.IDLE and (ki_prep_phase or (l_trig and r_trig)))
+	if block_super_entry:
 		if current_super_state != SuperPowerState.IDLE:
 			_reset_super_state()
 		candidate_super_tech = ""
@@ -623,6 +629,8 @@ func _process_super_powers(delta: float) -> void:
 	var r_local_y: float = r_rel.y
 	var l_local_z: float = l_rel.dot(torso_fwd)
 	var r_local_z: float = r_rel.dot(torso_fwd)
+	var l_cam_z: float = l_rel.dot(cam_fwd)
+	var r_cam_z: float = r_rel.dot(cam_fwd)
 	var avg_local_x: float = (l_local_x + r_local_x) * 0.5
 	var avg_local_y: float = (l_local_y + r_local_y) * 0.5
 	var avg_local_z: float = (l_local_z + r_local_z) * 0.5
@@ -801,7 +809,7 @@ func _process_super_powers(delta: float) -> void:
 
 		# --- FASE 1 EN CURSO: MANTENIMIENTO DE CARGA Y EVALUACIÓN DE SALIDA ---
 		var bb_side: int = int(gesture_tree.get("big_bang_hand")) if gesture_tree else (0 if l_grip else 1)
-		var active_grip = l_grip if bb_side == 0 else r_grip
+		var active_grip: bool = l_grip if bb_side == 0 else r_grip
 
 		var buttons_held: bool = false
 		if super_power_type == "big_bang":
@@ -810,7 +818,7 @@ func _process_super_powers(delta: float) -> void:
 			buttons_held = l_grip or r_grip
 
 		# Tiempo mínimo de carga requerida para que la Fase 1 quede LISTA y permita el disparo
-		var min_fire_time = 0.7
+		var min_fire_time: float = 0.7
 		match super_power_type:
 			"final_flash": min_fire_time = 1.0
 			"galick_ho": min_fire_time = 0.7
@@ -818,27 +826,56 @@ func _process_super_powers(delta: float) -> void:
 			"kamehameha": min_fire_time = 0.8
 			"genkidama": min_fire_time = 1.2
 
+		# Evaluar continuamente postura de Fase 2 con latch + ventana de gracia al soltar
+		var in_phase2_now: bool = _is_valid_super_release_pose(super_power_type, l_local_z, r_local_z, avg_local_y, avg_local_z, hands_dist, bb_side, l_cam_z, r_cam_z)
+		if super_charge_timer >= min_fire_time:
+			if in_phase2_now:
+				super_phase2_latched = true
+				super_phase2_grace_timer = 0.75
+				if not super_phase2_ready_notified:
+					super_phase2_ready_notified = true
+					_pulse_haptic(left_controller, 120.0, 0.75, 0.10)
+					_pulse_haptic(right_controller, 120.0, 0.75, 0.10)
+					if gesture_tree and gesture_tree.has_signal("phase_changed"):
+						gesture_tree.emit_signal("phase_changed", "🔥 ¡FASE 2 LISTA! SUELTA EL BOTÓN GRIP PARA LANZAR %s" % super_power_type.to_upper())
+			else:
+				if super_phase2_grace_timer > 0.0:
+					super_phase2_grace_timer = maxf(super_phase2_grace_timer - delta, 0.0)
+					if super_phase2_grace_timer <= 0.0:
+						super_phase2_latched = false
+						super_phase2_ready_notified = false
+
 		# Pulso háptico e indicación de "FASE 1 LISTA" en el instante exacto en que alcanza la carga mínima
 		if super_charge_timer >= min_fire_time:
 			if not super_locked_haptic:
 				super_locked_haptic = true
 				_pulse_haptic(left_controller, 180.0, 1.0, 0.20)
 				_pulse_haptic(right_controller, 180.0, 1.0, 0.20)
-				if gesture_tree and gesture_tree.has_signal("phase_changed"):
-					gesture_tree.emit_signal("phase_changed", "¡%s LISTO! (EXTIENDE Y SUELTA PARA DISPARAR)" % super_power_type.to_upper())
-				if gesture_tree and gesture_tree.has_signal("gesture_logged"):
-					gesture_tree.emit_signal("gesture_logged", "¡%s listo! Extiende las manos al frente y suelta los grips para disparar." % super_power_type.capitalize(), "success")
-			elif int(super_charge_timer * 10) % 5 == 0:
+				if not super_phase2_ready_notified:
+					if gesture_tree and gesture_tree.has_signal("phase_changed"):
+						gesture_tree.emit_signal("phase_changed", "¡%s LISTO! (EXTIENDE Y SUELTA PARA DISPARAR)" % super_power_type.to_upper())
+					if gesture_tree and gesture_tree.has_signal("gesture_logged"):
+						gesture_tree.emit_signal("gesture_logged", "¡%s listo! Extiende las manos al frente y suelta los grips para disparar." % super_power_type.capitalize(), "success")
+			elif not super_phase2_latched and int(super_charge_timer * 10) % 5 == 0:
 				if gesture_tree and gesture_tree.has_signal("phase_changed"):
 					gesture_tree.emit_signal("phase_changed", "¡%s MÁXIMA ENERGÍA! (EXTIENDE Y SUELTA)" % super_power_type.to_upper())
+
+		var in_phase2_window: bool = in_phase2_now or super_phase2_latched or super_phase2_grace_timer > 0.0
+
+		# En Fase 2 lista, disparar inmediatamente al soltar Grip (soporta liberación asincrónica de dos manos)
+		if super_charge_timer >= min_fire_time and in_phase2_window:
+			var grip_released: bool = (not active_grip) if super_power_type == "big_bang" else (not (l_grip and r_grip))
+			if grip_released:
+				_execute_super_fire(super_power_type)
+				return
 
 		# POSIBILIDAD A: Mientras los botones sigan apretados, permanecer en Fase 1 concentrando energía
 		if buttons_held:
 			return
 
-		# POSIBILIDAD B: Se soltaron los botones -> Validar Fase 2 (postura de disparo hacia adelante)
+		# POSIBILIDAD B: Se soltaron los botones -> Validar Fase 2 (postura o ventana latch/gracia)
 		if super_charge_timer >= min_fire_time:
-			if _is_valid_super_release_pose(super_power_type, l_local_z, r_local_z, avg_local_y, avg_local_z, hands_dist, bb_side):
+			if in_phase2_window:
 				_execute_super_fire(super_power_type)
 			else:
 				if gesture_tree:
@@ -881,6 +918,10 @@ func _execute_super_fire(tech_name: String) -> void:
 		if super_fatigue_timer > 0.0:
 			ki_req *= 1.25
 
+		# En estado Zenkai, limitar el costo para drenar el Ki disponible sin sacrificar mitad del BP justo antes del impacto
+		if player.is_in_zenkai_state:
+			ki_req = minf(ki_req, maxf(player.current_ki, 30.0))
+
 		var res: Dictionary = player.consume_ki_or_life_force(ki_req)
 		if res.get("is_life_sacrifice", false):
 			var lost_np = int(res.get("sacrificed_np", 0.0))
@@ -900,6 +941,7 @@ func _execute_super_fire(tech_name: String) -> void:
 
 	if gesture_tree:
 		gesture_tree._hide_aim_reticle()
+		gesture_tree.set("_ki_already_consumed_by_hybrid", true)
 		gesture_tree._trigger_action(tech_name)
 		gesture_tree._reset_to_idle()
 
@@ -929,6 +971,9 @@ func _reset_super_state() -> void:
 	super_power_type = ""
 	super_charge_timer = 0.0
 	super_locked_haptic = false
+	super_phase2_latched = false
+	super_phase2_grace_timer = 0.0
+	super_phase2_ready_notified = false
 	candidate_super_tech = ""
 	candidate_hold_timer = 0.0
 	var player = gesture_tree._get_player_instance() if gesture_tree else null

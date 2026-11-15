@@ -349,6 +349,9 @@ func _resolve_deflection() -> void:
 	is_active = false
 	Engine.time_scale = 1.0
 
+	if attacker and is_instance_valid(attacker) and bool(attacker.get("is_comeback_zenkai")) and attacker.has_method("notify_attack_failed"):
+		attacker.notify_attack_failed()
+
 	# Recompensas de maestría marcial
 	if defender and is_instance_valid(defender):
 		if defender.has_method("recharge_ki"):
@@ -384,6 +387,9 @@ func _resolve_containment_block() -> void:
 	is_active = false
 	Engine.time_scale = 1.0
 
+	if attacker and is_instance_valid(attacker) and bool(attacker.get("is_comeback_zenkai")) and attacker.has_method("notify_attack_failed"):
+		attacker.notify_attack_failed()
+
 	# Mitiga el 80% del daño a cambio de Ki de resistencia
 	var mitigated_damage = base_damage * 0.20
 	if defender and is_instance_valid(defender):
@@ -413,6 +419,9 @@ func _resolve_evasion() -> void:
 	state = BeamState.EVADED
 	is_active = false
 	Engine.time_scale = 1.0
+
+	if attacker and is_instance_valid(attacker) and bool(attacker.get("is_comeback_zenkai")) and attacker.has_method("notify_attack_failed"):
+		attacker.notify_attack_failed()
 
 	if defender and is_instance_valid(defender) and defender.has_method("consume_ki"):
 		defender.consume_ki(25.0)
@@ -465,7 +474,8 @@ func _resolve_direct_hit() -> void:
 
 	print("[SuperBeamSequence] 💥 ¡IMPACTO DIRECTO DE SUPER HAZ! %s colisionó con el defensor (Daño: %.0f NP)." % [power_name, final_damage])
 
-	if attacker and is_instance_valid(attacker) and bool(attacker.get("is_in_zenkai_state")) and defender and is_instance_valid(defender) and not bool(defender.get("is_blocking")):
+	var atk_in_zenkai: bool = bool(attacker and is_instance_valid(attacker) and (attacker.get("is_in_zenkai_state") or attacker.get("is_comeback_zenkai")))
+	if atk_in_zenkai and defender and is_instance_valid(defender):
 		if attacker.has_method("trigger_zenkai_match_finish"):
 			attacker.trigger_zenkai_match_finish(attacker, defender, power_name)
 
