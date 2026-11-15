@@ -220,7 +220,12 @@ func setup_character() -> void:
 							skeleton.set_bone_pose_scale(i, Vector3.ZERO)
 
 					var cam = get_parent().get_node_or_null("XRCamera3D") if get_parent() else null
-					torso_yaw = cam.rotation.y if cam else 0.0
+					if cam:
+						var cam_fwd_local: Vector3 = -cam.transform.basis.z
+						var cam_fwd_xz: Vector3 = Vector3(cam_fwd_local.x, 0.0, cam_fwd_local.z)
+						torso_yaw = atan2(-cam_fwd_xz.x, -cam_fwd_xz.z) if cam_fwd_xz.length_squared() > 0.0001 else cam.rotation.y
+					else:
+						torso_yaw = 0.0
 							
 					print("[CharacterInstance] Cuerpo 1ra persona configurado. Head: %d, Neck: %d, ArmIK: [L:%d, R:%d]" % [head_bone_idx, neck_bone_idx, left_arm_idx, right_arm_idx])
 				else:
@@ -462,8 +467,12 @@ func _process(delta: float) -> void:
 	if is_player and is_instance_valid(body_mesh_instance):
 		var camera = get_parent().get_node_or_null("XRCamera3D")
 		if camera:
-			# 1. Torso Deadzone: El torso no gira bruscamente; solo cuando la cabeza gira más de 35 grados
-			var cam_yaw: float = camera.rotation.y
+			# 1. Torso Deadzone: El torso no gira bruscamente; solo cuando la cabeza gira más de 35 grados (proyección XZ sin gimbal lock)
+			var cam_fwd_local: Vector3 = -camera.transform.basis.z
+			var cam_fwd_xz: Vector3 = Vector3(cam_fwd_local.x, 0.0, cam_fwd_local.z)
+			var cam_yaw: float = torso_yaw
+			if cam_fwd_xz.length_squared() > 0.0001:
+				cam_yaw = atan2(-cam_fwd_xz.x, -cam_fwd_xz.z)
 			var yaw_diff: float = wrapf(cam_yaw - torso_yaw, -PI, PI)
 			var max_neck_angle: float = deg_to_rad(35.0)
 			if abs(yaw_diff) > max_neck_angle:
@@ -2354,7 +2363,7 @@ func calculate_melee_attack_count(p_attacker: Node3D, p_defender: Node3D) -> int
 
 
 ## Activa la secuencia cinemática y Bullet-Time de Super Ataque de Ki
-func start_super_beam_sequence(tech_name: String, col: Color, dmg: float, tier_level: int = 3) -> void:
+func start_super_beam_sequence(tech_name: String, col: Color, dmg: float, tier_level: int = 3, aim_dir: Vector3 = Vector3.ZERO) -> void:
 	var opp = _get_opponent()
 	if not opp or not is_instance_valid(opp):
 		return
@@ -2373,7 +2382,7 @@ func start_super_beam_sequence(tech_name: String, col: Color, dmg: float, tier_l
 	seq.name = "SuperBeamSequenceController"
 	active_beam_sequence = seq
 	get_tree().current_scene.add_child(seq)
-	seq.setup(self, opp, tech_name, col, dmg, tier_level)
+	seq.setup(self, opp, tech_name, col, dmg, tier_level, aim_dir)
 	seq.sequence_completed.connect(func(res: String, final_dmg: float):
 		is_in_beam_sequence = false
 		is_firing_beam = false

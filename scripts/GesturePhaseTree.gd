@@ -116,6 +116,7 @@ var aim_reticle_mat: StandardMaterial3D = null
 var aim_reticle_texture: ImageTexture = null
 var current_aim_target: Vector3 = Vector3.ZERO
 var current_aim_locked: bool = false
+var last_super_launch_dir: Vector3 = Vector3.ZERO
 
 # --- Esferas Visuales de Carga de Ki Blast en la Palma ---
 var ki_blast_sphere_left: MeshInstance3D = null
@@ -603,7 +604,7 @@ func _process(delta: float) -> void:
 			_feed_trie(detected_gesture)
 	else:
 		# Timeout de seguridad para estados intermedios cuando no hay gestos activos
-		if current_node != gesture_tree and not is_charging_ki and not is_charging_ki_blast_left and not is_charging_ki_blast_right:
+		if current_node != gesture_tree and not is_charging_ki and not is_charging_ki_blast_left and not is_charging_ki_blast_right and not is_charging_kamehameha and not is_charging_genkidama and not is_charging_galick_ho and not is_charging_final_flash and not is_charging_big_bang:
 			gesture_timer += delta
 			if gesture_timer >= 2.5:
 				_cancel_action("Tiempo límite de gesto expirado (2.5s)")
@@ -1300,23 +1301,14 @@ func _get_hand_projectile_origin(hand_side: int) -> Dictionary:
 
 	# 1.1 Si los mandos físicos de Meta Quest están presentes y activos
 	if ctrl and ctrl.is_inside_tree() and ctrl.get_is_active():
-		var spawn_p = ctrl.global_position
-		var final_dir = default_dir
-		if current_aim_target != Vector3.ZERO and current_aim_target.distance_squared_to(spawn_p) > 0.1:
-			final_dir = (current_aim_target - spawn_p).normalized()
-		else:
-			# Auto-apuntado dinámico automático si apunta hacia el oponente en un cono suave (~55°)
-			var opp = _get_opponent_instance()
-			if opp and is_instance_valid(opp):
-				var opp_chest = opp.global_position + Vector3(0, 1.2, 0)
-				var to_opp = (opp_chest - spawn_p).normalized()
-				var hand_fwd = (spawn_p - camera.global_position).normalized() if camera else default_dir
-				if hand_fwd.dot(to_opp) > 0.55:
-					final_dir = to_opp
-				elif camera:
-					final_dir = hand_fwd
-			elif camera:
-				final_dir = (ctrl.global_position - camera.global_position).normalized()
+		var spawn_p: Vector3 = ctrl.global_position
+		var body_s: float = xr_origin.scale.y if (xr_origin and xr_origin.is_inside_tree()) else 1.0
+		var chest_origin: Vector3 = camera.global_position - Vector3(0.0, 0.25 * body_s, 0.0) if (camera and camera.is_inside_tree()) else spawn_p
+		var arm_vec: Vector3 = spawn_p - chest_origin
+		var chest_to_hand: Vector3 = arm_vec.normalized() if arm_vec.length_squared() > 0.001 else default_dir
+		var ctrl_fwd: Vector3 = (-ctrl.global_transform.basis.z).normalized()
+		var raw_hand_dir: Vector3 = (chest_to_hand * 0.65 + ctrl_fwd * 0.35).normalized()
+		var final_dir: Vector3 = apply_soft_aim_assist(spawn_p, raw_hand_dir, false)
 		return { "pos": spawn_p + final_dir * 0.12, "dir": final_dir }
 
 	# 2. Si hay Hand Tracking óptico (26 joints)
@@ -1324,24 +1316,16 @@ func _get_hand_projectile_origin(hand_side: int) -> Dictionary:
 	if tracker:
 		var flags = tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_PALM)
 		if (flags & XRHandTracker.HAND_JOINT_FLAG_POSITION_VALID):
-			var palm_local = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM).origin
+			var palm_local: Vector3 = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM).origin
 			if xr_origin and xr_origin.is_inside_tree():
-				var palm_global = xr_origin.global_transform * palm_local
-				var final_dir = default_dir
-				if current_aim_target != Vector3.ZERO and current_aim_target.distance_squared_to(palm_global) > 0.1:
-					final_dir = (current_aim_target - palm_global).normalized()
-				else:
-					var opp = _get_opponent_instance()
-					if opp and is_instance_valid(opp):
-						var opp_chest = opp.global_position + Vector3(0, 1.2, 0)
-						var to_opp = (opp_chest - palm_global).normalized()
-						var hand_fwd = (palm_global - camera.global_position).normalized() if camera else default_dir
-						if hand_fwd.dot(to_opp) > 0.55:
-							final_dir = to_opp
-						elif camera:
-							final_dir = hand_fwd
-					elif camera:
-						final_dir = (palm_global - camera.global_position).normalized()
+				var palm_global: Vector3 = xr_origin.global_transform * palm_local
+				var palm_xform: Transform3D = xr_origin.global_transform * tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM)
+				var chest_origin: Vector3 = camera.global_position - Vector3(0.0, 0.25 * xr_origin.scale.y, 0.0) if (camera and camera.is_inside_tree()) else palm_global
+				var arm_vec: Vector3 = palm_global - chest_origin
+				var chest_to_hand: Vector3 = arm_vec.normalized() if arm_vec.length_squared() > 0.001 else default_dir
+				var palm_out: Vector3 = (-palm_xform.basis.y).normalized()
+				var raw_hand_dir: Vector3 = (chest_to_hand * 0.65 + palm_out * 0.35).normalized() if palm_out.dot(chest_to_hand) > 0.0 else chest_to_hand
+				var final_dir: Vector3 = apply_soft_aim_assist(palm_global, raw_hand_dir, false)
 				return { "pos": palm_global + final_dir * 0.12, "dir": final_dir }
 
 	# 3. Fallback: proyectar desde el lateral correspondiente al lado que dispara
@@ -1367,38 +1351,61 @@ func _get_special_projectile_origin(power_name: String) -> Dictionary:
 	var l_ctrl: XRController3D = left_controller_node if (left_controller_node and left_controller_node.is_inside_tree()) else (xr_origin.get_node_or_null("LeftHand") if (xr_origin and xr_origin.is_inside_tree()) else null)
 	var r_ctrl: XRController3D = right_controller_node if (right_controller_node and right_controller_node.is_inside_tree()) else (xr_origin.get_node_or_null("RightHand") if (xr_origin and xr_origin.is_inside_tree()) else null)
 
+	var launch_override: Vector3 = last_super_launch_dir
+	last_super_launch_dir = Vector3.ZERO
+	var body_s: float = xr_origin.scale.y if (xr_origin and xr_origin.is_inside_tree()) else 1.0
+	var chest_origin: Vector3 = camera.global_position - Vector3(0.0, 0.28 * body_s, 0.0) if (camera and camera.is_inside_tree()) else default_pos
+
 	# Caso Genkidama: Se lanza desde arriba de la cabeza / brazos alzados
 	if power_name == "Genkidama":
-		var genki_pos = default_pos + Vector3(0, 1.8, 0)
+		var genki_pos: Vector3 = default_pos + Vector3(0, 1.8 * body_s, 0)
 		if l_ctrl and r_ctrl and l_ctrl.is_inside_tree() and r_ctrl.is_inside_tree() and l_ctrl.get_is_active() and r_ctrl.get_is_active():
-			genki_pos = (l_ctrl.global_position + r_ctrl.global_position) * 0.5 + Vector3(0, 0.6, 0)
-		return { "pos": genki_pos, "dir": default_dir }
+			genki_pos = (l_ctrl.global_position + r_ctrl.global_position) * 0.5 + Vector3(0, 0.6 * body_s, 0)
+		var raw_genki_dir: Vector3 = launch_override if launch_override.length_squared() > 0.001 else default_dir
+		var genki_dir: Vector3 = apply_soft_aim_assist(genki_pos, raw_genki_dir, true)
+		return { "pos": genki_pos, "dir": genki_dir }
 
 	# Caso Kamehameha / Galick Ho / Final Flash / Big Bang: Sale apuntado dinámicamente desde las manos
 	if l_ctrl and r_ctrl and l_ctrl.is_inside_tree() and r_ctrl.is_inside_tree() and l_ctrl.get_is_active() and r_ctrl.get_is_active():
-		var aim_pos = (l_ctrl.global_position + r_ctrl.global_position) * 0.5
+		var aim_pos: Vector3 = (l_ctrl.global_position + r_ctrl.global_position) * 0.5
+		var raw_dir: Vector3 = default_dir
 		if power_name == "Big Bang Attack":
-			var bb_ctrl = l_ctrl if big_bang_hand == 0 else r_ctrl
+			var bb_ctrl: XRController3D = l_ctrl if big_bang_hand == 0 else r_ctrl
 			aim_pos = bb_ctrl.global_position
-		
-		var final_dir = default_dir
-		if current_aim_target != Vector3.ZERO and current_aim_target.distance_squared_to(aim_pos) > 0.1:
-			final_dir = (current_aim_target - aim_pos).normalized()
-		elif camera:
-			final_dir = (aim_pos - camera.global_position).normalized()
+			if launch_override.length_squared() > 0.001:
+				raw_dir = launch_override
+			else:
+				var arm_v: Vector3 = aim_pos - chest_origin
+				var chest_dir: Vector3 = arm_v.normalized() if arm_v.length_squared() > 0.001 else default_dir
+				var ctrl_fwd: Vector3 = (-bb_ctrl.global_transform.basis.z).normalized()
+				raw_dir = (chest_dir * 0.65 + ctrl_fwd * 0.35).normalized()
+		else:
+			if launch_override.length_squared() > 0.001:
+				raw_dir = launch_override
+			else:
+				var arm_v: Vector3 = aim_pos - chest_origin
+				var chest_dir: Vector3 = arm_v.normalized() if arm_v.length_squared() > 0.001 else default_dir
+				var hands_fwd: Vector3 = ((-l_ctrl.global_transform.basis.z) + (-r_ctrl.global_transform.basis.z)).normalized()
+				raw_dir = (chest_dir * 0.75 + hands_fwd * 0.25).normalized()
+
+		var final_dir: Vector3 = apply_soft_aim_assist(aim_pos, raw_dir, true)
 		return { "pos": aim_pos + final_dir * 0.18, "dir": final_dir }
 
 	if left_tracker and right_tracker:
 		var l_flags = left_tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_PALM)
 		var r_flags = right_tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_PALM)
 		if (l_flags & XRHandTracker.HAND_JOINT_FLAG_POSITION_VALID) and (r_flags & XRHandTracker.HAND_JOINT_FLAG_POSITION_VALID):
-			var l_local = left_tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM).origin
-			var r_local = right_tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM).origin
+			var l_local: Vector3 = left_tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM).origin
+			var r_local: Vector3 = right_tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM).origin
 			if xr_origin:
-				var center_global = xr_origin.global_transform * ((l_local + r_local) * 0.5)
-				return { "pos": center_global + default_dir * 0.15, "dir": default_dir }
+				var center_global: Vector3 = xr_origin.global_transform * ((l_local + r_local) * 0.5)
+				var raw_tracker_dir: Vector3 = launch_override if launch_override.length_squared() > 0.001 else ((center_global - chest_origin).normalized() if center_global.distance_squared_to(chest_origin) > 0.001 else default_dir)
+				var final_tracker_dir: Vector3 = apply_soft_aim_assist(center_global, raw_tracker_dir, true)
+				return { "pos": center_global + final_tracker_dir * 0.15, "dir": final_tracker_dir }
 
-	return { "pos": default_pos, "dir": default_dir }
+	var fallback_raw: Vector3 = launch_override if launch_override.length_squared() > 0.001 else default_dir
+	var fallback_final: Vector3 = apply_soft_aim_assist(default_pos, fallback_raw, true)
+	return { "pos": default_pos, "dir": fallback_final }
 
 ## Instancia procedimentalmente un proyectil de energía Ki 3D brillante que vuela e impacta dinámicamente
 func _spawn_ki_blast_projectile(hand_side: int, is_charged: bool) -> void:
@@ -1588,7 +1595,7 @@ func _spawn_special_projectile(power: Resource) -> void:
 	if is_beam_tech and player and player.has_method("start_super_beam_sequence"):
 		var opp = player._get_opponent()
 		if opp and is_instance_valid(opp):
-			player.start_super_beam_sequence(power.power_name, energy_color, base_dmg, tier_val)
+			player.start_super_beam_sequence(power.power_name, energy_color, base_dmg, tier_val, velocity_dir)
 			return
 	
 	var projectile = Node3D.new()
@@ -2377,43 +2384,113 @@ func _ensure_aim_reticle() -> void:
 		add_child(aim_reticle_node)
 
 
-func _update_aim_reticle(origin_pos: Vector3, aim_dir: Vector3, color: Color) -> void:
+func _update_aim_reticle(origin_pos: Vector3, aim_dir: Vector3, color: Color, is_super_reticle: bool = true) -> void:
 	_ensure_aim_reticle()
 	if not aim_reticle_node or not is_instance_valid(aim_reticle_node):
 		return
-	
+
 	aim_reticle_node.visible = true
-	
-	var camera = get_viewport().get_camera_3d() if get_viewport() else null
-	var cam_pos = camera.global_position if camera else origin_pos
-	
-	var opp = _get_opponent_instance()
-	var hit_pos = origin_pos + aim_dir * 12.0
-	var is_locked = false
-	
-	if opp and is_instance_valid(opp):
-		var opp_chest = opp.global_position + Vector3(0, 1.2, 0)
-		var to_opp = (opp_chest - origin_pos).normalized()
-		# Si la línea de tiro apunta dentro de un cono de ~35 grados hacia el oponente: Lock-On directo
-		if aim_dir.dot(to_opp) > 0.80:
-			hit_pos = opp_chest
-			is_locked = true
-			
+
+	var camera: Camera3D = get_viewport().get_camera_3d() if get_viewport() else null
+	var cam_pos: Vector3 = camera.global_position if camera else origin_pos
+
+	var assisted_dir: Vector3 = apply_soft_aim_assist(origin_pos, aim_dir, is_super_reticle)
+	var zone: int = get_aim_assist_zone(origin_pos, aim_dir, is_super_reticle)
+
+	var opp: Node3D = _get_opponent_instance() as Node3D
+	var target_dist: float = 12.0
+	if opp != null and is_instance_valid(opp):
+		var opp_chest: Vector3 = opp.global_position + Vector3(0.0, 1.2, 0.0)
+		target_dist = clampf(origin_pos.distance_to(opp_chest), 2.5, 40.0)
+
+	var hit_pos: Vector3 = origin_pos + assisted_dir * target_dist
+	var is_locked: bool = (zone == 2)
+
 	current_aim_target = hit_pos
 	current_aim_locked = is_locked
 	aim_reticle_node.global_position = hit_pos
-	
-	# Retícula roja brillante cuando está bloqueada sobre el enemigo; si no, color de la técnica
+
+	# Zona 2: rojo lock-on; Zona 1: ámbar asistencia parcial; Zona 0: color tenue de la técnica
 	if aim_reticle_mat:
-		aim_reticle_mat.albedo_color = Color(1.0, 0.25, 0.2, 1.0) if is_locked else color
-	
+		if zone == 2:
+			aim_reticle_mat.albedo_color = Color(1.0, 0.25, 0.2, 1.0)
+		elif zone == 1:
+			aim_reticle_mat.albedo_color = Color(1.0, 0.72, 0.15, 0.95)
+		else:
+			aim_reticle_mat.albedo_color = Color(color.r, color.g, color.b, 0.65)
+
 	# Escala dinámica adaptada a la distancia para que siempre se vea de tamaño ideal en el visor
-	var dist = (hit_pos - cam_pos).length()
-	var pulse = 1.0 + sin(Time.get_ticks_msec() * 0.02) * (0.12 if is_locked else 0.05)
-	var scale_val = clamp(dist * 0.085, 0.5, 2.5) * pulse
+	var dist: float = (hit_pos - cam_pos).length()
+	var pulse: float = 1.0 + sin(Time.get_ticks_msec() * 0.02) * (0.12 if is_locked else 0.05)
+	var scale_val: float = clampf(dist * 0.085, 0.5, 2.5) * pulse
 	aim_reticle_mesh.scale = Vector3(scale_val, scale_val, scale_val)
 
 
 func _hide_aim_reticle() -> void:
 	if aim_reticle_node and is_instance_valid(aim_reticle_node):
 		aim_reticle_node.visible = false
+
+
+func sync_controller_gesture_state(node_key: String) -> void:
+	if node_key == "IDLE" or node_key.is_empty():
+		current_node = gesture_tree
+		gesture_timer = 0.0
+	elif gesture_tree.has(node_key):
+		current_node = gesture_tree[node_key]
+		gesture_timer = 0.0
+
+
+func get_aim_assist_zone(origin_pos: Vector3, raw_aim_dir: Vector3, is_super: bool = true) -> int:
+	var dir_len_sq: float = raw_aim_dir.length_squared()
+	if dir_len_sq < 0.0001:
+		return 0
+	var opp: Node3D = _get_opponent_instance() as Node3D
+	if opp == null or not is_instance_valid(opp):
+		return 0
+	var opp_chest: Vector3 = opp.global_position + Vector3(0.0, 1.2, 0.0)
+	var to_opp_vec: Vector3 = opp_chest - origin_pos
+	if to_opp_vec.length_squared() < 0.0001:
+		return 2
+	var aim_n: Vector3 = raw_aim_dir / sqrt(dir_len_sq)
+	var to_opp: Vector3 = to_opp_vec.normalized()
+	var d: float = aim_n.dot(to_opp)
+	if d >= 0.988:
+		return 2
+	var outer_dot: float = 0.940 if is_super else 0.960
+	if d >= outer_dot:
+		return 1
+	return 0
+
+
+func apply_soft_aim_assist(origin_pos: Vector3, raw_aim_dir: Vector3, is_super: bool = true) -> Vector3:
+	var dir_len_sq: float = raw_aim_dir.length_squared()
+	if dir_len_sq < 0.0001:
+		return Vector3.FORWARD
+	var aim_n: Vector3 = raw_aim_dir / sqrt(dir_len_sq)
+	var opp: Node3D = _get_opponent_instance() as Node3D
+	if opp == null or not is_instance_valid(opp):
+		return aim_n
+	var opp_chest: Vector3 = opp.global_position + Vector3(0.0, 1.2, 0.0)
+	var to_opp_vec: Vector3 = opp_chest - origin_pos
+	if to_opp_vec.length_squared() < 0.0001:
+		return aim_n
+	var to_opp: Vector3 = to_opp_vec.normalized()
+	var d: float = aim_n.dot(to_opp)
+	var assist_weight: float = 0.0
+	if is_super:
+		if d >= 0.988:
+			assist_weight = 0.75
+		elif d >= 0.940:
+			var u: float = clampf((d - 0.940) / (0.988 - 0.940), 0.0, 1.0)
+			assist_weight = 0.50 * (u * u * (3.0 - 2.0 * u))
+		else:
+			return aim_n
+	else:
+		if d >= 0.988:
+			assist_weight = 0.55
+		elif d >= 0.960:
+			var u: float = clampf((d - 0.960) / (0.988 - 0.960), 0.0, 1.0)
+			assist_weight = 0.40 * (u * u * (3.0 - 2.0 * u))
+		else:
+			return aim_n
+	return aim_n.slerp(to_opp, assist_weight).normalized()

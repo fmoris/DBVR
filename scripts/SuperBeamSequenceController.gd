@@ -41,6 +41,9 @@ var target_pos: Vector3 = Vector3.ZERO
 var beam_dir: Vector3 = Vector3.FORWARD
 var current_head_pos: Vector3 = Vector3.ZERO
 var prev_head_pos: Vector3 = Vector3.ZERO
+var fired_aim_dir: Vector3 = Vector3.ZERO
+var is_aimed_miss: bool = false
+var miss_target_pos: Vector3 = Vector3.ZERO
 
 # Nodos visuales del haz
 var beam_core_mesh: MeshInstance3D = null
@@ -114,7 +117,8 @@ func setup(
 	p_power_name: String,
 	p_color: Color,
 	p_base_damage: float,
-	p_tier: int = 3
+	p_tier: int = 3,
+	p_aim_dir: Vector3 = Vector3.ZERO
 ) -> void:
 	attacker = p_attacker
 	defender = p_defender
@@ -138,26 +142,55 @@ func setup(
 	reaction_duration = _calculate_adaptive_reaction_time()
 	time_left = reaction_duration
 
-	# 2. Calcular trayectorias dinámicas desde las manos del atacante
+	# 2. Calcular trayectorias dinámicas desde las manos del atacante y evaluar puntería real
 	start_pos = _get_attacker_hand_position()
-	target_pos = _get_defender_target_position()
+	var def_pos: Vector3 = _get_defender_target_position()
+	var to_def_vec: Vector3 = def_pos - start_pos
+	var dist_to_def: float = maxf(to_def_vec.length(), 0.1)
+	var to_def_dir: Vector3 = to_def_vec / dist_to_def
+
+	if p_aim_dir.length_squared() > 0.01:
+		fired_aim_dir = p_aim_dir.normalized()
+		var dot_def: float = fired_aim_dir.dot(to_def_dir)
+		var closest_pt: Vector3 = start_pos + fired_aim_dir * (dist_to_def * maxf(dot_def, 0.0))
+		var perp_dist: float = closest_pt.distance_to(def_pos)
+		if dot_def > 0.25 and perp_dist <= 1.15:
+			is_aimed_miss = false
+			target_pos = def_pos.lerp(closest_pt, 0.35)
+			fired_aim_dir = (target_pos - start_pos).normalized()
+		else:
+			is_aimed_miss = true
+			miss_target_pos = start_pos + fired_aim_dir * maxf(dist_to_def + 10.0, 24.0)
+			if miss_target_pos.y < 0.15:
+				miss_target_pos.y = 0.15
+			target_pos = miss_target_pos
+	else:
+		is_aimed_miss = false
+		target_pos = def_pos
+		fired_aim_dir = to_def_dir
+
 	beam_dir = (target_pos - start_pos).normalized()
 	current_head_pos = start_pos
 	prev_head_pos = start_pos
 
-	# 3. Aplicar dilatación temporal (Bullet-Time)
-	Engine.time_scale = 0.18
+	# 3. Aplicar dilatación temporal (Bullet-Time normal en impacto o vuelo rápido en tiro fallado)
+	if is_aimed_miss:
+		reaction_duration = 0.65
+		time_left = reaction_duration
+		Engine.time_scale = 0.65
+	else:
+		Engine.time_scale = 0.18
 
 	_build_visual_beam()
 	_build_reticle_and_hud()
 	_build_audio()
 
-	# Si el defensor es la IA, evaluar su respuesta anticipada
-	if defender and not defender.get("is_player"):
+	# Si el defensor es la IA y el tiro va al cuerpo, evaluar su respuesta anticipada
+	if defender and not defender.get("is_player") and not is_aimed_miss:
 		_plan_ai_defense_reaction()
 
-	print("[SuperBeamSequence] ⚡ ¡SECUENCIA DE SUPER HAZ INICIADA! %s -> %s (Ventana Bullet-Time: %.2fs)" % [
-		power_name, defender.name if defender else "Rival", reaction_duration
+	print("[SuperBeamSequence] ⚡ ¡SECUENCIA DE SUPER HAZ INICIADA! %s -> %s (Miss: %s | Ventana Bullet-Time: %.2fs)" % [
+		power_name, defender.name if defender else "Rival", str(is_aimed_miss), reaction_duration
 	])
 
 
@@ -172,7 +205,13 @@ func _process(delta: float) -> void:
 
 		# Anclar el origen del rayo en tiempo real a las manos del atacante
 		start_pos = _get_attacker_hand_position()
-		target_pos = _get_defender_target_position()
+		if is_aimed_miss:
+			target_pos = miss_target_pos
+		else:
+			var def_now: Vector3 = _get_defender_target_position()
+			var d_now: float = start_pos.distance_to(def_now)
+			var aimed_pt: Vector3 = start_pos + fired_aim_dir * d_now
+			target_pos = def_now.lerp(aimed_pt, 0.30)
 		beam_dir = (target_pos - start_pos).normalized()
 
 		# El rayo crece continuamente desde las manos hacia el objetivo
@@ -184,19 +223,21 @@ func _process(delta: float) -> void:
 		_update_hud(time_left)
 		_pulse_firing_haptics()
 
-		# Actualizar velocidad de los mandos del defensor
-		_update_defender_hand_velocities(real_delta)
-
-		# Evaluar respuestas defensivas del defensor
-		if defender and defender.get("is_player"):
-			_check_player_defense_options()
-		else:
-			_check_ai_defense_trigger()
+		# Evaluar respuestas defensivas únicamente cuando el ataque va dirigido al defensor
+		if not is_aimed_miss:
+			_update_defender_hand_velocities(real_delta)
+			if defender and defender.get("is_player"):
+				_check_player_defense_options()
+			else:
+				_check_ai_defense_trigger()
 
 		# Detección de colisión: cuando la cabeza del rayo alcanza el objetivo, expira el tiempo o toca el suelo
 		var dist_to_target = current_head_pos.distance_to(target_pos)
 		if dist_to_target <= 0.85 or time_left <= 0.0 or beam_progress >= 0.98 or current_head_pos.y <= 0.15:
-			_resolve_direct_hit()
+			if is_aimed_miss:
+				_resolve_aimed_miss()
+			else:
+				_resolve_direct_hit()
 
 	elif state == BeamState.IMPACTING:
 		impact_sustain_timer -= delta
@@ -438,6 +479,27 @@ func _resolve_evasion() -> void:
 	tw.tween_callback(func(): _cleanup_and_finish("evaded", 0.0))
 
 
+func _resolve_aimed_miss() -> void:
+	if state == BeamState.IMPACTING or state == BeamState.HIT_CONFIRMED or state == BeamState.EVADED:
+		return
+	state = BeamState.EVADED
+	is_active = false
+	Engine.time_scale = 1.0
+
+	if attacker and is_instance_valid(attacker) and bool(attacker.get("is_comeback_zenkai")) and attacker.has_method("notify_attack_failed"):
+		attacker.notify_attack_failed()
+
+	_spawn_spark_at(current_head_pos, energy_color)
+	if current_head_pos.y <= 3.0:
+		_spawn_plasma_crater(Vector3(current_head_pos.x, 0.12, current_head_pos.z), 2.0, energy_color)
+
+	if attacker and is_instance_valid(attacker) and attacker.has_method("_log_combat_event"):
+		attacker._log_combat_event("💨 ¡%s pasó de largo! Apunta tus manos hacia el rival al lanzar en Fase 2." % power_name, "warning")
+
+	print("[SuperBeamSequence] 💨 ¡TIRO FALLADO POR PUNTERÍA! %s viajó desviado sin impactar al rival." % power_name)
+	_cleanup_and_finish("missed", 0.0)
+
+
 func _resolve_direct_hit() -> void:
 	if state == BeamState.IMPACTING or state == BeamState.HIT_CONFIRMED:
 		return
@@ -606,6 +668,11 @@ func _update_hud(rem_time: float) -> void:
 	else:
 		var target_head = defender.global_position + Vector3(0.0, 1.6, 0.0) if defender else global_position
 		alert_label.global_position = target_head + Vector3(0.0, 0.45, 0.0)
+
+	if is_aimed_miss:
+		alert_label.modulate = Color(1.0, 0.72, 0.25)
+		alert_label.text = "💨 ¡%s DESVIADO!\nApunta las manos al rival al lanzar" % power_name.to_upper()
+		return
 
 	var pct = clampf(rem_time / maxf(reaction_duration, 0.01), 0.0, 1.0)
 	var bar_len = int(pct * 10.0)
