@@ -119,6 +119,8 @@ func _physics_process(delta: float) -> void:
 	if host.is_ragdoll_active or host.is_flying_to_opponent or host.is_knocked_back or host.wall_stick_timer > 0.0:
 		if host.is_charging_ki and current_state != AIState.KI_RECHARGE:
 			host.is_charging_ki = false
+		if host.procedural_animator and host.procedural_animator.has_method("set_ki_recharge_phase"):
+			host.procedural_animator.set_ki_recharge_phase(0)
 		return
 
 	# Buscar jugador si no está asignado
@@ -244,6 +246,8 @@ func _evaluate_tactical_transition(dist: float) -> void:
 ## Estado 2: Recarga táctica de Ki
 func _process_state_ki_recharge(delta: float) -> void:
 	host.is_charging_ki = true
+	if host.procedural_animator and host.procedural_animator.has_method("set_ki_recharge_phase"):
+		host.procedural_animator.set_ki_recharge_phase(1 if state_timer < 0.35 else 2)
 	var rate: float = 24.0 if difficulty == AIDifficulty.Z_HARD else 18.0
 	host.recharge_ki(rate * delta)
 
@@ -257,6 +261,8 @@ func _process_state_ki_recharge(delta: float) -> void:
 	var max_ki: float = host.character_data.base_ki if host.character_data else 100.0
 	if host.current_ki >= max_ki * 0.75 or state_timer >= 3.2:
 		host.is_charging_ki = false
+		if host.procedural_animator and host.procedural_animator.has_method("set_ki_recharge_phase"):
+			host.procedural_animator.set_ki_recharge_phase(0)
 		attack_cooldown = 0.5 if difficulty == AIDifficulty.Z_HARD else 0.8
 		_transition_to(AIState.IDLE_SPACING)
 
@@ -282,7 +288,18 @@ func _process_state_kamehameha_charge(delta: float) -> void:
 	kamehameha_charge_timer += delta
 	host.is_charging_ki = true
 	var super_info: Dictionary = _select_ai_super_power()
+	var s_name: String = String(super_info.get("name", "Kamehameha"))
 	var s_color: Color = super_info.get("color", _get_host_energy_color())
+
+	if host.procedural_animator and host.procedural_animator.has_method("set_super_pose"):
+		host.procedural_animator.set_super_pose(s_name, 1)
+
+	var sphere_offset: Vector3 = Vector3(-0.24, 0.96, 0.12)
+	var s_low: String = s_name.to_lower()
+	if "galick" in s_low:
+		sphere_offset = Vector3(-0.28, 1.15, 0.10)
+	elif "final" in s_low:
+		sphere_offset = Vector3(0.0, 1.18, 0.28)
 
 	if not kamehameha_vfx_sphere or not is_instance_valid(kamehameha_vfx_sphere):
 		kamehameha_vfx_sphere = MeshInstance3D.new()
@@ -300,10 +317,11 @@ func _process_state_kamehameha_charge(delta: float) -> void:
 		kamehameha_vfx_sphere.material_override = mat
 
 		host.add_child(kamehameha_vfx_sphere)
-		kamehameha_vfx_sphere.position = Vector3(0.18, 1.05, 0.35)
+		kamehameha_vfx_sphere.position = sphere_offset
 		_play_ai_sfx("kamehameha_charge")
 	else:
 		var progress = clampf(kamehameha_charge_timer / KAMEHAMEHA_CHARGE_DURATION, 0.1, 1.0)
+		kamehameha_vfx_sphere.position = sphere_offset
 		kamehameha_vfx_sphere.scale = Vector3.ONE * (0.8 + progress * 1.5)
 
 	if kamehameha_charge_timer >= KAMEHAMEHA_CHARGE_DURATION:
@@ -312,6 +330,9 @@ func _process_state_kamehameha_charge(delta: float) -> void:
 		if kamehameha_vfx_sphere and is_instance_valid(kamehameha_vfx_sphere):
 			kamehameha_vfx_sphere.queue_free()
 			kamehameha_vfx_sphere = null
+
+		if host.procedural_animator and host.procedural_animator.has_method("set_super_pose"):
+			host.procedural_animator.set_super_pose(s_name, 2)
 
 		var target_pos = player.global_position + Vector3(0.0, 1.35, 0.0)
 		_spawn_kamehameha_beam(target_pos)
@@ -324,6 +345,8 @@ func interrupt_kamehameha() -> void:
 	if current_state == AIState.KAMEHAMEHA_CHARGE:
 		host.is_charging_ki = false
 		host.stop_charging_super()
+		if host.procedural_animator and host.procedural_animator.has_method("set_super_pose"):
+			host.procedural_animator.set_super_pose("", 0)
 		if kamehameha_vfx_sphere and is_instance_valid(kamehameha_vfx_sphere):
 			kamehameha_vfx_sphere.queue_free()
 			kamehameha_vfx_sphere = null
@@ -346,6 +369,11 @@ func _process_state_defensive_block(delta: float) -> void:
 func _transition_to(new_state: AIState) -> void:
 	if current_state == AIState.KAMEHAMEHA_CHARGE and new_state != AIState.KAMEHAMEHA_CHARGE:
 		host.stop_charging_super()
+		if not bool(host.get("is_firing_beam")) and host.procedural_animator and host.procedural_animator.has_method("set_super_pose"):
+			host.procedural_animator.set_super_pose("", 0)
+	if current_state == AIState.KI_RECHARGE and new_state != AIState.KI_RECHARGE:
+		if host.procedural_animator and host.procedural_animator.has_method("set_ki_recharge_phase"):
+			host.procedural_animator.set_ki_recharge_phase(0)
 
 	state_timer = 0.0
 	current_state = new_state
@@ -609,6 +637,8 @@ func _spawn_ki_blast(target_pos: Vector3, is_charged: bool = false) -> void:
 	var projectile_radius = 0.16 if is_charged else 0.06
 	var speed = 16.0 if is_charged else 26.0
 	var energy_color = _get_host_energy_color()
+	if host.procedural_animator and host.procedural_animator.has_method("trigger_ki_blast_shot"):
+		host.procedural_animator.trigger_ki_blast_shot(blast_volley_count % 2)
 
 	var projectile = Node3D.new()
 	projectile.name = "EnemyKiProjectile_" + str(Time.get_ticks_msec())

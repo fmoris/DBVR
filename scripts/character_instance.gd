@@ -40,6 +40,7 @@ var is_knocked_back: bool = false
 var arena_half_limit: float = 92.0 # Límite en las faldas del cañón de Akira Toriyama
 const RING_HALF_SIZE: float = 16.0 # Límite del cuadrilátero de piedra de Cell (32x32m)
 var wall_stick_timer: float = 0.0 # Efecto de quedar incrustado en la roca de la montaña (Toriyama canon)
+var last_wall_crash_normal: Vector3 = Vector3.FORWARD
 
 # --- Estado de Guardia y Bloqueo Defensivo ---
 var is_blocking: bool = false
@@ -370,6 +371,10 @@ func _physics_process(delta: float) -> void:
 	if wall_stick_timer > 0.0:
 		wall_stick_timer -= delta
 		velocity = Vector3.ZERO
+		if wall_stick_timer <= 0.35 and not is_player and not is_ragdoll_active and ragdoll_simulator != null:
+			wall_stick_timer = 0.0
+			start_ragdoll(last_wall_crash_normal * 2.5 + Vector3.DOWN * 4.5)
+			ragdoll_recovery_timer = 1.65
 	elif velocity.length_squared() > 0.001:
 		var move_step = velocity * delta
 		if is_player:
@@ -1079,6 +1084,8 @@ func transform_to(index: int) -> void:
 				opp.check_zenkai_conditions(current_np)
 
 		# Feedback cinemático y onda expansiva de transformación
+		if procedural_animator and procedural_animator.has_method("trigger_transformation_roar"):
+			procedural_animator.trigger_transformation_roar()
 		_spawn_melee_shockwave(global_position + Vector3(0, 1.0, 0))
 		var char_name = character_data.character_name if character_data else name
 		_log_combat_event("[TRANSFORMACIÓN] ¡%s se ha transformado en %s! (NP x%.1f -> BP %s)" % [char_name, trans.form_name, new_mult, _format_bp_number(int(current_np))], "success")
@@ -2104,6 +2111,7 @@ func _clamp_to_arena(node: Node3D) -> void:
 				var collider = col.collider
 				if collider.is_in_group("mountains") or collider.has_meta("is_mountain") or "Mountain" in collider.name or "Canyon" in collider.name or "Boulder" in collider.name:
 					hit_mountain = true
+					last_wall_crash_normal = col.normal
 					pos = col.position + col.normal * 0.50
 					_on_boundary_crash_impact(horiz_speed)
 					velocity.x = 0.0
@@ -2131,6 +2139,13 @@ func _clamp_to_arena(node: Node3D) -> void:
 		hit_mountain = true
 
 	if hit_mountain and wall_stick_timer <= 0.0:
+		var perimeter_normal: Vector3 = Vector3(
+			-signf(pos.x) if absf(pos.x) >= limit else 0.0,
+			0.0,
+			-signf(pos.z) if absf(pos.z) >= limit else 0.0
+		)
+		if perimeter_normal.length_squared() > 0.01:
+			last_wall_crash_normal = perimeter_normal.normalized()
 		_on_boundary_crash_impact(horiz_speed)
 		# Cero rebote de goma: detener velocidad de inmediato
 		velocity.x = 0.0
@@ -2207,9 +2222,14 @@ func _check_pillar_collisions(pos: Vector3) -> void:
 		if Vector2(pos.x - p_pos.x, pos.z - p_pos.z).length() < 1.6 and pos.y < 4.0:
 			var pillar_damage = 350.0
 			take_hit(pillar_damage, Vector3.ZERO)
+			var impact_speed: float = velocity.length()
+			var rebound_dir: Vector3 = -velocity.normalized() if impact_speed > 0.01 else Vector3.BACK
 			velocity *= 0.4
 			_spawn_flurry_spark(p_pos + Vector3(0.0, 1.2, 0.0))
 			_log_combat_event("💥 ¡Impacto demoledor contra pilar de Cell Games! Daño: 350 NP", "warning")
+			if not is_player and not is_ragdoll_active and ragdoll_simulator != null and impact_speed >= 11.0:
+				start_ragdoll(rebound_dir * 6.0 + Vector3.DOWN * 4.0)
+				ragdoll_recovery_timer = 1.8
 			break
 
 
@@ -2226,11 +2246,18 @@ func start_ragdoll(impulse: Vector3 = Vector3.ZERO) -> void:
 	ragdoll_simulator.physical_bones_start_simulation()
 
 	if impulse.length_squared() > 0.01:
+		var applied_core: bool = false
+		var applied_spin: bool = false
 		for child in ragdoll_simulator.get_children():
 			if child is PhysicalBone3D:
-				var bn = child.bone_name.to_lower()
-				if "hip" in bn or "pelvis" in bn or "root" in bn or "spine" in bn:
+				var bn: String = child.bone_name.to_lower()
+				if not applied_core and ("hip" in bn or "pelvis" in bn or "root" in bn or bn == "spine"):
 					child.apply_central_impulse(impulse)
+					applied_core = true
+				elif not applied_spin and ("spine2" in bn or "chest" in bn or "head" in bn):
+					child.apply_central_impulse(impulse * 0.35 + Vector3(0.0, 1.5, 0.0))
+					applied_spin = true
+				if applied_core and applied_spin:
 					break
 	print("[Ragdoll] Simulación física activada para %s." % (character_data.character_name if character_data else name))
 
@@ -2240,8 +2267,13 @@ func stop_ragdoll() -> void:
 		return
 	is_ragdoll_active = false
 	ragdoll_simulator.physical_bones_stop_simulation()
+	if body_mesh_instance and is_instance_valid(body_mesh_instance):
+		body_mesh_instance.position = Vector3.ZERO
+		body_mesh_instance.rotation = Vector3.ZERO
 	if procedural_animator:
 		procedural_animator.enabled = true
+		if procedural_animator.has_method("trigger_getup_recovery"):
+			procedural_animator.trigger_getup_recovery(0.45)
 	print("[Ragdoll] Simulación física detenida. Reanudando postura de combate.")
 
 
@@ -2375,6 +2407,10 @@ func start_super_beam_sequence(tech_name: String, col: Color, dmg: float, tier_l
 		return
 
 	is_in_beam_sequence = true
+	is_firing_beam = true
+	beam_tech_name = tech_name
+	if procedural_animator and procedural_animator.has_method("set_super_pose"):
+		procedural_animator.set_super_pose(tech_name, 2)
 	if opp.has_method("set"):
 		opp.set("is_in_beam_sequence", true)
 
@@ -2386,7 +2422,10 @@ func start_super_beam_sequence(tech_name: String, col: Color, dmg: float, tier_l
 	seq.sequence_completed.connect(func(res: String, final_dmg: float):
 		is_in_beam_sequence = false
 		is_firing_beam = false
+		beam_tech_name = ""
 		active_beam_sequence = null
+		if procedural_animator and procedural_animator.has_method("set_super_pose"):
+			procedural_animator.set_super_pose("", 0)
 		if is_instance_valid(opp) and opp.has_method("set"):
 			opp.set("is_in_beam_sequence", false)
 			opp.set("is_firing_beam", false)
@@ -2545,9 +2584,11 @@ func _execute_melee_flurry_barrage(opponent: Node3D, recorded_hits: Array, launc
 	for i in range(hit_count):
 		var hit_info = recorded_hits[i]
 
-		# Flinch reactivo en el modelo del oponente
+		# Animación ofensiva cíclica (Jab, Cross, Gancho, Patada) y Flinch reactivo en el oponente
+		if procedural_animator and procedural_animator.has_method("trigger_melee_strike"):
+			procedural_animator.trigger_melee_strike(i % 4)
 		if opponent.get("procedural_animator"):
-			opponent.procedural_animator.trigger_hit_flinch(0.35, -fwd)
+			opponent.procedural_animator.trigger_hit_flinch(0.45, -fwd)
 
 		# Pulso háptico en mandos durante la ráfaga
 		if is_player and my_origin:
@@ -2639,6 +2680,8 @@ func _execute_hammer_strike_finisher(opponent: Node3D, swing_velocity: float, re
 	var hit_pos = opponent.global_position + Vector3(0.0, 1.1, 0.0)
 
 	# 4. Efectos audiovisuales y hápticos
+	if procedural_animator and procedural_animator.has_method("trigger_melee_strike"):
+		procedural_animator.trigger_melee_strike(4)
 	_spawn_melee_shockwave(hit_pos)
 
 	if is_player and my_origin:
