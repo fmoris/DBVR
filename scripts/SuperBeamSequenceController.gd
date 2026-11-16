@@ -784,18 +784,20 @@ func _build_audio() -> void:
 
 
 func _spawn_spark_at(pos: Vector3, col: Color) -> void:
+	if not is_inside_tree() or not get_tree() or not get_tree().current_scene:
+		return
 	var sw = MeshInstance3D.new()
 	var quad = QuadMesh.new()
 	quad.size = Vector2(3.5, 3.5)
 	sw.mesh = quad
 	sw.rotation.x = -PI * 0.5
-	sw.global_position = pos
 
 	var mat = ShaderMaterial.new()
 	mat.shader = ShockwaveShader
 	mat.set_shader_parameter("ring_color", col)
 	sw.material_override = mat
 	get_tree().current_scene.add_child(sw)
+	sw.global_position = pos
 
 	var tw = sw.create_tween()
 	tw.tween_property(sw, "scale", Vector3.ONE * 3.5, 0.40).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)

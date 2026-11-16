@@ -1575,18 +1575,13 @@ func _process_guard() -> void:
 		_set_player_blocking(false)
 		return
 
-	var l_grip = left_controller.get_float("grip") > 0.45 or left_controller.is_button_pressed("grip_click")
-	var r_grip = right_controller.get_float("grip") > 0.45 or right_controller.is_button_pressed("grip_click")
-	var l_trig = left_controller.get_float("trigger") > 0.45 or left_controller.is_button_pressed("trigger_click")
-	var r_trig = right_controller.get_float("trigger") > 0.45 or right_controller.is_button_pressed("trigger_click")
+	var l_grip: bool = left_controller.get_float("grip") > 0.45 or left_controller.is_button_pressed("grip_click")
+	var r_grip: bool = right_controller.get_float("grip") > 0.45 or right_controller.is_button_pressed("grip_click")
+	var l_trig: bool = left_controller.get_float("trigger") > 0.45 or left_controller.is_button_pressed("trigger_click")
+	var r_trig: bool = right_controller.get_float("trigger") > 0.45 or right_controller.is_button_pressed("trigger_click")
 
-	# Si está dando puñetazos de melee (trig + grip), no es guardia
-	if (l_grip and l_trig) or (r_grip and r_trig):
-		_set_player_blocking(false)
-		return
-
-	# Ambos Grips sostenidos cubriendo pecho o cabeza en espacio normalizado
-	if l_grip and r_grip and pose_chest_guard:
+	# Guardia Cruzada en 'X': Ambos puños cerrados (Grip + Gatillo en ambas manos) frente al pecho
+	if l_grip and l_trig and r_grip and r_trig and pose_chest_guard:
 		_set_player_blocking(true)
 		_pulse_haptic(left_controller, 80.0, 0.45, 0.08)
 		_pulse_haptic(right_controller, 80.0, 0.45, 0.08)

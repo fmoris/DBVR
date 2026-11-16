@@ -2525,32 +2525,49 @@ func _on_perfect_parry_turnover(new_attacker: Node3D, new_defender: Node3D) -> v
 			gss.emit_signal("phase_changed", "¡EL RIVAL HIZO PARRY! ¡DEFIENDE!")
 
 
-## Callback al finalizar la secuencia completa de Melee Rítmico
-func _on_bullet_time_completed(recorded_hits: Array, launch_vector: Vector3, opponent: Node3D) -> void:
+## Callback al finalizar la secuencia completa de Melee Rítmico (sin repetir cobro de daño ya aplicado en la cúpula)
+func _on_bullet_time_completed(recorded_hits: Array, _launch_vector: Vector3, opponent: Node3D) -> void:
 	is_in_bullet_time = false
 	if opponent and is_instance_valid(opponent) and opponent.has_method("set"):
 		opponent.set("is_in_bullet_time", false)
 	active_target_dome = null
+
+	velocity = Vector3.ZERO
+	is_knocked_back = false
+	if opponent and is_instance_valid(opponent) and opponent.has_method("set"):
+		opponent.set("velocity", Vector3.ZERO)
+		opponent.set("is_knocked_back", false)
 
 	if recorded_hits.is_empty():
-		_log_combat_event("¡El oponente esquivó tu embestida!", "warning")
-		_separate_fighters_to_canonical_distance(opponent, 5.5)
-		return
+		_log_combat_event("↩️ Secuencia melee cancelada o sin impactos. Retornando a distancia táctica.", "info")
+	else:
+		_log_combat_event("⚔️ Intercambio melee concluido (%d acciones resueltas). Separación táctica." % recorded_hits.size(), "info")
 
-	# Descargar ráfaga de puñetazos (flurry) acumulada
-	_execute_melee_flurry_barrage(opponent, recorded_hits, launch_vector)
+	_separate_fighters_to_canonical_distance(opponent, 5.5)
 
 
-## Callback al activarse un Finisher (ej. Martillazo bimanual) durante el Bullet-Time
+## Callback al activarse un Finisher (Martillazo al suelo, Ataque Cargado v3 Atrás/Arriba, o Ki Break)
 func _on_bullet_time_finisher(finisher_name: String, swing_velocity: float, recorded_hits: Array, launch_vector: Vector3, opponent: Node3D) -> void:
+	var strike_atk: Node3D = self
+	var strike_def: Node3D = opponent
+	if active_target_dome and is_instance_valid(active_target_dome):
+		var d_atk: Variant = active_target_dome.get("last_finisher_attacker")
+		var d_def: Variant = active_target_dome.get("last_finisher_victim")
+		if d_atk is Node3D and is_instance_valid(d_atk) and d_def is Node3D and is_instance_valid(d_def):
+			strike_atk = d_atk
+			strike_def = d_def
+
 	is_in_bullet_time = false
 	if opponent and is_instance_valid(opponent) and opponent.has_method("set"):
 		opponent.set("is_in_bullet_time", false)
 	active_target_dome = null
+
 	if finisher_name == "hammer_strike":
-		_execute_hammer_strike_finisher(opponent, swing_velocity, recorded_hits, launch_vector)
+		strike_atk._execute_hammer_strike_finisher(strike_def, swing_velocity, recorded_hits, launch_vector)
+	elif finisher_name in ["charged_v3_up", "charged_v3_back", "ki_break_launch"]:
+		strike_atk._execute_charged_v3_or_ki_break_finisher(strike_def, finisher_name, swing_velocity, launch_vector)
 	else:
-		_execute_melee_flurry_barrage(opponent, recorded_hits, launch_vector)
+		_separate_fighters_to_canonical_distance(opponent, 5.5)
 
 
 ## Ejecuta cinematográficamente la ráfaga de puñetazos (flurry) acumulada durante el Bullet-Time
@@ -2707,41 +2724,108 @@ func _execute_hammer_strike_finisher(opponent: Node3D, swing_velocity: float, re
 		opponent.take_hit(direct_damage, Vector3.ZERO)
 		increase_np(direct_damage * 0.45)
 
-	# 6. Cálculo cinético de expulsión demoledora (BP atacante vs BP defensor + Ki gastado + velocidad de golpe)
-	var ki_mult: float = 1.0 + (ki_spent / 25.0) * 0.90
-	var swing_mult: float = clampf(v_clean / 2.2, 0.85, 2.2)
-	var launch_base_speed: float = 52.0 # m/s base estilo Dragon Ball Z (doble de distancia)
+	# 6. Cálculo cinético de aplastamiento exclusivo CONTRA EL SUELO (Martillazo DBZ)
+	var ki_mult: float = 1.0 + (ki_spent / 25.0) * 0.85
+	var swing_mult: float = clampf(v_clean / 2.2, 0.85, 2.0)
+	var launch_base_speed: float = 42.0
 	var final_speed: float = launch_base_speed * ratio_bp * ki_mult * swing_mult
 
-	var launch_dir = (fwd * 4.5 + Vector3.UP * 2.2).normalized()
-	var final_impulse = launch_dir * final_speed
+	var launch_dir: Vector3 = (fwd * 1.4 + Vector3.DOWN * 3.8).normalized()
+	var final_impulse: Vector3 = launch_dir * final_speed
 
-	# Elevar ligeramente al oponente sobre el suelo para trayectoria parabólica aérea
-	var ground_h = get_ground_elevation(opponent.global_position)
-	if opponent.get("is_player"):
-		var p_orig = opponent.get_parent()
-		if p_orig is Node3D:
-			p_orig.global_position.y = maxf(p_orig.global_position.y, ground_h)
-	else:
-		opponent.global_position.y = maxf(opponent.global_position.y, ground_h + 0.85)
-
-	# Fricción reducida (0.85 en vez de 1.6) para que vuele el doble de distancia cruzando la arena
-	opponent.set("knockback_drag", 0.85)
+	var opp_pos_cur: Vector3 = opponent.get_parent().global_position if (opponent.get("is_player") and opponent.get_parent() is Node3D) else opponent.global_position
+	var ground_h: float = get_ground_elevation(opp_pos_cur)
+	opponent.set("knockback_drag", 2.2)
 	opponent.set("velocity", final_impulse)
 	opponent.set("is_knocked_back", true)
+
+	# Si ya está cerca del piso (<= ground_h + 1.5m), estrellar de inmediato con cráter sísmico y Ragdoll en el suelo
+	if opp_pos_cur.y <= ground_h + 1.5:
+		if opponent.get("is_player"):
+			var p_orig = opponent.get_parent()
+			if p_orig is Node3D:
+				p_orig.global_position.y = ground_h
+		else:
+			opponent.global_position.y = ground_h
+		if opponent.has_method("_on_ground_crash_impact"):
+			opponent._on_ground_crash_impact(maxf(final_speed * 0.45, 12.0), opp_pos_cur, ground_h)
+		opponent.set("velocity", fwd * clampf(final_speed * 0.22, 3.0, 9.0))
 
 	# REQUISITO CANÓNICO: El martillazo CORTA Y TERMINA el minijuego por completo (sin Follow-Up Bullet Time)
 	is_in_bullet_time = false
 	is_in_followup_bullet_time = false
+	if opponent.has_method("set"):
+		opponent.set("is_in_bullet_time", false)
 	active_target_dome = null
 
-	_log_combat_event("💥 ¡FINISHER MARTILLAZO! Rival expulsado a %.1f m/s (BP Ratio: %.2f). Fin del minijuego." % [final_speed, ratio_bp], "success")
-	print("[HammerFinisher] Martillazo conectado: daño=%.0f NP, vel=%.1f m/s. Minijuego cortado. Oponente volando por los aires." % [direct_damage, final_speed])
+	_log_combat_event("🔨 ¡MARTILLAZO DBZ CONTRA EL SUELO! Impacto a %.1f m/s (BP Ratio: %.2f)." % [final_speed, ratio_bp], "success")
+	print("[HammerFinisher] Martillazo al suelo conectado: daño=%.0f NP, vel=%.1f m/s." % [direct_damage, final_speed])
 	_check_transformation_unlocks()
 
 	var gss = _get_gesture_tree()
 	if gss and gss.has_signal("phase_changed"):
-		gss.emit_signal("phase_changed", "¡FASE LIBRE! (RIVAL EXPULSADO)")
+		gss.emit_signal("phase_changed", "¡FASE LIBRE! (RIVAL ESTRELLADO AL SUELO)")
+
+
+## Ejecuta lanzamiento direccional moderado (Ataque Cargado v3 Atrás/Arriba o Golpe Fuerte por Ki == 0)
+func _execute_charged_v3_or_ki_break_finisher(opponent: Node3D, mode: String, swing_velocity: float, _launch_vector: Vector3 = Vector3.ZERO) -> void:
+	if not opponent or not is_instance_valid(opponent):
+		return
+
+	var my_origin = get_parent() if is_player else null
+	var my_pos = my_origin.global_position if my_origin else global_position
+	var fwd = (opponent.global_position - my_pos).normalized()
+	fwd.y = 0.0
+	fwd = fwd.normalized() if fwd.length_squared() > 0.01 else -global_transform.basis.z
+
+	var bp_atk: float = maxf(current_np, 1000.0)
+	var bp_def: float = maxf(opponent.get("current_np") if opponent.get("current_np") != null else 10000.0, 1000.0)
+	var ratio_bp: float = clampf(sqrt(bp_atk / bp_def), 0.50, 2.5)
+	var v_mult: float = clampf(swing_velocity / 2.5, 0.85, 1.45)
+
+	velocity = Vector3.ZERO
+	is_knocked_back = false
+
+	var base_speed: float = 32.0
+	var final_speed: float = base_speed * ratio_bp * v_mult
+	var launch_dir: Vector3 = (fwd * 3.8 + Vector3.UP * 0.55).normalized()
+	var mode_tag: String = "HACIA ATRÁS"
+	if mode == "charged_v3_up":
+		launch_dir = (fwd * 1.8 + Vector3.UP * 2.4).normalized()
+		mode_tag = "POR LOS AIRES"
+	elif mode == "ki_break_launch":
+		launch_dir = (fwd * 3.8 + Vector3.UP * 0.90).normalized()
+		final_speed *= 1.15
+		mode_tag = "IMBLOQUEABLE (SIN KI)"
+
+	var hit_pos: Vector3 = opponent.global_position + Vector3(0.0, 1.1, 0.0)
+	if procedural_animator and procedural_animator.has_method("trigger_melee_strike"):
+		procedural_animator.trigger_melee_strike(2 if mode == "charged_v3_up" else 1)
+	_spawn_melee_shockwave(hit_pos)
+
+	if opponent.get("procedural_animator"):
+		opponent.procedural_animator.trigger_hit_flinch(1.1, -fwd)
+
+	if is_player and my_origin:
+		for h in ["LeftHand", "RightHand"]:
+			var ctrl = my_origin.get_node_or_null(h)
+			if ctrl and ctrl.has_method("trigger_haptic_pulse"):
+				ctrl.trigger_haptic_pulse("haptic", 200.0, 1.0, 0.22, 0.0)
+
+	opponent.set("knockback_drag", 1.2)
+	opponent.set("velocity", launch_dir * final_speed)
+	opponent.set("is_knocked_back", true)
+
+	is_in_bullet_time = false
+	is_in_followup_bullet_time = false
+	if opponent.has_method("set"):
+		opponent.set("is_in_bullet_time", false)
+	active_target_dome = null
+
+	_log_combat_event("💥 ¡GOLPE LANZADOR (%s)! Rival expulsado a %.1f m/s." % [mode_tag, final_speed], "success")
+	var gss = _get_gesture_tree()
+	if gss and gss.has_signal("phase_changed"):
+		gss.emit_signal("phase_changed", "¡FASE LIBRE! (%s)" % mode_tag)
 
 
 ## Separa a los combatientes garantizando la distancia canónica de combate (6.0m)
