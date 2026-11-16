@@ -1,32 +1,25 @@
 shader_type spatial;
-render_mode unshaded, depth_test_disabled, cull_disabled;
+render_mode blend_add, unshaded, cull_disabled, depth_draw_never;
 
-uniform sampler2D SCREEN_TEXTURE : hint_screen_texture, filter_linear_mipmap;
+uniform vec4 ring_color : source_color = vec4(0.45, 0.85, 1.0, 0.9);
 uniform float force : hint_range(-0.5, 0.5) = 0.08;
 uniform float progress : hint_range(0.0, 1.0) = 0.0;
-uniform float thickness : hint_range(0.01, 0.3) = 0.08;
+uniform float thickness : hint_range(0.01, 0.5) = 0.14;
+uniform float use_uv_ring : hint_range(0.0, 1.0) = 1.0;
 
 void fragment() {
-	// dist va de 0.0 en el centro de la esfera visible al jugador, a 1.0 en los bordes
-	float dist = 1.0 - dot(NORMAL, VIEW);
-	
-	// Máscara de anillo que se expande hacia afuera en función de progress
-	float wave = smoothstep(progress - thickness, progress, dist) * 
-				 smoothstep(progress + thickness, progress, dist);
-				 
-	// Dirección de desplazamiento radial en el espacio de la pantalla
-	// Transformamos la normal a espacio de vista y usamos su proyección XY
-	// Esto genera refracción radial perfecta desde el centro de la esfera en pantalla
-	vec3 view_normal = (VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz;
-	vec2 disp_dir = normalize(view_normal.xy);
-	vec2 displacement = disp_dir * wave * force * (1.0 - progress);
-	
-	// Muestrear el fondo con el desplazamiento en el espacio de pantalla
-	vec3 color = texture(SCREEN_TEXTURE, SCREEN_UV + displacement).rgb;
-	
-	// Destello luminoso en el frente de la onda expansiva térmica
-	vec3 wave_glow = vec3(0.5, 0.85, 1.0) * wave * 0.25 * (1.0 - progress);
-	
-	ALBEDO = color + wave_glow;
-	ALPHA = 1.0;
+	float fresnel = clamp(1.0 - abs(dot(NORMAL, VIEW)), 0.0, 1.0);
+	float uv_dist = length(UV - vec2(0.5)) * 2.0;
+	float radial = mix(fresnel, uv_dist, use_uv_ring);
+
+	float ring_pos = mix(0.70, progress, step(0.001, progress));
+	float band = smoothstep(ring_pos - thickness, ring_pos, radial) *
+				 (1.0 - smoothstep(ring_pos, ring_pos + thickness, radial));
+	float fade = (1.0 - progress) * ring_color.a;
+	float quad_mask = 1.0 - smoothstep(0.86, 1.0, uv_dist);
+	float mask = mix(1.0, quad_mask, use_uv_ring);
+
+	float intensity = band * fade * mask;
+	ALBEDO = ring_color.rgb * (1.25 + force * 2.0) * intensity;
+	ALPHA = clamp(intensity, 0.0, 1.0);
 }

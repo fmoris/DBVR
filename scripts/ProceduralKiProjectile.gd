@@ -27,6 +27,12 @@ var deflection_count: int = 0
 var shooter_node: Node = null
 var was_launched_in_zenkai: bool = false
 
+# Red de seguridad de ciclo de vida (Punto 10: Ki blasts que no desaparecen)
+const HARD_MAX_AGE: float = 6.0
+const ARENA_FREE_RADIUS_SQ: float = 60.0 * 60.0
+var _hard_age: float = 0.0
+var _dead_timeout: float = 0.0
+
 
 func _ready() -> void:
 	add_to_group("ki_projectiles")
@@ -39,7 +45,17 @@ func _exit_tree() -> void:
 
 
 func _physics_process(delta: float) -> void:
+	# Red de seguridad anti-proyectiles eternos: tope duro de vida independiente del estado
+	_hard_age += delta
+	if _hard_age >= HARD_MAX_AGE or global_position.length_squared() > ARENA_FREE_RADIUS_SQ:
+		queue_free()
+		return
+
 	if is_dead:
+		# Si quedó marcado como muerto sin llegar a explotar (deferred perdido), liberarlo igualmente
+		_dead_timeout += delta
+		if _dead_timeout >= 0.5:
+			queue_free()
 		return
 
 	# 1. Comprobar choque con otros proyectiles de Ki en vuelo
@@ -48,8 +64,10 @@ func _physics_process(delta: float) -> void:
 		return
 
 	# 2. Comprobar desvío por proximidad de manos a alta velocidad (Ki Deflection)
+	# (Solo se salta el frame exacto del desvío; luego el proyectil sigue volando y envejeciendo)
+	var deflections_before: int = deflection_count
 	_check_hand_deflection_proximity()
-	if is_dead or is_deflected:
+	if is_dead or deflection_count != deflections_before:
 		return
 
 	# 3. Desplazamiento lineal
@@ -268,6 +286,7 @@ func _trigger_air_clash_explosion(pos: Vector3) -> void:
 	if gss and gss.has_signal("gesture_logged"):
 		gss.emit_signal("gesture_logged", "[CHOQUE DE KI] ¡Dos poderes colisionaron y detonaron en el aire!", "warning")
 
+	KiSmokeFX.spawn_smoke(get_tree(), pos, 1.1)
 	queue_free()
 
 
@@ -409,9 +428,11 @@ func _spawn_visual_explosion(pos: Vector3) -> void:
 
 	var mat_wave = ShaderMaterial.new()
 	mat_wave.shader = ShockwaveShader
+	mat_wave.set_shader_parameter("ring_color", p_color)
+	mat_wave.set_shader_parameter("use_uv_ring", 0.0)
 	mat_wave.set_shader_parameter("force", 0.15)
 	mat_wave.set_shader_parameter("progress", 0.0)
-	mat_wave.set_shader_parameter("thickness", 0.08)
+	mat_wave.set_shader_parameter("thickness", 0.12)
 	shockwave.material_override = mat_wave
 	get_tree().current_scene.add_child(shockwave)
 	shockwave.global_position = pos
@@ -474,6 +495,8 @@ func _spawn_visual_explosion(pos: Vector3) -> void:
 
 	if tier >= 2 and pos.y <= 2.5:
 		_spawn_plasma_crater(Vector3(pos.x, 0.12, pos.z), clampf(explosion_radius * 0.55, 0.9, 2.8), p_color)
+	if tier >= 2 or pos.y <= 1.2:
+		KiSmokeFX.spawn_smoke(get_tree(), pos, 1.35 if tier >= 3 else 0.85)
 
 
 func _spawn_plasma_crater(pos: Vector3, radius: float, col: Color) -> void:

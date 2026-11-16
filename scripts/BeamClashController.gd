@@ -494,6 +494,7 @@ func _spawn_clash_shockwave() -> void:
 	tw.tween_property(sw, "scale", Vector3.ONE * 3.5, 0.35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tw.parallel().tween_property(mat, "shader_parameter/ring_color:a", 0.0, 0.35)
 	tw.tween_callback(sw.queue_free)
+	KiSmokeFX.spawn_smoke(get_tree(), clash_sphere.global_position, 1.35)
 
 
 func _spawn_colossal_explosion() -> void:
@@ -514,6 +515,8 @@ func _spawn_colossal_explosion() -> void:
 	tw.tween_property(sw, "scale", Vector3.ONE * 5.0, 0.65).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
 	tw.parallel().tween_property(mat, "shader_parameter/ring_color:a", 0.0, 0.65)
 	tw.tween_callback(sw.queue_free)
+	var smoke_pos: Vector3 = clash_sphere.global_position if clash_sphere else global_position
+	KiSmokeFX.spawn_smoke(get_tree(), smoke_pos, 2.4)
 
 
 func _apply_continuous_clash_haptics() -> void:

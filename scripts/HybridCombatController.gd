@@ -72,6 +72,17 @@ var l_torso_vel: Vector3 = Vector3.ZERO
 var r_torso_vel: Vector3 = Vector3.ZERO
 var super_phase1_anchor_z: float = 0.0
 var super_unusable_warn_cooldown: float = 0.0
+# Punto 3: Ventana "¡HAAA!" de 0.5s, láser guía y suavizado de dirección (cero allocs)
+var super_aim_lock_window: float = -1.0
+var _aim_dir_history: PackedVector3Array = PackedVector3Array()
+var _aim_dir_cursor: int = 0
+var _aim_dir_filled: int = 0
+var _guide_laser_mesh: MeshInstance3D = null
+var _guide_laser_mat: StandardMaterial3D = null
+# Punto 11: Señales en controles para Fase 2 lista (anillo + flecha + háptico latido)
+var _phase2_heartbeat_timer: float = 0.0
+var _ctrl_cue_l: Node3D = null
+var _ctrl_cue_r: Node3D = null
 var pose_chest_ki_p1: bool = false
 var pose_waist_ki_p2: bool = false
 var pose_chest_guard: bool = false
@@ -415,12 +426,16 @@ func _process_ki_recharge(delta: float) -> void:
 						if gesture_tree.has_signal("phase_changed"):
 							gesture_tree.emit_signal("phase_changed", "¡RECARGA DE KI ACTIVA! (CINTURA)")
 
-		# Mantenimiento activo de la Fase 2 (Carga Máxima de Ki y NP)
+		# Mantenimiento activo de la Fase 2 (Carga Máxima de Ki y BP con techo del 60%)
 		if is_charging_ki:
 			var player = gesture_tree._get_player_instance() if gesture_tree else null
 			if player and is_instance_valid(player):
-				player.recharge_ki(25.0 * delta)
-				player.increase_np(3000.0 * delta)
+				var cfg: KiEconomyConfig = KiEconomyConfig.get_default()
+				player.recharge_ki(cfg.charge_ki_per_sec_heavy * delta)
+				if player.has_method("increase_np_from_charge"):
+					player.increase_np_from_charge(cfg.charge_bp_per_sec_heavy * delta)
+				else:
+					player.increase_np(cfg.charge_bp_per_sec_heavy * delta)
 			# ¡PUNTO 9: RUMBLE HÁPTICO PROFUNDO Y CONTINUO DE KI!
 			ki_haptic_timer += delta
 			if ki_haptic_timer >= 0.08:
@@ -536,7 +551,7 @@ func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta:
 		var player = gesture_tree._get_player_instance() if gesture_tree else null
 		if player and is_instance_valid(player):
 			if player.current_ki > 0.0:
-				var ki_drain = 6.0 * delta
+				var ki_drain = KiEconomyConfig.get_default().ki_blast_charge_drain_per_sec * delta
 				player.consume_ki(ki_drain)
 			else:
 				var vital_drain = 80.0 * delta
@@ -648,8 +663,24 @@ func _is_super_tech_usable(player: Node, tech_name: String) -> bool:
 	return not found_any
 
 
+func _record_and_smooth_aim_dir(raw_dir: Vector3) -> Vector3:
+	if _aim_dir_history.size() != 15:
+		_aim_dir_history.resize(15)
+		_aim_dir_cursor = 0
+		_aim_dir_filled = 0
+	var n_dir: Vector3 = raw_dir.normalized() if raw_dir.length_squared() > 0.0001 else Vector3.FORWARD
+	_aim_dir_history[_aim_dir_cursor] = n_dir
+	_aim_dir_cursor = (_aim_dir_cursor + 1) % 15
+	_aim_dir_filled = mini(_aim_dir_filled + 1, 15)
+	var acc := Vector3.ZERO
+	for i in range(_aim_dir_filled):
+		acc += _aim_dir_history[i]
+	return acc.normalized() if acc.length_squared() > 0.0001 else n_dir
+
+
 func _compute_super_raw_aim_dir(tech_name: String, is_launch_moment: bool) -> Vector3:
 	var cam_dir: Vector3 = (-camera.global_transform.basis.z).normalized() if (camera and is_instance_valid(camera)) else torso_fwd
+	var raw: Vector3 = cam_dir
 	if tech_name == "big_bang":
 		var bb_side: int = int(gesture_tree.get("big_bang_hand")) if gesture_tree else 1
 		var bb_ctrl: XRController3D = left_controller if bb_side == 0 else right_controller
@@ -657,24 +688,177 @@ func _compute_super_raw_aim_dir(tech_name: String, is_launch_moment: bool) -> Ve
 			var arm_v: Vector3 = bb_ctrl.global_position - chest_pos_cached
 			var chest_to_hand: Vector3 = arm_v.normalized() if arm_v.length_squared() > 0.001 else cam_dir
 			var ctrl_fwd: Vector3 = (-bb_ctrl.global_transform.basis.z).normalized()
-			return (chest_to_hand * 0.65 + ctrl_fwd * 0.35).normalized()
-		return cam_dir
-	if tech_name == "genkidama":
+			var hands_blend: Vector3 = (chest_to_hand * 0.65 + ctrl_fwd * 0.35).normalized()
+			raw = (cam_dir * 0.55 + hands_blend * 0.45).normalized()
+	elif tech_name == "genkidama":
 		if is_launch_moment and left_controller and right_controller and avg_torso_pos.z >= 0.16:
 			var mid_h: Vector3 = (left_controller.global_position + right_controller.global_position) * 0.5
 			var c2h: Vector3 = mid_h - chest_pos_cached
 			var hand_dir: Vector3 = c2h.normalized() if c2h.length_squared() > 0.001 else cam_dir
-			return (cam_dir * 0.70 + hand_dir * 0.30).normalized()
-		return cam_dir
-	if is_launch_moment or (avg_torso_pos.z >= 0.25 and hands_dist_norm <= 0.50):
+			raw = (cam_dir * 0.65 + hand_dir * 0.35).normalized()
+	elif is_launch_moment or (avg_torso_pos.z >= 0.25 and hands_dist_norm <= 0.50):
 		if left_controller and right_controller:
 			var mid_hands: Vector3 = (left_controller.global_position + right_controller.global_position) * 0.5
 			var c2h_vec: Vector3 = mid_hands - chest_pos_cached
 			var chest_to_hands: Vector3 = c2h_vec.normalized() if c2h_vec.length_squared() > 0.001 else cam_dir
 			var hands_fwd: Vector3 = ((-left_controller.global_transform.basis.z) + (-right_controller.global_transform.basis.z))
 			hands_fwd = hands_fwd.normalized() if hands_fwd.length_squared() > 0.001 else chest_to_hands
-			return (chest_to_hands * 0.75 + hands_fwd * 0.25).normalized()
-	return cam_dir
+			var hands_blend_2: Vector3 = (chest_to_hands * 0.70 + hands_fwd * 0.30).normalized()
+			raw = (cam_dir * 0.55 + hands_blend_2 * 0.45).normalized()
+	return _record_and_smooth_aim_dir(raw)
+
+
+func _update_guide_laser(start_pos: Vector3, end_pos: Vector3, col: Color) -> void:
+	if _guide_laser_mesh == null or not is_instance_valid(_guide_laser_mesh):
+		_guide_laser_mesh = MeshInstance3D.new()
+		_guide_laser_mesh.name = "SuperGuideLaser"
+		var cyl := CylinderMesh.new()
+		cyl.top_radius = 0.012
+		cyl.bottom_radius = 0.012
+		cyl.height = 1.0
+		cyl.radial_segments = 8
+		_guide_laser_mesh.mesh = cyl
+		_guide_laser_mat = StandardMaterial3D.new()
+		_guide_laser_mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+		_guide_laser_mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
+		_guide_laser_mat.no_depth_test = true
+		_guide_laser_mesh.material_override = _guide_laser_mat
+		var scene_r: Node = get_tree().current_scene if get_tree() else null
+		if scene_r:
+			scene_r.add_child(_guide_laser_mesh)
+	if not _guide_laser_mesh.is_inside_tree():
+		return
+	var diff: Vector3 = end_pos - start_pos
+	var dist: float = diff.length()
+	if dist < 0.05:
+		_guide_laser_mesh.visible = false
+		return
+	_guide_laser_mesh.visible = true
+	_guide_laser_mesh.global_position = (start_pos + end_pos) * 0.5
+	_guide_laser_mesh.look_at(end_pos, Vector3.UP)
+	_guide_laser_mesh.rotate_object_local(Vector3.RIGHT, PI * 0.5)
+	_guide_laser_mesh.scale = Vector3(1.0, dist, 1.0)
+	if _guide_laser_mat:
+		_guide_laser_mat.albedo_color = Color(col.r, col.g, col.b, 0.75)
+
+
+func _hide_guide_laser() -> void:
+	if _guide_laser_mesh and is_instance_valid(_guide_laser_mesh):
+		_guide_laser_mesh.visible = false
+
+
+func _ensure_ctrl_cue(ctrl: XRController3D, is_left: bool) -> Node3D:
+	var cached: Node3D = _ctrl_cue_l if is_left else _ctrl_cue_r
+	if cached and is_instance_valid(cached):
+		return cached
+	if not ctrl or not is_instance_valid(ctrl):
+		return null
+	var root := Node3D.new()
+	root.name = "Phase2CueRoot"
+	root.visible = false
+	ctrl.add_child(root)
+
+	var ring := MeshInstance3D.new()
+	ring.name = "ChargeRing"
+	var torus := TorusMesh.new()
+	torus.inner_radius = 0.052
+	torus.outer_radius = 0.068
+	torus.rings = 16
+	torus.ring_segments = 8
+	ring.mesh = torus
+	var r_mat := StandardMaterial3D.new()
+	r_mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+	r_mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
+	r_mat.no_depth_test = true
+	ring.material_override = r_mat
+	root.add_child(ring)
+
+	var arrow := MeshInstance3D.new()
+	arrow.name = "Phase2Arrow"
+	var cone := CylinderMesh.new()
+	cone.top_radius = 0.0
+	cone.bottom_radius = 0.022
+	cone.height = 0.055
+	cone.radial_segments = 8
+	arrow.mesh = cone
+	arrow.position = Vector3(0.0, 0.05, -0.09)
+	arrow.rotation.x = -PI * 0.5
+	var a_mat := StandardMaterial3D.new()
+	a_mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+	a_mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
+	a_mat.no_depth_test = true
+	a_mat.albedo_color = Color(1.0, 0.92, 0.2, 0.95)
+	arrow.material_override = a_mat
+	arrow.visible = false
+	root.add_child(arrow)
+
+	var lbl := Label3D.new()
+	lbl.name = "Phase2Label"
+	lbl.text = "▶ EMPUJA"
+	lbl.font_size = 24
+	lbl.pixel_size = 0.0014
+	lbl.outline_size = 8
+	lbl.no_depth_test = true
+	lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	lbl.position = Vector3(0.0, 0.11, -0.04)
+	lbl.modulate = Color(1.0, 0.92, 0.25)
+	lbl.visible = false
+	root.add_child(lbl)
+
+	if is_left:
+		_ctrl_cue_l = root
+	else:
+		_ctrl_cue_r = root
+	return root
+
+
+func _update_controller_phase2_cues(tech_name: String, ratio: float, is_ready: bool, bb_side: int) -> void:
+	var use_l: bool = (tech_name != "big_bang") or (bb_side == 0)
+	var use_r: bool = (tech_name != "big_bang") or (bb_side == 1)
+	var col: Color = Color(0.2, 0.8, 1.0)
+	if tech_name == "galick_ho":
+		col = Color(0.85, 0.25, 1.0)
+	elif tech_name == "final_flash" or tech_name == "big_bang":
+		col = Color(1.0, 0.88, 0.18)
+
+	var pulse: float = 1.0 + sin(Time.get_ticks_msec() * 0.025) * 0.16
+	for idx in range(2):
+		var ctrl: XRController3D = left_controller if idx == 0 else right_controller
+		var active: bool = use_l if idx == 0 else use_r
+		var cue: Node3D = _ensure_ctrl_cue(ctrl, idx == 0)
+		if not cue:
+			continue
+		cue.visible = active
+		if not active:
+			continue
+		var ring: MeshInstance3D = cue.get_node_or_null("ChargeRing") as MeshInstance3D
+		var arrow: MeshInstance3D = cue.get_node_or_null("Phase2Arrow") as MeshInstance3D
+		var lbl: Label3D = cue.get_node_or_null("Phase2Label") as Label3D
+		if ring:
+			var sc: float = lerpf(0.45, 1.0, ratio) * (pulse if is_ready else 1.0)
+			ring.scale = Vector3(sc, sc, sc)
+			var r_mat: StandardMaterial3D = ring.material_override as StandardMaterial3D
+			if r_mat:
+				r_mat.albedo_color = Color(1.0, 0.92, 0.25, 0.95) if is_ready else Color(col.r, col.g, col.b, 0.45 + ratio * 0.4)
+		if arrow:
+			arrow.visible = is_ready
+			if is_ready:
+				if tech_name == "genkidama":
+					arrow.rotation.x = PI
+					arrow.position = Vector3(0.0, -0.06, -0.06)
+				else:
+					arrow.rotation.x = -PI * 0.5
+					arrow.position = Vector3(0.0, 0.05, -0.09)
+		if lbl:
+			lbl.visible = is_ready
+			if is_ready:
+				lbl.text = "▼ BAJA" if tech_name == "genkidama" else "▶ EMPUJA"
+
+
+func _hide_controller_phase2_cues() -> void:
+	for cue in [_ctrl_cue_l, _ctrl_cue_r]:
+		if cue and is_instance_valid(cue):
+			cue.visible = false
 
 
 func _is_phase2_autofire_pose(tech_name: String, eff_l_z: float, eff_r_z: float, bb_side: int) -> bool:
@@ -884,17 +1068,7 @@ func _process_super_powers(delta: float) -> void:
 
 		# Consumo continuo de Ki durante la carga
 		if player and is_instance_valid(player):
-			var drain_rate: float = 16.0
-			if super_power_type == "final_flash":
-				drain_rate = 25.0
-			elif super_power_type == "kamehameha":
-				drain_rate = 22.0
-			elif super_power_type == "galick_ho":
-				drain_rate = 18.0
-			elif super_power_type == "big_bang":
-				drain_rate = 18.0
-			elif super_power_type == "genkidama":
-				drain_rate = 15.0
+			var drain_rate: float = KiEconomyConfig.get_default().super_charge_drain_per_sec
 
 			if player.current_ki > 0.0:
 				player.consume_ki(drain_rate * delta)
@@ -986,10 +1160,42 @@ func _process_super_powers(delta: float) -> void:
 			if gesture_tree and gesture_tree.has_signal("gesture_logged"):
 				gesture_tree.emit_signal("gesture_logged", ready_cue, "success")
 
-		# FASE 2 CANÓNICA ("¡HAAA!"): Auto-disparo inmediato al completar la postura de lanzamiento (sin necesidad de soltar Grips)
-		if super_charge_timer >= min_fire_time and _is_phase2_autofire_pose(super_power_type, eff_l_z, eff_r_z, bb_side):
-			_execute_super_fire(super_power_type)
-			return
+		# Punto 11: Señales visuales en los controles (anillo de progreso + flecha/etiqueta Fase 2) y latido háptico
+		var p2_ready: bool = super_charge_timer >= min_fire_time
+		var p2_ratio: float = clampf(super_charge_timer / maxf(min_fire_time, 0.01), 0.0, 1.0)
+		_update_controller_phase2_cues(super_power_type, p2_ratio, p2_ready, bb_side)
+		if p2_ready:
+			_phase2_heartbeat_timer += delta
+			if _phase2_heartbeat_timer >= 0.35:
+				_phase2_heartbeat_timer = 0.0
+				if super_power_type == "big_bang":
+					_pulse_haptic(left_controller if bb_side == 0 else right_controller, 115.0, 0.48, 0.08)
+				else:
+					_pulse_haptic(left_controller, 115.0, 0.48, 0.08)
+					_pulse_haptic(right_controller, 115.0, 0.48, 0.08)
+
+		# FASE 2 CANÓNICA ("¡HAAA!"): Ventana de 0.50s para ajustar puntería con láser guía (disparo inmediato si hay lock rojo)
+		if super_aim_lock_window >= 0.0:
+			super_aim_lock_window -= delta
+			var aim_locked_now: bool = gesture_tree != null and bool(gesture_tree.get("current_aim_locked"))
+			if left_controller and right_controller and gesture_tree:
+				var laser_origin: Vector3 = (left_controller.global_position if bb_side == 0 else right_controller.global_position) if super_power_type == "big_bang" else (left_controller.global_position + right_controller.global_position) * 0.5
+				var target_pt: Vector3 = Vector3(gesture_tree.get("current_aim_target"))
+				_update_guide_laser(laser_origin, target_pt, Color(1.0, 0.25, 0.2) if aim_locked_now else Color(0.25, 0.90, 1.0))
+			if aim_locked_now or super_aim_lock_window <= 0.0:
+				_hide_guide_laser()
+				_execute_super_fire(super_power_type)
+				return
+		elif p2_ready and _is_phase2_autofire_pose(super_power_type, eff_l_z, eff_r_z, bb_side):
+			var aim_locked_inst: bool = gesture_tree != null and bool(gesture_tree.get("current_aim_locked"))
+			if aim_locked_inst:
+				_hide_guide_laser()
+				_execute_super_fire(super_power_type)
+				return
+			else:
+				super_aim_lock_window = 0.50
+				_pulse_haptic(left_controller, 150.0, 0.70, 0.10)
+				_pulse_haptic(right_controller, 150.0, 0.70, 0.10)
 
 		# Evaluar ventana tolerante si el jugador extiende parcialmente y suelta los Grips
 		var in_phase2_now: bool = _is_valid_super_release_pose(super_power_type, l_local_z, r_local_z, avg_local_y, avg_local_z, hands_dist_norm, bb_side, l_cam_z, r_cam_z)
@@ -1120,6 +1326,11 @@ func _reset_super_state() -> void:
 	super_phase2_ready_notified = false
 	candidate_super_tech = ""
 	candidate_hold_timer = 0.0
+	super_aim_lock_window = -1.0
+	_phase2_heartbeat_timer = 0.0
+	_aim_dir_filled = 0
+	_hide_guide_laser()
+	_hide_controller_phase2_cues()
 	var player = gesture_tree._get_player_instance() if gesture_tree else null
 	if player and player.has_method("stop_charging_super"):
 		player.stop_charging_super()
@@ -1349,14 +1560,15 @@ func _execute_melee_punch(controller: XRController3D) -> void:
 
 	if player and is_instance_valid(player):
 		var curr_ki: float = float(player.get("current_ki")) if player.get("current_ki") != null else 0.0
-		if curr_ki < 15.0:
+		var dash_cost: float = KiEconomyConfig.get_default().melee_dash_cost
+		if curr_ki < dash_cost:
 			melee_cooldown = 0.6
 			_pulse_haptic(controller, 90.0, 0.35, 0.12)
 			if gesture_tree and gesture_tree.has_signal("gesture_logged"):
-				gesture_tree.emit_signal("gesture_logged", "¡Ki insuficiente para embestida Melee (15 Ki)!", "warning")
+				gesture_tree.emit_signal("gesture_logged", "¡Ki insuficiente para embestida Melee (%d Ki)!" % int(dash_cost), "warning")
 			return
 		if player.has_method("consume_ki"):
-			player.consume_ki(15.0)
+			player.consume_ki(dash_cost)
 
 	melee_cooldown = 2.5
 
