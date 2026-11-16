@@ -43,22 +43,50 @@ is_finisher = true
 [sub_resource type="Resource" id="Resource_irx55"]
 script = ExtResource("3_f203u")
 form_name = "SSJ"
-np_multiplier = 2.5
+tier_level = 1
+np_multiplier = 2.0
+ki_drain_per_sec = 1.5
 aura_color = Color(1, 0.85, 0.1, 0.85)
+api_id = 7
+canonical_ki_text = "330.000.000"
+portrait_image_path = "res://assets/images/characters/vegeta_ssj.webp"
+api_image_url = "https://dragonball-api.com/transformaciones/vegeta%20SSJ%20(2).webp"
 
 [sub_resource type="Resource" id="Resource_uhbuo"]
 script = ExtResource("3_f203u")
 form_name = "Super Vegeta"
+tier_level = 2
 np_multiplier = 3.5
-ki_drain_per_sec = 2.0
+ki_drain_per_sec = 2.5
 aura_color = Color(1, 0.9, 0, 1)
+api_id = 8
+canonical_ki_text = "24 Billion"
+portrait_image_path = "res://assets/images/characters/vegeta_ssj2.webp"
+api_image_url = "https://dragonball-api.com/transformaciones/vegeta%20SSJ2.webp"
 
 [sub_resource type="Resource" id="Resource_7skgi"]
 script = ExtResource("3_f203u")
 form_name = "SSB"
+tier_level = 3
 np_multiplier = 5.0
-ki_drain_per_sec = 5.0
+ki_drain_per_sec = 4.0
 aura_color = Color(0.1, 0.7, 1, 0.9)
+api_id = 10
+canonical_ki_text = "100 Quintillion"
+portrait_image_path = "res://assets/images/characters/vegeta_ssjb.webp"
+api_image_url = "https://dragonball-api.com/transformaciones/vegeta%20SSJB.webp"
+
+[sub_resource type="Resource" id="Resource_ue_vegeta"]
+script = ExtResource("3_f203u")
+form_name = "Ultra Ego"
+tier_level = 4
+np_multiplier = 8.0
+ki_drain_per_sec = 6.0
+aura_color = Color(0.68, 0.15, 0.95, 0.95)
+api_id = 11
+canonical_ki_text = "19.84 Septillion"
+portrait_image_path = "res://assets/images/characters/vegeta_ultra_ego.webp"
+api_image_url = "https://dragonball-api.com/transformaciones/vegeta%20mega%20instinto.webp"
 
 [resource]
 script = ExtResource("2_w2v2a")
@@ -69,5 +97,17 @@ scale_factor = 0.94
 model_asset_scale = 8.291948
 body_model_path = "res://assets/models/vegeta_optimized.glb"
 hands_model_path = "res://assets/models/vegeta_hands_optimized.glb"
+api_id = 2
+race = "Saiyan"
+gender = "Male"
+affiliation = "Z Fighter"
+canonical_ki_text = "54.000.000"
+canonical_max_ki_text = "19.84 Septillion"
+description = "Príncipe de los Saiyans, inicialmente un villano, pero luego se une a los Z Fighters. A pesar de que a inicios de Dragon Ball Z, Vegeta cumple un papel antagónico, poco después decide rebelarse ante el Imperio de Freeza, volviéndose un aliado clave para los Guerreros Z. Con el paso del tiempo llegaría a cambiar su manera de ser, optando por permanecer y vivir en la Tierra para luchar a su lado contra las inminentes adversidades que superar. Junto con Piccolo, él es de los antiguos enemigos de Goku que ha evolucionando al pasar de ser un villano y antihéroe, a finalmente un héroe a lo largo del transcurso de la historia, convirtiéndose así en el deuteragonista de la serie."
+origin_planet_name = "Vegeta"
+origin_planet_description = "El planeta Vegeta, conocido como planeta Plant antes del fin de la Guerra Saiyan-tsufruiana en el año 730, es un planeta rocoso ficticio de la serie de manga y anime Dragon Ball y localizado en la Vía Láctea de las Galaxias del Norte del Universo 7 hasta su destrucción a manos de Freezer en los años 737-739. Planeta natal de los Saiyans, destruido por Freezer. Anteriormente conocido como Planeta Plant."
+portrait_image_path = "res://assets/images/characters/vegeta_normal.webp"
+origin_planet_image_path = "res://assets/images/characters/planet_vegeta.webp"
+api_image_url = "https://dragonball-api.com/characters/vegeta_normal.webp"
 powers = Array[Resource]([SubResource("Resource_s6f5x"), SubResource("Resource_l1rlh"), SubResource("Resource_bigbang"), SubResource("Resource_0cf60")])
-transformations = Array[Resource]([SubResource("Resource_irx55"), SubResource("Resource_uhbuo"), SubResource("Resource_7skgi")])
+transformations = Array[Resource]([SubResource("Resource_irx55"), SubResource("Resource_uhbuo"), SubResource("Resource_7skgi"), SubResource("Resource_ue_vegeta")])

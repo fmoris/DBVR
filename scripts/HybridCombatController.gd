@@ -1633,7 +1633,9 @@ func _process_bio_haptics(delta: float) -> void:
 	var trans = player.get("current_transformation")
 	if trans != null and trans.get("form_name") != null:
 		var t_name: String = String(trans.get("form_name")).to_lower()
-		if "kaioken" in t_name:
+		if "ultra" in t_name or "ego" in t_name or "instinto" in t_name:
+			trans_mult = 2.5
+		elif "kaioken" in t_name:
 			trans_mult = 1.35
 		elif "ssj2" in t_name or "super saiyan 2" in t_name:
 			trans_mult = 2.0

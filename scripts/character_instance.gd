@@ -1047,6 +1047,14 @@ func _check_transformation_unlocks() -> void:
 			if is_in_zenkai_state:
 				unlock_transformation(form_3)
 
+	# Desbloqueo Fase 4 (Cúspide x8.0: Ultra Instinto / Ultra Ego):
+	# Se activa tras transformar en Fase 3+ con Estado Zenkai o umbral irreversible >= 75%
+	if character_data.transformations.size() > 3:
+		var form_4: String = character_data.transformations[3].form_name
+		if not is_transformation_unlocked(form_4):
+			if current_transformation_index >= 2 and (is_in_zenkai_state or secured_np_threshold_ratio >= 0.75):
+				unlock_transformation(form_4)
+
 func transform_to(index: int) -> void:
 	if index >= 0 and index < character_data.transformations.size():
 		var trans = character_data.transformations[index]
