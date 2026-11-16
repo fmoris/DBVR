@@ -217,7 +217,7 @@ func _process(delta: float) -> void:
 
 	# 0.1 Si el jugador está volando hacia el oponente, no procesar gestos
 	var player_check = _get_player_instance()
-	if player_check and is_instance_valid(player_check) and player_check.get("is_flying_to_opponent"):
+	if player_check and is_instance_valid(player_check) and (player_check.get("is_flying_to_opponent") or bool(player_check.get("is_match_over"))):
 		return
 
 	# 1. Asegurar enlace continuo de trackers
@@ -368,7 +368,7 @@ func _process(delta: float) -> void:
 				else:
 					_cancel_action("Ki agotado: ¡No queda energía para continuar la carga!")
 				return
-			var ki_drain = 18.0 * delta
+			var ki_drain = KiEconomyConfig.get_default().super_charge_drain_per_sec * delta
 			player.consume_ki(ki_drain)
 			kamehameha_charge_time += delta
 		gesture_timer = 0.0
@@ -395,7 +395,7 @@ func _process(delta: float) -> void:
 				else:
 					_cancel_action("Ki agotado: ¡No queda energía para reunir la Genkidama!")
 				return
-			var ki_drain = 20.0 * delta
+			var ki_drain = KiEconomyConfig.get_default().super_charge_drain_per_sec * delta
 			player.consume_ki(ki_drain)
 			genkidama_charge_time += delta
 		gesture_timer = 0.0
@@ -422,7 +422,7 @@ func _process(delta: float) -> void:
 				else:
 					_cancel_action("Ki agotado: ¡No queda energía para continuar el Galick Ho!")
 				return
-			var ki_drain = 18.0 * delta
+			var ki_drain = KiEconomyConfig.get_default().super_charge_drain_per_sec * delta
 			player.consume_ki(ki_drain)
 			galick_ho_charge_time += delta
 		gesture_timer = 0.0
@@ -449,7 +449,7 @@ func _process(delta: float) -> void:
 				else:
 					_cancel_action("Ki agotado: ¡No queda energía para el Final Flash!")
 				return
-			var ki_drain = 25.0 * delta
+			var ki_drain = KiEconomyConfig.get_default().super_charge_drain_per_sec * delta
 			player.consume_ki(ki_drain)
 			final_flash_charge_time += delta
 		gesture_timer = 0.0
@@ -476,7 +476,7 @@ func _process(delta: float) -> void:
 				else:
 					_cancel_action("Ki agotado: ¡No queda energía para el Big Bang Attack!")
 				return
-			var ki_drain = 22.0 * delta
+			var ki_drain = KiEconomyConfig.get_default().super_charge_drain_per_sec * delta
 			player.consume_ki(ki_drain)
 			big_bang_charge_time += delta
 		gesture_timer = 0.0
@@ -503,6 +503,13 @@ func _process(delta: float) -> void:
 			if not ki_charge_valid:
 				_cancel_action("Pose de recarga rota (manos abiertas o fuera de la cadera)")
 				return
+			elif player and is_instance_valid(player):
+				var cfg_ki: KiEconomyConfig = KiEconomyConfig.get_default()
+				player.recharge_ki(cfg_ki.charge_ki_per_sec_heavy * delta)
+				if player.has_method("increase_np_from_charge"):
+					player.increase_np_from_charge(cfg_ki.charge_bp_per_sec_heavy * delta)
+				else:
+					player.increase_np(cfg_ki.charge_bp_per_sec_heavy * delta)
 			
 		# Si el Ki está al 100%, evaluar gestos de los dedos para transformaciones (Simétrico de 2 manos con hold de 0.6s)
 		if is_ki_full:
@@ -556,7 +563,7 @@ func _process(delta: float) -> void:
 		var player = _get_player_instance()
 		if player and is_instance_valid(player):
 			if player.current_ki > 0.0:
-				player.consume_ki(14.0 * delta)
+				player.consume_ki(KiEconomyConfig.get_default().ki_blast_charge_drain_per_sec * delta)
 			else:
 				var vital_drain = 120.0 * delta
 				player.current_np = max(1.0, player.current_np - vital_drain)
@@ -583,7 +590,7 @@ func _process(delta: float) -> void:
 		var player = _get_player_instance()
 		if player and is_instance_valid(player):
 			if player.current_ki > 0.0:
-				player.consume_ki(14.0 * delta)
+				player.consume_ki(KiEconomyConfig.get_default().ki_blast_charge_drain_per_sec * delta)
 			else:
 				var vital_drain = 120.0 * delta
 				player.current_np = max(1.0, player.current_np - vital_drain)
@@ -1147,7 +1154,8 @@ func _trigger_action(action_name: String) -> void:
 			return
 
 		var is_charged = ki_blast_charge_time_left >= 0.70
-		var ki_cost = 15.0 if is_charged else 5.0
+		var cfg_kb: KiEconomyConfig = KiEconomyConfig.get_default()
+		var ki_cost: float = cfg_kb.ki_blast_charged_cost if is_charged else cfg_kb.ki_blast_cost
 		var is_life = false
 		var sacrificed_bp = 0
 		if player:
@@ -1185,7 +1193,8 @@ func _trigger_action(action_name: String) -> void:
 			return
 
 		var is_charged = ki_blast_charge_time_right >= 0.70
-		var ki_cost = 15.0 if is_charged else 5.0
+		var cfg_kb: KiEconomyConfig = KiEconomyConfig.get_default()
+		var ki_cost: float = cfg_kb.ki_blast_charged_cost if is_charged else cfg_kb.ki_blast_cost
 		var is_life = false
 		var sacrificed_bp = 0
 		if player:
@@ -2454,9 +2463,10 @@ func get_aim_assist_zone(origin_pos: Vector3, raw_aim_dir: Vector3, is_super: bo
 	var aim_n: Vector3 = raw_aim_dir / sqrt(dir_len_sq)
 	var to_opp: Vector3 = to_opp_vec.normalized()
 	var d: float = aim_n.dot(to_opp)
-	if d >= 0.988:
+	var lock_dot: float = 0.966 if is_super else 0.988
+	if d >= lock_dot:
 		return 2
-	var outer_dot: float = 0.940 if is_super else 0.960
+	var outer_dot: float = 0.866 if is_super else 0.960
 	if d >= outer_dot:
 		return 1
 	return 0
@@ -2478,11 +2488,11 @@ func apply_soft_aim_assist(origin_pos: Vector3, raw_aim_dir: Vector3, is_super: 
 	var d: float = aim_n.dot(to_opp)
 	var assist_weight: float = 0.0
 	if is_super:
-		if d >= 0.988:
-			assist_weight = 0.75
-		elif d >= 0.940:
-			var u: float = clampf((d - 0.940) / (0.988 - 0.940), 0.0, 1.0)
-			assist_weight = 0.50 * (u * u * (3.0 - 2.0 * u))
+		if d >= 0.966:
+			assist_weight = 0.90
+		elif d >= 0.866:
+			var u: float = clampf((d - 0.866) / (0.966 - 0.866), 0.0, 1.0)
+			assist_weight = 0.65 * (u * u * (3.0 - 2.0 * u))
 		else:
 			return aim_n
 	else:

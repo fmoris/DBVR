@@ -234,6 +234,11 @@ static func generate_ragdoll(skeleton: Skeleton3D, config: Dictionary = {}) -> P
 		push_error("[RuntimeRagdollGenerator] Skeleton3D nulo o inválido.")
 		return null
 
+	var sk_scale: Vector3 = skeleton.global_transform.basis.get_scale()
+	if (sk_scale - Vector3.ONE).length() > 0.05:
+		push_warning("[RuntimeRagdollGenerator] Skeleton con escala no unitaria (%s). Se omite ragdoll Jolt para evitar deformación de malla." % str(sk_scale))
+		return null
+
 	print("[RuntimeRagdollGenerator] Generando esqueleto físico para: ", skeleton.name)
 
 	var total_mass: float = config.get("total_mass", TOTAL_BODY_MASS)

@@ -803,6 +803,7 @@ func _spawn_spark_at(pos: Vector3, col: Color) -> void:
 	tw.tween_property(sw, "scale", Vector3.ONE * 3.5, 0.40).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tw.parallel().tween_property(mat, "shader_parameter/ring_color:a", 0.0, 0.40)
 	tw.tween_callback(sw.queue_free)
+	KiSmokeFX.spawn_smoke(get_tree(), pos, 1.6)
 
 
 func _spawn_plasma_crater(pos: Vector3, radius: float, col: Color) -> void:

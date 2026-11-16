@@ -646,15 +646,10 @@ func _on_ki_blast_fired(_hand_side: int, _is_charged: bool) -> void:
 func _on_ki_blast_charging(_hand_side: int, _charge_time: float, _delta: float) -> void:
 	pass
 
-func _update_combat_stats(delta: float) -> void:
+func _update_combat_stats(_delta: float) -> void:
 	if player_instance and is_instance_valid(player_instance):
-		if is_recharging:
-			var recharge_speed = 35.0 if is_heavy_recharge else 12.0
-			player_instance.recharge_ki(recharge_speed * delta)
-			
-			var np_gain = 1800.0 if is_heavy_recharge else 400.0
-			player_instance.increase_np(np_gain * delta)
-		
+		# La recarga de Ki y BP ahora vive exclusivamente en HybridCombatController / GesturePhaseTree
+		# para evitar doble ganancia y respetar el techo de carga del 60% (Punto 8 y 9).
 		ki_current = player_instance.current_ki
 		np_current = player_instance.current_np
 		
@@ -702,15 +697,21 @@ func update_power_level(current: float, max_val: float) -> void:
 	var tier_mask: int = (1 if percent >= 25.0 else 0) | (2 if percent >= 50.0 else 0) | (4 if percent >= 75.0 else 0) | (8 if percent >= 100.0 else 0)
 	if cur_int == _last_np_int and tier_mask == _last_np_pct_tier and absf(mult - _last_bp_mult) <= 0.05:
 		return
+	var delta_dir: String = ""
+	if _last_np_int >= 0:
+		if cur_int > _last_np_int + 5:
+			delta_dir = " ▲"
+		elif cur_int < _last_np_int - 5:
+			delta_dir = " ▼"
 	_last_np_int = cur_int
 	_last_np_pct_tier = tier_mask
 	_last_bp_mult = mult
 	_hud_dirty = true
 	if bp_value_label:
 		if mult > 1.01:
-			bp_value_label.text = "BP: %s (x%.1f)" % [format_number_with_commas(cur_int), mult]
+			bp_value_label.text = "BP: %s (x%.1f)%s" % [format_number_with_commas(cur_int), mult, delta_dir]
 		else:
-			bp_value_label.text = "BP: %s" % format_number_with_commas(cur_int)
+			bp_value_label.text = "BP: %s%s" % [format_number_with_commas(cur_int), delta_dir]
 
 	# Actualizar hitos de umbrales irreversibles (25%, 50%, 75%, 100%)
 	var thresh_pcts = [25.0, 50.0, 75.0, 100.0]

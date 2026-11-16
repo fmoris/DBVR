@@ -20,6 +20,8 @@ var current_transformation_index: int = -1
 var _active_np_multiplier: float = 1.0
 var _bp_popup_cooldown: float = 0.0
 var _pending_bp_popup_accum: float = 0.0
+var _passive_regen_cooldown: float = 0.0
+var _passive_notify_accum: float = 0.0
 var unlocked_powers: Array[String] = []
 var unlocked_transformations: Array[String] = []
 
@@ -37,6 +39,7 @@ var velocity: Vector3 = Vector3.ZERO
 var knockback_drag: float = 24.0 # Fricción alta para frenado realista de cuerpos (cero rebote excesivo)
 var gravity: float = 9.8
 var is_knocked_back: bool = false
+var _proximity_repulsion_cooldown: float = 0.0
 var arena_half_limit: float = 92.0 # Límite en las faldas del cañón de Akira Toriyama
 const RING_HALF_SIZE: float = 16.0 # Límite del cuadrilátero de piedra de Cell (32x32m)
 var wall_stick_timer: float = 0.0 # Efecto de quedar incrustado en la roca de la montaña (Toriyama canon)
@@ -411,7 +414,9 @@ func _physics_process(delta: float) -> void:
 				velocity.y = 0.0
 				is_knocked_back = false
 
-	# 3. Colisión mutua de cuerpos anti-clipping (No atravesar al rival)
+	# 3. Colisión mutua de cuerpos anti-clipping (No atravesar al rival) y rebote de Ki por cercanía
+	if _proximity_repulsion_cooldown > 0.0:
+		_proximity_repulsion_cooldown -= delta
 	_process_mutual_body_collision()
 
 	# 4. Temporizador de rotura de guardia
@@ -530,7 +535,8 @@ func _process(delta: float) -> void:
 				procedural_animator.update(delta, eye_target, is_charging_ki, is_blocking, is_flying_to_opponent)
 
 
-	# Actualizar aura visual
+	# Regeneración pasiva de Ki en Fase Libre y actualización visual del aura
+	_process_passive_ki_regen(delta)
 	_update_aura_visuals(delta)
 
 func start_charging_super() -> void:
@@ -628,6 +634,7 @@ func take_hit(amount_np: float, hit_direction: Vector3 = Vector3.ZERO) -> void:
 		var mitigated_damage: float = amount_np * 0.50
 		var floor_limit_poise: float = maxf(active_max * secured_np_threshold_ratio, 100.0)
 		current_np = maxf(current_np - mitigated_damage, floor_limit_poise)
+		_regen_ki_from_damage(old_np - current_np)
 		_notify_stats()
 		_check_transformation_unlocks()
 		if old_np - current_np >= 80.0:
@@ -648,6 +655,7 @@ func take_hit(amount_np: float, hit_direction: Vector3 = Vector3.ZERO) -> void:
 	# 3. Recibir golpes disminuye nuestro BP/NP, pero nunca por debajo de los umbrales irreversibles asegurados (25%, 50%, 75%, 100%)
 	var floor_limit: float = maxf(active_max * secured_np_threshold_ratio, 100.0)
 	current_np = maxf(current_np - amount_np, floor_limit)
+	_regen_ki_from_damage(old_np - current_np)
 	_notify_stats()
 	_check_transformation_unlocks()
 	if old_np - current_np >= 80.0:
@@ -687,6 +695,7 @@ func block_hit(amount_np: float, hit_direction: Vector3 = Vector3.ZERO) -> void:
 
 	if current_ki >= ki_cost:
 		current_ki -= ki_cost
+		_mark_ki_spent()
 
 		# Daño al BP fuertemente mitigado (-85%)
 		var old_np: float = current_np
@@ -778,6 +787,7 @@ func consume_ki(amount: float) -> bool:
 		return false
 	if current_ki >= amount:
 		current_ki -= amount
+		_mark_ki_spent()
 		_notify_stats()
 		return true
 	return false
@@ -791,6 +801,7 @@ func consume_ki_or_life_force(ki_amount: float) -> Dictionary:
 	# Caso 1: Ki ordinario suficiente
 	if current_ki >= ki_amount:
 		current_ki -= ki_amount
+		_mark_ki_spent()
 		_notify_stats()
 		return { "success": true, "sacrificed_np": 0.0, "is_life_sacrifice": false }
 		
@@ -815,8 +826,11 @@ func consume_ki_or_life_force(ki_amount: float) -> Dictionary:
 	if current_np <= 0.0:
 		print("[CharacterInstance] %s: ¡COLAPSO POR SACRIFICIO VITAL! Fuerza vital agotada por completo." % character_data.character_name)
 		var opp = _get_opponent()
-		var winner_name = opp.character_data.character_name if (opp and opp.character_data) else "Rival"
-		emit_signal("game_finished", winner_name)
+		if opp and is_instance_valid(opp):
+			trigger_zenkai_match_finish(opp, self, "Agotamiento Vital")
+		else:
+			var winner_name = opp.character_data.character_name if (opp and opp.character_data) else "Rival"
+			emit_signal("game_finished", winner_name)
 		
 	return { "success": true, "sacrificed_np": np_cost, "is_life_sacrifice": true }
 
@@ -928,12 +942,58 @@ func increase_np(amount: float) -> void:
 		if opp.has_method("check_zenkai_conditions"):
 			opp.check_zenkai_conditions(current_np)
 
+## Ganancia de BP por recarga de Ki: solo sube hasta el techo de carga (60% del máximo activo).
+## El resto del BP se gana peleando (golpes, desvíos, choques). Punto 8 del playtest.
+func increase_np_from_charge(amount: float) -> void:
+	var cfg: KiEconomyConfig = KiEconomyConfig.get_default()
+	var ceiling: float = get_active_max_np() * cfg.charge_bp_ceiling_ratio
+	if current_np >= ceiling:
+		return
+	var effective_mult: float = maxf(get_transformation_multiplier() * (0.25 if is_penalized else 1.0), 0.001)
+	var raw_allowed: float = minf(amount, (ceiling - current_np) / effective_mult)
+	if raw_allowed <= 0.0:
+		return
+	increase_np(raw_allowed)
+
+
+func _mark_ki_spent() -> void:
+	_passive_regen_cooldown = KiEconomyConfig.get_default().passive_regen_delay_sec
+
+
+func _process_passive_ki_regen(delta: float) -> void:
+	if is_match_over or not character_data:
+		return
+	if _passive_regen_cooldown > 0.0:
+		_passive_regen_cooldown -= delta
+		return
+	# Solo en Fase Libre: no cargando Super, no en melee/bullet-time, no recargando (esa ya tiene su tasa)
+	if is_charging_super or is_firing_beam or is_in_beam_sequence or is_in_bullet_time or is_charging_ki:
+		return
+	if current_ki >= character_data.base_ki:
+		return
+	var regen: float = KiEconomyConfig.get_default().passive_ki_regen_per_sec * delta
+	if is_penalized:
+		regen *= 0.5
+	current_ki = minf(current_ki + regen, character_data.base_ki)
+	_passive_notify_accum += regen
+	if _passive_notify_accum >= 1.0:
+		_passive_notify_accum = 0.0
+		_notify_stats()
+
+
+func _regen_ki_from_damage(bp_lost: float) -> void:
+	if bp_lost <= 0.0 or not character_data:
+		return
+	current_ki = minf(current_ki + bp_lost * KiEconomyConfig.get_default().ki_regen_per_bp_lost, character_data.base_ki)
+
+
 func _update_secured_threshold(active_max: float) -> void:
 	if active_max <= 0.0:
 		return
 	var ratio: float = current_np / active_max
 	if ratio >= 1.0:
-		secured_np_threshold_ratio = max(secured_np_threshold_ratio, 1.0)
+		# Al 100% el piso queda en 90% (configurable) para que el BP siga oscilando en combate
+		secured_np_threshold_ratio = max(secured_np_threshold_ratio, KiEconomyConfig.get_default().secured_floor_at_full)
 	elif ratio >= 0.75:
 		secured_np_threshold_ratio = max(secured_np_threshold_ratio, 0.75)
 	elif ratio >= 0.50:
@@ -1183,6 +1243,24 @@ func trigger_zenkai_match_finish(winner: Node3D, loser: Node3D, tech_name: Strin
 			w_name = w_data.character_name
 	emit_signal("game_finished", w_name)
 	emit_signal("match_finished", winner, loser, tech_name)
+
+	# Limpiar domos melee activos y proyectiles en vuelo al concluir el combate
+	is_in_bullet_time = false
+	is_in_followup_bullet_time = false
+	if active_target_dome and is_instance_valid(active_target_dome):
+		active_target_dome.queue_free()
+		active_target_dome = null
+	var tree_fin: SceneTree = get_tree()
+	if tree_fin:
+		for proj in tree_fin.get_nodes_in_group("ki_projectiles"):
+			if is_instance_valid(proj):
+				proj.queue_free()
+		var player_node: Node3D = self if is_player else (loser if (loser and bool(loser.get("is_player"))) else winner)
+		var res_timer: SceneTreeTimer = tree_fin.create_timer(2.4)
+		res_timer.timeout.connect(func() -> void:
+			if is_instance_valid(self) and get_tree():
+				MatchResultScreen.spawn_result_screen(get_tree(), winner, loser, tech_name, player_node)
+		)
 	_spawn_zenkai_finish_banner(winner, loser, tech_name)
 
 
@@ -2182,6 +2260,9 @@ func _get_gesture_tree() -> Node:
 	return get_tree().root.find_child("GesturePhaseTree", true, false)
 
 func _log_combat_event(msg: String, type: String = "info") -> void:
+	# Punto 2: Silenciar logs flotantes de texto durante el minijuego melee para no saturar al jugador
+	if is_in_bullet_time or (active_target_dome != null and is_instance_valid(active_target_dome)):
+		return
 	var gss = _get_gesture_tree()
 	if gss and gss.has_signal("gesture_logged"):
 		gss.emit_signal("gesture_logged", msg, type)
@@ -2243,7 +2324,19 @@ func _check_pillar_collisions(pos: Vector3) -> void:
 
 ## Inicia la simulación física ragdoll en el esqueleto
 func start_ragdoll(impulse: Vector3 = Vector3.ZERO) -> void:
-	if not ragdoll_simulator or is_ragdoll_active:
+	if is_ragdoll_active:
+		return
+	# Punto 5: Si el esqueleto tiene escala no unitaria (ej. Vegeta 0.078) o no hay simulador,
+	# Jolt deforma la malla; usar caída procedural segura en su lugar.
+	var has_non_unit_scale: bool = skeleton != null and is_instance_valid(skeleton) and (skeleton.global_transform.basis.get_scale() - Vector3.ONE).length() > 0.05
+	if not ragdoll_simulator or has_non_unit_scale:
+		is_ragdoll_active = true
+		var dir: Vector3 = impulse.normalized() if impulse.length_squared() > 0.01 else Vector3.BACK
+		if procedural_animator:
+			procedural_animator.trigger_hit_flinch(1.5, -dir)
+		if body_mesh_instance and is_instance_valid(body_mesh_instance):
+			var tw: Tween = create_tween()
+			tw.tween_property(body_mesh_instance, "rotation:x", deg_to_rad(-65.0), 0.25).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 		return
 	is_ragdoll_active = true
 	if combat_anim_player and combat_anim_player.is_playing():
@@ -2271,10 +2364,13 @@ func start_ragdoll(impulse: Vector3 = Vector3.ZERO) -> void:
 
 ## Detiene la simulación física ragdoll y restaura la pose de combate
 func stop_ragdoll() -> void:
-	if not ragdoll_simulator or not is_ragdoll_active:
+	if not is_ragdoll_active:
 		return
 	is_ragdoll_active = false
-	ragdoll_simulator.physical_bones_stop_simulation()
+	if ragdoll_simulator and is_instance_valid(ragdoll_simulator):
+		ragdoll_simulator.physical_bones_stop_simulation()
+	if skeleton and is_instance_valid(skeleton):
+		skeleton.reset_bone_poses()
 	if body_mesh_instance and is_instance_valid(body_mesh_instance):
 		body_mesh_instance.position = Vector3.ZERO
 		body_mesh_instance.rotation = Vector3.ZERO
@@ -2300,8 +2396,29 @@ func _process_mutual_body_collision() -> void:
 	diff.y = 0.0
 	var dist = diff.length()
 
-	# Prevención de penetración física mutua entre combatientes (distancia mínima de cuerpos 0.65m)
-	var min_body_dist = 0.65
+	# Punto 4: Rebote de Ki por cercanía extrema fuera del melee (< 1.4m)
+	var in_melee_seq: bool = is_in_bullet_time or is_flying_to_opponent or bool(opponent.get("is_in_bullet_time")) or bool(opponent.get("is_flying_to_opponent"))
+	if not in_melee_seq and not is_match_over and dist < 1.40:
+		var push_dir: Vector3 = diff.normalized() if dist > 0.001 else Vector3.BACK
+		if _proximity_repulsion_cooldown <= 0.0:
+			_proximity_repulsion_cooldown = 0.60
+			var mid_pos: Vector3 = (player_pos + opponent_pos) * 0.5 + Vector3(0.0, 1.0, 0.0)
+			_spawn_melee_shockwave(mid_pos)
+			_spawn_block_shield_vfx()
+			if my_origin:
+				for h in ["LeftHand", "RightHand"]:
+					var ctrl = my_origin.get_node_or_null(h)
+					if ctrl and ctrl.has_method("trigger_haptic_pulse"):
+						ctrl.trigger_haptic_pulse("haptic", 175.0, 0.85, 0.14, 0.0)
+			velocity = push_dir * 9.0
+			knockback_drag = 8.0
+			is_knocked_back = true
+			opponent.set("velocity", -push_dir * 9.0)
+			opponent.set("knockback_drag", 8.0)
+			opponent.set("is_knocked_back", true)
+
+	# Prevención de penetración física mutua entre combatientes (distancia mínima dura 0.90m)
+	var min_body_dist: float = 0.90
 	if dist < min_body_dist and dist > 0.001:
 		var push_dir = diff.normalized()
 		var overlap = (min_body_dist - dist) * 0.5
@@ -2674,6 +2791,7 @@ func _execute_hammer_strike_finisher(opponent: Node3D, swing_velocity: float, re
 	var ki_spent: float = 0.0
 	if current_ki >= ki_cost:
 		current_ki -= ki_cost
+		_mark_ki_spent()
 		ki_spent = ki_cost
 	else:
 		ki_spent = current_ki
@@ -2766,6 +2884,10 @@ func _execute_hammer_strike_finisher(opponent: Node3D, swing_velocity: float, re
 	if gss and gss.has_signal("phase_changed"):
 		gss.emit_signal("phase_changed", "¡FASE LIBRE! (RIVAL ESTRELLADO AL SUELO)")
 
+	# Punto 1: Si el atacante estaba en Estado Zenkai, el Martillazo conectado cierra el combate
+	if is_in_zenkai_state and not is_match_over:
+		trigger_zenkai_match_finish(self, opponent, "Martillazo Zenkai")
+
 
 ## Ejecuta lanzamiento direccional moderado (Ataque Cargado v3 Atrás/Arriba o Golpe Fuerte por Ki == 0)
 func _execute_charged_v3_or_ki_break_finisher(opponent: Node3D, mode: String, swing_velocity: float, _launch_vector: Vector3 = Vector3.ZERO) -> void:
@@ -2826,6 +2948,10 @@ func _execute_charged_v3_or_ki_break_finisher(opponent: Node3D, mode: String, sw
 	var gss = _get_gesture_tree()
 	if gss and gss.has_signal("phase_changed"):
 		gss.emit_signal("phase_changed", "¡FASE LIBRE! (%s)" % mode_tag)
+
+	# Punto 1: Si el atacante estaba en Estado Zenkai, el remate conectado cierra el combate
+	if is_in_zenkai_state and not is_match_over:
+		trigger_zenkai_match_finish(self, opponent, "Remate Zenkai (%s)" % mode_tag)
 
 
 ## Separa a los combatientes garantizando la distancia canónica de combate (6.0m)

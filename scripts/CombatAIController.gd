@@ -429,11 +429,11 @@ func _check_incoming_threats() -> void:
 					host._log_combat_event("[DESVÍO] ¡%s desvió tu Ki Blast con un golpe de mano! (+15 Ki, +150 BP)" % _get_host_name(), "info")
 					return
 				# B. Esquive con paso lateral por casillas si tiene Ki >= 8.0 y no está en cooldown
-				elif difficulty != AIDifficulty.TRAINING and host.current_ki >= 8.0 and dodge_cooldown <= 0.0:
+				elif difficulty != AIDifficulty.TRAINING and host.current_ki >= KiEconomyConfig.get_default().ai_dodge_cost and dodge_cooldown <= 0.0:
 					var right_vec = host.global_transform.basis.x.normalized()
 					var dodge_dir = right_vec * (1.0 if randf() > 0.5 else -1.0)
 					if execute_step_movement(dodge_dir):
-						host.consume_ki(8.0)
+						host.consume_ki(KiEconomyConfig.get_default().ai_dodge_cost)
 						dodge_cooldown = 1.1 if difficulty == AIDifficulty.Z_HARD else 1.8
 						host._log_combat_event("[ESQUIVE] ¡%s dio un paso lateral evasivo para esquivar el ataque!" % _get_host_name(), "info")
 						return
@@ -623,7 +623,9 @@ func _check_ai_transformation() -> void:
 
 ## Instancia un Ki Blast procedural dinámico según CharacterData del rival
 func _spawn_ki_blast(target_pos: Vector3, is_charged: bool = false) -> void:
-	if not host.consume_ki(14.0 if is_charged else 6.0):
+	var cfg_ki: KiEconomyConfig = KiEconomyConfig.get_default()
+	var blast_cost: float = cfg_ki.ki_blast_charged_cost if is_charged else cfg_ki.ki_blast_cost
+	if not host.consume_ki(blast_cost):
 		return
 
 	var fwd = (target_pos - host.global_position).normalized()
