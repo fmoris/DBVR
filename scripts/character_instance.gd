@@ -543,7 +543,12 @@ func _process(delta: float) -> void:
 	if not is_player:
 		var opp = _get_opponent()
 		if opp and is_instance_valid(opp):
-			var opp_pos = opp.global_position
+			var opp_pos: Vector3 = opp.global_position
+			if bool(opp.get("is_player")):
+				var o_orig: Node = opp.get_parent()
+				var o_cam: Camera3D = o_orig.get_node_or_null("XRCamera3D") as Camera3D if o_orig else null
+				if o_cam and is_instance_valid(o_cam):
+					opp_pos = o_cam.global_position
 			var diff = opp_pos - global_position
 			diff.y = 0.0
 			if diff.length_squared() > 0.01:
