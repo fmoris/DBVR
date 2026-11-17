@@ -123,7 +123,9 @@ var active_beam_sequence: Node3D = null
 
 # Variables de vuelo hacia el contrincante
 var is_flying_to_opponent: bool = false
-var flight_speed: float = 35.0
+var flight_speed: float = 18.0
+var _dash_speed_mult: float = 1.0
+var _dash_vfx_ring: MeshInstance3D = null
 
 # Instancias de manos para el jugador
 var hand_left_instance: Node3D = null
@@ -350,8 +352,23 @@ func _physics_process(delta: float) -> void:
 			var target_dist = 0.65 # Distancia canónica exacta para golpear en VR
 
 			if dist > target_dist:
+				# Punto 5: Choque Dash vs Dash en pleno vuelo (gana ofensiva el de mayor BP)
+				if bool(opponent.get("is_flying_to_opponent")) and dist <= target_dist + 0.45:
+					_stop_flight()
+					if opponent.has_method("_stop_flight"):
+						opponent._stop_flight()
+					var mid_clash: Vector3 = (my_pos + opponent_pos) * 0.5
+					_spawn_melee_shockwave(mid_clash)
+					KiSmokeFX.spawn_smoke(get_tree(), mid_clash, 1.1)
+					var opp_np: float = float(opponent.get("current_np")) if opponent.get("current_np") != null else 10000.0
+					if current_np >= opp_np:
+						_start_melee_bullet_time(opponent)
+					elif opponent.has_method("_start_melee_bullet_time"):
+						opponent._start_melee_bullet_time(self)
+					return
+
 				var dir = diff.normalized() if dist > 0.01 else Vector3.FORWARD
-				var move_amount = min(flight_speed * delta, dist - target_dist)
+				var move_amount = min(flight_speed * _dash_speed_mult * delta, dist - target_dist)
 				if is_player:
 					var origin = get_parent()
 					if origin:
@@ -621,6 +638,32 @@ func _trigger_poise_resisted_feedback(hit_direction: Vector3) -> void:
 
 
 func take_hit(amount_np: float, hit_direction: Vector3 = Vector3.ZERO) -> void:
+	# Punto 5: Si el luchador va volando en Melee Dash y recibe un ataque, evaluar interrupción por tipo y BP
+	if is_flying_to_opponent and amount_np >= 10.0:
+		var opp_d: Node3D = _get_opponent()
+		var bp_shooter: float = maxf(float(opp_d.get("current_np")) if (opp_d and is_instance_valid(opp_d) and opp_d.get("current_np") != null) else 10000.0, 100.0)
+		var bp_dasher: float = maxf(current_np, 100.0)
+		var r_shoot_vs_dash: float = bp_shooter / bp_dasher
+		if is_in_beam_sequence:
+			_stop_flight()
+		elif amount_np >= 350.0:
+			# Ki Blast Cargado
+			if bp_dasher >= bp_shooter * 1.5:
+				amount_np *= 0.40 # Super Armor: sigue el dash
+			else:
+				_stop_flight()
+				is_staggered = true
+				stagger_timer = 0.35
+		else:
+			# Ki Blast Rápido
+			if r_shoot_vs_dash >= 1.5:
+				_stop_flight() # Corta el dash
+			elif bp_dasher < bp_shooter * 1.5:
+				_dash_speed_mult = 0.75
+				amount_np *= 0.50
+			else:
+				amount_np *= 0.25
+
 	# 1. Si está en postura de Guardia y no tiene la guardia rota, absorber con Bloqueo
 	if is_blocking and not is_guard_broken and amount_np >= 10.0:
 		block_hit(amount_np, hit_direction)
@@ -670,8 +713,8 @@ func take_hit(amount_np: float, hit_direction: Vector3 = Vector3.ZERO) -> void:
 		if opp_hit.has_method("check_zenkai_conditions"):
 			opp_hit.check_zenkai_conditions(current_np)
 
-	# Solo aplicar retroceso físico a impactos reales (no a decaimiento pasivo por delta)
-	if amount_np >= 10.0:
+	# Solo aplicar retroceso físico a impactos reales (si sigue en dash por Super Armor no lo frenamos)
+	if amount_np >= 10.0 and not is_flying_to_opponent:
 		var dir = hit_direction
 		if dir.length_squared() < 0.01:
 			var opp = _get_opponent()
@@ -1475,12 +1518,20 @@ func start_flight_to_opponent() -> void:
 					if ctrl and ctrl.has_method("trigger_haptic_pulse"):
 						ctrl.trigger_haptic_pulse("haptic", 120.0, 0.65, 0.22, 0.0)
 			return
+	var opp_f: Node3D = _get_opponent()
+	var bp_atk_f: float = maxf(current_np, 100.0)
+	var bp_def_f: float = maxf(float(opp_f.get("current_np")) if (opp_f and is_instance_valid(opp_f) and opp_f.get("current_np") != null) else 10000.0, 100.0)
+	flight_speed = clampf(18.0 * sqrt(bp_atk_f / bp_def_f), 13.0, 26.0)
+	_dash_speed_mult = 1.0
 	is_flying_to_opponent = true
+	_set_dash_vfx_visible(true)
 	_update_aura_visuals()
-	print("[CharacterInstance] %s: Iniciando vuelo rápido hacia el oponente." % character_data.character_name)
+	print("[CharacterInstance] %s: Iniciando vuelo rápido (%.1f m/s)." % [character_data.character_name, flight_speed])
 
 func _stop_flight() -> void:
 	is_flying_to_opponent = false
+	_dash_speed_mult = 1.0
+	_set_dash_vfx_visible(false)
 	_update_aura_visuals()
 	print("[CharacterInstance] %s: Vuelo finalizado a distancia de melee." % character_data.character_name)
 	
@@ -1490,6 +1541,41 @@ func _stop_flight() -> void:
 		if gss:
 			gss.emit_signal("gesture_logged", "[Melee] ¡Llegada al oponente a distancia de Melee!", "success")
 			gss.emit_signal("phase_changed", "DISTANCIA DE MELEE")
+
+
+func _set_dash_vfx_visible(show_vfx: bool) -> void:
+	if not is_player:
+		return
+	if show_vfx:
+		if _dash_vfx_ring == null or not is_instance_valid(_dash_vfx_ring):
+			var orig: Node = get_parent()
+			var cam: Camera3D = orig.get_node_or_null("XRCamera3D") as Camera3D if orig else null
+			if cam:
+				_dash_vfx_ring = MeshInstance3D.new()
+				_dash_vfx_ring.name = "MeleeDashSpeedLines"
+				var cyl := CylinderMesh.new()
+				cyl.top_radius = 0.65
+				cyl.bottom_radius = 1.15
+				cyl.height = 1.8
+				cyl.radial_segments = 24
+				cyl.cap_top = false
+				cyl.cap_bottom = false
+				_dash_vfx_ring.mesh = cyl
+				var mat := StandardMaterial3D.new()
+				mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
+				mat.blend_mode = StandardMaterial3D.BLEND_MODE_ADD
+				mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+				mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+				mat.albedo_color = Color(0.75, 0.92, 1.0, 0.16)
+				_dash_vfx_ring.material_override = mat
+				_dash_vfx_ring.rotation.x = PI * 0.5
+				_dash_vfx_ring.position = Vector3(0.0, 0.0, -0.95)
+				cam.add_child(_dash_vfx_ring)
+		if _dash_vfx_ring and is_instance_valid(_dash_vfx_ring):
+			_dash_vfx_ring.visible = true
+	else:
+		if _dash_vfx_ring and is_instance_valid(_dash_vfx_ring):
+			_dash_vfx_ring.visible = false
 
 func _get_opponent() -> Node3D:
 	if is_player:
@@ -2598,6 +2684,16 @@ func _start_melee_bullet_time(opponent: Node3D) -> void:
 		var p_floor_y: float = p_origin.global_position.y if p_origin else p_node.global_position.y
 		ai_node.global_position = Vector3(p_cam.global_position.x, p_floor_y, p_cam.global_position.z) + cam_fwd_xz * 0.85
 		_clamp_to_arena(ai_node)
+		# Punto 7: Girar instantáneamente a la IA para mirar cara a cara al jugador desde el frame 0
+		var face_dx: float = p_cam.global_position.x - ai_node.global_position.x
+		var face_dz: float = p_cam.global_position.z - ai_node.global_position.z
+		if face_dx * face_dx + face_dz * face_dz > 0.0001:
+			ai_node.rotation.y = atan2(face_dx, face_dz)
+		# Punto 8: Onda expansiva de choque al iniciar el melee (+ humo si está cerca del suelo)
+		var clash_pt: Vector3 = (p_cam.global_position - Vector3(0.0, 0.20, 0.0) + ai_node.global_position + Vector3(0.0, 1.1, 0.0)) * 0.5
+		_spawn_melee_shockwave(clash_pt)
+		if p_floor_y <= 2.0:
+			KiSmokeFX.spawn_smoke(get_tree(), Vector3(clash_pt.x, p_floor_y + 0.15, clash_pt.z), 0.85)
 
 	# Instanciar la cúpula holográfica anime con las cajas de impacto secuenciales
 	active_target_dome = MeleeTargetDomeClass.new()
