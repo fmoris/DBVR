@@ -299,6 +299,23 @@ func _process(delta: float) -> void:
 		if gesture_tree:
 			gesture_tree._reset_to_idle()
 
+	# Fix 2: Mientras el jugador sale volando / ragdoll / incrustado, no puede realizar acciones de combate
+	if player and player.has_method("is_airborne_incapacitated") and player.is_airborne_incapacitated():
+		_reset_super_state()
+		if left_is_charging or right_is_charging:
+			if gesture_tree:
+				gesture_tree._cleanup_ki_blast_charge_sphere(0)
+				gesture_tree._cleanup_ki_blast_charge_sphere(1)
+			left_charge_time = 0.0
+			right_charge_time = 0.0
+			left_is_charging = false
+			right_is_charging = false
+		if is_charging_ki:
+			is_charging_ki = false
+			ki_prep_phase = false
+		_process_hud_toggle(delta)
+		return
+
 	# 4. Procesar las acciones híbridas en combate libre
 	_process_ki_recharge(delta)
 	_process_melee_punches()
@@ -1244,6 +1261,7 @@ func _execute_super_fire(tech_name: String) -> void:
 	var tech_display_name = tech_name.capitalize()
 	var player = gesture_tree._get_player_instance() if gesture_tree else null
 	if player and is_instance_valid(player):
+		player.set("last_super_charge_time", super_charge_timer)
 		var power_lookup = ""
 		match tech_name:
 			"galick_ho": power_lookup = "Galick Ho"

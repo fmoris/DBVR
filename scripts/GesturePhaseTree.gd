@@ -217,8 +217,13 @@ func _process(delta: float) -> void:
 
 	# 0.1 Si el jugador está volando hacia el oponente, no procesar gestos
 	var player_check = _get_player_instance()
-	if player_check and is_instance_valid(player_check) and (player_check.get("is_flying_to_opponent") or bool(player_check.get("is_match_over"))):
-		return
+	if player_check and is_instance_valid(player_check):
+		if player_check.get("is_flying_to_opponent") or bool(player_check.get("is_match_over")):
+			return
+		if player_check.has_method("is_airborne_incapacitated") and player_check.is_airborne_incapacitated():
+			if not is_controller_override and current_node != gesture_tree:
+				_reset_to_idle()
+			return
 
 	# 1. Asegurar enlace continuo de trackers
 	_ensure_trackers()
