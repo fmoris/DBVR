@@ -278,7 +278,6 @@ func _process(delta: float) -> void:
 				gesture_tree._cancel_action("En combate cuerpo a cuerpo")
 				gesture_tree._reset_to_idle()
 		_process_guard()
-		_process_grid_step_movement(delta)
 		_process_hud_toggle(delta)
 		return
 
