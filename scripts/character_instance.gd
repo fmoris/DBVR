@@ -2586,33 +2586,18 @@ func _start_melee_bullet_time(opponent: Node3D) -> void:
 		opponent.set("velocity", Vector3.ZERO)
 		opponent.set("is_knocked_back", false)
 
-	if is_player:
-		var my_origin = get_parent()
-		var cam = my_origin.get_node_or_null("XRCamera3D") if my_origin else null
-		if my_origin and cam:
-			var opp_pos = opponent.global_position
-			var cam_h = Vector3(cam.global_position.x, 0.0, cam.global_position.z)
-			var opp_h = Vector3(opp_pos.x, 0.0, opp_pos.z)
-			var to_player_dir = (cam_h - opp_h).normalized()
-			if to_player_dir.length_squared() < 0.01:
-				to_player_dir = Vector3.BACK
-			var desired_cam_pos = opp_pos + to_player_dir * 0.65
-			var cam_offset_from_origin = cam.global_position - my_origin.global_position
-			my_origin.global_position.x = desired_cam_pos.x - cam_offset_from_origin.x
-			my_origin.global_position.z = desired_cam_pos.z - cam_offset_from_origin.z
-			_clamp_to_arena(my_origin)
-	else:
-		var opp_origin = opponent.get_parent() if opponent.get("is_player") else null
-		var opp_cam = opp_origin.get_node_or_null("XRCamera3D") if opp_origin else null
-		var player_head = opp_cam.global_position if opp_cam else (opp_origin.global_position if opp_origin else opponent.global_position)
-		var player_h = Vector3(player_head.x, 0.0, player_head.z)
-		var ai_h = Vector3(global_position.x, 0.0, global_position.z)
-		var to_ai_dir = (ai_h - player_h).normalized()
-		if to_ai_dir.length_squared() < 0.01:
-			to_ai_dir = Vector3.FORWARD
-		global_position.x = player_h.x + to_ai_dir.x * 0.65
-		global_position.z = player_h.z + to_ai_dir.z * 0.65
-		_clamp_to_arena(self)
+	# Alinear frente a frente: colocar siempre a la IA directamente delante de la mirada del jugador (0.85m) y misma altura Y
+	var p_node: Node3D = self if is_player else opponent
+	var ai_node: Node3D = opponent if is_player else self
+	var p_origin: Node3D = p_node.get_parent() as Node3D if (p_node and p_node.get_parent() is Node3D) else null
+	var p_cam: Camera3D = p_origin.get_node_or_null("XRCamera3D") as Camera3D if p_origin else null
+	if p_cam and is_instance_valid(p_cam) and ai_node and is_instance_valid(ai_node):
+		var cam_fwd_xz: Vector3 = -p_cam.global_transform.basis.z
+		cam_fwd_xz.y = 0.0
+		cam_fwd_xz = cam_fwd_xz.normalized() if cam_fwd_xz.length_squared() > 0.001 else Vector3.FORWARD
+		var p_floor_y: float = p_origin.global_position.y if p_origin else p_node.global_position.y
+		ai_node.global_position = Vector3(p_cam.global_position.x, p_floor_y, p_cam.global_position.z) + cam_fwd_xz * 0.85
+		_clamp_to_arena(ai_node)
 
 	# Instanciar la cúpula holográfica anime con las cajas de impacto secuenciales
 	active_target_dome = MeleeTargetDomeClass.new()

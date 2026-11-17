@@ -486,15 +486,7 @@ func _process(delta: float) -> void:
 			attacker.set("velocity", Vector3.ZERO)
 		if defender.get("velocity") != null:
 			defender.set("velocity", Vector3.ZERO)
-		var p_atk: Vector3 = _get_fighter_chest_pos(attacker)
-		var p_def: Vector3 = _get_fighter_chest_pos(defender)
-		p_atk.y = 0.0
-		p_def.y = 0.0
-		var sep_dist: float = p_atk.distance_to(p_def)
-		if sep_dist > 5.5:
-			print("[BulletTimeDome] Fin del enfrentamiento melee: Separación fuera de rango (%.2fm)." % sep_dist)
-			finish_without_hits()
-			return
+		_keep_ai_face_to_face(delta)
 
 	match phase:
 		DomePhase.PHASE_TRANSITION:
@@ -1659,7 +1651,51 @@ func _clamp_dome_y_to_player(raw_y: float, atk_chest: Vector3, def_chest: Vector
 	return raw_y
 
 
+func _get_player_and_ai() -> Array[Node3D]:
+	var p_node: Node3D = null
+	var ai_node: Node3D = null
+	for f in [attacker, defender]:
+		if f and is_instance_valid(f):
+			if bool(f.get("is_player")):
+				p_node = f
+			else:
+				ai_node = f
+	return [p_node, ai_node]
+
+
+func _keep_ai_face_to_face(delta: float) -> void:
+	var pair: Array[Node3D] = _get_player_and_ai()
+	var p_node: Node3D = pair[0]
+	var ai_node: Node3D = pair[1]
+	if not p_node or not ai_node:
+		return
+	var cam: Camera3D = _get_player_camera()
+	if not cam or not is_instance_valid(cam):
+		return
+	var cam_fwd_xz: Vector3 = -cam.global_transform.basis.z
+	cam_fwd_xz.y = 0.0
+	cam_fwd_xz = cam_fwd_xz.normalized() if cam_fwd_xz.length_squared() > 0.001 else Vector3.FORWARD
+	var p_orig: Node3D = p_node.get_parent() as Node3D if p_node.get_parent() is Node3D else null
+	var target_y: float = p_orig.global_position.y if p_orig else p_node.global_position.y
+	var desired_ai_pos: Vector3 = Vector3(cam.global_position.x, target_y, cam.global_position.z) + cam_fwd_xz * 0.85
+	var w: float = clampf(delta * 10.0, 0.0, 1.0)
+	ai_node.global_position = ai_node.global_position.lerp(desired_ai_pos, w)
+	if ai_node.has_method("_clamp_to_arena"):
+		ai_node._clamp_to_arena(ai_node)
+
+
 func _update_dome_transform() -> void:
+	var cam: Camera3D = _get_player_camera()
+	if cam and is_instance_valid(cam):
+		var cam_fwd_xz: Vector3 = -cam.global_transform.basis.z
+		cam_fwd_xz.y = 0.0
+		cam_fwd_xz = cam_fwd_xz.normalized() if cam_fwd_xz.length_squared() > 0.001 else Vector3.FORWARD
+		var chest_y: float = cam.global_position.y - 0.22
+		global_position = Vector3(cam.global_position.x, chest_y, cam.global_position.z) + cam_fwd_xz * 0.48
+		rotation.y = atan2(-cam_fwd_xz.x, -cam_fwd_xz.z)
+		rotation.x = 0.0
+		return
+
 	var atk_chest: Vector3 = _get_fighter_chest_pos(attacker) if (attacker and is_instance_valid(attacker)) else global_position
 	var def_chest: Vector3 = _get_fighter_chest_pos(defender) if (defender and is_instance_valid(defender)) else (atk_chest + Vector3.FORWARD * 0.65)
 	var dir_to_def: Vector3 = _get_atk_to_def_dir()
@@ -1673,22 +1709,8 @@ func _update_dome_transform() -> void:
 
 
 func _update_dome_transform_for_defender() -> void:
-	var atk_chest: Vector3 = _get_fighter_chest_pos(attacker) if (attacker and is_instance_valid(attacker)) else global_position
-	var def_chest: Vector3 = _get_fighter_chest_pos(defender) if (defender and is_instance_valid(defender)) else (atk_chest + Vector3.FORWARD * 0.65)
-	var dir_atk_to_def: Vector3 = _get_atk_to_def_dir()
-	var horiz_dist: float = Vector2(def_chest.x - atk_chest.x, def_chest.z - atk_chest.z).length()
-	var dome_y: float = _clamp_dome_y_to_player((atk_chest.y + def_chest.y) * 0.5 - 0.03, atk_chest, def_chest)
-
-	if attacker and is_instance_valid(attacker) and bool(attacker.get("is_player")):
-		var atk_offset: float = clampf(horiz_dist * 0.62, 0.36, 0.52) if horiz_dist > 0.05 else 0.45
-		global_position = Vector3(atk_chest.x, dome_y, atk_chest.z) + dir_atk_to_def * atk_offset
-		rotation.y = atan2(-dir_atk_to_def.x, -dir_atk_to_def.z)
-	else:
-		var atk_front_offset: float = clampf(horiz_dist - 0.40, 0.22, 0.38) if horiz_dist > 0.05 else 0.28
-		global_position = Vector3(atk_chest.x, dome_y, atk_chest.z) + dir_atk_to_def * atk_front_offset
-		var dir_def_to_atk: Vector3 = -dir_atk_to_def
-		rotation.y = atan2(-dir_def_to_atk.x, -dir_def_to_atk.z)
-	rotation.x = 0.0
+	# Tanto en ataque como en defensa, las cajas quedan siempre a 0.48m frente al jugador
+	_update_dome_transform()
 
 
 # ==============================================================================
@@ -1712,7 +1734,7 @@ func _check_controller_punches() -> void:
 	var best_ctrl: XRController3D = null
 	var best_hand_name: String = ""
 	var best_hand_idx: int = -1
-	var best_dist: float = 0.23
+	var best_dist: float = 0.25
 	var best_vel: Vector3 = Vector3.ZERO
 	var best_vmag: float = 0.0
 
@@ -1730,7 +1752,7 @@ func _check_controller_punches() -> void:
 				if d_any < min_dist_to_any_zone:
 					min_dist_to_any_zone = d_any
 
-		if hand_must_retract[hand_idx] and min_dist_to_any_zone > 0.24:
+		if hand_must_retract[hand_idx] and min_dist_to_any_zone > 0.26:
 			hand_must_retract[hand_idx] = false
 
 		# Exigir puño cerrado (Grip+Trigger) y no estar en retracción
@@ -1749,7 +1771,7 @@ func _check_controller_punches() -> void:
 			if not z_node or not is_instance_valid(z_node):
 				continue
 			var d: float = hand_pos.distance_to(z_node.global_position)
-			if d <= 0.22 and d < best_dist:
+			if d <= 0.24 and d < best_dist:
 				best_dist = d
 				best_zone = zone
 				best_ctrl = ctrl
