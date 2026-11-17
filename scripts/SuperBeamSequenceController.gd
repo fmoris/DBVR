@@ -922,11 +922,10 @@ func _build_audio() -> void:
 	audio_player.name = "BeamSequenceAudio"
 	audio_player.unit_size = 8.0
 	audio_player.max_distance = 45.0
-	if ResourceLoader.exists("res://assets/sfx/Kamehameha Regular.mp3"):
-		audio_player.stream = load("res://assets/sfx/Kamehameha Regular.mp3")
-		audio_player.pitch_scale = randf_range(0.92, 1.08)
-		audio_player.play()
 	add_child(audio_player)
+	var fallback_beam: AudioStream = load("res://assets/sfx/Kamehameha Regular.mp3") if ResourceLoader.exists("res://assets/sfx/Kamehameha Regular.mp3") else null
+	audio_player.pitch_scale = randf_range(0.92, 1.08)
+	AudioActionManager.play_action("goku.kamehameha_fire", audio_player, fallback_beam)
 
 
 func _spawn_spark_at(pos: Vector3, col: Color) -> void:

@@ -18,6 +18,7 @@ config/icon="res://icon.svg"
 [autoload]
 
 MetaManager="*res://scripts/MetaManager.gd"
+AudioActionManager="*res://scripts/AudioActionManager.gd"
 
 [dotnet]
 

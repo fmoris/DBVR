@@ -1,0 +1,19 @@
+[remap]
+
+importer="oggvorbisstr"
+type="AudioStreamOggVorbis"
+uid="uid://dm0txidh4cugh"
+path="res://.godot/imported/Goku (Z - End)_143.ogg-f1a17d944595f7a9338c99478034e280.oggvorbisstr"
+
+[deps]
+
+source_file="res://assets/audio/Goku (Z - End)/Goku (Z - End)_143.ogg"
+dest_files=["res://.godot/imported/Goku (Z - End)_143.ogg-f1a17d944595f7a9338c99478034e280.oggvorbisstr"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

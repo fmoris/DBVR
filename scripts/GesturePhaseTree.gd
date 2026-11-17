@@ -998,7 +998,7 @@ func _feed_trie(gesture_name: String) -> void:
 						emit_signal("gesture_logged", "Manos unidas en la cadera. ¡Cargando Kamehameha!", "info")
 					if ki_blast_charge_player:
 						ki_blast_charge_player.pitch_scale = randf_range(0.92, 1.08)
-						ki_blast_charge_player.play()
+						AudioActionManager.play_action("goku.kamehameha_charge", ki_blast_charge_player, ki_blast_charge_player.stream)
 				else:
 					emit_signal("gesture_logged", "No se pudo cargar Kamehameha.", "warning")
 					_cancel_action("Kamehameha cancelado")
@@ -1023,7 +1023,7 @@ func _feed_trie(gesture_name: String) -> void:
 						emit_signal("gesture_logged", "Brazos alzados al cielo. ¡Reuniendo energía para la Genkidama!", "info")
 					if ki_blast_charge_player:
 						ki_blast_charge_player.pitch_scale = randf_range(0.92, 1.08)
-						ki_blast_charge_player.play()
+						AudioActionManager.play_action("goku.kamehameha_charge", ki_blast_charge_player, ki_blast_charge_player.stream)
 				else:
 					emit_signal("gesture_logged", "No se pudo reunir la Genkidama.", "warning")
 					_cancel_action("Genkidama cancelada")
@@ -1048,7 +1048,7 @@ func _feed_trie(gesture_name: String) -> void:
 						emit_signal("gesture_logged", "Manos unidas al hombro. ¡Cargando Galick Ho!", "info")
 					if ki_blast_charge_player:
 						ki_blast_charge_player.pitch_scale = randf_range(0.92, 1.08)
-						ki_blast_charge_player.play()
+						AudioActionManager.play_action("goku.kamehameha_charge", ki_blast_charge_player, ki_blast_charge_player.stream)
 				else:
 					emit_signal("gesture_logged", "No se pudo cargar Galick Ho.", "warning")
 					_cancel_action("Galick Ho cancelado")
@@ -1073,7 +1073,7 @@ func _feed_trie(gesture_name: String) -> void:
 						emit_signal("gesture_logged", "Brazos en cruz acumulando relámpagos. ¡Cargando Final Flash!", "info")
 					if ki_blast_charge_player:
 						ki_blast_charge_player.pitch_scale = randf_range(0.92, 1.08)
-						ki_blast_charge_player.play()
+						AudioActionManager.play_action("goku.kamehameha_charge", ki_blast_charge_player, ki_blast_charge_player.stream)
 				else:
 					emit_signal("gesture_logged", "No se pudo cargar Final Flash.", "warning")
 					_cancel_action("Final Flash cancelado")
@@ -1098,7 +1098,7 @@ func _feed_trie(gesture_name: String) -> void:
 						emit_signal("gesture_logged", "Brazo extendido con palma abierta. ¡Cargando Big Bang Attack!", "info")
 					if ki_blast_charge_player:
 						ki_blast_charge_player.pitch_scale = randf_range(0.92, 1.08)
-						ki_blast_charge_player.play()
+						AudioActionManager.play_action("goku.kamehameha_charge", ki_blast_charge_player, ki_blast_charge_player.stream)
 				else:
 					emit_signal("gesture_logged", "No se pudo cargar Big Bang Attack.", "warning")
 					_cancel_action("Big Bang Attack cancelado")
@@ -1144,10 +1144,10 @@ func _trigger_action(action_name: String) -> void:
 		# Reproducir sonidos de recarga de Ki
 		if aura_start_player:
 			aura_start_player.pitch_scale = randf_range(0.92, 1.08)
-			aura_start_player.play()
+			AudioActionManager.play_action("common.aura_burst", aura_start_player, aura_start_player.stream)
 		if aura_loop_player:
 			aura_loop_player.pitch_scale = randf_range(0.92, 1.08)
-			aura_loop_player.play()
+			AudioActionManager.play_action("common.ki_charge_phase2", aura_loop_player, aura_loop_player.stream, true)
 		
 	elif action_name == "ki_blast_left":
 		# REQUISITO 1: Solo al tener el brazo extendido

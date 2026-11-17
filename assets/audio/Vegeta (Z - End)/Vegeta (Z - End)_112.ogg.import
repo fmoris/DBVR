@@ -1,0 +1,19 @@
+[remap]
+
+importer="oggvorbisstr"
+type="AudioStreamOggVorbis"
+uid="uid://co3p14wf6k3jc"
+path="res://.godot/imported/Vegeta (Z - End)_112.ogg-a7170ebc543f11a0ccf4f4ce6cc8ceef.oggvorbisstr"
+
+[deps]
+
+source_file="res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_112.ogg"
+dest_files=["res://.godot/imported/Vegeta (Z - End)_112.ogg-a7170ebc543f11a0ccf4f4ce6cc8ceef.oggvorbisstr"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

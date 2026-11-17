@@ -545,11 +545,10 @@ func _build_audio() -> void:
 	audio_loop.name = "ClashLoopAudio"
 	audio_loop.unit_size = 8.0
 	audio_loop.max_distance = 40.0
-	if ResourceLoader.exists("res://assets/sfx/AURA.mp3"):
-		audio_loop.stream = load("res://assets/sfx/AURA.mp3")
-		audio_loop.pitch_scale = 0.85
-		audio_loop.play()
 	add_child(audio_loop)
+	var fallback_clash: AudioStream = load("res://assets/sfx/AURA.mp3") if ResourceLoader.exists("res://assets/sfx/AURA.mp3") else null
+	audio_loop.pitch_scale = 0.85
+	AudioActionManager.play_action("common.beam_clash", audio_loop, fallback_clash, true)
 
 
 func _spawn_clash_shockwave() -> void:
