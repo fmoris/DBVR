@@ -189,6 +189,14 @@ func trigger_melee_strike(strike_type: int = -1) -> void:
 	melee_anim_timer = melee_anim_duration
 
 
+var melee_block_timer: float = 0.0
+var melee_block_type: int = 0
+
+func trigger_melee_block(block_type: int = 0) -> void:
+	melee_block_type = clampi(block_type, 0, 3)
+	melee_block_timer = 0.28
+
+
 func trigger_getup_recovery(duration: float = 0.45) -> void:
 	getup_recovery_duration = maxf(duration, 0.15)
 	getup_recovery_timer = getup_recovery_duration
@@ -210,6 +218,8 @@ func update(delta: float, target_look_pos: Vector3, is_charging_ki: bool, is_blo
 		ki_blast_anim_timer = maxf(ki_blast_anim_timer - delta, 0.0)
 	if melee_anim_timer > 0.0:
 		melee_anim_timer = maxf(melee_anim_timer - delta, 0.0)
+	if melee_block_timer > 0.0:
+		melee_block_timer = maxf(melee_block_timer - delta, 0.0)
 	if getup_recovery_timer > 0.0:
 		getup_recovery_timer = maxf(getup_recovery_timer - delta, 0.0)
 	if active_super_phase == 2 and super_fire_hold_timer > 0.0:
@@ -429,6 +439,20 @@ func _apply_hips_spine_and_chest(delta: float) -> void:
 			"genkidama":
 				spine_target = Vector3(deg_to_rad(-8.0), 0.0, 0.0)
 				chest_target = Vector3(deg_to_rad(-12.0), 0.0, 0.0)
+	elif melee_block_timer > 0.0:
+		match melee_block_type:
+			0:
+				spine_target = Vector3(deg_to_rad(-6.0), deg_to_rad(-10.0), 0.0)
+				chest_target = Vector3(deg_to_rad(4.0), deg_to_rad(-12.0), 0.0)
+			1:
+				spine_target = Vector3(deg_to_rad(10.0), 0.0, 0.0)
+				chest_target = Vector3(deg_to_rad(8.0), 0.0, 0.0)
+			2:
+				hips_target = Vector3(0.0, deg_to_rad(14.0), 0.0)
+				spine_target = Vector3(deg_to_rad(10.0), deg_to_rad(10.0), 0.0)
+			3:
+				hips_target = Vector3(0.0, deg_to_rad(-16.0), 0.0)
+				chest_target = Vector3(0.0, deg_to_rad(-16.0), 0.0)
 	elif _st_is_blocking:
 		spine_target = Vector3(deg_to_rad(8.0) + breath_x, 0.0, 0.0)
 		chest_target = Vector3(deg_to_rad(6.0), 0.0, 0.0)
@@ -452,11 +476,11 @@ func _apply_hips_spine_and_chest(delta: float) -> void:
 		spine_target = Vector3(deg_to_rad(14.0) + pant_x, 0.0, 0.0)
 		chest_target = Vector3(deg_to_rad(10.0) + pant_x, 0.0, 0.0)
 	else:
-		# Guardia marcial DBZ viva (cadera y torso girados ~20°, postura erguida)
-		var martial_yaw: float = deg_to_rad(-18.0 if is_vegeta_char else -20.0)
-		hips_target = Vector3(0.0, martial_yaw * 0.55, 0.0)
-		spine_target = Vector3(breath_x + deg_to_rad(5.0), martial_yaw * 0.25, 0.0)
-		chest_target = Vector3(breath_x * 0.8 + deg_to_rad(4.0), martial_yaw * 0.25, 0.0)
+		# Guardia marcial DBZ frontal (ligerísimo ángulo -4° para no verse de costado)
+		var martial_yaw: float = deg_to_rad(-4.0)
+		hips_target = Vector3(0.0, martial_yaw * 0.4, 0.0)
+		spine_target = Vector3(breath_x + deg_to_rad(4.0), martial_yaw * 0.3, 0.0)
+		chest_target = Vector3(breath_x * 0.8 + deg_to_rad(3.0), martial_yaw * 0.3, 0.0)
 
 	# Superposición elástica direccional por impacto físico recibido (Hit Flinch)
 	if _st_flinch_factor > 0.001:
@@ -818,6 +842,26 @@ func _apply_arms_pose(delta: float) -> void:
 				trig_l = 0.05
 				grip_r = 0.05
 				trig_r = 0.05
+	elif melee_block_timer > 0.0:
+		match melee_block_type:
+			0: # Bloqueo con una mano (brazo derecho arriba cubriendo rostro, palma abierta)
+				des_pos_l = Vector3(0.08, -0.04, 0.20)
+				des_pos_r = Vector3(0.02, 0.16, 0.36)
+				des_basis_r = palm_fwd_r
+				grip_l = 0.85; trig_l = 0.85; grip_r = 0.05; trig_r = 0.15
+			1: # Guardia Cruzada en X
+				des_pos_l = Vector3(-0.08, 0.10, 0.32)
+				des_pos_r = Vector3(0.08, 0.06, 0.30)
+				grip_l = 0.95; trig_l = 0.95; grip_r = 0.95; trig_r = 0.95
+			2: # Choque de Puños (puño derecho extendido al impacto)
+				des_pos_l = Vector3(-0.10, -0.06, 0.18)
+				des_pos_r = Vector3(0.0, 0.04, 0.52)
+				grip_l = 0.95; trig_l = 0.95; grip_r = 1.0; trig_r = 1.0
+			3: # Parry Perfecto (barrido lateral amplio)
+				des_pos_l = Vector3(0.26, 0.14, 0.34)
+				des_pos_r = Vector3(-0.22, 0.08, 0.30)
+				des_basis_l = palm_fwd_l; des_basis_r = palm_fwd_r
+				grip_l = 0.10; trig_l = 0.10; grip_r = 0.10; trig_r = 0.10
 	elif _st_is_blocking:
 		des_pos_l = Vector3(-0.08, 0.10, 0.30)
 		des_pos_r = Vector3(0.08, 0.06, 0.28)
