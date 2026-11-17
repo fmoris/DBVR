@@ -105,6 +105,7 @@ var target_zones: Array = []
 var dome_mesh: MeshInstance3D = null
 var header_label: Label3D = null
 var melee_hud_anchor: Node3D = null
+var _active_impact_popup: Label3D = null
 var charge_spheres: Array[MeshInstance3D] = [null, null]
 
 # Parámetros de Defensa Rítmica (1.25s por nota)
@@ -268,19 +269,35 @@ func _get_pips_string(total: int) -> String:
 
 
 func _spawn_impact_popup(world_pos: Vector3, txt: String, col: Color) -> void:
-	var tree: SceneTree = get_tree()
-	if not tree or not tree.current_scene:
-		return
+	if _active_impact_popup and is_instance_valid(_active_impact_popup):
+		_active_impact_popup.queue_free()
+		_active_impact_popup = null
 	var lbl := Label3D.new()
 	lbl.text = txt
-	lbl.font_size = 32
-	lbl.pixel_size = 0.0020
+	lbl.font_size = 28
+	lbl.pixel_size = 0.0014
 	lbl.outline_size = 10
 	lbl.modulate = col
 	lbl.outline_modulate = Color(0.0, 0.0, 0.0, 0.95)
-	lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	lbl.no_depth_test = true
-	lbl.render_priority = 118
+	lbl.render_priority = 126
+	_active_impact_popup = lbl
+
+	if melee_hud_anchor and is_instance_valid(melee_hud_anchor):
+		lbl.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+		melee_hud_anchor.add_child(lbl)
+		lbl.position = Vector3(0.0, -0.11, 0.0)
+		var tw_h: Tween = lbl.create_tween().set_parallel(true)
+		tw_h.tween_property(lbl, "position:y", -0.04, 0.45).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		tw_h.tween_property(lbl, "modulate:a", 0.0, 0.45).set_delay(0.14)
+		tw_h.chain().tween_callback(lbl.queue_free)
+		return
+
+	var tree: SceneTree = get_tree()
+	if not tree or not tree.current_scene:
+		lbl.queue_free()
+		return
+	lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	tree.current_scene.add_child(lbl)
 	lbl.global_position = world_pos + Vector3(0.0, 0.08, 0.0)
 	var tw: Tween = lbl.create_tween().set_parallel(true)
@@ -595,6 +612,22 @@ func _refresh_header_hud(is_charging_hammer: bool = false, active_zone_name: Str
 # FASE 2: DEFENSA RÍTMICA SECUENCIAL (1.25s POR GOLPE)
 # ==============================================================================
 
+func _compute_note_prewarn_sec(note: Dictionary) -> float:
+	var vel: float = float(note.get("velocity", 1.8))
+	var base_t: float = clampf(0.95 - (vel - 1.2) * 0.08, 0.65, 0.95)
+	if bool(note.get("is_hammer", false)):
+		base_t = 1.70
+	elif bool(note.get("is_charged_v3", false)):
+		base_t = 1.55
+	elif bool(note.get("is_charged", false)):
+		base_t = 1.35
+
+	var bp_atk: float = maxf(float(attacker.get("current_np")) if (attacker and is_instance_valid(attacker) and attacker.get("current_np") != null) else 10000.0, 100.0)
+	var bp_def: float = maxf(float(defender.get("current_np")) if (defender and is_instance_valid(defender) and defender.get("current_np") != null) else 10000.0, 100.0)
+	var bp_factor: float = clampf(pow(bp_def / bp_atk, 0.35), 0.65, 1.55)
+	return clampf(base_t * bp_factor, 0.50, 2.60)
+
+
 func start_defense_phase() -> void:
 	_hide_all_charge_spheres()
 	if hits.is_empty():
@@ -614,12 +647,13 @@ func start_defense_phase() -> void:
 	def_right_velocity = Vector3.ZERO
 	_reset_all_timing_rings()
 
-	var max_offset: float = 0.0
+	var accum_time: float = 0.0
 	for h in hits:
-		var off: float = float(h.get("time_offset", 0.0))
-		if off > max_offset:
-			max_offset = off
-	defense_total_duration = max_offset + 0.90
+		var prewarn: float = _compute_note_prewarn_sec(h)
+		h["prewarn_sec"] = prewarn
+		accum_time += prewarn + 0.16
+		h["time_offset"] = accum_time
+	defense_total_duration = accum_time + 0.90
 
 	if dome_mesh and is_instance_valid(dome_mesh):
 		var mat := dome_mesh.material_override as StandardMaterial3D
@@ -678,10 +712,11 @@ func _process_defense_rhythm(delta: float) -> void:
 				var strike_type: int = 4 if is_hammer else (first_unresolved_idx % 4)
 				attacker.procedural_animator.trigger_melee_strike(strike_type)
 
-		if t_diff > 0.0 and t_diff <= RING_PREWARN_SEC:
+		var note_prewarn: float = float(active_note.get("prewarn_sec", RING_PREWARN_SEC))
+		if t_diff > 0.0 and t_diff <= note_prewarn:
 			if active_ring and is_instance_valid(active_ring):
 				active_ring.visible = true
-				var t_factor: float = clampf(t_diff / RING_PREWARN_SEC, 0.0, 1.0)
+				var t_factor: float = clampf(t_diff / maxf(note_prewarn, 0.01), 0.0, 1.0)
 				active_ring.scale = Vector3.ONE * (1.0 + t_factor * 1.65)
 				var r_mat: StandardMaterial3D = active_ring.material_override as StandardMaterial3D
 				if r_mat:
@@ -693,7 +728,7 @@ func _process_defense_rhythm(delta: float) -> void:
 						r_mat.albedo_color = Color(1.0, 0.55, 0.1, 0.95)
 					else:
 						r_mat.albedo_color = Color(0.2, 0.9, 1.0, 0.95)
-		elif t_diff > RING_PREWARN_SEC and active_ring and is_instance_valid(active_ring):
+		elif t_diff > note_prewarn and active_ring and is_instance_valid(active_ring):
 			active_ring.visible = false
 
 		# Ventana de resolución defensiva (hasta ±0.28s para Choque de Puños)
@@ -783,6 +818,15 @@ func _resolve_perfect_parry(note: Dictionary, zone: Dictionary) -> void:
 
 	if _check_ki_break_after_note():
 		return
+
+	# Punto 3: Si fue Martillazo y el defensor tiene BP igual o menor (< 1.25x), corta el melee y gana distancia
+	if bool(note.get("is_hammer", false)):
+		var bp_atk: float = maxf(float(attacker.get("current_np")) if (attacker and attacker.get("current_np") != null) else 10000.0, 100.0)
+		var bp_def: float = maxf(float(defender.get("current_np")) if (defender and defender.get("current_np") != null) else 10000.0, 100.0)
+		if bp_def < bp_atk * 1.25:
+			_cut_melee_hammer_defended(defender, attacker, 50.0)
+			return
+
 	pending_attack_penalty = 0
 	restart_as_attacker()
 
@@ -965,7 +1009,36 @@ func _resolve_cross_arm_guard(note: Dictionary, zone: Dictionary) -> void:
 	pip_results.append("blocked")
 	_spawn_impact_popup(zone_pos, "🛡️ ¡BLOQUEADO!", Color(0.30, 0.78, 1.0))
 	emit_signal("defense_action_resolved", "cross_arm_guard", zone["id"], true, -ki_cost, 20.0)
-	_check_ki_break_after_note()
+	if _check_ki_break_after_note():
+		return
+
+	# Punto 3: Martillazo bloqueado con BP igual o menor (< 1.25x) corta el melee y empuja hacia atrás (sin daño completo)
+	if is_hammer:
+		var bp_atk_h: float = maxf(float(attacker.get("current_np")) if (attacker and attacker.get("current_np") != null) else 10000.0, 100.0)
+		var bp_def_h: float = maxf(float(defender.get("current_np")) if (defender and defender.get("current_np") != null) else 10000.0, 100.0)
+		if bp_def_h < bp_atk_h * 1.25:
+			_cut_melee_hammer_defended(defender, attacker, final_dmg)
+
+
+func _cut_melee_hammer_defended(p_def: Node3D, p_atk: Node3D, chip_dmg: float) -> void:
+	is_active = false
+	if p_def and is_instance_valid(p_def):
+		p_def.set("is_in_bullet_time", false)
+		var push_dir: Vector3 = (p_def.global_position - p_atk.global_position).normalized() if (p_atk and is_instance_valid(p_atk)) else Vector3.BACK
+		push_dir.y = 0.0
+		if push_dir.length_squared() < 0.001:
+			push_dir = Vector3.BACK
+		if p_def.has_method("apply_knockback"):
+			p_def.apply_knockback(push_dir.normalized(), 6.5)
+	if p_atk and is_instance_valid(p_atk):
+		p_atk.set("is_in_bullet_time", false)
+		p_atk.set("active_target_dome", null)
+	if p_def and p_def.has_method("_separate_fighters_to_canonical_distance") and p_atk:
+		p_def._separate_fighters_to_canonical_distance(p_atk, 5.5)
+	elif p_atk and p_atk.has_method("_separate_fighters_to_canonical_distance") and p_def:
+		p_atk._separate_fighters_to_canonical_distance(p_def, 5.5)
+	_spawn_impact_popup(global_position, "🛡️ ¡MARTILLO FRENADO! (-%d BP)" % int(chip_dmg), Color(0.4, 0.9, 1.0))
+	queue_free()
 
 
 func _resolve_unblocked_hit(note: Dictionary, zone: Dictionary) -> void:
@@ -1005,6 +1078,10 @@ func _resolve_unblocked_hit(note: Dictionary, zone: Dictionary) -> void:
 	last_action_feedback = "💥 ¡IMPACTO CONECTADO!"
 	pip_results.append("hit")
 	_spawn_impact_popup(zone_pos, "💥 ¡IMPACTO!", Color(1.0, 0.42, 0.15))
+	if is_charged or is_v3 or is_hammer:
+		_spawn_parry_shockwave(zone_pos)
+		if is_hammer:
+			KiSmokeFX.spawn_smoke(get_tree(), zone_pos, 1.2)
 	emit_signal("defense_action_resolved", "hit_taken", zone["id"], false, -10.0, 0.0)
 
 	# Si el golpe no bloqueado fue Martillazo DBZ o Cargado v3: interrumpe y lanza al rival de inmediato
@@ -1922,7 +1999,16 @@ func _check_hammer_finisher() -> bool:
 		hammer_charge_time = 0.0
 		hammer_primed = false
 		hammer_locked_haptic = false
-		_begin_phase_transition("start_defense", 0.50, "🔨 ¡MARTILLAZO DBZ LANZADO!", Color(0.95, 0.35, 1.0))
+		# Punto 3: El Martillazo ya no corta los golpes restantes del atacante; avanza la secuencia normalmente
+		current_attack_step += 1
+		attack_step_cooldown = 0.28
+		var hammer_pos: Vector3 = target_zones[1]["node"].global_position
+		_spawn_parry_shockwave(hammer_pos)
+		_spawn_impact_popup(hammer_pos, "🔨 ¡MARTILLAZO REGISTRADO!", Color(0.95, 0.35, 1.0))
+		if current_attack_step >= max_allowed_hits:
+			_begin_phase_transition("start_defense", 0.50, "🔨 ¡MARTILLAZO DBZ LANZADO!", Color(0.95, 0.35, 1.0))
+		else:
+			_update_sequential_target_highlights()
 		return true
 
 	return false
