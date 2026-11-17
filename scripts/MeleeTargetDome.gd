@@ -104,6 +104,7 @@ var was_last_hit_charged: bool = false
 var target_zones: Array = []
 var dome_mesh: MeshInstance3D = null
 var header_label: Label3D = null
+var melee_hud_anchor: Node3D = null
 var charge_spheres: Array[MeshInstance3D] = [null, null]
 
 # Parámetros de Defensa Rítmica (1.25s por nota)
@@ -1519,6 +1520,8 @@ func _build_target_boxes() -> void:
 		mat_box.emission_enabled = true
 		mat_box.emission = Color(def.color.r, def.color.g, def.color.b)
 		mat_box.emission_energy_multiplier = 1.2
+		mat_box.no_depth_test = true
+		mat_box.render_priority = 115
 		box_mesh_inst.material_override = mat_box
 		zone_node.add_child(box_mesh_inst)
 
@@ -1532,6 +1535,8 @@ func _build_target_boxes() -> void:
 		mat_quad.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
 		mat_quad.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
 		mat_quad.albedo_color = Color(1.0, 1.0, 1.0, 0.9)
+		mat_quad.no_depth_test = true
+		mat_quad.render_priority = 116
 		inner_quad.material_override = mat_quad
 		zone_node.add_child(inner_quad)
 
@@ -1550,6 +1555,8 @@ func _build_target_boxes() -> void:
 		mat_ring.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
 		mat_ring.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
 		mat_ring.albedo_color = Color(1.0, 0.9, 0.2, 0.95)
+		mat_ring.no_depth_test = true
+		mat_ring.render_priority = 117
 		timing_ring.material_override = mat_ring
 		zone_node.add_child(timing_ring)
 
@@ -1583,20 +1590,41 @@ func _build_target_boxes() -> void:
 		})
 
 
+func _get_player_camera() -> Camera3D:
+	for f in [attacker, defender]:
+		if f and is_instance_valid(f) and bool(f.get("is_player")):
+			var orig: Node = f.get_parent()
+			if orig:
+				var c: Camera3D = orig.get_node_or_null("XRCamera3D") as Camera3D
+				if c and is_instance_valid(c):
+					return c
+	return get_viewport().get_camera_3d() if get_viewport() else null
+
+
 func _build_header_hud() -> void:
 	header_label = Label3D.new()
 	header_label.name = "HeaderLabel"
 	header_label.text = "🥊 FASE DE ATAQUE 🥊"
 	header_label.font_size = 24
-	header_label.pixel_size = 0.0019
+	header_label.pixel_size = 0.0014
 	header_label.no_depth_test = true
-	header_label.render_priority = 110
+	header_label.render_priority = 125
 	header_label.outline_size = 10
 	header_label.modulate = Color(1.0, 0.95, 0.3)
 	header_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.95)
-	header_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	header_label.position = Vector3(0.0, 0.42, -0.75)
-	add_child(header_label)
+	var cam: Camera3D = _get_player_camera()
+	if cam and is_instance_valid(cam):
+		melee_hud_anchor = Node3D.new()
+		melee_hud_anchor.name = "MeleeHUDAnchor"
+		melee_hud_anchor.position = Vector3(0.0, 0.23, -1.15)
+		cam.add_child(melee_hud_anchor)
+		header_label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+		header_label.position = Vector3.ZERO
+		melee_hud_anchor.add_child(header_label)
+	else:
+		header_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		header_label.position = Vector3(0.0, 0.42, -0.75)
+		add_child(header_label)
 
 
 func _get_fighter_chest_pos(fighter: Node3D) -> Vector3:
@@ -1623,13 +1651,21 @@ func _get_atk_to_def_dir() -> Vector3:
 	return Vector3.FORWARD
 
 
+func _clamp_dome_y_to_player(raw_y: float, atk_chest: Vector3, def_chest: Vector3) -> float:
+	if attacker and is_instance_valid(attacker) and bool(attacker.get("is_player")):
+		return clampf(raw_y, atk_chest.y - 0.30, atk_chest.y + 0.30)
+	if defender and is_instance_valid(defender) and bool(defender.get("is_player")):
+		return clampf(raw_y, def_chest.y - 0.30, def_chest.y + 0.30)
+	return raw_y
+
+
 func _update_dome_transform() -> void:
 	var atk_chest: Vector3 = _get_fighter_chest_pos(attacker) if (attacker and is_instance_valid(attacker)) else global_position
 	var def_chest: Vector3 = _get_fighter_chest_pos(defender) if (defender and is_instance_valid(defender)) else (atk_chest + Vector3.FORWARD * 0.65)
 	var dir_to_def: Vector3 = _get_atk_to_def_dir()
 	var horiz_dist: float = Vector2(def_chest.x - atk_chest.x, def_chest.z - atk_chest.z).length()
 	var dome_offset: float = clampf(horiz_dist * 0.62, 0.36, 0.52) if horiz_dist > 0.05 else 0.45
-	var dome_y: float = (atk_chest.y + def_chest.y) * 0.5 - 0.03
+	var dome_y: float = _clamp_dome_y_to_player((atk_chest.y + def_chest.y) * 0.5 - 0.03, atk_chest, def_chest)
 
 	global_position = Vector3(atk_chest.x, dome_y, atk_chest.z) + dir_to_def * dome_offset
 	rotation.y = atan2(-dir_to_def.x, -dir_to_def.z)
@@ -1641,7 +1677,7 @@ func _update_dome_transform_for_defender() -> void:
 	var def_chest: Vector3 = _get_fighter_chest_pos(defender) if (defender and is_instance_valid(defender)) else (atk_chest + Vector3.FORWARD * 0.65)
 	var dir_atk_to_def: Vector3 = _get_atk_to_def_dir()
 	var horiz_dist: float = Vector2(def_chest.x - atk_chest.x, def_chest.z - atk_chest.z).length()
-	var dome_y: float = (atk_chest.y + def_chest.y) * 0.5 - 0.03
+	var dome_y: float = _clamp_dome_y_to_player((atk_chest.y + def_chest.y) * 0.5 - 0.03, atk_chest, def_chest)
 
 	if attacker and is_instance_valid(attacker) and bool(attacker.get("is_player")):
 		var atk_offset: float = clampf(horiz_dist * 0.62, 0.36, 0.52) if horiz_dist > 0.05 else 0.45
@@ -2130,3 +2166,6 @@ func _spawn_parry_shockwave(pos: Vector3) -> void:
 
 func _exit_tree() -> void:
 	_hide_all_charge_spheres()
+	if melee_hud_anchor and is_instance_valid(melee_hud_anchor):
+		melee_hud_anchor.queue_free()
+		melee_hud_anchor = null

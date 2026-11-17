@@ -413,6 +413,10 @@ func _physics_process(delta: float) -> void:
 			if current_pos.y <= ground_h + 0.005:
 				velocity.y = 0.0
 				is_knocked_back = false
+		if is_knocked_back and velocity.length_squared() < 1.2:
+			is_knocked_back = false
+	elif is_knocked_back:
+		is_knocked_back = false
 
 	# 3. Colisión mutua de cuerpos anti-clipping (No atravesar al rival) y rebote de Ki por cercanía
 	if _proximity_repulsion_cooldown > 0.0:
@@ -1286,7 +1290,7 @@ func _spawn_zenkai_finish_banner(winner: Node3D, _loser: Node3D, tech_name: Stri
 	banner.pixel_size = 0.0022
 	banner.font_size = 34
 	banner.outline_size = 10
-	banner.outline_color = Color(0.0, 0.0, 0.0, 0.96)
+	banner.outline_modulate = Color(0.0, 0.0, 0.0, 0.96)
 	var winner_is_player: bool = (winner == self and is_player) or (winner != null and is_instance_valid(winner) and bool(winner.get("is_player")))
 	banner.modulate = Color(1.0, 0.88, 0.15) if winner_is_player else Color(1.0, 0.22, 0.25)
 	banner.text = "🏆 ¡K.O. ZENKAI DEFINITIVO! 🏆\nGANADOR: %s\nTécnica Final: %s\n[Usa el Menú (☰) para Reiniciar Combate]" % [w_name.to_upper(), tech_name.to_upper()]
@@ -2156,7 +2160,7 @@ func apply_knockback(dir: Vector3, force: float) -> void:
 		horiz_dir = -global_transform.basis.z
 	# Masa corporal realista sin saltos artificiales en impactos horizontales
 	var vert_comp = clampf(dir.y, -1.0, 1.0) if abs(dir.y) > 0.35 else 0.0
-	var controlled_force = clampf(force, 1.5, 7.5)
+	var controlled_force = clampf(force, 1.5, 28.0)
 	var impulse = (horiz_dir + Vector3.UP * vert_comp).normalized() * controlled_force
 	velocity = impulse
 	is_knocked_back = true
@@ -2379,6 +2383,10 @@ func stop_ragdoll() -> void:
 		if procedural_animator.has_method("trigger_getup_recovery"):
 			procedural_animator.trigger_getup_recovery(0.45)
 	print("[Ragdoll] Simulación física detenida. Reanudando postura de combate.")
+
+
+func is_airborne_incapacitated() -> bool:
+	return is_ragdoll_active or wall_stick_timer > 0.0 or (is_knocked_back and velocity.length_squared() > 1.2)
 
 
 func _process_mutual_body_collision() -> void:

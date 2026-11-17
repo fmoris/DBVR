@@ -25,6 +25,8 @@ const LOCK_LOSS_TIMEOUT: float = 3.5
 # Componentes visuales
 var lockon_reticle_root: Node3D = null
 var reticle_ring: MeshInstance3D = null
+var reticle_icon: MeshInstance3D = null
+var _reticle_icon_mat: StandardMaterial3D = null
 var reticle_label: Label3D = null
 
 var ki_pointer_root: Node3D = null
@@ -99,17 +101,54 @@ func _build_lockon_reticle() -> void:
 	reticle_ring.material_override = mat_ring
 	lockon_reticle_root.add_child(reticle_ring)
 
-	# 2. Etiqueta central de estado
-	reticle_label = Label3D.new()
-	reticle_label.text = "[ FIJANDO KI ]"
-	reticle_label.font_size = 22
-	reticle_label.outline_size = 6
-	reticle_label.modulate = Color(0.2, 0.85, 1.0)
-	reticle_label.outline_modulate = Color.BLACK
-	reticle_label.no_depth_test = true
-	reticle_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	reticle_label.position = Vector3(0.0, 0.30, 0.0)
-	lockon_reticle_root.add_child(reticle_label)
+	# 2. Icono Scouter 3D de objetivo fijado (sin texto flotante sobre el rival)
+	reticle_icon = MeshInstance3D.new()
+	reticle_icon.name = "ScouterLockOnIcon"
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.42, 0.42)
+	reticle_icon.mesh = quad
+	_reticle_icon_mat = StandardMaterial3D.new()
+	_reticle_icon_mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
+	_reticle_icon_mat.blend_mode = StandardMaterial3D.BLEND_MODE_ADD
+	_reticle_icon_mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+	_reticle_icon_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	_reticle_icon_mat.no_depth_test = true
+	_reticle_icon_mat.render_priority = 115
+	_reticle_icon_mat.albedo_texture = _create_scouter_lock_icon_texture()
+	_reticle_icon_mat.albedo_color = Color(1.0, 0.90, 0.22, 0.95)
+	reticle_icon.material_override = _reticle_icon_mat
+	reticle_icon.visible = false
+	lockon_reticle_root.add_child(reticle_icon)
+
+
+func _create_scouter_lock_icon_texture() -> ImageTexture:
+	var sz: int = 64
+	var img := Image.create(sz, sz, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0, 0, 0, 0))
+	var col := Color(1.0, 1.0, 1.0, 1.0)
+	var m: int = 6
+	var arm: int = 14
+	var t: int = 3
+	# 4 esquinas Scouter
+	for i in range(arm):
+		for w in range(t):
+			img.set_pixel(m + i, m + w, col)
+			img.set_pixel(m + w, m + i, col)
+			img.set_pixel(sz - 1 - m - i, m + w, col)
+			img.set_pixel(sz - 1 - m - w, m + i, col)
+			img.set_pixel(m + i, sz - 1 - m - w, col)
+			img.set_pixel(m + w, sz - 1 - m - i, col)
+			img.set_pixel(sz - 1 - m - i, sz - 1 - m - w, col)
+			img.set_pixel(sz - 1 - m - w, sz - 1 - m - i, col)
+	# Rombo central
+	var c: int = sz / 2
+	var r: int = 10
+	for d in range(-r, r + 1):
+		var y_off: int = r - abs(d)
+		for k in range(-1, 2):
+			img.set_pixel(c + d, c + y_off + k, col)
+			img.set_pixel(c + d, c - y_off + k, col)
+	return ImageTexture.create_from_image(img)
 
 
 func _build_ki_pointer() -> void:
@@ -237,9 +276,8 @@ func _show_reticle_charging(pos: Vector3, progress: float) -> void:
 	if mat:
 		mat.albedo_color = Color(0.2, 0.85, 1.0, 0.5 + progress * 0.45)
 
-	var pct_str = int(progress * 100.0)
-	reticle_label.text = "[ FIJANDO KI: %d%% ]\n%s" % [pct_str, _get_comparative_bp_line()]
-	reticle_label.modulate = Color(0.2, 0.85, 1.0)
+	if reticle_icon:
+		reticle_icon.visible = false
 
 
 func _show_reticle_locked(pos: Vector3) -> void:
@@ -251,8 +289,10 @@ func _show_reticle_locked(pos: Vector3) -> void:
 	if mat:
 		mat.albedo_color = Color(1.0, 0.88, 0.15, 0.95)
 
-	reticle_label.text = "🎯 [ OBJETIVO FIJADO ] 🎯\n%s" % _get_comparative_bp_line()
-	reticle_label.modulate = Color(1.0, 0.95, 0.2)
+	if reticle_icon:
+		reticle_icon.visible = true
+		var pulse: float = 1.0 + sin(Time.get_ticks_msec() * 0.012) * 0.08
+		reticle_icon.scale = Vector3(pulse, pulse, pulse)
 
 
 func _lock_target() -> void:

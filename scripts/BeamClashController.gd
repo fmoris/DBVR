@@ -42,8 +42,13 @@ var prev_l_grip: bool = false
 var prev_r_grip: bool = false
 var _prev_l_hand_pos: Vector3 = Vector3.ZERO
 var _prev_r_hand_pos: Vector3 = Vector3.ZERO
+var _prev_l_vel: Vector3 = Vector3.ZERO
+var _prev_r_vel: Vector3 = Vector3.ZERO
 var _hand_track_init: bool = false
 var _physical_push_cd: float = 0.0
+var _is_burning_bp_in_clash: bool = false
+var _in_phase2_pose: bool = true
+var clash_hud_anchor: Node3D = null
 
 const KiCoronaShader = preload("res://shaders/ki_corona.gdshader")
 const KiBeamShader = preload("res://shaders/ki_beam.gdshader")
@@ -57,7 +62,11 @@ func setup(
 	p_color_atk: Color,
 	p_tech_def: String,
 	p_color_def: Color,
-	p_duration: float = 3.5
+	p_duration: float = 3.5,
+	p_atk_damage: float = 1800.0,
+	p_def_damage: float = 1800.0,
+	p_atk_charge: float = 1.0,
+	p_def_charge: float = 1.0
 ) -> void:
 	attacker = p_attacker
 	defender = p_defender
@@ -67,7 +76,14 @@ func setup(
 	color_def = p_color_def
 	clash_duration = p_duration
 	clash_timer = 0.0
-	clash_ratio = 0.5
+
+	# Ventaja inicial calculada con BP + carga + potencia de cada Super Poder
+	var bp_atk: float = maxf(float(attacker.get("current_np")) if (attacker and attacker.get("current_np") != null) else 10000.0, 100.0)
+	var bp_def: float = maxf(float(defender.get("current_np")) if (defender and defender.get("current_np") != null) else 10000.0, 100.0)
+	var power_atk: float = bp_atk * (1.0 + clampf(p_atk_charge, 0.2, 3.0) * 0.25) * clampf(p_atk_damage / 1800.0, 0.7, 2.5)
+	var power_def: float = bp_def * (1.0 + clampf(p_def_charge, 0.2, 3.0) * 0.25) * clampf(p_def_damage / 1800.0, 0.7, 2.5)
+	var advantage: float = clampf((power_def - power_atk) / maxf(power_atk + power_def, 1.0), -0.25, 0.25)
+	clash_ratio = 0.5 + advantage
 	is_active = true
 
 	# Ralentizar levemente el tiempo para enfatizar la escala del choque
@@ -125,60 +141,96 @@ func _process_player_inputs(real_delta: float) -> void:
 	if not origin:
 		return
 
+	var cam = origin.get_node_or_null("XRCamera3D") as Camera3D
 	var l_ctrl = origin.get_node_or_null("LeftHand") as XRController3D
 	var r_ctrl = origin.get_node_or_null("RightHand") as XRController3D
 
 	var l_trig = l_ctrl.get_float("trigger") > 0.60 or l_ctrl.is_button_pressed("trigger_click") if l_ctrl else false
 	var r_trig = r_ctrl.get_float("trigger") > 0.60 or r_ctrl.is_button_pressed("trigger_click") if r_ctrl else false
-	var l_grip = l_ctrl.get_float("grip") > 0.60 or l_ctrl.is_button_pressed("grip_click") if l_ctrl else false
-	var r_grip = r_ctrl.get_float("grip") > 0.60 or r_ctrl.is_button_pressed("grip_click") if r_ctrl else false
+	var l_grip = l_ctrl.get_float("grip") > 0.50 or l_ctrl.is_button_pressed("grip_click") if l_ctrl else false
+	var r_grip = r_ctrl.get_float("grip") > 0.50 or r_ctrl.is_button_pressed("grip_click") if r_ctrl else false
 
-	# Detección de pulsos de bombeo ("Pump / Push")
+	# 1. Mantener postura de Fase 2 (Grips sostenidos + manos proyectadas al frente)
+	var hands_extended: bool = true
+	if cam and l_ctrl and r_ctrl and l_ctrl.get_is_active() and r_ctrl.get_is_active():
+		var cam_fwd: Vector3 = -cam.global_transform.basis.z.normalized()
+		var l_z: float = (l_ctrl.global_position - cam.global_position).dot(cam_fwd)
+		var r_z: float = (r_ctrl.global_position - cam.global_position).dot(cam_fwd)
+		hands_extended = (l_z >= 0.16 or r_z >= 0.16)
+	_in_phase2_pose = (l_grip or r_grip) and hands_extended
+
 	var did_pulse = false
-	if (l_trig and not prev_l_trig) or (r_trig and not prev_r_trig) or (l_grip and not prev_l_grip) or (r_grip and not prev_r_grip):
+	if (l_trig and not prev_l_trig) or (r_trig and not prev_r_trig):
 		did_pulse = true
-
 	prev_l_trig = l_trig
 	prev_r_trig = r_trig
 	prev_l_grip = l_grip
 	prev_r_grip = r_grip
 
-	# Detección de empuje físico VR real de ambas manos hacia el punto de choque
+	# 2. Medir agitación enérgica de los controles (velocidad + cambio de dirección)
 	if _physical_push_cd > 0.0:
 		_physical_push_cd -= real_delta
-	var did_physical_push: bool = false
-	if l_ctrl and r_ctrl and l_ctrl.get_is_active() and r_ctrl.get_is_active():
+	var shake_mag: float = 0.0
+	if l_ctrl and r_ctrl and l_ctrl.get_is_active() and r_ctrl.get_is_active() and real_delta > 0.0001:
 		var l_pos: Vector3 = l_ctrl.global_position
 		var r_pos: Vector3 = r_ctrl.global_position
-		if _hand_track_init and real_delta > 0.0001 and _physical_push_cd <= 0.0:
-			var opp_node: Node3D = defender if player == attacker else attacker
-			var push_dir: Vector3 = (opp_node.global_position - player.global_position).normalized() if (opp_node and is_instance_valid(opp_node)) else Vector3.FORWARD
-			var l_fwd_speed: float = ((l_pos - _prev_l_hand_pos) / real_delta).dot(push_dir)
-			var r_fwd_speed: float = ((r_pos - _prev_r_hand_pos) / real_delta).dot(push_dir)
-			if l_fwd_speed > 1.35 or r_fwd_speed > 1.35:
-				did_physical_push = true
-				_physical_push_cd = 0.22
+		if _hand_track_init:
+			var l_vel: Vector3 = (l_pos - _prev_l_hand_pos) / real_delta
+			var r_vel: Vector3 = (r_pos - _prev_r_hand_pos) / real_delta
+			var l_accel: float = (l_vel - _prev_l_vel).length()
+			var r_accel: float = (r_vel - _prev_r_vel).length()
+			shake_mag = (l_vel.length() + r_vel.length()) * 0.5 + (l_accel + r_accel) * 0.04
+			_prev_l_vel = l_vel
+			_prev_r_vel = r_vel
 		_prev_l_hand_pos = l_pos
 		_prev_r_hand_pos = r_pos
 		_hand_track_init = true
 
-	if did_pulse or did_physical_push:
-		var push_power = 0.055 if did_physical_push else 0.045
-		# Bonificación de empuje si está en modo Furia o Zenkai
-		if player.get("is_in_zenkai_state"):
-			push_power *= 1.45
+	_is_burning_bp_in_clash = false
+	if not _in_phase2_pose:
+		return
 
-		# Consumo de Ki por cada bombeo o empuje físico
-		if player.has_method("consume_ki_or_life_force"):
-			player.consume_ki_or_life_force(3.5 if did_physical_push else 4.0)
+	var push_power: float = 0.0
+	var is_shaking: bool = shake_mag >= 1.50
+	if is_shaking:
+		push_power += clampf((shake_mag - 1.2) * 0.065 * real_delta, 0.01 * real_delta, 0.15 * real_delta)
+	if did_pulse:
+		push_power += 0.030
 
-		# Si el jugador es el atacante, empuja clash_ratio hacia 0.0; si es defensor, hacia 1.0
-		if player == attacker:
-			clash_ratio = maxf(clash_ratio - push_power, 0.05)
-		else:
-			clash_ratio = minf(clash_ratio + push_power, 0.95)
+	if push_power <= 0.0:
+		return
 
-		_pulse_haptic_burst(origin, 220.0, 1.0, 0.16)
+	if player.get("is_in_zenkai_state"):
+		push_power *= 1.45
+
+	# 3. Consumo de Ki; si Ki llega a 0, permite seguir compitiendo gastando BP (Último Aliento)
+	var ki_cost: float = (11.0 * real_delta if is_shaking else 0.0) + (2.5 if did_pulse else 0.0)
+	var p_ki: float = float(player.get("current_ki")) if player.get("current_ki") != null else 0.0
+	if p_ki > 0.0:
+		if player.has_method("consume_ki"):
+			player.consume_ki(minf(p_ki, ki_cost))
+	else:
+		_is_burning_bp_in_clash = true
+		var bp_burn: float = maxf(ki_cost * 38.0, 25.0 * real_delta)
+		var p_np: float = float(player.get("current_np")) if player.get("current_np") != null else 0.0
+		var new_np: float = maxf(p_np - bp_burn, 0.0)
+		player.set("current_np", new_np)
+		if player.has_method("_notify_stats"):
+			player._notify_stats()
+		if new_np <= 0.0:
+			var opp_win: Node3D = defender if player == attacker else attacker
+			var opp_tech: String = tech_def if player == attacker else tech_atk
+			_resolve_clash(opp_win, player, opp_tech)
+			return
+
+	if player == attacker:
+		clash_ratio = maxf(clash_ratio - push_power, 0.05)
+	else:
+		clash_ratio = minf(clash_ratio + push_power, 0.95)
+
+	if _physical_push_cd <= 0.0:
+		_physical_push_cd = 0.20
+		_pulse_haptic_burst(origin, 220.0, 1.0, 0.14)
 		_spawn_clash_shockwave()
 
 
@@ -324,8 +376,14 @@ func _update_hud() -> void:
 
 	var player = _get_player_instance()
 	var is_winning = (player == attacker and clash_ratio < 0.5) or (player == defender and clash_ratio > 0.5)
-	var status_text = "¡MANTÉN LA PRESIÓN!" if is_winning else "¡BOMBEA KI PARA RESISTIR!"
+	var status_text: String = "¡MANTÉN FASE 2 Y AGITA!" if is_winning else "¡AGITA LOS CONTROLES PARA EMPUJAR!"
 	var col = Color(0.2, 1.0, 0.4) if is_winning else Color(1.0, 0.4, 0.2)
+	if not _in_phase2_pose:
+		status_text = "⚠️ ¡EXTIENDE MANOS CON GRIP (FASE 2)!"
+		col = Color(1.0, 0.25, 0.25)
+	elif _is_burning_bp_in_clash:
+		status_text = "⚠️ ¡SIN KI! QUEMANDO BP PARA RESISTIR"
+		col = Color(1.0, 0.55, 0.15)
 
 	header_label.text = "⚡ ¡CHOQUE DE PODERES! ⚡\n[ %s ]\n%s" % [bar_str, status_text]
 	header_label.modulate = col
@@ -458,8 +516,28 @@ func _build_visuals() -> void:
 	header_label.no_depth_test = true
 	header_label.render_priority = 115
 	header_label.outline_size = 10
-	header_label.outline_color = Color(0.0, 0.0, 0.0, 0.95)
-	add_child(header_label)
+	header_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.95)
+	_build_visuals_hud_attach()
+
+
+func _exit_tree() -> void:
+	if clash_hud_anchor and is_instance_valid(clash_hud_anchor):
+		clash_hud_anchor.queue_free()
+		clash_hud_anchor = null
+
+
+func _build_visuals_hud_attach() -> void:
+	var cam: Camera3D = get_viewport().get_camera_3d() if get_viewport() else null
+	if cam and is_instance_valid(cam):
+		clash_hud_anchor = Node3D.new()
+		clash_hud_anchor.name = "ClashHUDAnchor"
+		clash_hud_anchor.position = Vector3(0.0, 0.24, -1.25)
+		cam.add_child(clash_hud_anchor)
+		header_label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+		header_label.position = Vector3.ZERO
+		clash_hud_anchor.add_child(header_label)
+	else:
+		add_child(header_label)
 
 
 func _build_audio() -> void:

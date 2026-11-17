@@ -11,6 +11,7 @@ signal beam_clash_initiated(clash_controller: Node3D)
 
 enum BeamState {
 	ADVANCING_BULLET_TIME,
+	HAND_HOLDING,
 	IMPACTING,
 	DEFLECTED,
 	BLOCKED,
@@ -51,6 +52,10 @@ var beam_head_mesh: MeshInstance3D = null
 var beam_light: OmniLight3D = null
 var reticle_mesh: MeshInstance3D = null
 var alert_label: Label3D = null
+var beam_hud_anchor: Node3D = null
+var hold_progress: float = 0.0
+var hold_required_sec: float = 1.65
+var hold_stall_timer: float = 0.0
 
 # Audio espacial
 var audio_player: AudioStreamPlayer3D = null
@@ -239,6 +244,9 @@ func _process(delta: float) -> void:
 			else:
 				_resolve_direct_hit()
 
+	elif state == BeamState.HAND_HOLDING:
+		_process_hand_holding(delta)
+
 	elif state == BeamState.IMPACTING:
 		impact_sustain_timer -= delta
 		# Mantener el haz extendido desde las manos hasta el punto de impacto
@@ -274,36 +282,64 @@ func _check_player_defense_options() -> void:
 	if not origin:
 		return
 
-	# OPCIÓN 1: CHOQUE DE PODERES (BEAM CLASH)
-	# Si el jugador está concentrando o liberando un Super Haz con Ki >= 40
-	if defender.get("is_charging_super"):
-		var counter_info: Dictionary = _get_signature_counter_beam(defender)
-		_trigger_beam_clash(defender, String(counter_info["name"]), counter_info["color"])
-		return
-
-	# OPCIÓN 2: DESVÍO FÍSICO CON LA MANO (KI DEFLECTION / BATTING)
-	# Cuando el haz está a menos de 1.4m de las manos y el jugador da un manotazo lateral veloz (> 2.8 m/s)
 	var l_ctrl = origin.get_node_or_null("LeftHand") as XRController3D
 	var r_ctrl = origin.get_node_or_null("RightHand") as XRController3D
+	var cam = origin.get_node_or_null("XRCamera3D") as Camera3D
 
+	var l_grip: bool = (l_ctrl.get_float("grip") > 0.55 or l_ctrl.is_button_pressed("grip_click")) if l_ctrl else false
+	var r_grip: bool = (r_ctrl.get_float("grip") > 0.55 or r_ctrl.is_button_pressed("grip_click")) if r_ctrl else false
+	var l_trig: bool = (l_ctrl.get_float("trigger") > 0.55 or l_ctrl.is_button_pressed("trigger_click")) if l_ctrl else false
+	var r_trig: bool = (r_ctrl.get_float("trigger") > 0.55 or r_ctrl.is_button_pressed("trigger_click")) if r_ctrl else false
+
+	var bp_atk: float = maxf(float(attacker.get("current_np")) if (attacker and attacker.get("current_np") != null) else 10000.0, 100.0)
+	var bp_def: float = maxf(float(defender.get("current_np")) if (defender and defender.get("current_np") != null) else 10000.0, 100.0)
+	var def_ki: float = float(defender.get("current_ki")) if (defender and defender.get("current_ki") != null) else 0.0
+
+	# OPCIÓN 1: CHOQUE DE SUPER PODER (BEAM CLASH) — con Super Poder propio usable del personaje
+	if defender.get("is_charging_super") or defender.get("is_firing_beam"):
+		var counter_info: Dictionary = _get_signature_counter_beam(defender)
+		if bool(counter_info.get("usable", true)) and def_ki >= 15.0:
+			var hands_fwd_ok: bool = true
+			if cam and l_ctrl and r_ctrl:
+				var cam_fwd: Vector3 = -cam.global_transform.basis.z.normalized()
+				var l_z: float = (l_ctrl.global_position - cam.global_position).dot(cam_fwd)
+				var r_z: float = (r_ctrl.global_position - cam.global_position).dot(cam_fwd)
+				hands_fwd_ok = (l_z >= 0.22 and r_z >= 0.22) or bool(defender.get("is_firing_beam"))
+			if hands_fwd_ok:
+				_trigger_beam_clash(defender, String(counter_info["name"]), counter_info["color"], float(counter_info.get("damage", 1800.0)))
+				return
+
+	# OPCIÓN 2: ESQUIVAR (Z-VANISH) — flick rápido en joystick izquierdo o derecho (15 Ki)
+	var stick_l: Vector2 = l_ctrl.get_vector2("primary") if l_ctrl else Vector2.ZERO
+	var stick_r: Vector2 = r_ctrl.get_vector2("primary") if r_ctrl else Vector2.ZERO
+	if (stick_l.length() > 0.72 or stick_r.length() > 0.72 or defender.get("is_teleporting")) and def_ki >= 15.0:
+		_resolve_evasion()
+		return
+
+	# OPCIÓN 3: AGUANTAR EL PODER CON LAS MANOS (extender manos al frente + ambos Grips sin Trigger + agitar)
+	if l_grip and r_grip and not (l_trig and r_trig) and cam and l_ctrl and r_ctrl:
+		var cam_fwd: Vector3 = -cam.global_transform.basis.z.normalized()
+		var l_z: float = (l_ctrl.global_position - cam.global_position).dot(cam_fwd)
+		var r_z: float = (r_ctrl.global_position - cam.global_position).dot(cam_fwd)
+		if l_z >= 0.26 and r_z >= 0.26:
+			_start_hand_holding(bp_atk, bp_def)
+			return
+
+	# OPCIÓN 4: DESVÍO FÍSICO CON LA MANO (Batear el rayo al cielo; exige BP competitivo >= 70% del atacante)
 	var l_pos = l_ctrl.global_position if l_ctrl else Vector3.ZERO
 	var r_pos = r_ctrl.global_position if r_ctrl else Vector3.ZERO
-
 	var dist_l = current_head_pos.distance_to(l_pos)
 	var dist_r = current_head_pos.distance_to(r_pos)
-
-	if (dist_l < 1.35 and l_hand_vel.length() > 2.6) or (dist_r < 1.35 and r_hand_vel.length() > 2.6):
-		_resolve_deflection()
+	if (dist_l < 1.80 and l_hand_vel.length() > 2.0) or (dist_r < 1.80 and r_hand_vel.length() > 2.0):
+		if bp_def >= bp_atk * 0.70:
+			_resolve_deflection()
+		else:
+			_resolve_containment_block(true)
 		return
 
-	# OPCIÓN 3: BLOQUEO DE CONTENCIÓN (GUARDIA PESADA / MANOS CRUZADAS)
-	if _is_defender_crossing_arms(origin):
-		_resolve_containment_block()
-		return
-
-	# OPCIÓN 4: Z-VANISH (TELETRANSPORTE EVASIVO)
-	if defender.get("is_teleporting") or (defender.get("is_blocking") and defender.get("velocity").length_squared() > 1.0):
-		_resolve_evasion()
+	# OPCIÓN 5: DEFENSA DE BRAZOS CRUZADOS (Grip + Trigger cruzados al pecho)
+	if ((l_grip and l_trig) or (r_grip and r_trig) or defender.get("is_blocking")) and _is_defender_crossing_arms(origin):
+		_resolve_containment_block(false)
 		return
 
 
@@ -363,20 +399,24 @@ func _get_signature_counter_beam(fighter: Node3D) -> Dictionary:
 					if is_beam and not p.forbidden_transformations.has(cur_form):
 						if p.unlock_requirement_transformation == "" or (fighter.has_method("is_transformation_unlocked") and fighter.is_transformation_unlocked(p.unlock_requirement_transformation)):
 							var p_col: Color = p.energy_color if p.energy_color.a > 0.05 else fallback_col
-							return { "name": p.power_name, "color": p_col }
-	return { "name": fallback_name, "color": fallback_col }
+							var p_dmg: float = float(p.base_damage_np) if "base_damage_np" in p else 1800.0
+							return { "name": p.power_name, "color": p_col, "damage": p_dmg, "usable": true }
+	return { "name": fallback_name, "color": fallback_col, "damage": 1800.0, "usable": true }
 
 
-func _trigger_beam_clash(clash_defender: Node3D, counter_tech: String, counter_color: Color) -> void:
+func _trigger_beam_clash(clash_defender: Node3D, counter_tech: String, counter_color: Color, counter_damage: float = 1800.0) -> void:
 	state = BeamState.CLASHING
 	is_active = false
 	Engine.time_scale = 1.0
 
-	# Instanciar el controlador del Choque de Haces
+	var atk_charge: float = clampf(float(attacker.get("last_super_charge_time")) if (attacker and attacker.get("last_super_charge_time") != null) else 1.0, 0.4, 3.0)
+	var def_charge: float = clampf(float(clash_defender.get("last_super_charge_time")) if (clash_defender and clash_defender.get("last_super_charge_time") != null) else 0.8, 0.4, 3.0)
+
+	# Instanciar el controlador del Choque de Haces con BP y carga reales
 	var clash = BeamClashControllerClass.new()
 	clash.name = "BeamClashController"
 	get_tree().current_scene.add_child(clash)
-	clash.setup(attacker, clash_defender, power_name, energy_color, counter_tech, counter_color, 3.5)
+	clash.setup(attacker, clash_defender, power_name, energy_color, counter_tech, counter_color, 4.0, base_damage, counter_damage, atk_charge, def_charge)
 
 	emit_signal("beam_clash_initiated", clash)
 	print("[SuperBeamSequence] ⚡ ¡CHOQUE DE PODERES ACTIVADO! Transfiriendo control a BeamClashController.")
@@ -423,7 +463,58 @@ func _resolve_deflection() -> void:
 	tw.tween_callback(func(): _cleanup_and_finish("deflected", 0.0))
 
 
-func _resolve_containment_block() -> void:
+func _start_hand_holding(bp_atk: float, bp_def: float) -> void:
+	state = BeamState.HAND_HOLDING
+	hold_progress = 0.0
+	hold_stall_timer = 0.0
+	hold_required_sec = clampf(1.85 * sqrt(bp_atk / maxf(bp_def, 100.0)), 1.30, 2.40)
+	Engine.time_scale = 0.35
+
+
+func _process_hand_holding(delta: float) -> void:
+	var real_delta: float = delta / maxf(Engine.time_scale, 0.01)
+	start_pos = _get_attacker_hand_position()
+	target_pos = _get_defender_target_position()
+	beam_dir = (target_pos - start_pos).normalized()
+	current_head_pos = target_pos - beam_dir * 0.65
+	_update_beam_geometry()
+	_update_defender_hand_velocities(real_delta)
+
+	var origin: XROrigin3D = defender.get_parent() as XROrigin3D if (defender and defender.get("is_player")) else null
+	var l_ctrl = origin.get_node_or_null("LeftHand") as XRController3D if origin else null
+	var r_ctrl = origin.get_node_or_null("RightHand") as XRController3D if origin else null
+	var l_grip: bool = (l_ctrl.get_float("grip") > 0.50 or l_ctrl.is_button_pressed("grip_click")) if l_ctrl else false
+	var r_grip: bool = (r_ctrl.get_float("grip") > 0.50 or r_ctrl.is_button_pressed("grip_click")) if r_ctrl else false
+
+	if not (l_grip and r_grip):
+		# Soltó los Grips antes de disipar el rayo -> impacto directo
+		_resolve_direct_hit()
+		return
+
+	var shake_speed: float = l_hand_vel.length() + r_hand_vel.length()
+	if shake_speed >= 1.35:
+		hold_stall_timer = 0.0
+		var shake_boost: float = clampf(shake_speed / 3.0, 0.75, 1.85)
+		hold_progress += (real_delta * shake_boost) / maxf(hold_required_sec, 0.5)
+		if defender and defender.has_method("consume_ki_or_life_force"):
+			defender.consume_ki_or_life_force(9.0 * real_delta)
+		if origin:
+			for h in ["LeftHand", "RightHand"]:
+				var ctrl = origin.get_node_or_null(h) as XRController3D
+				if ctrl and ctrl.has_method("trigger_haptic_pulse"):
+					ctrl.trigger_haptic_pulse("haptic", 190.0, 0.85, 0.08, 0.0)
+	else:
+		hold_stall_timer += real_delta
+		if hold_stall_timer >= 0.45:
+			_resolve_direct_hit()
+			return
+
+	_update_hud(hold_progress)
+	if hold_progress >= 1.0:
+		_resolve_hand_hold_dissipated()
+
+
+func _resolve_hand_hold_dissipated() -> void:
 	state = BeamState.BLOCKED
 	is_active = false
 	Engine.time_scale = 1.0
@@ -431,29 +522,54 @@ func _resolve_containment_block() -> void:
 	if attacker and is_instance_valid(attacker) and bool(attacker.get("is_comeback_zenkai")) and attacker.has_method("notify_attack_failed"):
 		attacker.notify_attack_failed()
 
-	# Mitiga el 80% del daño a cambio de Ki de resistencia
-	var mitigated_damage = base_damage * 0.20
+	var chip_dmg: float = base_damage * 0.10
+	if defender and is_instance_valid(defender):
+		if defender.has_method("take_hit"):
+			defender.take_hit(chip_dmg, beam_dir)
+		if defender.has_method("apply_knockback"):
+			defender.apply_knockback(beam_dir, 4.0)
+	_spawn_spark_at(current_head_pos, Color(0.45, 0.95, 1.0))
+	_cleanup_and_finish("hand_held", chip_dmg)
+
+
+func _resolve_containment_block(is_failed_deflect: bool = false) -> void:
+	state = BeamState.BLOCKED
+	is_active = false
+	Engine.time_scale = 1.0
+
+	var bp_atk: float = maxf(float(attacker.get("current_np")) if (attacker and attacker.get("current_np") != null) else 10000.0, 100.0)
+	var bp_def: float = maxf(float(defender.get("current_np")) if (defender and defender.get("current_np") != null) else 10000.0, 100.0)
+	var bp_ratio: float = clampf(sqrt(bp_atk / bp_def), 0.50, 2.2)
+
+	var def_ki: float = float(defender.get("current_ki")) if (defender and defender.get("current_ki") != null) else 0.0
+	var guard_broken: bool = def_ki < 12.0
+	var mitigated_damage: float = base_damage * (0.55 if (guard_broken or is_failed_deflect) else 0.25)
+
 	if defender and is_instance_valid(defender):
 		if defender.has_method("consume_ki"):
-			defender.consume_ki(15.0)
+			defender.consume_ki(minf(def_ki, 16.0))
 		if defender.has_method("take_hit"):
 			defender.take_hit(mitigated_damage, beam_dir)
 		if defender.has_method("apply_knockback"):
-			# Empuje hacia atrás creando trinchera
-			defender.apply_knockback(beam_dir, 4.2)
+			var kb_spd: float = (9.5 if guard_broken else 5.0) * bp_ratio
+			defender.apply_knockback(beam_dir, kb_spd)
 
-	_spawn_spark_at(current_head_pos, Color(0.2, 0.8, 1.0))
+	if attacker and is_instance_valid(attacker) and bool(attacker.get("is_comeback_zenkai")) and attacker.has_method("notify_attack_failed") and not guard_broken:
+		attacker.notify_attack_failed()
 
-	# Pulso háptico sostenido
-	var origin: XROrigin3D = defender.get_parent() as XROrigin3D if defender.get("is_player") else null
+	_spawn_spark_at(current_head_pos, Color(1.0, 0.35, 0.2) if guard_broken else Color(0.2, 0.8, 1.0))
+
+	var origin: XROrigin3D = defender.get_parent() as XROrigin3D if (defender and defender.get("is_player")) else null
 	if origin:
 		for h in ["LeftHand", "RightHand"]:
 			var ctrl = origin.get_node_or_null(h) as XRController3D
 			if ctrl and ctrl.has_method("trigger_haptic_pulse"):
-				ctrl.trigger_haptic_pulse("haptic", 180.0, 0.85, 0.35, 0.0)
+				ctrl.trigger_haptic_pulse("haptic", 180.0, 0.90 if guard_broken else 0.75, 0.35, 0.0)
 
-	print("[SuperBeamSequence] 🛡️ ¡BLOQUEO DE CONTENCIÓN! 80%% de daño absorbido con retroceso.")
-	_cleanup_and_finish("blocked", mitigated_damage)
+	if guard_broken and attacker and is_instance_valid(attacker) and bool(attacker.get("is_in_zenkai_state")) and attacker.has_method("trigger_zenkai_match_finish"):
+		attacker.trigger_zenkai_match_finish(attacker, defender, power_name)
+
+	_cleanup_and_finish("guard_break" if guard_broken else "blocked", mitigated_damage)
 
 
 func _resolve_evasion() -> void:
@@ -465,7 +581,7 @@ func _resolve_evasion() -> void:
 		attacker.notify_attack_failed()
 
 	if defender and is_instance_valid(defender) and defender.has_method("consume_ki"):
-		defender.consume_ki(25.0)
+		defender.consume_ki(15.0)
 
 	# El haz continúa su trayectoria recta y colisiona contra las montañas lejanas
 	var mountain_target = start_pos + beam_dir * 80.0
@@ -511,14 +627,16 @@ func _resolve_direct_hit() -> void:
 	if attacker and attacker.get("is_in_zenkai_state"):
 		final_damage *= 1.5
 
-	# 1. Aplicar daño y cambio de pose (flinch/stagger) al defensor
+	# 1. Aplicar daño y empuje proporcional a la diferencia de BP (sale volando si el atacante es superior)
+	var bp_atk: float = maxf(float(attacker.get("current_np")) if (attacker and attacker.get("current_np") != null) else 10000.0, 100.0)
+	var bp_def: float = maxf(float(defender.get("current_np")) if (defender and defender.get("current_np") != null) else 10000.0, 100.0)
+	var bp_ratio: float = clampf(sqrt(bp_atk / bp_def), 0.45, 2.8)
 	if defender and is_instance_valid(defender):
 		if defender.has_method("take_hit"):
 			defender.take_hit(final_damage, beam_dir)
 		if defender.has_method("apply_knockback"):
-			defender.apply_knockback(beam_dir, 9.5)
+			defender.apply_knockback(beam_dir, 10.0 * bp_ratio)
 		if defender.get("procedural_animator"):
-			# Cambio de pose drástico del defensor al recibir el impacto
 			defender.procedural_animator.trigger_hit_flinch(2.2, beam_dir)
 
 	# 2. Notificar al atacante para sostener la pose de empuje de energía
@@ -655,23 +773,36 @@ func _update_beam_geometry() -> void:
 		beam_light.global_position = current_head_pos
 
 
+func _exit_tree() -> void:
+	if beam_hud_anchor and is_instance_valid(beam_hud_anchor):
+		beam_hud_anchor.queue_free()
+		beam_hud_anchor = null
+
+
 func _update_hud(rem_time: float) -> void:
 	if not alert_label or not is_instance_valid(alert_label):
 		return
 
-	var cam = _get_active_camera()
-	if cam and is_instance_valid(cam):
-		var cam_fwd: Vector3 = -cam.global_transform.basis.z.normalized()
-		alert_label.global_position = cam.global_position + cam_fwd * 1.80 + Vector3(0.0, 0.18, 0.0)
-		alert_label.look_at(cam.global_position, Vector3.UP)
-		alert_label.rotate_y(PI)
-	else:
-		var target_head = defender.global_position + Vector3(0.0, 1.6, 0.0) if defender else global_position
-		alert_label.global_position = target_head + Vector3(0.0, 0.45, 0.0)
+	if not beam_hud_anchor:
+		var cam = _get_active_camera()
+		if cam and is_instance_valid(cam):
+			var cam_fwd: Vector3 = -cam.global_transform.basis.z.normalized()
+			alert_label.global_position = cam.global_position + cam_fwd * 1.80 + Vector3(0.0, 0.18, 0.0)
+			alert_label.look_at(cam.global_position, Vector3.UP)
+			alert_label.rotate_y(PI)
 
 	if is_aimed_miss:
 		alert_label.modulate = Color(1.0, 0.72, 0.25)
 		alert_label.text = "💨 ¡%s DESVIADO!\nApunta las manos al rival al lanzar" % power_name.to_upper()
+		return
+
+	if state == BeamState.HAND_HOLDING:
+		var h_pct: int = int(clampf(hold_progress, 0.0, 1.0) * 10.0)
+		var h_bar: String = "█".repeat(h_pct) + "░".repeat(10 - h_pct)
+		alert_label.modulate = Color(0.30, 0.95, 1.0)
+		alert_label.text = "👐 ¡AGUANTANDO %s!\n[%s] %d%% — ¡AGITA LOS CONTROLES!" % [
+			power_name.to_upper(), h_bar, int(clampf(hold_progress, 0.0, 1.0) * 100.0)
+		]
 		return
 
 	var pct = clampf(rem_time / maxf(reaction_duration, 0.01), 0.0, 1.0)
@@ -681,17 +812,22 @@ func _update_hud(rem_time: float) -> void:
 	var zenkai_prefix: String = ""
 	if attacker and is_instance_valid(attacker) and bool(attacker.get("is_in_zenkai_state")):
 		if bool(attacker.get("is_player")):
-			zenkai_prefix = "🔥 ¡ATAQUE ZENKAI DE VICTORIA EN CURSO! 🔥\n"
+			zenkai_prefix = "🔥 ¡ATAQUE ZENKAI EN CURSO! 🔥\n"
 			alert_label.modulate = Color(1.0, 0.88, 0.15)
 		else:
-			zenkai_prefix = "💀 ¡ATAQUE ZENKAI K.O. ENTRANTE! 💀\n"
+			zenkai_prefix = "💀 ¡ATAQUE ZENKAI ENTRANTE! 💀\n"
 			alert_label.modulate = Color(1.0, 0.22, 0.22)
 	else:
 		alert_label.modulate = Color(1.0, 0.8, 0.2)
 
-	alert_label.text = "%s⚡ ¡%s ENTRANTE! ⚡\n[ %s ] %.1fs\n[Z-VANISH | DESVÍO CON MANO | BLOQUEO | CHOQUE]" % [
-		zenkai_prefix, power_name.to_upper(), bar, maxf(rem_time, 0.0)
-	]
+	if defender and is_instance_valid(defender) and bool(defender.get("is_player")):
+		alert_label.text = "%s⚡ ¡%s! [%s] %.1fs\n🛡️Cruzada(G+T) | 👐Aguantar(Grips+Agita) | ✋Desvío | ⚡Super | 💨Stick" % [
+			zenkai_prefix, power_name.to_upper(), bar, maxf(rem_time, 0.0)
+		]
+	else:
+		alert_label.text = "%s⚡ ¡%s ENTRANTE! [%s] %.1fs" % [
+			zenkai_prefix, power_name.to_upper(), bar, maxf(rem_time, 0.0)
+		]
 
 
 func _build_visual_beam() -> void:
@@ -761,14 +897,24 @@ func _build_visual_beam() -> void:
 func _build_reticle_and_hud() -> void:
 	alert_label = Label3D.new()
 	alert_label.name = "BeamAlertHUD"
-	alert_label.font_size = 26
-	alert_label.pixel_size = 0.0022
+	alert_label.font_size = 22
+	alert_label.pixel_size = 0.0014
 	alert_label.no_depth_test = true
-	alert_label.render_priority = 115
+	alert_label.render_priority = 125
 	alert_label.outline_size = 8
-	alert_label.outline_color = Color(0.0, 0.0, 0.0, 0.95)
+	alert_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.95)
 	alert_label.modulate = Color(1.0, 0.8, 0.2)
-	add_child(alert_label)
+	var cam: Camera3D = _get_active_camera()
+	if cam and is_instance_valid(cam):
+		beam_hud_anchor = Node3D.new()
+		beam_hud_anchor.name = "BeamBulletTimeHUDAnchor"
+		beam_hud_anchor.position = Vector3(0.0, 0.24, -1.25)
+		cam.add_child(beam_hud_anchor)
+		alert_label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+		alert_label.position = Vector3.ZERO
+		beam_hud_anchor.add_child(alert_label)
+	else:
+		add_child(alert_label)
 
 
 func _build_audio() -> void:
