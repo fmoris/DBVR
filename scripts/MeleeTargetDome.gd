@@ -171,12 +171,9 @@ func setup(p_attacker: Node3D, p_defender: Node3D, p_duration: float = -1.0, p_m
 	pending_attack_penalty = 0
 	last_action_feedback = ""
 
-	sfx_hit_light = load("res://assets/audio/gekishin_test/003073_s1.wav")
-	sfx_hit_heavy = load("res://assets/audio/gekishin_test/003073_s3.wav")
-	if ResourceLoader.exists("res://assets/audio/gekishin_test/003074_s4.wav"):
-		sfx_parry = load("res://assets/audio/gekishin_test/003074_s4.wav")
-	else:
-		sfx_parry = sfx_hit_light
+	sfx_hit_light = null
+	sfx_hit_heavy = null
+	sfx_parry = null
 
 	audio_player = AudioStreamPlayer3D.new()
 	audio_player.name = "BulletTimeAudio"
@@ -333,10 +330,9 @@ func _begin_phase_transition(mode: String, wait_sec: float, msg: String, col: Co
 	elif mode == "continue_offense":
 		player_will_attack = attacker != null and bool(attacker.get("is_player"))
 	_apply_role_dome_tint(player_will_attack)
-	if audio_player and sfx_parry:
-		audio_player.stream = sfx_parry
+	if audio_player:
 		audio_player.pitch_scale = 1.15 if player_will_attack else 0.85
-		audio_player.play()
+		AudioActionManager.play_action("common.block_perfect", audio_player, sfx_parry)
 	if player_will_attack:
 		_pulse_defender_hand(0, 150.0, 0.75, 0.14)
 		_pulse_defender_hand(1, 150.0, 0.75, 0.14)
@@ -826,9 +822,8 @@ func _resolve_perfect_parry(note: Dictionary, zone: Dictionary) -> void:
 
 	if audio_player:
 		audio_player.global_position = zone["node"].global_position
-		audio_player.stream = sfx_parry
 		audio_player.pitch_scale = 1.30
-		audio_player.play()
+		AudioActionManager.play_action("common.block_perfect", audio_player, sfx_parry)
 
 	_spawn_parry_shockwave(zone["node"].global_position)
 	_pulse_defender_both_hands(250.0, 1.0, 0.25)
@@ -892,9 +887,8 @@ func _resolve_fist_clash(note: Dictionary, zone: Dictionary, hand_idx: int) -> v
 
 		if audio_player:
 			audio_player.global_position = zone_pos
-			audio_player.stream = sfx_parry
 			audio_player.pitch_scale = 1.15
-			audio_player.play()
+			AudioActionManager.play_action("common.block_perfect", audio_player, sfx_parry)
 		_spawn_parry_shockwave(zone_pos)
 		_pulse_defender_hand(hand_idx, 210.0, 1.0, 0.16)
 		if defender and is_instance_valid(defender) and defender.get("procedural_animator"):
@@ -956,8 +950,7 @@ func _resolve_hand_block(note: Dictionary, zone: Dictionary, hand_idx: int) -> v
 			defender.take_hit(v3_mitigated, Vector3.ZERO)
 		if audio_player:
 			audio_player.global_position = zone_pos
-			audio_player.stream = sfx_hit_heavy
-			audio_player.play()
+			AudioActionManager.play_action("common.melee_hit_heavy", audio_player, sfx_hit_heavy)
 		_spawn_block_spark(zone_pos, Color(1.0, 0.55, 0.2))
 		last_action_feedback = "✋ ¡CARGADO V3 FRENADO! (-12 Ki)"
 		pip_results.append("blocked")
@@ -974,8 +967,7 @@ func _resolve_hand_block(note: Dictionary, zone: Dictionary, hand_idx: int) -> v
 			defender.increase_np(75.0)
 		if audio_player:
 			audio_player.global_position = zone_pos
-			audio_player.stream = sfx_hit_heavy
-			audio_player.play()
+			AudioActionManager.play_action("common.melee_hit_heavy", audio_player, sfx_hit_heavy)
 		_spawn_block_spark(zone_pos, Color(1.0, 0.75, 0.2))
 		last_action_feedback = "✋ ¡CARGADO BLOQUEADO! (-6 Ki)"
 		pip_results.append("blocked")
@@ -989,9 +981,8 @@ func _resolve_hand_block(note: Dictionary, zone: Dictionary, hand_idx: int) -> v
 			defender.increase_np(150.0)
 		if audio_player:
 			audio_player.global_position = zone_pos
-			audio_player.stream = sfx_hit_light
 			audio_player.pitch_scale = 1.25
-			audio_player.play()
+			AudioActionManager.play_action("common.melee_hit_light", audio_player, sfx_hit_light)
 		_spawn_block_spark(zone_pos, Color(1.0, 0.9, 0.2))
 		last_action_feedback = "✋ ¡DESVÍO LIMPIO! (+12 Ki)"
 		pip_results.append("blocked")
@@ -1035,9 +1026,10 @@ func _resolve_cross_arm_guard(note: Dictionary, zone: Dictionary) -> void:
 
 	if audio_player:
 		audio_player.global_position = zone_pos
-		audio_player.stream = sfx_hit_heavy if (is_hammer or is_v3) else sfx_hit_light
 		audio_player.pitch_scale = 0.85
-		audio_player.play()
+		var act_id := "common.melee_hit_heavy" if (is_hammer or is_v3) else "common.melee_hit_light"
+		var fb := sfx_hit_heavy if (is_hammer or is_v3) else sfx_hit_light
+		AudioActionManager.play_action(act_id, audio_player, fb)
 
 	_spawn_block_spark(zone_pos, Color(0.2, 0.7, 1.0))
 	_pulse_defender_both_hands(140.0, 0.65, 0.10)
@@ -1116,8 +1108,9 @@ func _resolve_unblocked_hit(note: Dictionary, zone: Dictionary) -> void:
 
 	if audio_player:
 		audio_player.global_position = zone_pos
-		audio_player.stream = sfx_hit_heavy if (is_charged or is_v3 or is_hammer) else sfx_hit_light
-		audio_player.play()
+		var act_id := "common.melee_hit_heavy" if (is_charged or is_v3 or is_hammer) else "common.melee_hit_light"
+		var fb := sfx_hit_heavy if (is_charged or is_v3 or is_hammer) else sfx_hit_light
+		AudioActionManager.play_action(act_id, audio_player, fb)
 
 	_pulse_defender_both_hands(200.0, 0.80, 0.14)
 	_spawn_hit_spark(zone_pos)
@@ -2006,9 +1999,10 @@ func _register_hit(zone: Dictionary, ctrl_node: XRController3D, hand_name: Strin
 
 	if audio_player:
 		audio_player.global_position = hit_pos
-		audio_player.stream = sfx_hit_heavy if (is_charged or is_v3) else sfx_hit_light
 		audio_player.pitch_scale = randf_range(0.92, 1.08)
-		audio_player.play()
+		var act_id := "common.melee_hit_heavy" if (is_charged or is_v3) else "common.melee_hit_light"
+		var fb := sfx_hit_heavy if (is_charged or is_v3) else sfx_hit_light
+		AudioActionManager.play_action(act_id, audio_player, fb)
 
 	if ctrl_node and ctrl_node.has_method("trigger_haptic_pulse"):
 		ctrl_node.trigger_haptic_pulse("haptic", 220.0 if is_charged else 180.0, 1.0 if is_charged else 0.80, 0.20 if is_charged else 0.08, 0.0)

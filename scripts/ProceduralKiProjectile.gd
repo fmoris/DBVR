@@ -545,15 +545,16 @@ func _spawn_deflection_vfx(pos: Vector3) -> void:
 	# Audio 3D metálico de ping de desvío anime
 	var sfx = AudioStreamPlayer3D.new()
 	sfx.name = "DeflectSfx"
-	if ResourceLoader.exists("res://assets/audio/gekishin_test/003073_s1.wav"):
-		sfx.stream = load("res://assets/audio/gekishin_test/003073_s1.wav")
+	var fallback_deflect: AudioStream = null
 	sfx.unit_size = 5.0
 	sfx.max_distance = 40.0
 	get_tree().current_scene.add_child(sfx)
 	sfx.global_position = pos
 	sfx.pitch_scale = randf_range(0.92, 1.08)
-	sfx.play()
-	sfx.finished.connect(sfx.queue_free)
+	if AudioActionManager.play_action("common.block_guard", sfx, fallback_deflect):
+		sfx.finished.connect(sfx.queue_free)
+	else:
+		sfx.queue_free()
 
 	var tween = get_tree().create_tween().set_parallel(true)
 	tween.tween_property(spark, "scale", Vector3.ONE * 3.5, 0.15).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)

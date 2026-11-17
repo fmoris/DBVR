@@ -93,8 +93,6 @@ func _ready() -> void:
 		snd_kamehameha = load("res://assets/sfx/Kamehameha Regular.mp3")
 	if ResourceLoader.exists("res://assets/sfx/AURA.mp3"):
 		snd_aura = load("res://assets/sfx/AURA.mp3")
-	if ResourceLoader.exists("res://assets/audio/gekishin_test/003074_s4.wav"):
-		snd_vanish = load("res://assets/audio/gekishin_test/003074_s4.wav")
 	if ResourceLoader.exists("res://assets/sfx/Charged_KI_Blast_1.mp3"):
 		snd_ki_blast = load("res://assets/sfx/Charged_KI_Blast_1.mp3")
 
@@ -809,30 +807,27 @@ func _play_ai_sfx(sfx_type: String) -> void:
 	if not audio_player_3d:
 		return
 
+	var char_name: String = host.character_data.character_name if (host and host.character_data) else ""
 	match sfx_type:
 		"kamehameha_charge":
-			if snd_kamehameha:
-				audio_player_3d.stream = snd_kamehameha
-				audio_player_3d.pitch_scale = randf_range(0.92, 1.08)
-				audio_player_3d.play()
+			var charge_id := AudioActionManager.get_character_action_id(char_name, "kamehameha_charge")
+			if "vegeta" in char_name.to_lower() and not AudioActionManager.has_action_sounds(charge_id):
+				charge_id = "vegeta.galick_gun_charge"
+			audio_player_3d.pitch_scale = randf_range(0.92, 1.08)
+			AudioActionManager.play_action(charge_id, audio_player_3d, snd_kamehameha)
 		"kamehameha_fire":
-			if snd_ki_blast:
-				audio_player_3d.stream = snd_ki_blast
-				audio_player_3d.pitch_scale = 0.85 * randf_range(0.92, 1.08)
-				audio_player_3d.play()
+			var fire_id := AudioActionManager.get_character_action_id(char_name, "kamehameha_fire")
+			if "vegeta" in char_name.to_lower() and not AudioActionManager.has_action_sounds(fire_id):
+				fire_id = "vegeta.galick_gun_fire"
+			audio_player_3d.pitch_scale = 0.85 * randf_range(0.92, 1.08)
+			AudioActionManager.play_action(fire_id, audio_player_3d, snd_ki_blast)
 		"ki_blast":
-			if snd_ki_blast:
-				audio_player_3d.stream = snd_ki_blast
-				audio_player_3d.pitch_scale = randf_range(1.05, 1.25)
-				audio_player_3d.play()
+			audio_player_3d.pitch_scale = randf_range(1.05, 1.25)
+			AudioActionManager.play_action("common.ki_blast_fire", audio_player_3d, snd_ki_blast)
 		"aura":
-			if snd_aura:
-				audio_player_3d.stream = snd_aura
-				audio_player_3d.pitch_scale = randf_range(0.92, 1.08)
-				audio_player_3d.play()
+			audio_player_3d.pitch_scale = randf_range(0.92, 1.08)
+			AudioActionManager.play_action("common.ki_charge_phase2", audio_player_3d, snd_aura)
 		"step", "vanish":
-			if snd_vanish:
-				audio_player_3d.stream = snd_vanish
-				audio_player_3d.pitch_scale = randf_range(1.15, 1.35)
-				audio_player_3d.volume_db = -4.0
-				audio_player_3d.play()
+			audio_player_3d.pitch_scale = randf_range(1.15, 1.35)
+			audio_player_3d.volume_db = -4.0
+			AudioActionManager.play_action("common.dodge_vanish", audio_player_3d, snd_vanish)

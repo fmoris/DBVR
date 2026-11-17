@@ -148,8 +148,6 @@ func _ready() -> void:
 	step_audio_player = AudioStreamPlayer.new()
 	step_audio_player.name = "StepAudioPlayer"
 	add_child(step_audio_player)
-	if ResourceLoader.exists("res://assets/audio/gekishin_test/003074_s4.wav"):
-		snd_step = load("res://assets/audio/gekishin_test/003074_s4.wav")
 
 
 func _find_xr_nodes() -> void:
@@ -1786,11 +1784,10 @@ func _execute_vertical_step(target_pos: Vector3, is_up: bool) -> void:
 
 
 func _play_step_audio(pitch: float = 1.25) -> void:
-	if step_audio_player and snd_step:
-		step_audio_player.stream = snd_step
+	if step_audio_player:
 		step_audio_player.pitch_scale = pitch * randf_range(0.92, 1.08)
 		step_audio_player.volume_db = -5.0
-		step_audio_player.play()
+		AudioActionManager.play_action("common.dodge_vanish", step_audio_player, snd_step)
 
 
 # --- 7. GUARDIA DEFENSIVA (BLOQUEO) ---

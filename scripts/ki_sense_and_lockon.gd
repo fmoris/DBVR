@@ -73,7 +73,7 @@ func _setup_audio() -> void:
 	audio_player.unit_size = 3.0
 	audio_player.max_distance = 15.0
 	add_child(audio_player)
-	sfx_locked = load("res://assets/audio/gekishin_test/003073_s1.wav")
+	sfx_locked = null
 
 
 func _build_lockon_reticle() -> void:
