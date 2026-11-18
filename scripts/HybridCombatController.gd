@@ -382,7 +382,7 @@ func _process_ki_recharge(delta: float) -> void:
 
 		# FASE 1: Concentración a la altura de los hombros o pecho (OBLIGATORIAMENTE DELANTE DE LOS HOMBROS)
 		if not is_charging_ki:
-			if not ki_prep_phase:
+			if not ki_prep_phase and not left_is_charging and not right_is_charging:
 				if pose_chest_ki_p1:
 					ki_prep_phase = true
 					if gesture_tree:
@@ -497,22 +497,15 @@ func _process_ki_blasts(delta: float) -> void:
 	var l_trig: bool = left_controller.get_float("trigger") > 0.35 or left_controller.is_button_pressed("trigger_click")
 	var r_trig: bool = right_controller.get_float("trigger") > 0.35 or right_controller.is_button_pressed("trigger_click")
 
-	# Si ambos gatillos están presionados simultáneamente, se reserva para Recarga de Ki, NO para Ki Blasts
-	if l_trig and r_trig:
-		if left_is_charging or right_is_charging:
-			if gesture_tree:
-				gesture_tree._cleanup_ki_blast_charge_sphere(0)
-				gesture_tree._cleanup_ki_blast_charge_sphere(1)
-		left_charge_time = 0.0
-		right_charge_time = 0.0
-		left_is_charging = false
-		right_is_charging = false
+	# Si ambos gatillos están presionados simultáneamente, no iniciar nuevos Ki Blasts (reservado para Recarga de Ki),
+	# pero NO cancelar cargas de Ki Blast ya activas en curso
+	if l_trig and r_trig and not left_is_charging and not right_is_charging:
 		return
 
-	# Si ambos mandos tienen Grip presionado, es Super Poder o Guardia
+	# Si ambos mandos tienen Grip presionado y no hay Ki Blast cargando, es Super Poder o Guardia
 	var l_grip: bool = left_controller.get_float("grip") > 0.50 or left_controller.is_button_pressed("grip_click")
 	var r_grip: bool = right_controller.get_float("grip") > 0.50 or right_controller.is_button_pressed("grip_click")
-	if l_grip and r_grip:
+	if l_grip and r_grip and not left_is_charging and not right_is_charging:
 		return
 
 	# Mano Izquierda (solo gatillo izquierdo)
@@ -536,10 +529,13 @@ func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta:
 	var hand_torso: Vector3 = l_torso_pos if is_left else r_torso_pos
 	var dist_from_cam_norm: float = ctrl_p.distance_to(cam_pos_cached) * inv_body_scale
 
-	# REQUISITO CANÓNICO: Para cargar y disparar Ki Blast, el brazo debe estar en zona frontal normalizada
+	# REQUISITO CANÓNICO: Para iniciar Ki Blast, el brazo debe estar en zona frontal normalizada.
+	# Una vez iniciada la carga (was_charging), mantener mientras el gatillo siga presionado y la mano no pase detrás de la espalda.
+	var was_charging: bool = left_is_charging if is_left else right_is_charging
 	var is_arm_extended: bool = (dist_from_cam_norm >= 0.26 and hand_torso.z >= 0.14 and absf(hand_torso.x) <= 0.65 and hand_torso.y >= -0.45 and hand_torso.y <= 0.55 and ctrl_fwd.dot(cam_fwd_flat) > 0.10)
+	var can_continue_charge: bool = was_charging and hand_torso.z >= -0.10
 
-	if trig_pressed and is_arm_extended:
+	if trig_pressed and (is_arm_extended or can_continue_charge):
 		var aim_origin: Vector3 = ctrl_p
 		var c2h_vec: Vector3 = aim_origin - chest_pos_cached
 		var chest_to_hand: Vector3 = c2h_vec.normalized() if c2h_vec.length_squared() > 0.001 else cam_fwd_flat
@@ -595,8 +591,8 @@ func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta:
 		# Gatillo soltado o brazo retirado: Evaluar disparo (tap rápido o disparo cargado)
 		var held_time = left_charge_time if is_left else right_charge_time
 
-		# Solo dispara si se mantuvo cargando al menos 0.10s (previene disparos accidentales por ruido analógico)
-		if held_time >= 0.10:
+		# Solo dispara si se mantuvo cargando al menos 0.025s (acepta taps rápidos de gatillo)
+		if held_time >= 0.025:
 			var is_charged = held_time >= 0.50
 			var action_name = "ki_blast_left" if is_left else "ki_blast_right"
 
@@ -871,9 +867,9 @@ func _is_phase2_autofire_pose(tech_name: String, eff_l_z: float, eff_r_z: float,
 			var avg_rel_y: float = (l_cam_rel_y + r_cam_rel_y) * 0.5
 			return avg_rel_y <= 0.08 and (eff_l_z >= 0.16 or eff_r_z >= 0.16)
 		"big_bang":
-			var active_z: float = l_torso_pos.z if bb_side == 0 else r_torso_pos.z
+			var active_z: float = maxf(l_torso_pos.z, l_cam_fwd_proj) if bb_side == 0 else maxf(r_torso_pos.z, r_cam_fwd_proj)
 			var active_vel_z: float = l_torso_vel.z if bb_side == 0 else r_torso_vel.z
-			return (active_vel_z >= 1.35 and active_z >= 0.28) or (active_vel_z >= 0.65 and active_z >= super_phase1_anchor_z + 0.16)
+			return active_z >= 0.30 and (active_vel_z >= 0.55 or active_z >= super_phase1_anchor_z + 0.08)
 	return false
 
 
@@ -1056,8 +1052,8 @@ func _process_super_powers(delta: float) -> void:
 						if gesture_tree.has_signal("gesture_logged"):
 							gesture_tree.emit_signal("gesture_logged", "¡Técnica actualizada a %s! Mantén los grips y concentra tu Ki." % upgraded_display, "info")
 
-		# Si se está cargando Big Bang y el usuario aprieta el gatillo de esa mano, formó puño para Melee -> Cancelar Big Bang
-		if super_power_type == "big_bang":
+		# Si se está cargando Big Bang al inicio (< 0.45s) y el usuario aprieta el gatillo de esa mano, formó puño para Melee
+		if super_power_type == "big_bang" and super_charge_timer < 0.45:
 			var bb_side_trig: int = int(gesture_tree.get("big_bang_hand")) if gesture_tree else (0 if l_grip else 1)
 			var active_trig: bool = l_trig if bb_side_trig == 0 else r_trig
 			if active_trig:
@@ -1172,28 +1168,11 @@ func _process_super_powers(delta: float) -> void:
 					_pulse_haptic(left_controller, 115.0, 0.48, 0.08)
 					_pulse_haptic(right_controller, 115.0, 0.48, 0.08)
 
-		# FASE 2 CANÓNICA ("¡HAAA!"): Ventana de 0.50s para ajustar puntería con láser guía (disparo inmediato si hay lock rojo)
-		if super_aim_lock_window >= 0.0:
-			super_aim_lock_window -= delta
-			var aim_locked_now: bool = gesture_tree != null and bool(gesture_tree.get("current_aim_locked"))
-			if left_controller and right_controller and gesture_tree:
-				var laser_origin: Vector3 = (left_controller.global_position if bb_side == 0 else right_controller.global_position) if super_power_type == "big_bang" else (left_controller.global_position + right_controller.global_position) * 0.5
-				var target_pt: Vector3 = Vector3(gesture_tree.get("current_aim_target"))
-				_update_guide_laser(laser_origin, target_pt, Color(1.0, 0.25, 0.2) if aim_locked_now else Color(0.25, 0.90, 1.0))
-			if aim_locked_now or super_aim_lock_window <= 0.0:
-				_hide_guide_laser()
-				_execute_super_fire(super_power_type)
-				return
-		elif p2_ready and _is_phase2_autofire_pose(super_power_type, eff_l_z, eff_r_z, bb_side):
-			var aim_locked_inst: bool = gesture_tree != null and bool(gesture_tree.get("current_aim_locked"))
-			if aim_locked_inst:
-				_hide_guide_laser()
-				_execute_super_fire(super_power_type)
-				return
-			else:
-				super_aim_lock_window = 0.50
-				_pulse_haptic(left_controller, 150.0, 0.70, 0.10)
-				_pulse_haptic(right_controller, 150.0, 0.70, 0.10)
+		# FASE 2 CANÓNICA ("¡HAAA!"): Disparo inmediato al proyectar la postura de lanzamiento tras completar carga mínima
+		if p2_ready and _is_phase2_autofire_pose(super_power_type, eff_l_z, eff_r_z, bb_side):
+			_hide_guide_laser()
+			_execute_super_fire(super_power_type)
+			return
 
 		# Evaluar ventana tolerante si el jugador extiende parcialmente y suelta los Grips
 		var in_phase2_now: bool = _is_valid_super_release_pose(super_power_type, l_local_z, r_local_z, avg_local_y, avg_local_z, hands_dist_norm, bb_side, l_cam_z, r_cam_z)
@@ -1496,6 +1475,12 @@ func _process_melee_punches() -> void:
 		right_punch_cocked = false
 		return
 
+	if left_is_charging or right_is_charging or current_super_state != SuperPowerState.IDLE:
+		if not (current_super_state == SuperPowerState.CHARGING and super_power_type == "big_bang" and super_charge_timer < 0.45):
+			left_punch_cocked = false
+			right_punch_cocked = false
+			return
+
 	var l_grip: bool = left_controller.get_float("grip") > 0.40 or left_controller.is_button_pressed("grip_click")
 	var l_trig: bool = left_controller.get_float("trigger") > 0.40 or left_controller.is_button_pressed("trigger_click")
 	# REQUISITO CANÓNICO: Puño cerrado simulado con Grab + Gatillo (ambos botones presionados)
@@ -1512,8 +1497,8 @@ func _process_melee_punches() -> void:
 		right_punch_cocked = false
 		return
 
-	# Si se estaba cargando Big Bang y el usuario cierra el puño completo (grab + gatillo), priorizar Melee
-	if current_super_state == SuperPowerState.CHARGING and super_power_type == "big_bang":
+	# Si se estaba cargando Big Bang al inicio (< 0.45s) y el usuario cierra el puño completo (grab + gatillo), priorizar Melee
+	if current_super_state == SuperPowerState.CHARGING and super_power_type == "big_bang" and super_charge_timer < 0.45:
 		if l_fist or r_fist:
 			_reset_super_state()
 	elif current_super_state != SuperPowerState.IDLE:
@@ -1544,12 +1529,6 @@ func _process_melee_punches() -> void:
 
 
 func _execute_melee_punch(controller: XRController3D) -> void:
-	_reset_super_state()
-	left_charge_time = 0.0
-	right_charge_time = 0.0
-	left_is_charging = false
-	right_is_charging = false
-
 	var player: Node = gesture_tree._get_player_instance() if gesture_tree else null
 	# Si ya estamos en Bullet-Time cuerpo a cuerpo, el golpe impacta la cúpula táctica
 	if player and player.get("is_in_bullet_time"):
@@ -1568,6 +1547,12 @@ func _execute_melee_punch(controller: XRController3D) -> void:
 			return
 		if player.has_method("consume_ki"):
 			player.consume_ki(dash_cost)
+
+	_reset_super_state()
+	left_charge_time = 0.0
+	right_charge_time = 0.0
+	left_is_charging = false
+	right_is_charging = false
 
 	melee_cooldown = 2.5
 

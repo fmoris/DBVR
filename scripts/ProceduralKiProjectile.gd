@@ -32,7 +32,7 @@ var was_launched_in_zenkai: bool = false
 
 # Red de seguridad de ciclo de vida (Punto 10: Ki blasts que no desaparecen)
 const HARD_MAX_AGE: float = 6.0
-const ARENA_FREE_RADIUS_SQ: float = 60.0 * 60.0
+const ARENA_FREE_RADIUS_SQ: float = 160.0 * 160.0
 var _hard_age: float = 0.0
 var _dead_timeout: float = 0.0
 

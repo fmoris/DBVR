@@ -517,6 +517,8 @@ func _process(delta: float) -> void:
 			if abs(yaw_diff) > max_neck_angle:
 				var target_yaw: float = cam_yaw - sign(yaw_diff) * max_neck_angle
 				torso_yaw = lerp_angle(torso_yaw, target_yaw, 8.0 * delta)
+			else:
+				torso_yaw = lerp_angle(torso_yaw, cam_yaw, 3.5 * delta)
 				
 			# Offset hacia atrás del torso respecto a los ojos (10cm) usando rotación mundial real
 			var origin_node: Node3D = get_parent() as Node3D
@@ -846,9 +848,6 @@ func recharge_ki(amount: float) -> void:
 	_notify_stats()
 
 func consume_ki(amount: float) -> bool:
-	if is_penalized:
-		# Penalizado no puede consumir Ki para ataques avanzados
-		return false
 	if current_ki >= amount:
 		current_ki -= amount
 		_mark_ki_spent()
@@ -859,9 +858,6 @@ func consume_ki(amount: float) -> bool:
 ## Consume Ki para técnicas especiales; si el Ki es insuficiente (último aliento),
 ## permite ejecutar la técnica sacrificando Fuerza Vital / Battle Power (NP) directamente.
 func consume_ki_or_life_force(ki_amount: float) -> Dictionary:
-	if is_penalized:
-		return { "success": false, "sacrificed_np": 0.0, "is_life_sacrifice": false }
-		
 	# Caso 1: Ki ordinario suficiente
 	if current_ki >= ki_amount:
 		current_ki -= ki_amount
@@ -1255,8 +1251,6 @@ func revert_to_base() -> void:
 			opp.check_zenkai_conditions(current_np)
 
 func is_power_usable(power: Resource) -> bool:
-	if is_penalized and not is_in_zenkai_state:
-		return false
 	# En Estado Zenkai se exime todo bloqueo de transformación para permitir lanzar cualquier Super Poder
 	if is_in_zenkai_state:
 		return true
@@ -2497,7 +2491,7 @@ func stop_ragdoll() -> void:
 
 
 func is_airborne_incapacitated() -> bool:
-	return is_ragdoll_active or wall_stick_timer > 0.0 or (is_knocked_back and velocity.length_squared() > 1.2)
+	return is_ragdoll_active or wall_stick_timer > 0.0 or is_staggered or (is_knocked_back and velocity.length_squared() > 144.0)
 
 
 func _process_mutual_body_collision() -> void:
@@ -2643,6 +2637,19 @@ func start_super_beam_sequence(tech_name: String, col: Color, dmg: float, tier_l
 	var opp = _get_opponent()
 	if not opp or not is_instance_valid(opp):
 		return
+	var opp_seq: Node = opp.get("active_beam_sequence")
+	if is_in_beam_sequence and opp_seq != null and is_instance_valid(opp_seq):
+		if int(opp_seq.get("state")) == 0: # SuperBeamSequenceController.BeamState.ADVANCING_BULLET_TIME
+			opp_seq._trigger_beam_clash(self, tech_name, col, dmg)
+			return
+		elif int(opp_seq.get("state")) >= 2:
+			is_in_beam_sequence = false
+	if is_in_beam_sequence and active_beam_sequence != null and is_instance_valid(active_beam_sequence):
+		if int(active_beam_sequence.get("state")) >= 2:
+			active_beam_sequence.queue_free()
+			active_beam_sequence = null
+			is_in_beam_sequence = false
+			is_firing_beam = false
 	if is_in_beam_sequence and not is_instance_valid(active_beam_sequence):
 		is_in_beam_sequence = false
 	if is_in_bullet_time and not is_instance_valid(active_target_dome):
