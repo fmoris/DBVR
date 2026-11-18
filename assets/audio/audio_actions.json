@@ -216,69 +216,127 @@
     "vegeta.galick_gun_charge": {
       "label": "Vegeta: Galick Ho (Carga)",
       "category": "Vegeta",
-      "sounds": []
+      "sounds": [
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_6.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_11.ogg",
+        "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_20.ogg"
+      ]
     },
     "vegeta.galick_gun_fire": {
       "label": "Vegeta: Galick Ho (Disparo)",
       "category": "Vegeta",
       "sounds": [
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_104.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_105.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_132.ogg",
         "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_16.ogg"
       ]
     },
     "vegeta.big_bang_charge": {
       "label": "Vegeta: Big Bang Attack (Carga)",
       "category": "Vegeta",
-      "sounds": []
+      "sounds": [
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_77.ogg",
+        "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_40.ogg"
+      ]
     },
     "vegeta.big_bang_fire": {
       "label": "Vegeta: Big Bang Attack (Disparo)",
       "category": "Vegeta",
-      "sounds": []
+      "sounds": [
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_9.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_79.ogg",
+        "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_4.ogg"
+      ]
     },
     "vegeta.final_flash_charge": {
       "label": "Vegeta: Final Flash (Carga)",
       "category": "Vegeta",
-      "sounds": []
+      "sounds": [
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_80.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_120.ogg",
+        "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_24.ogg"
+      ]
     },
     "vegeta.final_flash_fire": {
       "label": "Vegeta: Final Flash (Disparo)",
       "category": "Vegeta",
-      "sounds": []
+      "sounds": [
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_84.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_125.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_131.ogg",
+        "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_16.ogg"
+      ]
     },
     "vegeta.transform_ssj": {
       "label": "Vegeta: Transformación (SSJ / Super Vegeta / SSB)",
       "category": "Vegeta",
-      "sounds": []
+      "sounds": [
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_68.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_72.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_93.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_94.ogg"
+      ]
     },
     "vegeta.attack_effort": {
       "label": "Vegeta: Grito de ataque (Melee / Blast)",
       "category": "Vegeta",
-      "sounds": []
+      "sounds": [
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_17.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_27.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_43.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_44.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_47.ogg"
+      ]
     },
     "vegeta.ki_charge_voice": {
       "label": "Vegeta: Grito recargando Ki",
       "category": "Vegeta",
-      "sounds": []
+      "sounds": [
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_49.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_51.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_52.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_53.ogg"
+      ]
     },
     "vegeta.hurt_light": {
       "label": "Vegeta: Daño ligero / Quejido",
       "category": "Vegeta",
-      "sounds": []
+      "sounds": [
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_31.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_32.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_34.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_36.ogg"
+      ]
     },
     "vegeta.hurt_heavy": {
       "label": "Vegeta: Daño fuerte / Derrota",
       "category": "Vegeta",
-      "sounds": []
+      "sounds": [
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_21.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_23.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_25.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_38.ogg"
+      ]
     },
     "vegeta.intro_taunt": {
       "label": "Vegeta: Intro / Provocación",
       "category": "Vegeta",
-      "sounds": []
+      "sounds": [
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_2.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_8.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_13.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_137.ogg"
+      ]
     },
     "vegeta.victory": {
       "label": "Vegeta: Victoria",
       "category": "Vegeta",
-      "sounds": []
+      "sounds": [
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_3.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_156.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_162.ogg"
+      ]
     }
   },
   "ignored": []

@@ -1139,10 +1139,9 @@ func _trigger_action(action_name: String) -> void:
 		if voice_player:
 			var c_name_ki: String = player.character_data.character_name if (player and player.character_data) else "Goku"
 			var voice_id: String = AudioActionManager.get_character_action_id(c_name_ki, "ki_charge_voice")
-			if not AudioActionManager.has_action_sounds(voice_id):
-				voice_id = "goku.ki_charge_voice"
-			voice_player.pitch_scale = randf_range(0.95, 1.05)
-			AudioActionManager.play_action(voice_id, voice_player)
+			if AudioActionManager.has_action_sounds(voice_id):
+				voice_player.pitch_scale = randf_range(0.95, 1.05)
+				AudioActionManager.play_action(voice_id, voice_player)
 		
 	elif action_name == "ki_blast_left":
 		# REQUISITO 1: Solo al tener el brazo extendido
@@ -1290,10 +1289,9 @@ func _trigger_action(action_name: String) -> void:
 		if voice_player and player and is_instance_valid(player):
 			var c_name_m: String = player.character_data.character_name if player.character_data else "Goku"
 			var eff_id: String = AudioActionManager.get_character_action_id(c_name_m, "attack_effort")
-			if not AudioActionManager.has_action_sounds(eff_id):
-				eff_id = "goku.attack_effort"
-			voice_player.pitch_scale = randf_range(0.95, 1.05)
-			AudioActionManager.play_action(eff_id, voice_player)
+			if AudioActionManager.has_action_sounds(eff_id):
+				voice_player.pitch_scale = randf_range(0.95, 1.05)
+				AudioActionManager.play_action(eff_id, voice_player)
 		if player and is_instance_valid(player):
 			emit_signal("phase_changed", "¡MELEE DISPARADO!")
 			emit_signal("gesture_logged", "¡Puñetazo lanzado! Volando al contrincante...", "success")
@@ -1628,7 +1626,7 @@ func _spawn_special_projectile(power: Resource) -> void:
 	if ki_blast_fire_player:
 		var fire_act: String = "goku.genkidama_fire" if power.power_name == "Genkidama" else "vegeta.big_bang_fire"
 		if not AudioActionManager.has_action_sounds(fire_act):
-			fire_act = "goku.kamehameha_fire"
+			fire_act = "common.ki_blast_fire"
 		ki_blast_fire_player.pitch_scale = randf_range(0.92, 1.04)
 		AudioActionManager.play_action(fire_act, ki_blast_fire_player, _default_blast_fire_stream)
 	
@@ -1917,7 +1915,7 @@ func _play_charge_audio_for_node(node_key: String) -> void:
 	if act_id.is_empty():
 		return
 	if act_id != "common.ki_blast_charge" and not AudioActionManager.has_action_sounds(act_id):
-		act_id = "goku.kamehameha_charge"
+		act_id = "common.ki_blast_charge"
 	ki_blast_charge_player.pitch_scale = randf_range(0.92, 1.08)
 	AudioActionManager.play_action(act_id, ki_blast_charge_player, _default_charge_stream)
 

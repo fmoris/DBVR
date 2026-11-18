@@ -170,7 +170,7 @@ func setup_character() -> void:
 	_hurt_voice_cooldown = 0.0
 	_ensure_character_audio_players()
 	if not is_player:
-		play_character_action_audio("intro_taunt", true, "goku.intro_taunt")
+		play_character_action_audio("intro_taunt", true)
 	unlocked_powers.clear()
 	unlocked_transformations.clear()
 	for power in character_data.powers:
@@ -725,7 +725,7 @@ func take_hit(amount_np: float, hit_direction: Vector3 = Vector3.ZERO) -> void:
 		if _hurt_voice_cooldown <= 0.0:
 			_hurt_voice_cooldown = 0.60
 			var hurt_suffix: String = "hurt_heavy" if amount_np >= 600.0 else "hurt_light"
-			play_character_action_audio(hurt_suffix, true, "goku." + hurt_suffix)
+			play_character_action_audio(hurt_suffix, true)
 	var opp_hit: Node3D = _get_opponent()
 	if opp_hit and is_instance_valid(opp_hit):
 		check_zenkai_conditions(opp_hit.current_np)
@@ -925,21 +925,34 @@ func _format_bp_number(n: int) -> String:
 	return ("-" + res) if neg else res
 
 
+func _get_player_xr_camera() -> Camera3D:
+	var vp: Viewport = get_viewport() if is_inside_tree() else null
+	if vp:
+		var c: Camera3D = vp.get_camera_3d()
+		if c and is_instance_valid(c):
+			return c
+	if is_player and get_parent():
+		var xr_cam: Camera3D = get_parent().get_node_or_null("XRCamera3D") as Camera3D
+		if xr_cam and is_instance_valid(xr_cam):
+			return xr_cam
+	return null
+
+
 func _spawn_bp_delta_popup(delta_bp: float, custom_tag: String = "") -> void:
 	if absf(delta_bp) < 80.0 and custom_tag == "":
 		return
-	if not is_inside_tree() or not get_tree() or not get_tree().current_scene:
+	if not is_inside_tree() or not get_tree():
 		return
-	var cam: Camera3D = get_viewport().get_camera_3d()
+	var cam: Camera3D = _get_player_xr_camera()
 	if not cam or not is_instance_valid(cam):
 		return
 
 	var lbl := Label3D.new()
 	lbl.name = "BPDeltaPopup_" + str(Time.get_ticks_msec())
-	lbl.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	lbl.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 	lbl.no_depth_test = true
-	lbl.pixel_size = 0.0020
-	lbl.font_size = 28
+	lbl.pixel_size = 0.0014
+	lbl.font_size = 24
 	lbl.outline_size = 10
 	lbl.render_priority = 115
 
@@ -959,18 +972,15 @@ func _spawn_bp_delta_popup(delta_bp: float, custom_tag: String = "") -> void:
 	lbl.modulate = col
 	lbl.outline_modulate = Color(0.0, 0.0, 0.0, 0.95)
 
-	get_tree().current_scene.add_child(lbl)
-	var cam_basis: Basis = cam.global_transform.basis
-	var cam_fwd: Vector3 = -cam_basis.z.normalized()
-	var cam_right: Vector3 = cam_basis.x.normalized()
-	var cam_up: Vector3 = cam_basis.y.normalized()
-	var side_off: float = -0.30 if is_player else 0.30
-	var jitter_y: float = randf_range(-0.04, 0.06)
-	var start_pos: Vector3 = cam.global_position + cam_fwd * 1.65 + cam_right * side_off + cam_up * (0.20 + jitter_y)
-	lbl.global_position = start_pos
+	# Anclar directamente a la cámara del jugador para que siempre sea legible sin importar la distancia ni desplazamientos
+	cam.add_child(lbl)
+	var side_off: float = -0.24 if is_player else 0.24
+	var jitter_y: float = randf_range(-0.03, 0.04)
+	var start_local := Vector3(side_off, 0.16 + jitter_y, -1.20)
+	lbl.position = start_local
 
 	var tw: Tween = lbl.create_tween().set_parallel(true)
-	tw.tween_property(lbl, "global_position", start_pos + cam_up * 0.22, 1.15).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.tween_property(lbl, "position:y", start_local.y + 0.16, 1.15).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tw.tween_property(lbl, "modulate:a", 0.0, 1.15).set_delay(0.30)
 	tw.tween_property(lbl, "outline_modulate:a", 0.0, 1.15).set_delay(0.30)
 	tw.chain().tween_callback(lbl.queue_free)
@@ -1219,7 +1229,7 @@ func transform_to(index: int) -> void:
 			procedural_animator.trigger_transformation_roar()
 		_spawn_melee_shockwave(global_position + Vector3(0, 1.0, 0))
 		var trans_suffix: String = "kaioken" if "kaioken" in trans.form_name.to_lower() else "transform_ssj"
-		play_character_action_audio(trans_suffix, true, "goku." + trans_suffix)
+		play_character_action_audio(trans_suffix, true)
 		play_character_action_audio("common.aura_burst", false)
 		var char_name = character_data.character_name if character_data else name
 		_log_combat_event("[TRANSFORMACIÓN] ¡%s se ha transformado en %s! (NP x%.1f -> BP %s)" % [char_name, trans.form_name, new_mult, _format_bp_number(int(current_np))], "success")
@@ -1309,7 +1319,7 @@ func trigger_zenkai_match_finish(winner: Node3D, loser: Node3D, tech_name: Strin
 	emit_signal("match_finished", winner, loser, tech_name)
 	play_character_action_audio("common.ko_finisher", false)
 	if winner and is_instance_valid(winner) and winner.has_method("play_character_action_audio"):
-		winner.play_character_action_audio("victory", true, "goku.victory")
+		winner.play_character_action_audio("victory", true)
 
 	# Limpiar domos melee activos y proyectiles en vuelo al concluir el combate
 	is_in_bullet_time = false
@@ -1335,7 +1345,7 @@ func _spawn_zenkai_finish_banner(winner: Node3D, _loser: Node3D, tech_name: Stri
 	var tree: SceneTree = get_tree()
 	if not tree:
 		return
-	var cam: Camera3D = get_viewport().get_camera_3d() if get_viewport() else null
+	var cam: Camera3D = _get_player_xr_camera()
 	if not cam or not is_instance_valid(cam):
 		return
 
@@ -1347,24 +1357,19 @@ func _spawn_zenkai_finish_banner(winner: Node3D, _loser: Node3D, tech_name: Stri
 
 	var banner := Label3D.new()
 	banner.name = "ZenkaiMatchFinishBanner"
-	banner.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	banner.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 	banner.no_depth_test = true
 	banner.render_priority = 120
-	banner.pixel_size = 0.0022
-	banner.font_size = 34
+	banner.pixel_size = 0.0015
+	banner.font_size = 28
 	banner.outline_size = 10
 	banner.outline_modulate = Color(0.0, 0.0, 0.0, 0.96)
 	var winner_is_player: bool = (winner == self and is_player) or (winner != null and is_instance_valid(winner) and bool(winner.get("is_player")))
 	banner.modulate = Color(1.0, 0.88, 0.15) if winner_is_player else Color(1.0, 0.22, 0.25)
 	banner.text = "🏆 ¡K.O. ZENKAI DEFINITIVO! 🏆\nGANADOR: %s\nTécnica Final: %s\n[Usa el Menú (☰) para Reiniciar Combate]" % [w_name.to_upper(), tech_name.to_upper()]
 
-	var parent_node: Node = tree.current_scene if tree.current_scene else self
-	parent_node.add_child(banner)
-
-	var fwd: Vector3 = -cam.global_transform.basis.z
-	fwd.y = 0.0
-	fwd = fwd.normalized() if fwd.length_squared() > 0.001 else Vector3.FORWARD
-	banner.global_position = cam.global_position + fwd * 1.70 + Vector3(0.0, 0.08, 0.0)
+	cam.add_child(banner)
+	banner.position = Vector3(0.0, 0.08, -1.25)
 
 	var finish_timer: SceneTreeTimer = tree.create_timer(8.0)
 	finish_timer.timeout.connect(func() -> void:

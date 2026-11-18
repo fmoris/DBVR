@@ -811,17 +811,15 @@ func _play_ai_sfx(sfx_type: String) -> void:
 		return
 
 	var char_name: String = host.character_data.character_name if (host and host.character_data) else ""
+	var is_vegeta: bool = "vegeta" in char_name.to_lower()
 	match sfx_type:
 		"kamehameha_charge":
-			var charge_id := AudioActionManager.get_character_action_id(char_name, "kamehameha_charge")
-			if "vegeta" in char_name.to_lower() and not AudioActionManager.has_action_sounds(charge_id):
-				charge_id = "vegeta.galick_gun_charge"
+			var charge_id: String = "vegeta.galick_gun_charge" if is_vegeta else AudioActionManager.get_character_action_id(char_name, "kamehameha_charge")
+			var fb_charge: AudioStream = snd_aura if is_vegeta else snd_kamehameha
 			audio_player_3d.pitch_scale = randf_range(0.92, 1.08)
-			AudioActionManager.play_action(charge_id, audio_player_3d, snd_kamehameha)
+			AudioActionManager.play_action(charge_id, audio_player_3d, fb_charge)
 		"kamehameha_fire":
-			var fire_id := AudioActionManager.get_character_action_id(char_name, "kamehameha_fire")
-			if "vegeta" in char_name.to_lower() and not AudioActionManager.has_action_sounds(fire_id):
-				fire_id = "vegeta.galick_gun_fire"
+			var fire_id: String = "vegeta.galick_gun_fire" if is_vegeta else AudioActionManager.get_character_action_id(char_name, "kamehameha_fire")
 			audio_player_3d.pitch_scale = 0.85 * randf_range(0.92, 1.08)
 			AudioActionManager.play_action(fire_id, audio_player_3d, snd_ki_blast)
 		"ki_blast":

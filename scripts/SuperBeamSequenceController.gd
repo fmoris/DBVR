@@ -785,13 +785,19 @@ func _update_hud(rem_time: float) -> void:
 	if not alert_label or not is_instance_valid(alert_label):
 		return
 
-	if not beam_hud_anchor:
-		var cam = _get_active_camera()
+	if not beam_hud_anchor or not is_instance_valid(beam_hud_anchor):
+		var cam: Camera3D = _get_active_camera()
 		if cam and is_instance_valid(cam):
-			var cam_fwd: Vector3 = -cam.global_transform.basis.z.normalized()
-			alert_label.global_position = cam.global_position + cam_fwd * 1.80 + Vector3(0.0, 0.18, 0.0)
-			alert_label.look_at(cam.global_position, Vector3.UP)
-			alert_label.rotate_y(PI)
+			beam_hud_anchor = Node3D.new()
+			beam_hud_anchor.name = "BeamBulletTimeHUDAnchor"
+			beam_hud_anchor.position = Vector3(0.0, 0.22, -1.18)
+			cam.add_child(beam_hud_anchor)
+			if alert_label.get_parent() and alert_label.get_parent() != beam_hud_anchor:
+				alert_label.get_parent().remove_child(alert_label)
+			if not alert_label.get_parent():
+				beam_hud_anchor.add_child(alert_label)
+			alert_label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
+			alert_label.position = Vector3.ZERO
 
 	if is_aimed_miss:
 		alert_label.modulate = Color(1.0, 0.72, 0.25)
@@ -910,7 +916,7 @@ func _build_reticle_and_hud() -> void:
 	if cam and is_instance_valid(cam):
 		beam_hud_anchor = Node3D.new()
 		beam_hud_anchor.name = "BeamBulletTimeHUDAnchor"
-		beam_hud_anchor.position = Vector3(0.0, 0.24, -1.25)
+		beam_hud_anchor.position = Vector3(0.0, 0.22, -1.18)
 		cam.add_child(beam_hud_anchor)
 		alert_label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 		alert_label.position = Vector3.ZERO
@@ -925,20 +931,28 @@ func _build_audio() -> void:
 	audio_player.unit_size = 8.0
 	audio_player.max_distance = 45.0
 	add_child(audio_player)
-	var fallback_beam: AudioStream = load("res://assets/sfx/Kamehameha Regular.mp3") if ResourceLoader.exists("res://assets/sfx/Kamehameha Regular.mp3") else null
+	var fallback_beam: AudioStream = load("res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_16.ogg") if ResourceLoader.exists("res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_16.ogg") else null
 	audio_player.pitch_scale = randf_range(0.92, 1.08)
 	var p_lower: String = power_name.to_lower()
-	var fire_act: String = "goku.kamehameha_fire"
-	if "galick" in p_lower:
-		fire_act = "vegeta.galick_gun_fire"
-	elif "final flash" in p_lower:
-		fire_act = "vegeta.final_flash_fire" if AudioActionManager.has_action_sounds("vegeta.final_flash_fire") else "vegeta.galick_gun_fire"
-	elif "big bang" in p_lower:
-		fire_act = "vegeta.big_bang_fire" if AudioActionManager.has_action_sounds("vegeta.big_bang_fire") else "vegeta.galick_gun_fire"
-	elif "genkidama" in p_lower:
-		fire_act = "goku.genkidama_fire"
-	if not AudioActionManager.has_action_sounds(fire_act):
-		fire_act = "goku.kamehameha_fire"
+	var atk_name: String = ""
+	if attacker and is_instance_valid(attacker) and attacker.get("character_data"):
+		var cd: Resource = attacker.get("character_data")
+		if cd and "character_name" in cd:
+			atk_name = String(cd.character_name).to_lower()
+	var is_vegeta_atk: bool = ("vegeta" in atk_name) or ("galick" in p_lower) or ("final flash" in p_lower) or ("big bang" in p_lower)
+	var fire_act: String = ""
+	if is_vegeta_atk:
+		if "final flash" in p_lower:
+			fire_act = "vegeta.final_flash_fire" if AudioActionManager.has_action_sounds("vegeta.final_flash_fire") else "vegeta.galick_gun_fire"
+		elif "big bang" in p_lower:
+			fire_act = "vegeta.big_bang_fire" if AudioActionManager.has_action_sounds("vegeta.big_bang_fire") else "vegeta.galick_gun_fire"
+		else:
+			fire_act = "vegeta.galick_gun_fire"
+	else:
+		if "genkidama" in p_lower:
+			fire_act = "goku.genkidama_fire" if AudioActionManager.has_action_sounds("goku.genkidama_fire") else "goku.kamehameha_fire"
+		else:
+			fire_act = "goku.kamehameha_fire"
 	AudioActionManager.play_action(fire_act, audio_player, fallback_beam)
 
 
@@ -994,9 +1008,12 @@ func _spawn_plasma_crater(pos: Vector3, radius: float, col: Color) -> void:
 
 
 func _get_active_camera() -> Camera3D:
-	if defender and defender.get("is_player"):
-		var orig = defender.get_parent()
-		if orig:
-			return orig.get_node_or_null("XRCamera3D") as Camera3D
-	var vp = get_viewport()
+	for f in [defender, attacker]:
+		if f and is_instance_valid(f) and bool(f.get("is_player")):
+			var orig: Node = f.get_parent()
+			if orig:
+				var c: Camera3D = orig.get_node_or_null("XRCamera3D") as Camera3D
+				if c and is_instance_valid(c):
+					return c
+	var vp: Viewport = get_viewport()
 	return vp.get_camera_3d() if vp else null

@@ -347,8 +347,8 @@ func _update_peripheral_ki_pointer(cam_pos: Vector3, opp_pos: Vector3, dist_m: f
 	if local_dir.z > 0.0:
 		screen_dir = -screen_dir
 
-	# Posicionar el puntero en la periferia de visión (0.42m del centro a 0.85m de profundidad)
-	var pointer_offset_local = Vector3(screen_dir.x * 0.68, screen_dir.y * 0.46, -1.45)
+	# Posicionar el puntero en la periferia de visión cerca del jugador para lectura nítida
+	var pointer_offset_local = Vector3(screen_dir.x * 0.54, screen_dir.y * 0.36, -1.20)
 	ki_pointer_root.global_position = camera.global_position + (cam_basis * pointer_offset_local)
 
 	# Orientar la flecha para que apunte en la dirección screen_dir
@@ -474,7 +474,7 @@ func _poll_combat_alerts(delta: float) -> void:
 
 	if alert_banner_root and alert_banner_root.visible and camera and is_instance_valid(camera):
 		var cam_basis: Basis = camera.global_transform.basis
-		alert_banner_root.global_position = camera.global_position + (cam_basis * Vector3(0.0, 0.25, -1.60))
+		alert_banner_root.global_position = camera.global_position + (cam_basis * Vector3(0.0, 0.22, -1.22))
 		alert_banner_root.global_transform.basis = cam_basis
 		if _alert_timer > 0.0:
 			_alert_timer -= delta

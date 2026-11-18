@@ -311,18 +311,12 @@ func _update_beam_transforms() -> void:
 	if clash_light and is_instance_valid(clash_light):
 		clash_light.global_position = clash_pos
 
-	if header_label and is_instance_valid(header_label):
-		var target_pos: Vector3 = clash_pos + Vector3(0.0, 1.1, 0.0)
-		var player_cam = _get_active_camera()
+	if header_label and is_instance_valid(header_label) and (not clash_hud_anchor or not is_instance_valid(clash_hud_anchor)):
+		var player_cam: Camera3D = _get_active_camera()
 		if player_cam and is_instance_valid(player_cam):
-			if target_pos.distance_to(player_cam.global_position) < 1.75:
-				var cam_fwd: Vector3 = -player_cam.global_transform.basis.z.normalized()
-				target_pos = player_cam.global_position + cam_fwd * 1.75 + Vector3(0.0, 0.22, 0.0)
-			header_label.global_position = target_pos
-			header_label.look_at(player_cam.global_position, Vector3.UP)
-			header_label.rotate_y(PI)
+			_build_visuals_hud_attach()
 		else:
-			header_label.global_position = target_pos
+			header_label.global_position = clash_pos + Vector3(0.0, 1.1, 0.0)
 
 	# 1. Haz exterior y núcleo blanco del Atacante (desde manos del atacante hasta clash_pos)
 	if beam_mesh_atk and is_instance_valid(beam_mesh_atk):
@@ -511,8 +505,8 @@ func _build_visuals() -> void:
 	header_label = Label3D.new()
 	header_label.name = "ClashHUD"
 	header_label.text = "⚡ ¡CHOQUE DE PODERES! ⚡"
-	header_label.font_size = 28
-	header_label.pixel_size = 0.0022
+	header_label.font_size = 24
+	header_label.pixel_size = 0.0014
 	header_label.no_depth_test = true
 	header_label.render_priority = 115
 	header_label.outline_size = 10
@@ -529,16 +523,19 @@ func _exit_tree() -> void:
 
 
 func _build_visuals_hud_attach() -> void:
-	var cam: Camera3D = get_viewport().get_camera_3d() if get_viewport() else null
+	var cam: Camera3D = _get_active_camera()
 	if cam and is_instance_valid(cam):
 		clash_hud_anchor = Node3D.new()
 		clash_hud_anchor.name = "ClashHUDAnchor"
-		clash_hud_anchor.position = Vector3(0.0, 0.24, -1.25)
+		clash_hud_anchor.position = Vector3(0.0, 0.22, -1.20)
 		cam.add_child(clash_hud_anchor)
+		if header_label.get_parent() and header_label.get_parent() != clash_hud_anchor:
+			header_label.get_parent().remove_child(header_label)
+		if not header_label.get_parent():
+			clash_hud_anchor.add_child(header_label)
 		header_label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 		header_label.position = Vector3.ZERO
-		clash_hud_anchor.add_child(header_label)
-	else:
+	elif not header_label.get_parent():
 		add_child(header_label)
 
 
