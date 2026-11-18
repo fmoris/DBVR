@@ -84,6 +84,10 @@ var is_charging_ki_blast_right: bool = false
 var aura_start_player: AudioStreamPlayer = null
 var aura_loop_player: AudioStreamPlayer = null
 var ki_blast_charge_player: AudioStreamPlayer = null
+var ki_blast_fire_player: AudioStreamPlayer = null
+var voice_player: AudioStreamPlayer = null
+var _default_charge_stream: AudioStream = null
+var _default_blast_fire_stream: AudioStream = null
 
 # --- Aura Visual del Jugador ---
 var visual_aura: Node3D = null
@@ -225,9 +229,6 @@ func _process(delta: float) -> void:
 				_reset_to_idle()
 			return
 
-	# 1. Asegurar enlace continuo de trackers
-	_ensure_trackers()
-	
 	var camera = get_viewport().get_camera_3d()
 	if not camera:
 		return
@@ -240,12 +241,21 @@ func _process(delta: float) -> void:
 	else:
 		camera_forward_speed = 0.0
 	prev_camera_global_pos = camera.global_position
-		
-	# Actualizar la posición y rotación del aura dorada si está activa
-	if visual_aura and is_instance_valid(visual_aura):
-		var feet_pos = Vector3(camera.global_position.x, 0.5, camera.global_position.z)
-		visual_aura.global_position = feet_pos + Vector3(0, 1.2, 0)
-		visual_aura.rotate_y(delta * 0.5)
+
+	# En modo mandos Quest (is_controller_override), HybridCombatController gestiona las poses,
+	# el drenaje de Ki, el Sobre-Esfuerzo Vital y la actualización de esferas de carga.
+	if is_controller_override:
+		if is_charging_kamehameha or is_charging_genkidama or is_charging_galick_ho or is_charging_final_flash or is_charging_big_bang or is_charging_ki or is_charging_ki_blast_left or is_charging_ki_blast_right:
+			gesture_timer = 0.0
+			return
+		if current_node != gesture_tree:
+			gesture_timer += delta
+			if gesture_timer >= 2.5:
+				_cancel_action("Tiempo límite de gesto expirado (2.5s)")
+		return
+
+	# 1. Asegurar enlace continuo de trackers (solo en modo Hand Tracking óptico)
+	_ensure_trackers()
 		
 	# 2. Calcular el torso de referencia con Yaw Deadzone (amortiguación de giro de cabeza) y offset dinámico de altura
 	var xr_origin: Node3D = camera.get_parent() as Node3D if (camera and camera.get_parent() is Node3D) else null
@@ -305,20 +315,6 @@ func _process(delta: float) -> void:
 		hands_dist = 0.0
 		hands_sep_speed = 0.0
 	
-	# Emitir señal de actualización de estados de manos para el HUD
-	var left_desc = "%s-%s-%s-%s-%s" % [left_state.height, left_state.lateral, left_state.depth, left_state.shape, left_state.speed] if left_state.valid else "DESCONECTADA"
-	var right_desc = "%s-%s-%s-%s-%s" % [right_state.height, right_state.lateral, right_state.depth, right_state.shape, right_state.speed] if right_state.valid else "DESCONECTADA"
-	emit_signal("hand_states_updated", left_desc, right_desc)
-	
-	# Debug periódico de zonas en consola
-	debug_log_timer += delta
-	if debug_log_timer >= 0.5:
-		debug_log_timer = 0.0
-		if left_state.valid or right_state.valid:
-			var left_log = "%s-%s-%s-%s-%s" % [left_state.height, left_state.lateral, left_state.depth, left_state.shape, left_state.speed] if left_state.valid else "OFF"
-			var right_log = "%s-%s-%s-%s-%s" % [right_state.height, right_state.lateral, right_state.depth, right_state.shape, right_state.speed] if right_state.valid else "OFF"
-			print("[GSS-Debug] L: %s | R: %s" % [left_log, right_log])
-	
 	# 4. Control de gracia para pérdida temporal de señal
 	var active_gesture_needs_left = false
 	var active_gesture_needs_right = false
@@ -337,11 +333,10 @@ func _process(delta: float) -> void:
 		active_gesture_needs_right = true
 		
 	var tracking_failed = false
-	if not is_controller_override:
-		if active_gesture_needs_left and not left_state.valid:
-			tracking_failed = true
-		if active_gesture_needs_right and not right_state.valid:
-			tracking_failed = true
+	if active_gesture_needs_left and not left_state.valid:
+		tracking_failed = true
+	if active_gesture_needs_right and not right_state.valid:
+		tracking_failed = true
 		
 	if tracking_failed:
 		tracking_loss_frames += 1
@@ -997,8 +992,7 @@ func _feed_trie(gesture_name: String) -> void:
 						emit_signal("phase_changed", "KAMEHAMEHA: CARGANDO")
 						emit_signal("gesture_logged", "Manos unidas en la cadera. ¡Cargando Kamehameha!", "info")
 					if ki_blast_charge_player:
-						ki_blast_charge_player.pitch_scale = randf_range(0.92, 1.08)
-						AudioActionManager.play_action("goku.kamehameha_charge", ki_blast_charge_player, ki_blast_charge_player.stream)
+						_play_charge_audio_for_node("KAMEHAMEHA_CHARGE")
 				else:
 					emit_signal("gesture_logged", "No se pudo cargar Kamehameha.", "warning")
 					_cancel_action("Kamehameha cancelado")
@@ -1022,8 +1016,7 @@ func _feed_trie(gesture_name: String) -> void:
 						emit_signal("phase_changed", "GENKIDAMA: REUNIENDO ENERGÍA")
 						emit_signal("gesture_logged", "Brazos alzados al cielo. ¡Reuniendo energía para la Genkidama!", "info")
 					if ki_blast_charge_player:
-						ki_blast_charge_player.pitch_scale = randf_range(0.92, 1.08)
-						AudioActionManager.play_action("goku.kamehameha_charge", ki_blast_charge_player, ki_blast_charge_player.stream)
+						_play_charge_audio_for_node("GENKIDAMA_CHARGE")
 				else:
 					emit_signal("gesture_logged", "No se pudo reunir la Genkidama.", "warning")
 					_cancel_action("Genkidama cancelada")
@@ -1047,8 +1040,7 @@ func _feed_trie(gesture_name: String) -> void:
 						emit_signal("phase_changed", "GALICK HO: CARGANDO")
 						emit_signal("gesture_logged", "Manos unidas al hombro. ¡Cargando Galick Ho!", "info")
 					if ki_blast_charge_player:
-						ki_blast_charge_player.pitch_scale = randf_range(0.92, 1.08)
-						AudioActionManager.play_action("goku.kamehameha_charge", ki_blast_charge_player, ki_blast_charge_player.stream)
+						_play_charge_audio_for_node("GALICK_HO_CHARGE")
 				else:
 					emit_signal("gesture_logged", "No se pudo cargar Galick Ho.", "warning")
 					_cancel_action("Galick Ho cancelado")
@@ -1072,8 +1064,7 @@ func _feed_trie(gesture_name: String) -> void:
 						emit_signal("phase_changed", "FINAL FLASH: CARGANDO RELÁMPAGOS")
 						emit_signal("gesture_logged", "Brazos en cruz acumulando relámpagos. ¡Cargando Final Flash!", "info")
 					if ki_blast_charge_player:
-						ki_blast_charge_player.pitch_scale = randf_range(0.92, 1.08)
-						AudioActionManager.play_action("goku.kamehameha_charge", ki_blast_charge_player, ki_blast_charge_player.stream)
+						_play_charge_audio_for_node("FINAL_FLASH_CHARGE")
 				else:
 					emit_signal("gesture_logged", "No se pudo cargar Final Flash.", "warning")
 					_cancel_action("Final Flash cancelado")
@@ -1097,8 +1088,7 @@ func _feed_trie(gesture_name: String) -> void:
 						emit_signal("phase_changed", "BIG BANG: CARGANDO ENERGÍA")
 						emit_signal("gesture_logged", "Brazo extendido con palma abierta. ¡Cargando Big Bang Attack!", "info")
 					if ki_blast_charge_player:
-						ki_blast_charge_player.pitch_scale = randf_range(0.92, 1.08)
-						AudioActionManager.play_action("goku.kamehameha_charge", ki_blast_charge_player, ki_blast_charge_player.stream)
+						_play_charge_audio_for_node("BIG_BANG_CHARGE")
 				else:
 					emit_signal("gesture_logged", "No se pudo cargar Big Bang Attack.", "warning")
 					_cancel_action("Big Bang Attack cancelado")
@@ -1113,16 +1103,14 @@ func _feed_trie(gesture_name: String) -> void:
 				emit_signal("phase_changed", "KI BLAST IZQ: CARGANDO")
 				emit_signal("gesture_logged", "Brazo Izquierdo estirado al frente. ¡Cargando Ki Blast!", "info")
 				if ki_blast_charge_player:
-					ki_blast_charge_player.pitch_scale = randf_range(0.92, 1.08)
-					ki_blast_charge_player.play()
+					_play_charge_audio_for_node("ARM_STRETCHED_OPEN_LEFT")
 		elif gesture_name == "ARM_STRETCHED_OPEN_RIGHT":
 			if ki_blast_charge_time_right <= 0.01:
 				is_charging_ki_blast_right = true
 				emit_signal("phase_changed", "KI BLAST DER: CARGANDO")
 				emit_signal("gesture_logged", "Brazo Derecho estirado al frente. ¡Cargando Ki Blast!", "info")
 				if ki_blast_charge_player:
-					ki_blast_charge_player.pitch_scale = randf_range(0.92, 1.08)
-					ki_blast_charge_player.play()
+					_play_charge_audio_for_node("ARM_STRETCHED_OPEN_RIGHT")
 			
 		# Comprobar si se ha alcanzado una acción final
 		if current_node.has("action_trigger"):
@@ -1141,13 +1129,20 @@ func _trigger_action(action_name: String) -> void:
 		# Mostrar aura visual dorada y luz
 		_show_visual_aura(true)
 		
-		# Reproducir sonidos de recarga de Ki
+		# Reproducir sonidos de recarga de Ki + voz del personaje
 		if aura_start_player:
 			aura_start_player.pitch_scale = randf_range(0.92, 1.08)
 			AudioActionManager.play_action("common.aura_burst", aura_start_player, aura_start_player.stream)
 		if aura_loop_player:
 			aura_loop_player.pitch_scale = randf_range(0.92, 1.08)
 			AudioActionManager.play_action("common.ki_charge_phase2", aura_loop_player, aura_loop_player.stream, true)
+		if voice_player:
+			var c_name_ki: String = player.character_data.character_name if (player and player.character_data) else "Goku"
+			var voice_id: String = AudioActionManager.get_character_action_id(c_name_ki, "ki_charge_voice")
+			if not AudioActionManager.has_action_sounds(voice_id):
+				voice_id = "goku.ki_charge_voice"
+			voice_player.pitch_scale = randf_range(0.95, 1.05)
+			AudioActionManager.play_action(voice_id, voice_player)
 		
 	elif action_name == "ki_blast_left":
 		# REQUISITO 1: Solo al tener el brazo extendido
@@ -1158,7 +1153,7 @@ func _trigger_action(action_name: String) -> void:
 			_reset_to_idle()
 			return
 
-		var is_charged = ki_blast_charge_time_left >= 0.70
+		var is_charged = ki_blast_charge_time_left >= 0.50
 		var cfg_kb: KiEconomyConfig = KiEconomyConfig.get_default()
 		var ki_cost: float = cfg_kb.ki_blast_charged_cost if is_charged else cfg_kb.ki_blast_cost
 		var is_life = false
@@ -1185,6 +1180,9 @@ func _trigger_action(action_name: String) -> void:
 			emit_signal("gesture_logged", "Paso 2: ¡Ki Blast rápido lanzado con Mano Izquierda!", "success")
 		if ki_blast_charge_player:
 			ki_blast_charge_player.stop()
+		if ki_blast_fire_player:
+			ki_blast_fire_player.pitch_scale = randf_range(0.88, 0.98) if is_charged else randf_range(0.95, 1.08)
+			AudioActionManager.play_action("common.ki_blast_fire", ki_blast_fire_player, _default_blast_fire_stream)
 		_reset_ki_blast_charge(0)
 		_reset_to_idle()
 		
@@ -1197,7 +1195,7 @@ func _trigger_action(action_name: String) -> void:
 			_reset_to_idle()
 			return
 
-		var is_charged = ki_blast_charge_time_right >= 0.70
+		var is_charged = ki_blast_charge_time_right >= 0.50
 		var cfg_kb: KiEconomyConfig = KiEconomyConfig.get_default()
 		var ki_cost: float = cfg_kb.ki_blast_charged_cost if is_charged else cfg_kb.ki_blast_cost
 		var is_life = false
@@ -1224,6 +1222,9 @@ func _trigger_action(action_name: String) -> void:
 			emit_signal("gesture_logged", "Paso 2: ¡Ki Blast rápido lanzado con Mano Derecha!", "success")
 		if ki_blast_charge_player:
 			ki_blast_charge_player.stop()
+		if ki_blast_fire_player:
+			ki_blast_fire_player.pitch_scale = randf_range(0.88, 0.98) if is_charged else randf_range(0.95, 1.08)
+			AudioActionManager.play_action("common.ki_blast_fire", ki_blast_fire_player, _default_blast_fire_stream)
 		_reset_ki_blast_charge(1)
 		_reset_to_idle()
 		
@@ -1283,6 +1284,16 @@ func _trigger_action(action_name: String) -> void:
 		_hide_aim_reticle()
 		_cleanup_ki_blast_charge_sphere(0)
 		_cleanup_ki_blast_charge_sphere(1)
+		if ki_blast_fire_player:
+			ki_blast_fire_player.pitch_scale = randf_range(0.95, 1.08)
+			AudioActionManager.play_action("common.melee_swing", ki_blast_fire_player)
+		if voice_player and player and is_instance_valid(player):
+			var c_name_m: String = player.character_data.character_name if player.character_data else "Goku"
+			var eff_id: String = AudioActionManager.get_character_action_id(c_name_m, "attack_effort")
+			if not AudioActionManager.has_action_sounds(eff_id):
+				eff_id = "goku.attack_effort"
+			voice_player.pitch_scale = randf_range(0.95, 1.05)
+			AudioActionManager.play_action(eff_id, voice_player)
 		if player and is_instance_valid(player):
 			emit_signal("phase_changed", "¡MELEE DISPARADO!")
 			emit_signal("gesture_logged", "¡Puñetazo lanzado! Volando al contrincante...", "success")
@@ -1485,12 +1496,13 @@ func _spawn_ki_blast_projectile(hand_side: int, is_charged: bool) -> void:
 	mesh_corona.material_override = mat_corona
 	projectile.add_child(mesh_corona)
 	
-	# Luz dinámica omnidireccional asociada (calibrada para VR sin destello cegador)
-	var light = OmniLight3D.new()
-	light.light_color = energy_color
-	light.light_energy = 2.2 if is_charged else 1.2
-	light.omni_range = 2.0 if is_charged else 1.0
-	projectile.add_child(light)
+	# Luz dinámica omnidireccional asociada (solo para ataques cargados para mantener 90 FPS en Quest 3)
+	if is_charged:
+		var light = OmniLight3D.new()
+		light.light_color = energy_color
+		light.light_energy = 2.2
+		light.omni_range = 2.0
+		projectile.add_child(light)
 	
 	# Asignar el script físico estático precompilado y sus variables ANTES de entrar al árbol
 	projectile.set_script(ProceduralKiProjectileScript)
@@ -1611,6 +1623,14 @@ func _spawn_special_projectile(power: Resource) -> void:
 		if opp and is_instance_valid(opp):
 			player.start_super_beam_sequence(power.power_name, energy_color, base_dmg, tier_val, velocity_dir)
 			return
+
+	# Audio de lanzamiento para esferas especiales (Genkidama / Big Bang Attack)
+	if ki_blast_fire_player:
+		var fire_act: String = "goku.genkidama_fire" if power.power_name == "Genkidama" else "vegeta.big_bang_fire"
+		if not AudioActionManager.has_action_sounds(fire_act):
+			fire_act = "goku.kamehameha_fire"
+		ki_blast_fire_player.pitch_scale = randf_range(0.92, 1.04)
+		AudioActionManager.play_action(fire_act, ki_blast_fire_player, _default_blast_fire_stream)
 	
 	var projectile = Node3D.new()
 	projectile.name = "ProceduralKiProjectile_" + power.power_name.replace(" ", "") + "_" + str(Time.get_ticks_msec())
@@ -1851,71 +1871,64 @@ func _setup_sound_players() -> void:
 	aura_loop_player.volume_db = -9.0
 	add_child(aura_loop_player)
 	
-	# 3. Reproductor para el efecto de carga del Ki Blast
+	# 3. Reproductor para el efecto de carga del Ki Blast y Super Poderes
 	ki_blast_charge_player = AudioStreamPlayer.new()
 	ki_blast_charge_player.name = "KiBlastChargePlayer"
-	var charge_stream = load("res://assets/sfx/Charged_KI_Blast_1.mp3")
-	if charge_stream:
-		charge_stream.loop = false
-		ki_blast_charge_player.stream = charge_stream
+	_default_charge_stream = load("res://assets/sfx/Charged_KI_Blast_1.mp3")
+	if _default_charge_stream:
+		_default_charge_stream.loop = false
+		ki_blast_charge_player.stream = _default_charge_stream
 	ki_blast_charge_player.volume_db = -6.0
 	add_child(ki_blast_charge_player)
+
+	# 4. Reproductor dedicado para disparos de Ki Blast, golpes al aire y esferas especiales
+	ki_blast_fire_player = AudioStreamPlayer.new()
+	ki_blast_fire_player.name = "KiBlastFirePlayer"
+	_default_blast_fire_stream = load("res://assets/sfx/Basic_KI_Blast_1.mp3") if ResourceLoader.exists("res://assets/sfx/Basic_KI_Blast_1.mp3") else _default_charge_stream
+	ki_blast_fire_player.volume_db = -4.5
+	add_child(ki_blast_fire_player)
+
+	# 5. Reproductor dedicado para voces de esfuerzo y carga del jugador
+	voice_player = AudioStreamPlayer.new()
+	voice_player.name = "PlayerVoiceActionPlayer"
+	voice_player.volume_db = -3.0
+	add_child(voice_player)
 	
 	print("[GesturePhaseTree] Reproductores de audio inicializados con éxito.")
+
+
+func _play_charge_audio_for_node(node_key: String) -> void:
+	if not ki_blast_charge_player:
+		return
+	var act_id: String = ""
+	match node_key:
+		"KAMEHAMEHA_CHARGE":
+			act_id = "goku.kamehameha_charge"
+		"GENKIDAMA_CHARGE":
+			act_id = "goku.genkidama_charge"
+		"GALICK_HO_CHARGE":
+			act_id = "vegeta.galick_gun_charge"
+		"FINAL_FLASH_CHARGE":
+			act_id = "vegeta.final_flash_charge"
+		"BIG_BANG_CHARGE":
+			act_id = "vegeta.big_bang_charge"
+		"ARM_STRETCHED_OPEN_LEFT", "ARM_STRETCHED_OPEN_RIGHT":
+			act_id = "common.ki_blast_charge"
+	if act_id.is_empty():
+		return
+	if act_id != "common.ki_blast_charge" and not AudioActionManager.has_action_sounds(act_id):
+		act_id = "goku.kamehameha_charge"
+	ki_blast_charge_player.pitch_scale = randf_range(0.92, 1.08)
+	AudioActionManager.play_action(act_id, ki_blast_charge_player, _default_charge_stream)
+
 
 # --- Gestión del Aura Visual 3D del Jugador ---
 
 func _show_visual_aura(show: bool) -> void:
-	if show:
-		if visual_aura != null and is_instance_valid(visual_aura):
-			return
-			
-		var camera = get_viewport().get_camera_3d()
-		if not camera:
-			return
-			
-		# Contenedor del Aura
-		visual_aura = Node3D.new()
-		visual_aura.name = "PlayerKiAura"
-		
-		# 1. Crear cilindro procedural
-		var mesh_inst = MeshInstance3D.new()
-		mesh_inst.name = "AuraMesh"
-		var cylinder = CylinderMesh.new()
-		cylinder.top_radius = 0.85
-		cylinder.bottom_radius = 0.95
-		cylinder.height = 2.4
-		cylinder.radial_segments = 24
-		cylinder.rings = 4
-		cylinder.cap_top = false
-		cylinder.cap_bottom = false
-		mesh_inst.mesh = cylinder
-		
-		var mat = ShaderMaterial.new()
-		mat.shader = KiCoronaShader
-		mat.set_shader_parameter("base_color", Color(1.0, 0.85, 0.1, 0.85)) # Oro brillante
-		mat.set_shader_parameter("vertex_displacement", 0.07)
-		mat.set_shader_parameter("speed", 4.5)
-		mat.set_shader_parameter("scale", 5.0)
-		mesh_inst.material_override = mat
-		visual_aura.add_child(mesh_inst)
-		
-		# 2. Luz dinámica omnidireccional
-		var light = OmniLight3D.new()
-		light.name = "AuraLight"
-		light.light_color = Color(1.0, 0.8, 0.2)
-		light.light_energy = 8.0
-		light.omni_range = 4.0
-		light.position = Vector3(0, 0.5, 0)
-		visual_aura.add_child(light)
-		
-		var root_node = get_tree().current_scene if get_tree().current_scene else get_tree().root
-		root_node.add_child(visual_aura)
-		var feet_pos = Vector3(camera.global_position.x, 0.5, camera.global_position.z)
-		visual_aura.global_position = feet_pos + Vector3(0, 1.2, 0)
-	else:
-		if visual_aura != null and is_instance_valid(visual_aura):
-			visual_aura.queue_free()
+	# PlayerCharacterInstance ya posee CharacterKiAura en 3D que sigue la altura real (incluso en vuelo)
+	# y respeta el color de la transformación activa, evitando doble cilindro transparente en VR.
+	if not show and visual_aura != null and is_instance_valid(visual_aura):
+		visual_aura.queue_free()
 		visual_aura = null
 
 
@@ -2449,9 +2462,14 @@ func sync_controller_gesture_state(node_key: String) -> void:
 	if node_key == "IDLE" or node_key.is_empty():
 		current_node = gesture_tree
 		gesture_timer = 0.0
+		if ki_blast_charge_player and ki_blast_charge_player.playing:
+			ki_blast_charge_player.stop()
 	elif gesture_tree.has(node_key):
+		var prev_node: Dictionary = current_node
 		current_node = gesture_tree[node_key]
 		gesture_timer = 0.0
+		if current_node != prev_node:
+			_play_charge_audio_for_node(node_key)
 
 
 func get_aim_assist_zone(origin_pos: Vector3, raw_aim_dir: Vector3, is_super: bool = true) -> int:

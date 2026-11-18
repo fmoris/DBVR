@@ -70,7 +70,9 @@ var is_player: bool = false
 var skeleton: Skeleton3D = null
 const ProceduralCombatAnimatorClass = preload("res://scripts/ProceduralCombatAnimator.gd")
 var procedural_animator: RefCounted = null
-var combat_anim_player: AnimationPlayer = null
+var char_voice_player: AudioStreamPlayer3D = null
+var char_sfx_player: AudioStreamPlayer3D = null
+var _hurt_voice_cooldown: float = 0.0
 var head_bone_idx: int = -1
 var hidden_head_bone_indices: Array[int] = []
 var neck_bone_idx: int = -1
@@ -165,6 +167,10 @@ func setup_character() -> void:
 	
 	# Desbloquear técnicas base
 	is_match_over = false
+	_hurt_voice_cooldown = 0.0
+	_ensure_character_audio_players()
+	if not is_player:
+		play_character_action_audio("intro_taunt", true, "goku.intro_taunt")
 	unlocked_powers.clear()
 	unlocked_transformations.clear()
 	for power in character_data.powers:
@@ -461,6 +467,8 @@ func _process(delta: float) -> void:
 
 	if _bp_popup_cooldown > 0.0:
 		_bp_popup_cooldown -= delta
+	if _hurt_voice_cooldown > 0.0:
+		_hurt_voice_cooldown -= delta
 
 	# Manejar temporizador de penalización por fallo de remate
 	if is_penalized:
@@ -712,6 +720,10 @@ func take_hit(amount_np: float, hit_direction: Vector3 = Vector3.ZERO) -> void:
 	_check_transformation_unlocks()
 	if old_np - current_np >= 80.0:
 		_spawn_bp_delta_popup(-(old_np - current_np), "")
+		if _hurt_voice_cooldown <= 0.0:
+			_hurt_voice_cooldown = 0.60
+			var hurt_suffix: String = "hurt_heavy" if amount_np >= 600.0 else "hurt_light"
+			play_character_action_audio(hurt_suffix, true, "goku." + hurt_suffix)
 	var opp_hit: Node3D = _get_opponent()
 	if opp_hit and is_instance_valid(opp_hit):
 		check_zenkai_conditions(opp_hit.current_np)
@@ -1071,6 +1083,7 @@ func check_zenkai_conditions(opponent_np: float) -> void:
 		if not is_in_zenkai_state:
 			is_in_zenkai_state = true
 			emit_signal("zenkai_activated", "brecha")
+			play_character_action_audio("common.zenkai_activate", false)
 			_notify_stats()
 	else:
 		if is_in_zenkai_state:
@@ -1084,6 +1097,7 @@ func trigger_comeback_zenkai() -> void:
 		is_in_zenkai_state = true
 		is_comeback_zenkai = true
 		emit_signal("zenkai_activated", "comeback")
+		play_character_action_audio("common.furia_activate", false, "common.zenkai_activate")
 		_notify_stats()
 		_check_transformation_unlocks()
 		print("[CharacterInstance] %s: ¡ZENKAI COMEBACK ACTIVADO! Tienes un ataque para liquidar o serás penalizado." % character_data.character_name)
@@ -1127,28 +1141,29 @@ func _check_transformation_unlocks() -> void:
 	if not character_data or character_data.transformations.is_empty():
 		return
 	
-	var active_max: float = character_data.max_np
-	if current_transformation:
-		active_max *= current_transformation.np_multiplier
-	var hp_ratio: float = current_np / maxf(1.0, active_max)
+	var mult: float = get_transformation_multiplier()
+	var active_max: float = character_data.max_np * mult
+	var active_base: float = character_data.base_np * mult
+	var climb_ratio: float = current_np / maxf(1.0, active_max)
+	var damage_ratio: float = current_np / maxf(1.0, active_base)
 	
 	var opp = _get_opponent()
 	var opp_np: float = opp.get("current_np") if (opp and is_instance_valid(opp) and opp.get("current_np") != null) else current_np
 	var is_lagging_behind: bool = (opp_np - current_np) / maxf(1.0, current_np) >= 0.25
 	
-	# Desbloqueo Fase 1 (SSJ / Kaioken):
-	# Se activa si el NP baja del 70% O si está en desventaja de Furia (>25% atrás)
+	# Desbloqueo Fase 1 (SSJ):
+	# Se activa al escalar NP (>= 75% del máx), sufrir daño real (<= 78% del base) o estar en Furia (>= 25% atrás)
 	var form_1: String = character_data.transformations[0].form_name
 	if not is_transformation_unlocked(form_1):
-		if hp_ratio <= 0.70 or is_lagging_behind:
+		if climb_ratio >= 0.75 or damage_ratio <= 0.78 or is_lagging_behind:
 			unlock_transformation(form_1)
 	
 	# Desbloqueo Fase 2 (Super Vegeta / SSJ2):
-	# Se activa si ya está en la Forma 1 y ha sufrido más daño (<= 45%) o completado combo
+	# Se activa estando ya transformado en Fase 1+ al escalar NP (>= 85%), sufrir daño (<= 68%) o en Furia
 	if character_data.transformations.size() > 1:
 		var form_2: String = character_data.transformations[1].form_name
 		if not is_transformation_unlocked(form_2):
-			if current_transformation != null and (hp_ratio <= 0.45 or is_lagging_behind):
+			if current_transformation != null and (climb_ratio >= 0.85 or damage_ratio <= 0.68 or is_lagging_behind):
 				unlock_transformation(form_2)
 				
 	# Desbloqueo Fase 3 (SSB / Forma Divina):
@@ -1207,6 +1222,9 @@ func transform_to(index: int) -> void:
 		if procedural_animator and procedural_animator.has_method("trigger_transformation_roar"):
 			procedural_animator.trigger_transformation_roar()
 		_spawn_melee_shockwave(global_position + Vector3(0, 1.0, 0))
+		var trans_suffix: String = "kaioken" if "kaioken" in trans.form_name.to_lower() else "transform_ssj"
+		play_character_action_audio(trans_suffix, true, "goku." + trans_suffix)
+		play_character_action_audio("common.aura_burst", false)
 		var char_name = character_data.character_name if character_data else name
 		_log_combat_event("[TRANSFORMACIÓN] ¡%s se ha transformado en %s! (NP x%.1f -> BP %s)" % [char_name, trans.form_name, new_mult, _format_bp_number(int(current_np))], "success")
 
@@ -1295,6 +1313,9 @@ func trigger_zenkai_match_finish(winner: Node3D, loser: Node3D, tech_name: Strin
 			w_name = w_data.character_name
 	emit_signal("game_finished", w_name)
 	emit_signal("match_finished", winner, loser, tech_name)
+	play_character_action_audio("common.ko_finisher", false)
+	if winner and is_instance_valid(winner) and winner.has_method("play_character_action_audio"):
+		winner.play_character_action_audio("victory", true, "goku.victory")
 
 	# Limpiar domos melee activos y proyectiles en vuelo al concluir el combate
 	is_in_bullet_time = false
@@ -1531,6 +1552,7 @@ func start_flight_to_opponent() -> void:
 	is_flying_to_opponent = true
 	_set_dash_vfx_visible(true)
 	_update_aura_visuals()
+	play_character_action_audio("common.dash_fly", false, "common.dodge_vanish")
 	print("[CharacterInstance] %s: Iniciando vuelo rápido (%.1f m/s)." % [character_data.character_name, flight_speed])
 
 func _stop_flight() -> void:
@@ -2434,8 +2456,6 @@ func start_ragdoll(impulse: Vector3 = Vector3.ZERO) -> void:
 			tw.tween_property(body_mesh_instance, "rotation:x", deg_to_rad(-65.0), 0.25).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 		return
 	is_ragdoll_active = true
-	if combat_anim_player and combat_anim_player.is_playing():
-		combat_anim_player.pause()
 	if procedural_animator:
 		procedural_animator.enabled = false
 
@@ -3283,3 +3303,37 @@ func _spawn_flurry_spark(pos: Vector3) -> void:
 	tw.tween_property(spark, "scale", Vector3.ONE * 0.35, 0.08).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tw.tween_property(mat, "albedo_color:a", 0.0, 0.08)
 	tw.chain().tween_callback(spark.queue_free)
+
+
+func _ensure_character_audio_players() -> void:
+	if char_voice_player == null or not is_instance_valid(char_voice_player):
+		char_voice_player = AudioStreamPlayer3D.new()
+		char_voice_player.name = "CharVoicePlayer3D"
+		char_voice_player.unit_size = 7.0
+		char_voice_player.max_distance = 40.0
+		char_voice_player.position = Vector3(0.0, 1.4, 0.0)
+		add_child(char_voice_player)
+	if char_sfx_player == null or not is_instance_valid(char_sfx_player):
+		char_sfx_player = AudioStreamPlayer3D.new()
+		char_sfx_player.name = "CharSfxPlayer3D"
+		char_sfx_player.unit_size = 7.0
+		char_sfx_player.max_distance = 40.0
+		char_sfx_player.position = Vector3(0.0, 1.1, 0.0)
+		add_child(char_sfx_player)
+
+
+func play_character_action_audio(action_or_suffix: String, is_voice: bool = true, fallback_action: String = "") -> void:
+	_ensure_character_audio_players()
+	var target_player: AudioStreamPlayer3D = char_voice_player if is_voice else char_sfx_player
+	if not target_player or not is_instance_valid(target_player):
+		return
+	var act_id: String = action_or_suffix
+	if not ("." in act_id):
+		var c_name: String = character_data.character_name if character_data else "Goku"
+		act_id = AudioActionManager.get_character_action_id(c_name, action_or_suffix)
+	if not AudioActionManager.has_action_sounds(act_id) and not fallback_action.is_empty():
+		act_id = fallback_action
+	if not AudioActionManager.has_action_sounds(act_id):
+		return
+	target_player.pitch_scale = randf_range(0.95, 1.05)
+	AudioActionManager.play_action(act_id, target_player)

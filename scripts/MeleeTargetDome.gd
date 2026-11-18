@@ -2344,6 +2344,8 @@ func _spawn_parry_shockwave(pos: Vector3) -> void:
 
 
 func _exit_tree() -> void:
+	if Engine.time_scale < 1.0:
+		Engine.time_scale = 1.0
 	_hide_all_charge_spheres()
 	if melee_hud_anchor and is_instance_valid(melee_hud_anchor):
 		melee_hud_anchor.queue_free()

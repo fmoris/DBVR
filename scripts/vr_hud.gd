@@ -6,6 +6,7 @@ extends Node3D
 @export var horizontal_offset: float = 0.0
 @export var vertical_offset: float = -0.34
 @export var tilt_angle_degrees: float = 14.0
+@export var enable_debug_tooltip: bool = false
 
 @onready var sub_viewport: SubViewport = $SubViewport
 @onready var hud_mesh: MeshInstance3D = $HUDMesh
@@ -96,7 +97,8 @@ func _ready() -> void:
 
 	if not Engine.is_editor_hint():
 		call_deferred("_setup_wrist_hud")
-		call_deferred("_setup_debug_tooltip")
+		if enable_debug_tooltip:
+			call_deferred("_setup_debug_tooltip")
 		call_deferred("_setup_moves_guide_hud")
 
 
@@ -329,7 +331,7 @@ func _build_dragon_ball_hud() -> void:
 	ki_head_hbox.add_child(ki_spacer)
 
 	ki_cost_label = Label.new()
-	ki_cost_label.text = "[BLAST: 6 | GALICK: 50 | BIG BANG: 65 | FINAL FLASH: 90]"
+	ki_cost_label.text = "[BLAST: 4/14 | GALICK: 28 | BIG BANG: 35 | FINAL FLASH: 45]"
 	var cost_settings = LabelSettings.new()
 	cost_settings.font_size = 20
 	cost_settings.font_color = Color(1.0, 0.88, 0.25, 0.95)
@@ -514,12 +516,7 @@ func _process(delta: float) -> void:
 				player_instance.transformation_unlocked.connect(_on_transformation_unlocked)
 			_on_player_stats_changed(player_instance.current_ki, player_instance.current_np, player_instance.is_in_zenkai_state)
 			_update_moves_guide_text(current_controller_mode)
-			if ki_cost_label and player_instance.character_data:
-				var cname = player_instance.character_data.character_name.to_upper()
-				if "VEGETA" in cname:
-					ki_cost_label.text = "[BLAST: 6 | GALICK: 50 | BIG BANG: 65 | FINAL FLASH: 90]"
-				else:
-					ki_cost_label.text = "[BLAST: 6 | KAMEHAMEHA: 50 | GENKIDAMA: 90]"
+			_refresh_ki_cost_label()
 			print("[VRHUD] Enlazado exitosamente al CharacterInstance del jugador.")
 
 	# Búsqueda dinámica del contrincante (Rival Scouter)
@@ -834,6 +831,8 @@ func _on_hand_states_updated(left_desc: String, right_desc: String) -> void:
 
 
 func log_gesture_event(msg: String, type: String = "info") -> void:
+	if not tooltip_debug_logs:
+		return
 	var time_dict = Time.get_time_dict_from_system()
 	var time_str = "%02d:%02d:%02d" % [time_dict.hour, time_dict.minute, time_dict.second]
 	
@@ -1044,6 +1043,21 @@ func toggle_moves_guide() -> void:
 			moves_guide_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE if moves_guide_mesh.visible else SubViewport.UPDATE_DISABLED
 
 
+func _refresh_ki_cost_label() -> void:
+	if not ki_cost_label or not player_instance or not is_instance_valid(player_instance) or not player_instance.character_data:
+		return
+	var cfg: KiEconomyConfig = KiEconomyConfig.get_default()
+	var parts: Array[String] = ["BLAST: %d/%d" % [int(cfg.ki_blast_cost), int(cfg.ki_blast_charged_cost)]]
+	for p in player_instance.character_data.powers:
+		if not p or String(p.gesture_trigger) == "ki_blast":
+			continue
+		if String(p.power_name) == "Super Kamehameha":
+			continue
+		parts.append("%s: %d" % [String(p.power_name).to_upper(), int(p.ki_cost)])
+	ki_cost_label.text = "[" + " | ".join(parts) + "]"
+	_hud_dirty = true
+
+
 func refresh_for_character_swap() -> void:
 	_last_ki_int = -1
 	_last_max_ki_int = -1
@@ -1056,12 +1070,7 @@ func refresh_for_character_swap() -> void:
 	_last_guard_state = -1
 	_hud_dirty = true
 	if player_instance and is_instance_valid(player_instance):
-		if ki_cost_label and player_instance.character_data:
-			var cname: String = player_instance.character_data.character_name.to_upper()
-			if "VEGETA" in cname:
-				ki_cost_label.text = "[BLAST: 6 | GALICK: 50 | BIG BANG: 65 | FINAL FLASH: 90]"
-			else:
-				ki_cost_label.text = "[BLAST: 6 | KAMEHAMEHA: 50 | GENKIDAMA: 90]"
+		_refresh_ki_cost_label()
 		_on_player_stats_changed(player_instance.current_ki, player_instance.current_np, player_instance.is_in_zenkai_state)
 	_update_moves_guide_text(current_controller_mode)
 	if sub_viewport and is_instance_valid(sub_viewport):

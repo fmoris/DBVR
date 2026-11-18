@@ -65,7 +65,7 @@ func _build_ui(is_victory: bool, winner_name: String, tech_name: String, p_bp: i
 	viewport = SubViewport.new()
 	viewport.size = Vector2i(760, 520)
 	viewport.transparent_bg = true
-	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 	add_child(viewport)
 
 	var root_ctrl := Control.new()
@@ -186,6 +186,8 @@ func _refresh_button_styles() -> void:
 		if st:
 			st.bg_color = Color(0.18, 0.55, 0.88, 0.95) if selected else Color(0.08, 0.12, 0.20, 0.85)
 			st.border_color = Color(1.0, 0.88, 0.2, 1.0) if selected else Color(0.30, 0.40, 0.55, 0.7)
+	if viewport and is_instance_valid(viewport):
+		viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
 
 
 func _position_in_front_of_camera() -> void:

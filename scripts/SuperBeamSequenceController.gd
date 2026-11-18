@@ -774,6 +774,8 @@ func _update_beam_geometry() -> void:
 
 
 func _exit_tree() -> void:
+	if Engine.time_scale < 1.0:
+		Engine.time_scale = 1.0
 	if beam_hud_anchor and is_instance_valid(beam_hud_anchor):
 		beam_hud_anchor.queue_free()
 		beam_hud_anchor = null
@@ -925,7 +927,19 @@ func _build_audio() -> void:
 	add_child(audio_player)
 	var fallback_beam: AudioStream = load("res://assets/sfx/Kamehameha Regular.mp3") if ResourceLoader.exists("res://assets/sfx/Kamehameha Regular.mp3") else null
 	audio_player.pitch_scale = randf_range(0.92, 1.08)
-	AudioActionManager.play_action("goku.kamehameha_fire", audio_player, fallback_beam)
+	var p_lower: String = power_name.to_lower()
+	var fire_act: String = "goku.kamehameha_fire"
+	if "galick" in p_lower:
+		fire_act = "vegeta.galick_gun_fire"
+	elif "final flash" in p_lower:
+		fire_act = "vegeta.final_flash_fire" if AudioActionManager.has_action_sounds("vegeta.final_flash_fire") else "vegeta.galick_gun_fire"
+	elif "big bang" in p_lower:
+		fire_act = "vegeta.big_bang_fire" if AudioActionManager.has_action_sounds("vegeta.big_bang_fire") else "vegeta.galick_gun_fire"
+	elif "genkidama" in p_lower:
+		fire_act = "goku.genkidama_fire"
+	if not AudioActionManager.has_action_sounds(fire_act):
+		fire_act = "goku.kamehameha_fire"
+	AudioActionManager.play_action(fire_act, audio_player, fallback_beam)
 
 
 func _spawn_spark_at(pos: Vector3, col: Color) -> void:

@@ -132,10 +132,6 @@ const VRInGameMenuClass = preload("res://scripts/vr_in_game_menu.gd")
 var in_game_menu: VRInGameMenu = null
 var menu_toggle_cooldown: float = 0.0
 
-const VRHandCalibrationMenuClass = preload("res://scripts/VRHandCalibrationMenu.gd")
-var hand_calibration_menu: VRHandCalibrationMenu = null
-var calibration_toggle_cooldown: float = 0.0
-
 const KiSenseAndLockOnClass = preload("res://scripts/ki_sense_and_lockon.gd")
 var ki_lockon_system: KiSenseAndLockOn = null
 
@@ -173,18 +169,6 @@ func _find_xr_nodes() -> void:
 				in_game_menu.name = "VRInGameMenu"
 				xr_origin.add_child(in_game_menu)
 			in_game_menu.setup_references(xr_origin, camera, left_controller, right_controller)
-
-		if hand_calibration_menu == null:
-			var existing_calib = xr_origin.find_child("VRHandCalibrationMenu", true, false)
-			if not existing_calib and get_tree() and get_tree().current_scene:
-				existing_calib = get_tree().current_scene.find_child("VRHandCalibrationMenu", true, false)
-			if existing_calib and existing_calib is VRHandCalibrationMenu:
-				hand_calibration_menu = existing_calib
-			else:
-				hand_calibration_menu = VRHandCalibrationMenuClass.new()
-				hand_calibration_menu.name = "VRHandCalibrationMenu"
-				xr_origin.add_child(hand_calibration_menu)
-			hand_calibration_menu.setup_references(xr_origin, camera, left_controller, right_controller)
 
 		if ki_lockon_system == null and get_tree() and get_tree().current_scene:
 			ki_lockon_system = KiSenseAndLockOnClass.new()

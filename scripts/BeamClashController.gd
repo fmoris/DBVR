@@ -521,6 +521,8 @@ func _build_visuals() -> void:
 
 
 func _exit_tree() -> void:
+	if Engine.time_scale < 1.0:
+		Engine.time_scale = 1.0
 	if clash_hud_anchor and is_instance_valid(clash_hud_anchor):
 		clash_hud_anchor.queue_free()
 		clash_hud_anchor = null

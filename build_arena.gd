@@ -16,8 +16,9 @@ extends Node3D
 			_build()
 
 func _ready() -> void:
-	# Asegurar construcción limpia del escenario canónico al cargar
-	_build()
+	# Si la geometría y shaders ya están serializados en cell_games_arena.tscn, no reconstruir en runtime (evita stutter de shaders en Quest 3)
+	if Engine.is_editor_hint() or get_node_or_null("ArenaFloor_Single") == null:
+		_build()
 	if not Engine.is_editor_hint():
 		call_deferred("_generate_runtime_colliders")
 

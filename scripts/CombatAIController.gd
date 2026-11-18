@@ -587,8 +587,11 @@ func _check_ai_transformation() -> void:
 	if difficulty == AIDifficulty.TRAINING:
 		return
 
-	var base_max: float = maxf(1.0, host.character_data.max_np)
-	var np_ratio: float = host.current_np / base_max
+	var host_mult: float = host.get_transformation_multiplier() if host.has_method("get_transformation_multiplier") else 1.0
+	var active_max: float = maxf(1.0, host.character_data.max_np * host_mult)
+	var active_base: float = maxf(1.0, host.character_data.base_np * host_mult)
+	var climb_ratio: float = host.current_np / active_max
+	var damage_ratio: float = host.current_np / active_base
 	var player_trans = player.get("current_transformation") if (player and is_instance_valid(player)) else null
 	var player_mult: float = float(player_trans.np_multiplier) if (player_trans and player_trans.get("np_multiplier") != null) else 1.0
 
@@ -599,14 +602,14 @@ func _check_ai_transformation() -> void:
 	var desired_idx: int = current_idx
 	var total_forms: int = host.character_data.transformations.size()
 
-	# Igualar forma si el jugador supera en multiplicador, o despertar por presión de combate
+	# Igualar forma si el jugador supera en multiplicador, o despertar por presión / escalada real de combate
 	for i in range(total_forms):
 		var form_cand: TransformationData = host.character_data.transformations[i]
 		if not form_cand:
 			continue
-		var pressure_trigger: bool = (i == 0 and np_ratio <= 0.75) or (i == 1 and np_ratio <= 0.50) or (i >= 2 and np_ratio <= 0.30)
+		var pressure_trigger: bool = (i == 0 and (damage_ratio <= 0.75 or climb_ratio >= 0.75)) or (i == 1 and current_idx >= 0 and (damage_ratio <= 0.65 or climb_ratio >= 0.85)) or (i >= 2 and current_idx >= 1 and bool(host.get("is_in_zenkai_state")))
 		var match_player: bool = (player_trans != null and form_cand.np_multiplier <= player_mult + 0.1)
-		var z_hard_early: bool = (difficulty == AIDifficulty.Z_HARD and np_ratio <= 0.85 and i <= 1)
+		var z_hard_early: bool = (difficulty == AIDifficulty.Z_HARD and damage_ratio <= 0.85 and i == 0)
 		if i > desired_idx and (pressure_trigger or match_player or z_hard_early):
 			desired_idx = i
 

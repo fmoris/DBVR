@@ -7,6 +7,9 @@ extends Node3D
 const ShockwaveShader = preload("res://shaders/shockwave.gdshader")
 static var _shared_spark_mesh: SphereMesh = null
 static var _shared_spark_mat: StandardMaterial3D = null
+static var _cached_hybrid_ctrl: Node = null
+static var _cached_gss: Node = null
+static var _cached_player_char: Node = null
 
 enum ProjectileTier { RAPID = 1, CHARGED = 2, SUPER_BEAM = 3, ULTIMATE = 4 }
 
@@ -112,7 +115,7 @@ func _physics_process(delta: float) -> void:
 				if collider is RigidBody3D:
 					hand_vel = collider.linear_velocity
 				else:
-					var ctrl = get_tree().current_scene.find_child("HybridCombatController", true, false)
+					var ctrl = _get_hybrid_ctrl()
 					if ctrl:
 						hand_vel = ctrl.left_velocity if "left" in col_name.to_lower() else ctrl.right_velocity
 
@@ -132,6 +135,30 @@ func _physics_process(delta: float) -> void:
 			return
 
 
+func _get_hybrid_ctrl() -> Node:
+	if _cached_hybrid_ctrl and is_instance_valid(_cached_hybrid_ctrl) and _cached_hybrid_ctrl.is_inside_tree():
+		return _cached_hybrid_ctrl
+	if is_inside_tree() and get_tree() and get_tree().current_scene:
+		_cached_hybrid_ctrl = get_tree().current_scene.find_child("HybridCombatController", true, false)
+	return _cached_hybrid_ctrl
+
+
+func _get_player_char() -> Node:
+	if _cached_player_char and is_instance_valid(_cached_player_char) and _cached_player_char.is_inside_tree():
+		return _cached_player_char
+	if is_inside_tree() and get_tree() and get_tree().current_scene:
+		_cached_player_char = get_tree().current_scene.find_child("PlayerCharacterInstance", true, false)
+	return _cached_player_char
+
+
+func _get_gss() -> Node:
+	if _cached_gss and is_instance_valid(_cached_gss) and _cached_gss.is_inside_tree():
+		return _cached_gss
+	if is_inside_tree() and get_tree() and get_tree().root:
+		_cached_gss = get_tree().root.find_child("GesturePhaseTree", true, false)
+	return _cached_gss
+
+
 ## Detección proactiva por proximidad de barrido de manos (previene tunneling a alta velocidad)
 func _check_hand_deflection_proximity() -> void:
 	if is_dead or is_deflected or tier > ProjectileTier.CHARGED:
@@ -139,7 +166,7 @@ func _check_hand_deflection_proximity() -> void:
 	if (initial_lifetime - lifetime_left) < 0.12:
 		return
 
-	var ctrl = get_tree().current_scene.find_child("HybridCombatController", true, false)
+	var ctrl = _get_hybrid_ctrl()
 	if not ctrl or not is_instance_valid(ctrl):
 		return
 
@@ -209,7 +236,7 @@ func _execute_deflection(collision: Dictionary, hand_vel: Vector3, hand_collider
 	# Identificar defensor que desvió el ataque
 	var defender = hand_collider.get_parent()
 	if defender and not defender.has_method("recharge_ki"):
-		defender = get_tree().current_scene.find_child("PlayerCharacterInstance", true, false)
+		defender = _get_player_char()
 	if not defender and hand_collider.has_method("recharge_ki"):
 		defender = hand_collider
 
@@ -222,13 +249,13 @@ func _execute_deflection(collision: Dictionary, hand_vel: Vector3, hand_collider
 			defender.increase_np(150.0)
 
 	# Pulso háptico en el mando si fue el jugador
-	var ctrl = get_tree().current_scene.find_child("HybridCombatController", true, false)
+	var ctrl = _get_hybrid_ctrl()
 	if ctrl:
 		var controller_node = ctrl.left_controller if "left" in hand_collider.name.to_lower() else ctrl.right_controller
 		if controller_node and controller_node.has_method("trigger_haptic_pulse"):
 			controller_node.trigger_haptic_pulse("haptic", 180.0, 0.90, 0.10, 0.0)
 
-	var gss = get_tree().root.find_child("GesturePhaseTree", true, false)
+	var gss = _get_gss()
 	if gss and gss.has_signal("gesture_logged"):
 		gss.emit_signal("gesture_logged", "[DESVÍO] ¡Ki Blast desviado con la mano! (+15 Ki, +150 BP)", "success")
 
@@ -482,16 +509,29 @@ func _spawn_visual_explosion(pos: Vector3) -> void:
 	sparks.emitting = true
 	sparks.finished.connect(sparks.queue_free)
 
-	# --- 4. FLASH DE LUZ OMNIDIRECCIONAL PUNTUAL ---
-	var exp_light = OmniLight3D.new()
-	exp_light.light_color = p_color
-	exp_light.light_energy = 8.0 if tier >= 3 else 4.0
-	exp_light.omni_range = explosion_radius * 2.5
-	get_tree().current_scene.add_child(exp_light)
-	exp_light.global_position = pos
-	var light_tween = get_tree().create_tween()
-	light_tween.tween_property(exp_light, "light_energy", 0.0, 0.25).set_trans(Tween.TRANS_QUAD)
-	light_tween.chain().tween_callback(exp_light.queue_free)
+	# --- 4. FLASH DE LUZ OMNIDIRECCIONAL PUNTUAL (Solo ataques cargados/supers para cuidar 90 FPS en Quest 3) ---
+	if tier >= 2:
+		var exp_light = OmniLight3D.new()
+		exp_light.light_color = p_color
+		exp_light.light_energy = 8.0 if tier >= 3 else 4.0
+		exp_light.omni_range = explosion_radius * 2.5
+		get_tree().current_scene.add_child(exp_light)
+		exp_light.global_position = pos
+		var light_tween = get_tree().create_tween()
+		light_tween.tween_property(exp_light, "light_energy", 0.0, 0.25).set_trans(Tween.TRANS_QUAD)
+		light_tween.chain().tween_callback(exp_light.queue_free)
+
+	if AudioActionManager.has_action_sounds("common.ki_blast_impact"):
+		var imp_sfx := AudioStreamPlayer3D.new()
+		imp_sfx.unit_size = 5.0
+		imp_sfx.max_distance = 40.0
+		get_tree().current_scene.add_child(imp_sfx)
+		imp_sfx.global_position = pos
+		imp_sfx.pitch_scale = randf_range(0.92, 1.08)
+		if AudioActionManager.play_action("common.ki_blast_impact", imp_sfx):
+			imp_sfx.finished.connect(imp_sfx.queue_free)
+		else:
+			imp_sfx.queue_free()
 
 	if tier >= 2 and pos.y <= 2.5:
 		_spawn_plasma_crater(Vector3(pos.x, 0.12, pos.z), clampf(explosion_radius * 0.55, 0.9, 2.8), p_color)
