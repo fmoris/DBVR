@@ -279,7 +279,6 @@ func setup_character() -> void:
 			skeleton = _find_skeleton(body_mesh_instance)
 			if skeleton:
 				skeleton.name = "Skeleton3D" # Asegura resolución exacta de tracks para AnimationPlayer y Ragdoll
-				skeleton.name = "Skeleton3D" # Asegura resolución exacta de tracks para AnimationPlayer y Ragdoll
 				neck_bone_idx = skeleton.find_bone("Neck")
 				if neck_bone_idx == -1:
 					neck_bone_idx = skeleton.find_bone("neck")
@@ -631,10 +630,6 @@ func _physics_process(delta: float) -> void:
 			wall_stick_timer = 0.0
 			start_ragdoll(last_wall_crash_normal * 2.5 + Vector3.DOWN * 4.5)
 			ragdoll_recovery_timer = 1.65
-		if wall_stick_timer <= 0.35 and not is_player and not is_ragdoll_active and ragdoll_simulator != null:
-			wall_stick_timer = 0.0
-			start_ragdoll(last_wall_crash_normal * 2.5 + Vector3.DOWN * 4.5)
-			ragdoll_recovery_timer = 1.65
 	elif velocity.length_squared() > 0.001:
 		var move_step = velocity * delta
 		if is_player:
@@ -670,17 +665,6 @@ func _physics_process(delta: float) -> void:
 			if current_pos.y <= ground_h + 0.005:
 				velocity.y = 0.0
 				is_knocked_back = false
-		if is_knocked_back and velocity.length_squared() < 1.2:
-			is_knocked_back = false
-	elif is_knocked_back:
-		is_knocked_back = false
-
-	if not is_knocked_back:
-		knockback_drag = 24.0
-	if is_air_brake_active and (not is_knocked_back or is_ragdoll_active or wall_stick_timer > 0.0 or velocity.length_squared() < 9.0):
-		is_air_brake_active = false
-		air_brake_progress = 0.0
-		knockback_drag = 24.0
 		if is_knocked_back and velocity.length_squared() < 1.2:
 			is_knocked_back = false
 	elif is_knocked_back:
@@ -1651,24 +1635,33 @@ func _update_secured_threshold(active_max: float) -> void:
 	if active_max <= 0.0:
 		return
 	var ratio: float = current_np / active_max
-	if ratio >= 1.0:
-		# Al 100% el piso queda en 90% (configurable) para que el BP siga oscilando en combate
-		secured_np_threshold_ratio = max(secured_np_threshold_ratio, KiEconomyConfig.get_default().secured_floor_at_full)
-	elif ratio >= 0.75:
-		secured_np_threshold_ratio = max(secured_np_threshold_ratio, 0.75)
-	elif ratio >= 0.50:
-		secured_np_threshold_ratio = max(secured_np_threshold_ratio, 0.50)
+	if ratio >= 0.98:
+		# Piso máximo 85% para que el BP siempre pueda oscilar en combate
+		secured_np_threshold_ratio = maxf(secured_np_threshold_ratio, 0.85)
+	elif ratio >= 0.80:
+		secured_np_threshold_ratio = maxf(secured_np_threshold_ratio, 0.75)
+	elif ratio >= 0.60:
+		secured_np_threshold_ratio = maxf(secured_np_threshold_ratio, 0.50)
 	elif ratio >= 0.25:
-		secured_np_threshold_ratio = max(secured_np_threshold_ratio, 0.25)
+		secured_np_threshold_ratio = maxf(secured_np_threshold_ratio, 0.25)
 
 func check_zenkai_conditions(opponent_np: float) -> void:
 	if is_match_over:
 		return
 
-	# Mecánica canónica de Furia (Comeback): se activa al estar >= 30% por debajo del BP rival (o umbral dramático menor)
-	var behind_ratio: float = (opponent_np - current_np) / maxf(opponent_np, 1.0)
+	# Cálculo simétrico para ambos luchadores usando max(current_np, opponent_np) como denominador común
+	var max_pair_bp: float = maxf(maxf(current_np, opponent_np), 1000.0)
+	var behind_ratio: float = (opponent_np - current_np) / max_pair_bp
+	var lead_ratio: float = (current_np - opponent_np) / max_pair_bp
 	var furia_threshold: float = get_dramatic_modifier("furia_threshold", 0.30)
-	var should_furia: bool = behind_ratio >= furia_threshold
+
+	# Furia (Comeback): se activa al estar >= 30% atrás (o umbral dramático menor), histéresis al recuperar ventaja
+	var should_furia: bool = is_in_furia
+	if behind_ratio >= furia_threshold:
+		should_furia = true
+	elif behind_ratio < furia_threshold * 0.75:
+		should_furia = false
+
 	if should_furia != is_in_furia:
 		is_in_furia = should_furia
 		emit_signal("furia_changed", is_in_furia)
@@ -1678,42 +1671,48 @@ func check_zenkai_conditions(opponent_np: float) -> void:
 			_log_combat_event("🔥 ¡%s desata su FURIA! (+100%% Ki recarga, x2 BP)" % c_name, "warning")
 		_notify_stats()
 
-	# Evitar recalcular si el Zenkai se activó por Comeback (ya que dura exactamente 1 ataque)
+	# Si el Zenkai se activó por Comeback, dura 1 intento heroico hasta acertar o fallar el Super Poder
 	if is_comeback_zenkai:
+		_check_transformation_unlocks()
 		return
 	# No revocar Zenkai en medio de la carga o disparo de un Super Poder (ej: sacrificio de NP)
 	if is_charging_super or is_firing_beam or is_in_beam_sequence:
+		_check_transformation_unlocks()
 		return
-	# No revocar Zenkai en medio de la carga o disparo de un Super Poder (ej: sacrificio de NP)
-	if is_charging_super or is_firing_beam or is_in_beam_sequence:
-		return
-		
+
 	var active_max: float = get_active_max_np()
-		
-	# Trigger 1: Brecha notable de NP a nuestro favor (+35% o >=85% del máximo activo superando al rival por +15%)
-	var ratio_diff: float = (current_np - opponent_np) / maxf(active_max, 1.0)
-	if ratio_diff >= 0.35 or (current_np >= active_max * 0.85 and current_np > opponent_np * 1.15):
+
+	# Zenkai por Dominio Absoluto (simétrico para ambos jugadores): liderar >= 40% BP y >= 75% máximo activo
+	if lead_ratio >= 0.40 and current_np >= active_max * 0.75:
 		if not is_in_zenkai_state:
 			is_in_zenkai_state = true
-			emit_signal("zenkai_activated", "brecha")
+			zenkai_source = "dominance"
+			emit_signal("zenkai_activated", "dominance")
 			play_character_action_audio("common.zenkai_activate", false)
+			var c_name_z: String = character_data.character_name if character_data else name
+			_log_combat_event("🔥 ¡ZENKAI DE DOMINIO ACTIVADO (%s)! Superas al rival en >40%% BP" % c_name_z, "success")
 			_notify_stats()
-	else:
-		if is_in_zenkai_state:
-			is_in_zenkai_state = false
-			_notify_stats()
+	elif is_in_zenkai_state and (lead_ratio < 0.32 or current_np < active_max * 0.68):
+		is_in_zenkai_state = false
+		zenkai_source = ""
+		_notify_stats()
 
 	_check_transformation_unlocks()
 
 func trigger_comeback_zenkai() -> void:
+	if is_match_over:
+		return
 	if not is_in_zenkai_state:
 		is_in_zenkai_state = true
 		is_comeback_zenkai = true
+		zenkai_source = "comeback"
 		emit_signal("zenkai_activated", "comeback")
 		play_character_action_audio("common.furia_activate", false, "common.zenkai_activate")
 		_notify_stats()
 		_check_transformation_unlocks()
-		print("[CharacterInstance] %s: ¡ZENKAI COMEBACK ACTIVADO! Tienes un ataque para liquidar o serás penalizado." % character_data.character_name)
+		var c_name: String = character_data.character_name if character_data else name
+		_log_combat_event("⚡ ¡ZENKAI COMEBACK (%s)! (1 intento de Finisher tras jugada heroica en Furia)" % c_name, "warning")
+		print("[CharacterInstance] %s: ¡ZENKAI COMEBACK ACTIVADO! Tienes un ataque para liquidar o serás penalizado." % c_name)
 
 
 func _tick_dramatic_buffs(delta: float) -> void:
@@ -2173,9 +2172,6 @@ func trigger_zenkai_match_finish(winner: Node3D, loser: Node3D, tech_name: Strin
 			w_name = w_data.character_name
 	emit_signal("game_finished", w_name)
 	emit_signal("match_finished", winner, loser, tech_name)
-	play_character_action_audio("common.ko_finisher", false)
-	if winner and is_instance_valid(winner) and winner.has_method("play_character_action_audio"):
-		winner.play_character_action_audio("victory", true)
 	play_character_action_audio("common.ko_finisher", false)
 	if winner and is_instance_valid(winner) and winner.has_method("play_character_action_audio"):
 		winner.play_character_action_audio("victory", true)
