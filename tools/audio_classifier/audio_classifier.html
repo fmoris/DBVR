@@ -536,6 +536,7 @@
           <select id="filterCategory">
             <option value="all">Todas las categorías</option>
             <option value="Comunes">Comunes / Combate</option>
+            <option value="Escenas Dramáticas">Escenas Dramáticas</option>
             <option value="Goku">Goku</option>
             <option value="Vegeta">Vegeta</option>
             <option value="Personalizadas">Personalizadas</option>
@@ -578,6 +579,7 @@
           Categoría
           <select id="newActionCatInput">
             <option value="Comunes">Comunes</option>
+            <option value="Escenas Dramáticas">Escenas Dramáticas</option>
             <option value="Goku">Goku</option>
             <option value="Vegeta">Vegeta</option>
             <option value="Personalizadas" selected>Personalizadas</option>
@@ -656,6 +658,18 @@ func play_random_action_sound(action_id: String, player: AudioStreamPlayer3D) ->
       { id: 'common.ko_finisher', label: 'Finisher K.O. / Explosión final', category: 'Comunes', sounds: [] },
       { id: 'common.ui_select', label: 'UI / Menú Selección', category: 'Comunes', sounds: [] },
 
+      // Escenas Dramáticas
+      { id: 'dramatic.intro_fanfare', label: 'Dramatic Intro: Inicio / Careo Saiyan', category: 'Escenas Dramáticas', sounds: [] },
+      { id: 'dramatic.transform_buildup', label: 'Transformación Dramática: Tensión / Relámpagos', category: 'Escenas Dramáticas', sounds: [] },
+      { id: 'dramatic.determination_charge', label: 'Momento de Determinación: Carga / Concentración', category: 'Escenas Dramáticas', sounds: [] },
+      { id: 'dramatic.determination_burst', label: 'Momento de Determinación: Explosión de Aura', category: 'Escenas Dramáticas', sounds: [] },
+      { id: 'dramatic.miniscene_trigger', label: 'Mini-Escena: Pausa / Alerta de Evento', category: 'Escenas Dramáticas', sounds: [] },
+      { id: 'dramatic.miniscene_tick', label: 'Mini-Escena: Acierto / Pulso de Minijuego', category: 'Escenas Dramáticas', sounds: [] },
+      { id: 'dramatic.miniscene_success', label: 'Mini-Escena: ¡Éxito! Bono Obtenido', category: 'Escenas Dramáticas', sounds: [] },
+      { id: 'dramatic.miniscene_fail', label: 'Mini-Escena: Fallo / Tiempo Agotado', category: 'Escenas Dramáticas', sounds: [] },
+      { id: 'dramatic.finish_impact', label: 'Dramatic Finish: Impacto / Columna de Luz K.O.', category: 'Escenas Dramáticas', sounds: [] },
+      { id: 'dramatic.crater_impact', label: 'Entorno: Cráter / Choque contra Pilares o Roca', category: 'Escenas Dramáticas', sounds: [] },
+
       // Goku
       { id: 'goku.kamehameha_charge', label: 'Goku: Kamehameha (Carga)', category: 'Goku', sounds: [] },
       { id: 'goku.kamehameha_fire', label: 'Goku: Kamehameha (Disparo)', category: 'Goku', sounds: ['res://assets/sfx/Kamehameha Regular.mp3'] },
@@ -669,6 +683,9 @@ func play_random_action_sound(action_id: String, player: AudioStreamPlayer3D) ->
       { id: 'goku.hurt_heavy', label: 'Goku: Daño fuerte / Derrota', category: 'Goku' },
       { id: 'goku.intro_taunt', label: 'Goku: Intro / Provocación', category: 'Goku' },
       { id: 'goku.victory', label: 'Goku: Victoria', category: 'Goku' },
+      { id: 'goku.dramatic_intro', label: 'Goku: Voz Dramatic Intro (Careo)', category: 'Goku', sounds: [] },
+      { id: 'goku.dramatic_miniscene', label: 'Goku: Voz Mini-Escena (Calma / Kaioken)', category: 'Goku', sounds: [] },
+      { id: 'goku.dramatic_finish', label: 'Goku: Voz Dramatic Finish (K.O.)', category: 'Goku', sounds: [] },
 
       // Vegeta
       { id: 'vegeta.galick_gun_charge', label: 'Vegeta: Galick Ho (Carga)', category: 'Vegeta' },
@@ -683,7 +700,10 @@ func play_random_action_sound(action_id: String, player: AudioStreamPlayer3D) ->
       { id: 'vegeta.hurt_light', label: 'Vegeta: Daño ligero / Quejido', category: 'Vegeta' },
       { id: 'vegeta.hurt_heavy', label: 'Vegeta: Daño fuerte / Derrota', category: 'Vegeta' },
       { id: 'vegeta.intro_taunt', label: 'Vegeta: Intro / Provocación', category: 'Vegeta' },
-      { id: 'vegeta.victory', label: 'Vegeta: Victoria', category: 'Vegeta' }
+      { id: 'vegeta.victory', label: 'Vegeta: Victoria', category: 'Vegeta' },
+      { id: 'vegeta.dramatic_intro', label: 'Vegeta: Voz Dramatic Intro (Careo)', category: 'Vegeta', sounds: [] },
+      { id: 'vegeta.dramatic_miniscene', label: 'Vegeta: Voz Mini-Escena (Orgullo / Precisión)', category: 'Vegeta', sounds: [] },
+      { id: 'vegeta.dramatic_finish', label: 'Vegeta: Voz Dramatic Finish (K.O.)', category: 'Vegeta', sounds: [] }
     ];
 
     let manifest = null;

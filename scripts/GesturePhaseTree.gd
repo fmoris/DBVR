@@ -551,11 +551,12 @@ func _process(delta: float) -> void:
 		
 	# 6. Procesar carga y cancelaciones de Ki Blasts (Requisitos: Brazo extendido, consumo de Ki y esfera en la palma)
 	if is_charging_ki_blast_left:
-		# REQUISITO 1: El brazo DEBE estar extendido (depth == "FAR") y no bajo
+		# REQUISITO 1: El brazo DEBE estar extendido (depth == "FAR"), no bajo y con la palma hacia adelante
 		if not is_controller_override:
-			var left_arm_ok = left_state.valid and left_state.depth == "FAR" and left_state.height != "LOW"
+			var l_palm: Vector3 = _get_palm_dir_in_torso(left_tracker, torso_transform)
+			var left_arm_ok = left_state.valid and left_state.depth == "FAR" and left_state.height != "LOW" and l_palm.z <= -0.25
 			if not left_arm_ok:
-				_cancel_action("Carga de Ki Blast cancelada: El brazo izquierdo no está extendido al frente")
+				_cancel_action("Carga de Ki Blast cancelada: Extiende el brazo izquierdo con la palma al frente")
 				_reset_ki_blast_charge(0)
 				return
 				
@@ -578,11 +579,12 @@ func _process(delta: float) -> void:
 			_update_aim_reticle(sp_info["pos"], sp_info["dir"], Color(0.0, 0.7, 1.0))
 			
 	if is_charging_ki_blast_right:
-		# REQUISITO 1: El brazo DEBE estar extendido (depth == "FAR") y no bajo
+		# REQUISITO 1: El brazo DEBE estar extendido (depth == "FAR"), no bajo y con la palma hacia adelante
 		if not is_controller_override:
-			var right_arm_ok = right_state.valid and right_state.depth == "FAR" and right_state.height != "LOW"
+			var r_palm: Vector3 = _get_palm_dir_in_torso(right_tracker, torso_transform)
+			var right_arm_ok = right_state.valid and right_state.depth == "FAR" and right_state.height != "LOW" and r_palm.z <= -0.25
 			if not right_arm_ok:
-				_cancel_action("Carga de Ki Blast cancelada: El brazo derecho no está extendido al frente")
+				_cancel_action("Carga de Ki Blast cancelada: Extiende el brazo derecho con la palma al frente")
 				_reset_ki_blast_charge(1)
 				return
 				
@@ -861,21 +863,23 @@ func _match_gesture(left_state: Dictionary, right_state: Dictionary, torso_trans
 				if player and player.character_data and player.character_data.character_name == "Vegeta":
 					return "FINAL_FLASH_CHARGE"
 
-	# J. Big Bang Attack - Preparar (Un solo brazo extendido al frente, solo en Hand Tracking puro)
+	# J. Big Bang Attack - Preparar (Un solo brazo extendido al frente con palma hacia adelante, solo en Hand Tracking puro)
 	if not is_controller_override and not is_charging_big_bang and not is_charging_galick_ho and not is_charging_final_flash:
 		var player = _get_player_instance()
 		if player and player.character_data and player.character_data.character_name == "Vegeta":
 			if right_state.valid and right_state.depth == "FAR" and right_state.height in ["CHEST", "HEAD"]:
 				var r_open = right_state.shape != "CLOSED"
 				var r_stable = right_state.speed_val < 1.5
+				var r_palm_bb = palm_dir_right.z <= -0.45
 				var l_not_extended = not left_state.valid or left_state.depth != "FAR"
-				if r_open and r_stable and l_not_extended and not hands_are_close:
+				if r_open and r_stable and r_palm_bb and l_not_extended and not hands_are_close:
 					return "BIG_BANG_CHARGE"
 			elif left_state.valid and left_state.depth == "FAR" and left_state.height in ["CHEST", "HEAD"]:
 				var l_open = left_state.shape != "CLOSED"
 				var l_stable = left_state.speed_val < 1.5
+				var l_palm_bb = palm_dir_left.z <= -0.45
 				var r_not_extended = not right_state.valid or right_state.depth != "FAR"
-				if l_open and l_stable and r_not_extended and not hands_are_close:
+				if l_open and l_stable and l_palm_bb and r_not_extended and not hands_are_close:
 					return "BIG_BANG_CHARGE"
 
 	# 1. Recarga KI - Paso 1: Brazos/puños juntos o cruzados delante del pecho (Fase 1 canónica DBVR)
@@ -917,7 +921,7 @@ func _match_gesture(left_state: Dictionary, right_state: Dictionary, torso_trans
 		var l_left = left_state.lateral == "LEFT" or left_state.lateral == "CENTER"
 		var l_far = left_state.depth == "FAR"
 		var l_stable = left_state.speed_val <= 2.0
-		var l_palm_fwd = palm_dir_left.z < 0.6
+		var l_palm_fwd = palm_dir_left.z <= -0.45
 		
 		if l_open and l_chest and l_left and l_far and l_stable and l_palm_fwd and not hands_are_close:
 			return "ARM_STRETCHED_OPEN_LEFT"
@@ -938,7 +942,7 @@ func _match_gesture(left_state: Dictionary, right_state: Dictionary, torso_trans
 		var r_right = right_state.lateral == "RIGHT" or right_state.lateral == "CENTER"
 		var r_far = right_state.depth == "FAR"
 		var r_stable = right_state.speed_val <= 2.0
-		var r_palm_fwd = palm_dir_right.z < 0.6
+		var r_palm_fwd = palm_dir_right.z <= -0.45
 		
 		if r_open and r_chest and r_right and r_far and r_stable and r_palm_fwd and not hands_are_close:
 			return "ARM_STRETCHED_OPEN_RIGHT"
@@ -1152,9 +1156,13 @@ func _trigger_action(action_name: String) -> void:
 			_reset_to_idle()
 			return
 
-		var is_charged = ki_blast_charge_time_left >= 0.50
+		var is_charged = ki_blast_charge_time_left >= 0.45
 		var cfg_kb: KiEconomyConfig = KiEconomyConfig.get_default()
-		var ki_cost: float = cfg_kb.ki_blast_charged_cost if is_charged else cfg_kb.ki_blast_cost
+		var is_veg_kb: bool = player != null and is_instance_valid(player) and player.get("character_data") != null and "VEGETA" in String(player.character_data.character_name).to_upper()
+		var base_rapid_cost: float = cfg_kb.ki_blast_rapid_vegeta_cost if is_veg_kb else cfg_kb.ki_blast_cost
+		var ki_cost: float = cfg_kb.ki_blast_charged_cost if is_charged else base_rapid_cost
+		if player and is_instance_valid(player) and player.has_method("get_dramatic_modifier"):
+			ki_cost *= player.get_dramatic_modifier("blast_cost_mult", 1.0)
 		var is_life = false
 		var sacrificed_bp = 0
 		if player:
@@ -1194,9 +1202,13 @@ func _trigger_action(action_name: String) -> void:
 			_reset_to_idle()
 			return
 
-		var is_charged = ki_blast_charge_time_right >= 0.50
+		var is_charged = ki_blast_charge_time_right >= 0.45
 		var cfg_kb: KiEconomyConfig = KiEconomyConfig.get_default()
-		var ki_cost: float = cfg_kb.ki_blast_charged_cost if is_charged else cfg_kb.ki_blast_cost
+		var is_veg_kb: bool = player != null and is_instance_valid(player) and player.get("character_data") != null and "VEGETA" in String(player.character_data.character_name).to_upper()
+		var base_rapid_cost: float = cfg_kb.ki_blast_rapid_vegeta_cost if is_veg_kb else cfg_kb.ki_blast_cost
+		var ki_cost: float = cfg_kb.ki_blast_charged_cost if is_charged else base_rapid_cost
+		if player and is_instance_valid(player) and player.has_method("get_dramatic_modifier"):
+			ki_cost *= player.get_dramatic_modifier("blast_cost_mult", 1.0)
 		var is_life = false
 		var sacrificed_bp = 0
 		if player:
@@ -1301,6 +1313,30 @@ func _trigger_action(action_name: String) -> void:
 		else:
 			_reset_to_idle()
 
+## Retorna la normal real de la palma de la mano del mando Quest 3 (alineado con character_instance.gd)
+func _get_ctrl_palm_dir(ctrl: XRController3D, hand_side: int) -> Vector3:
+	if not ctrl or not is_instance_valid(ctrl):
+		return Vector3.FORWARD
+	var b: Basis = ctrl.global_transform.basis
+	return (b.x if hand_side == 0 else -b.x).normalized()
+
+
+## Calcula una dirección de disparo nivelada usando normal de palma + cámara + hombro alto (sin sesgo al cielo)
+func _compute_level_palm_aim_dir(ctrl: XRController3D, hand_side: int, camera: Camera3D, xr_origin: Node3D) -> Vector3:
+	var cam_dir: Vector3 = (-camera.global_transform.basis.z).normalized() if (camera and is_instance_valid(camera) and camera.is_inside_tree()) else Vector3.FORWARD
+	if not ctrl or not is_instance_valid(ctrl):
+		return cam_dir
+	var body_s: float = xr_origin.scale.y if (xr_origin and is_instance_valid(xr_origin) and xr_origin.is_inside_tree()) else 1.0
+	var shoulder_origin: Vector3 = camera.global_position - Vector3(0.0, 0.16 * body_s, 0.0) if (camera and is_instance_valid(camera) and camera.is_inside_tree()) else ctrl.global_position
+	var arm_vec: Vector3 = ctrl.global_position - shoulder_origin
+	var arm_dir: Vector3 = arm_vec.normalized() if arm_vec.length_squared() > 0.001 else cam_dir
+	var palm_dir: Vector3 = _get_ctrl_palm_dir(ctrl, hand_side)
+	if palm_dir.dot(cam_dir) < 0.0:
+		palm_dir = cam_dir
+	var blended: Vector3 = cam_dir * 0.45 + palm_dir * 0.35 + arm_dir * 0.20
+	return blended.normalized() if blended.length_squared() > 0.0001 else cam_dir
+
+
 ## Obtiene el punto de origen 3D y dirección de disparo de un Ki Blast desde la mano real
 func _get_hand_projectile_origin(hand_side: int) -> Dictionary:
 	var camera = get_viewport().get_camera_3d() if get_viewport() else null
@@ -1322,15 +1358,11 @@ func _get_hand_projectile_origin(hand_side: int) -> Dictionary:
 		var ctrl_name = "LeftHand" if hand_side == 0 else "RightHand"
 		ctrl = xr_origin.get_node_or_null(ctrl_name) if (xr_origin and xr_origin.is_inside_tree()) else null
 
-	# 1.1 Si los mandos físicos de Meta Quest están presentes y activos
-	if ctrl and ctrl.is_inside_tree() and ctrl.get_is_active():
+	# 1.1 Si los mandos físicos de Meta Quest están presentes y activos (o en override con posición válida)
+	var ctrl_usable: bool = ctrl != null and ctrl.is_inside_tree() and (ctrl.get_is_active() or (is_controller_override and ctrl.position.length_squared() > 0.001))
+	if ctrl_usable:
 		var spawn_p: Vector3 = ctrl.global_position
-		var body_s: float = xr_origin.scale.y if (xr_origin and xr_origin.is_inside_tree()) else 1.0
-		var chest_origin: Vector3 = camera.global_position - Vector3(0.0, 0.25 * body_s, 0.0) if (camera and camera.is_inside_tree()) else spawn_p
-		var arm_vec: Vector3 = spawn_p - chest_origin
-		var chest_to_hand: Vector3 = arm_vec.normalized() if arm_vec.length_squared() > 0.001 else default_dir
-		var ctrl_fwd: Vector3 = (-ctrl.global_transform.basis.z).normalized()
-		var raw_hand_dir: Vector3 = (chest_to_hand * 0.65 + ctrl_fwd * 0.35).normalized()
+		var raw_hand_dir: Vector3 = _compute_level_palm_aim_dir(ctrl, hand_side, camera, xr_origin)
 		var final_dir: Vector3 = apply_soft_aim_assist(spawn_p, raw_hand_dir, false)
 		return { "pos": spawn_p + final_dir * 0.12, "dir": final_dir }
 
@@ -1377,39 +1409,41 @@ func _get_special_projectile_origin(power_name: String) -> Dictionary:
 	var launch_override: Vector3 = last_super_launch_dir
 	last_super_launch_dir = Vector3.ZERO
 	var body_s: float = xr_origin.scale.y if (xr_origin and xr_origin.is_inside_tree()) else 1.0
-	var chest_origin: Vector3 = camera.global_position - Vector3(0.0, 0.28 * body_s, 0.0) if (camera and camera.is_inside_tree()) else default_pos
+	var shoulder_origin: Vector3 = camera.global_position - Vector3(0.0, 0.16 * body_s, 0.0) if (camera and camera.is_inside_tree()) else default_pos
+	var l_usable: bool = l_ctrl != null and l_ctrl.is_inside_tree() and (l_ctrl.get_is_active() or (is_controller_override and l_ctrl.position.length_squared() > 0.001))
+	var r_usable: bool = r_ctrl != null and r_ctrl.is_inside_tree() and (r_ctrl.get_is_active() or (is_controller_override and r_ctrl.position.length_squared() > 0.001))
 
 	# Caso Genkidama: Se lanza desde arriba de la cabeza / brazos alzados
 	if power_name == "Genkidama":
 		var genki_pos: Vector3 = default_pos + Vector3(0, 1.8 * body_s, 0)
-		if l_ctrl and r_ctrl and l_ctrl.is_inside_tree() and r_ctrl.is_inside_tree() and l_ctrl.get_is_active() and r_ctrl.get_is_active():
+		if l_usable and r_usable:
 			genki_pos = (l_ctrl.global_position + r_ctrl.global_position) * 0.5 + Vector3(0, 0.6 * body_s, 0)
 		var raw_genki_dir: Vector3 = launch_override if launch_override.length_squared() > 0.001 else default_dir
 		var genki_dir: Vector3 = apply_soft_aim_assist(genki_pos, raw_genki_dir, true)
 		return { "pos": genki_pos, "dir": genki_dir }
 
 	# Caso Kamehameha / Galick Ho / Final Flash / Big Bang: Sale apuntado dinámicamente desde las manos
-	if l_ctrl and r_ctrl and l_ctrl.is_inside_tree() and r_ctrl.is_inside_tree() and l_ctrl.get_is_active() and r_ctrl.get_is_active():
+	if power_name == "Big Bang Attack":
+		var bb_ctrl: XRController3D = l_ctrl if big_bang_hand == 0 else r_ctrl
+		var bb_usable: bool = l_usable if big_bang_hand == 0 else r_usable
+		if bb_usable and bb_ctrl:
+			var aim_pos_bb: Vector3 = bb_ctrl.global_position
+			var raw_dir_bb: Vector3 = launch_override if launch_override.length_squared() > 0.001 else _compute_level_palm_aim_dir(bb_ctrl, big_bang_hand, camera, xr_origin)
+			var final_dir_bb: Vector3 = apply_soft_aim_assist(aim_pos_bb, raw_dir_bb, true)
+			return { "pos": aim_pos_bb + final_dir_bb * 0.18, "dir": final_dir_bb }
+
+	if l_usable and r_usable:
 		var aim_pos: Vector3 = (l_ctrl.global_position + r_ctrl.global_position) * 0.5
 		var raw_dir: Vector3 = default_dir
-		if power_name == "Big Bang Attack":
-			var bb_ctrl: XRController3D = l_ctrl if big_bang_hand == 0 else r_ctrl
-			aim_pos = bb_ctrl.global_position
-			if launch_override.length_squared() > 0.001:
-				raw_dir = launch_override
-			else:
-				var arm_v: Vector3 = aim_pos - chest_origin
-				var chest_dir: Vector3 = arm_v.normalized() if arm_v.length_squared() > 0.001 else default_dir
-				var ctrl_fwd: Vector3 = (-bb_ctrl.global_transform.basis.z).normalized()
-				raw_dir = (chest_dir * 0.65 + ctrl_fwd * 0.35).normalized()
+		if launch_override.length_squared() > 0.001:
+			raw_dir = launch_override
 		else:
-			if launch_override.length_squared() > 0.001:
-				raw_dir = launch_override
-			else:
-				var arm_v: Vector3 = aim_pos - chest_origin
-				var chest_dir: Vector3 = arm_v.normalized() if arm_v.length_squared() > 0.001 else default_dir
-				var hands_fwd: Vector3 = ((-l_ctrl.global_transform.basis.z) + (-r_ctrl.global_transform.basis.z)).normalized()
-				raw_dir = (chest_dir * 0.75 + hands_fwd * 0.25).normalized()
+			var arm_v: Vector3 = aim_pos - shoulder_origin
+			var shoulder_dir: Vector3 = arm_v.normalized() if arm_v.length_squared() > 0.001 else default_dir
+			var palms_sum: Vector3 = _get_ctrl_palm_dir(l_ctrl, 0) + _get_ctrl_palm_dir(r_ctrl, 1)
+			var palms_dir: Vector3 = palms_sum.normalized() if (palms_sum.length_squared() > 0.01 and palms_sum.dot(default_dir) > 0.0) else default_dir
+			var dir_blend: Vector3 = default_dir * 0.50 + palms_dir * 0.30 + shoulder_dir * 0.20
+			raw_dir = dir_blend.normalized() if dir_blend.length_squared() > 0.0001 else default_dir
 
 		var final_dir: Vector3 = apply_soft_aim_assist(aim_pos, raw_dir, true)
 		return { "pos": aim_pos + final_dir * 0.18, "dir": final_dir }
@@ -1422,7 +1456,7 @@ func _get_special_projectile_origin(power_name: String) -> Dictionary:
 			var r_local: Vector3 = right_tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM).origin
 			if xr_origin:
 				var center_global: Vector3 = xr_origin.global_transform * ((l_local + r_local) * 0.5)
-				var raw_tracker_dir: Vector3 = launch_override if launch_override.length_squared() > 0.001 else ((center_global - chest_origin).normalized() if center_global.distance_squared_to(chest_origin) > 0.001 else default_dir)
+				var raw_tracker_dir: Vector3 = launch_override if launch_override.length_squared() > 0.001 else ((center_global - shoulder_origin).normalized() if center_global.distance_squared_to(shoulder_origin) > 0.001 else default_dir)
 				var final_tracker_dir: Vector3 = apply_soft_aim_assist(center_global, raw_tracker_dir, true)
 				return { "pos": center_global + final_tracker_dir * 0.15, "dir": final_tracker_dir }
 
@@ -1449,12 +1483,19 @@ func _spawn_ki_blast_projectile(hand_side: int, is_charged: bool) -> void:
 	var spawn_pos: Vector3 = spawn_info["pos"]
 	var velocity_dir: Vector3 = spawn_info["dir"]
 	
-	# Atributos de escala y velocidad según carga
-	var projectile_radius = 0.05
-	var speed = 28.0
-	if is_charged:
-		projectile_radius = 0.18
-		speed = 14.0
+	# Atributos de escala, velocidad y homing escalados por BP (Overhaul Híbrido)
+	var opp_kb: Node3D = null
+	if player and is_instance_valid(player) and player.has_method("_get_opponent"):
+		opp_kb = player._get_opponent()
+	if (not opp_kb or not is_instance_valid(opp_kb)) and get_tree() and get_tree().current_scene:
+		opp_kb = get_tree().current_scene.find_child("EnemyCharacterInstance", true, false) as Node3D
+	var atk_bp_kb: float = float(player.get("current_np")) if (player and is_instance_valid(player) and player.get("current_np") != null) else 10000.0
+	var def_bp_kb: float = float(opp_kb.get("current_np")) if (opp_kb and is_instance_valid(opp_kb) and opp_kb.get("current_np") != null) else 10000.0
+	var atk_furia_kb: bool = bool(player and is_instance_valid(player) and player.get("is_in_furia"))
+	var kb_profile: Dictionary = CharacterInstance.compute_ki_blast_bp_profile(atk_bp_kb, def_bp_kb, is_charged, atk_furia_kb)
+	var is_veg_p: bool = player != null and is_instance_valid(player) and player.get("character_data") != null and "VEGETA" in String(player.character_data.character_name).to_upper()
+	var projectile_radius: float = 0.18 if is_charged else 0.05
+	var speed: float = float(kb_profile.get("projectile_speed", 22.0 if is_charged else 28.0))
 		
 	# Crear el nodo principal del proyectil
 	var projectile = Node3D.new()
@@ -1508,9 +1549,18 @@ func _spawn_ki_blast_projectile(hand_side: int, is_charged: bool) -> void:
 	projectile.set("p_radius", projectile_radius)
 	projectile.set("p_color", energy_color)
 	projectile.set("tier", 2 if is_charged else 1)
-	projectile.set("base_damage", 700.0 if is_charged else 200.0)
+	var blast_dmg: float = 680.0 if is_charged else 220.0
+	if player and is_instance_valid(player) and player.has_method("get_dramatic_modifier"):
+		blast_dmg *= player.get_dramatic_modifier("damage_mult", 1.0)
+	projectile.set("base_damage", blast_dmg)
 	projectile.set("explosion_radius", 2.6 if is_charged else 1.2)
 	projectile.set("shooter_node", player)
+	projectile.set("shooter_bp", atk_bp_kb)
+	projectile.set("shooter_in_furia", atk_furia_kb)
+	projectile.set("original_shooter", player)
+	if is_charged and opp_kb and is_instance_valid(opp_kb):
+		projectile.set("homing_target", opp_kb)
+		projectile.set("homing_strength", 1.35 if is_veg_p else 1.95)
 	projectile.set("was_launched_in_zenkai", bool(player and is_instance_valid(player) and player.get("is_in_zenkai_state")))
 	
 	# Excluir colisionadores del propio jugador en O(1) usando caché
@@ -1547,8 +1597,9 @@ func _spawn_special_projectile(power: Resource) -> void:
 	var spawn_info = _get_special_projectile_origin(power.power_name)
 	var spawn_pos: Vector3 = spawn_info["pos"]
 	var velocity_dir: Vector3 = spawn_info["dir"]
-	# Desplazar origen ligeramente hacia adelante y abajo (a nivel de manos/pecho) para que el proyectil no tape la línea de visión
-	spawn_pos += velocity_dir * 0.40 + Vector3(0.0, -0.16, 0.0)
+	# Desplazar origen ligeramente hacia adelante sin hundirlo cerca del suelo o muros
+	spawn_pos += velocity_dir * 0.25 + Vector3(0.0, -0.06, 0.0)
+	spawn_pos.y = maxf(spawn_pos.y, 0.45)
 	
 	# Capturar y limpiar tiempos de carga
 	var fallback_charge: float = maxf(
@@ -1612,11 +1663,8 @@ func _spawn_special_projectile(power: Resource) -> void:
 		speed = maxf(speed, 30.0)
 		energy_color = Color(1.0, 0.88, 0.15, 1.0) # Esfera amarilla canónica de Big Bang Attack
 
-	# Activación canónica de la Secuencia Cinemática y Bullet-Time de Super Ataques de Ki
-	# Las técnicas con rayos de energía (Kamehameha, Galick Ho, Final Flash) usan haz continuo;
-	# Big Bang Attack es una esfera de energía viajera de alta potencia (proyectil esférico).
-	var is_beam_tech = (power.power_name != "Big Bang Attack" and power.power_name != "Genkidama")
-	if is_beam_tech and player and player.has_method("start_super_beam_sequence"):
+	# Activación canónica de la Secuencia Cinemática y Bullet-Time para TODOS los Super Ataques (incluidos Big Bang Attack y Genkidama)
+	if player and player.has_method("start_super_beam_sequence"):
 		var opp = player._get_opponent()
 		if opp and is_instance_valid(opp):
 			player.start_super_beam_sequence(power.power_name, energy_color, base_dmg, tier_val, velocity_dir)
@@ -1695,6 +1743,8 @@ func _spawn_special_projectile(power: Resource) -> void:
 	projectile.set("p_radius", projectile_radius)
 	projectile.set("p_color", energy_color)
 	projectile.set("tier", tier_val)
+	if player and is_instance_valid(player) and player.has_method("get_dramatic_modifier"):
+		base_dmg *= player.get_dramatic_modifier("damage_mult", 1.0) * player.get_dramatic_modifier("super_damage_mult", 1.0)
 	projectile.set("base_damage", base_dmg)
 	projectile.set("explosion_radius", 7.5 if is_big_bang else (8.5 if is_ult_tech else 4.8))
 	projectile.set("shooter_node", player)
@@ -2484,10 +2534,10 @@ func get_aim_assist_zone(origin_pos: Vector3, raw_aim_dir: Vector3, is_super: bo
 	var aim_n: Vector3 = raw_aim_dir / sqrt(dir_len_sq)
 	var to_opp: Vector3 = to_opp_vec.normalized()
 	var d: float = aim_n.dot(to_opp)
-	var lock_dot: float = 0.966 if is_super else 0.988
+	var lock_dot: float = 0.966 if is_super else 0.982
 	if d >= lock_dot:
 		return 2
-	var outer_dot: float = 0.866 if is_super else 0.960
+	var outer_dot: float = 0.866 if is_super else 0.940
 	if d >= outer_dot:
 		return 1
 	return 0
@@ -2517,11 +2567,11 @@ func apply_soft_aim_assist(origin_pos: Vector3, raw_aim_dir: Vector3, is_super: 
 		else:
 			return aim_n
 	else:
-		if d >= 0.988:
-			assist_weight = 0.55
-		elif d >= 0.960:
-			var u: float = clampf((d - 0.960) / (0.988 - 0.960), 0.0, 1.0)
-			assist_weight = 0.40 * (u * u * (3.0 - 2.0 * u))
+		if d >= 0.982:
+			assist_weight = 0.68
+		elif d >= 0.940:
+			var u: float = clampf((d - 0.940) / (0.982 - 0.940), 0.0, 1.0)
+			assist_weight = 0.48 * (u * u * (3.0 - 2.0 * u))
 		else:
 			return aim_n
 	return aim_n.slerp(to_opp, assist_weight).normalized()

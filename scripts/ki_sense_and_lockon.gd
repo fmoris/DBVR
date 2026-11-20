@@ -44,6 +44,8 @@ var _alert_color: Color = Color(1.0, 0.85, 0.15)
 var _prev_player_zenkai: bool = false
 var _prev_opp_charging_super: bool = false
 var _prev_opp_zenkai_attack: bool = false
+var _prev_opp_opened: bool = false
+var _prev_opp_crater: bool = false
 var _zenkai_reminder_timer: float = 0.0
 var _connected_player_id: int = 0
 var _connected_opp_id: int = 0
@@ -287,7 +289,15 @@ func _show_reticle_locked(pos: Vector3) -> void:
 
 	var mat = reticle_ring.material_override as StandardMaterial3D
 	if mat:
-		mat.albedo_color = Color(1.0, 0.88, 0.15, 0.95)
+		var opp_crater_v: Variant = opponent_instance.get("ground_crater_stun_timer") if (opponent_instance != null and is_instance_valid(opponent_instance)) else null
+		var is_opp_crater: bool = opp_crater_v != null and float(opp_crater_v) > 0.0
+		var opp_open_v: Variant = opponent_instance.get("blast_opened_timer") if (opponent_instance != null and is_instance_valid(opponent_instance)) else null
+		var is_opp_opened: bool = opp_open_v != null and float(opp_open_v) > 0.0
+		if is_opp_crater:
+			var cpulse: float = 0.72 + 0.28 * sin(Time.get_ticks_msec() * 0.018)
+			mat.albedo_color = Color(0.95, 0.25 * cpulse + 0.15, 1.0, 0.98)
+		else:
+			mat.albedo_color = Color(1.0, 0.38, 0.10, 0.98) if is_opp_opened else Color(1.0, 0.88, 0.15, 0.95)
 
 	if reticle_icon:
 		reticle_icon.visible = true
@@ -437,7 +447,7 @@ func _bind_combat_alerts() -> void:
 
 
 func _on_player_transformation_alert(form_name: String) -> void:
-	show_scouter_alert("⚡ ¡DESPERTAR: %s!" % form_name.to_upper(), "Poder e ímpetu Saiyan incrementados", Color(1.0, 0.88, 0.18), 2.5)
+	show_scouter_alert("⚡ ¡%s LISTO PARA ACTIVAR! ⚡" % form_name.to_upper(), "Pulsa [A / X] o mantén Puños a la Cintura (Grip+Trigger 1.2s)", Color(1.0, 0.88, 0.18), 3.8)
 
 
 func _on_enemy_transformation_alert(form_name: String) -> void:
@@ -447,15 +457,19 @@ func _on_enemy_transformation_alert(form_name: String) -> void:
 func _poll_combat_alerts(delta: float) -> void:
 	if player_instance and is_instance_valid(player_instance):
 		var z_now: bool = (player_instance.get("is_in_zenkai_state") == true)
+		var z_comeback: bool = (player_instance.get("is_comeback_zenkai") == true) or String(player_instance.get("zenkai_source")) == "comeback"
 		var match_over: bool = (player_instance.get("is_match_over") == true)
+		var z_title: String = "⚡ ¡ZENKAI COMEBACK (1 INTENTO)! ⚡" if z_comeback else "🔥 ¡ZENKAI DOMINIO LISTO PARA K.O.! 🔥"
+		var z_sub: String = "Acierta tu Super Poder ahora (fallarlo penaliza)" if z_comeback else "¡Superas al rival! Acierta un Super Poder para el K.O."
+		var z_col: Color = Color(1.0, 0.65, 0.12) if z_comeback else Color(1.0, 0.85, 0.12)
 		if z_now and not _prev_player_zenkai and not match_over:
-			show_scouter_alert("🔥 ¡ZENKAI LISTO PARA GANAR! 🔥", "¡Acierta un Super Poder con éxito para lograr el K.O. definitivo!", Color(1.0, 0.85, 0.12), 3.4)
+			show_scouter_alert(z_title, z_sub, z_col, 3.4)
 			_zenkai_reminder_timer = 0.0
 		elif z_now and not match_over:
 			_zenkai_reminder_timer += delta
 			if _zenkai_reminder_timer >= 8.0:
 				_zenkai_reminder_timer = 0.0
-				show_scouter_alert("🔥 ¡ZENKAI LISTO PARA GANAR! 🔥", "¡Acierta un Super Poder con éxito para lograr el K.O. definitivo!", Color(1.0, 0.85, 0.12), 2.6)
+				show_scouter_alert(z_title, z_sub, z_col, 2.6)
 		else:
 			_zenkai_reminder_timer = 0.0
 		_prev_player_zenkai = z_now
@@ -469,6 +483,16 @@ func _poll_combat_alerts(delta: float) -> void:
 			show_scouter_alert("💀 ¡PELIGRO: ATAQUE ZENKAI DE K.O. ENTRANTE! 💀", "¡BLOQUEA, DESVÍA, ESQUIVA O CHOCA EL PODER!", Color(1.0, 0.15, 0.18), 3.2)
 		elif opp_charging and not _prev_opp_charging_super:
 			show_scouter_alert("🚨 ¡SUPER ENEMIGO INMINENTE!", "Prepárate para Bloqueo, Choque o Esquive", Color(1.0, 0.22, 0.25), 2.2)
+		var opp_open_t: Variant = opponent_instance.get("blast_opened_timer")
+		var opp_opened: bool = (opp_open_t != null and float(opp_open_t) > 0.0) and bool(opponent_instance.get("smoke_obscures_active"))
+		if opp_opened and not _prev_opp_opened:
+			show_scouter_alert("💥 ¡GUARDIA RIVAL ABIERTA!", "Melee Dash 0 KI (+1 Golpe) o Super (+25% Vel.)", Color(1.0, 0.72, 0.12), 2.2)
+		var opp_crater_t: Variant = opponent_instance.get("ground_crater_stun_timer")
+		var opp_crater: bool = opp_crater_t != null and float(opp_crater_t) > 0.0
+		if opp_crater and not _prev_opp_crater:
+			show_scouter_alert("🌌 ¡RIVAL ESTRELLADO EN CRÁTER!", "¡Lanza tu SUPER ahora! (+35% Vel. Carga)", Color(0.95, 0.35, 1.0), 2.8)
+		_prev_opp_opened = opp_opened
+		_prev_opp_crater = opp_crater
 		_prev_opp_charging_super = opp_charging
 		_prev_opp_zenkai_attack = (opp_zenkai and opp_super_active)
 

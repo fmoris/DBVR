@@ -115,6 +115,56 @@
       "category": "Comunes",
       "sounds": []
     },
+    "dramatic.intro_fanfare": {
+      "label": "Dramatic Intro: Inicio / Careo Saiyan",
+      "category": "Escenas Dramáticas",
+      "sounds": []
+    },
+    "dramatic.transform_buildup": {
+      "label": "Transformación Dramática: Tensión / Relámpagos",
+      "category": "Escenas Dramáticas",
+      "sounds": []
+    },
+    "dramatic.determination_charge": {
+      "label": "Momento de Determinación: Carga / Concentración",
+      "category": "Escenas Dramáticas",
+      "sounds": []
+    },
+    "dramatic.determination_burst": {
+      "label": "Momento de Determinación: Explosión de Aura",
+      "category": "Escenas Dramáticas",
+      "sounds": []
+    },
+    "dramatic.miniscene_trigger": {
+      "label": "Mini-Escena: Pausa / Alerta de Evento",
+      "category": "Escenas Dramáticas",
+      "sounds": []
+    },
+    "dramatic.miniscene_tick": {
+      "label": "Mini-Escena: Acierto / Pulso de Minijuego",
+      "category": "Escenas Dramáticas",
+      "sounds": []
+    },
+    "dramatic.miniscene_success": {
+      "label": "Mini-Escena: ¡Éxito! Bono Obtenido",
+      "category": "Escenas Dramáticas",
+      "sounds": []
+    },
+    "dramatic.miniscene_fail": {
+      "label": "Mini-Escena: Fallo / Tiempo Agotado",
+      "category": "Escenas Dramáticas",
+      "sounds": []
+    },
+    "dramatic.finish_impact": {
+      "label": "Dramatic Finish: Impacto / Columna de Luz K.O.",
+      "category": "Escenas Dramáticas",
+      "sounds": []
+    },
+    "dramatic.crater_impact": {
+      "label": "Entorno: Cráter / Choque contra Pilares o Roca",
+      "category": "Escenas Dramáticas",
+      "sounds": []
+    },
     "goku.kamehameha_charge": {
       "label": "Goku: Kamehameha (Carga)",
       "category": "Goku",
@@ -212,6 +262,21 @@
       "sounds": [
         "res://assets/audio/Goku (Z - End)/Goku (Z - End)_145.ogg"
       ]
+    },
+    "goku.dramatic_intro": {
+      "label": "Goku: Voz Dramatic Intro (Careo)",
+      "category": "Goku",
+      "sounds": []
+    },
+    "goku.dramatic_miniscene": {
+      "label": "Goku: Voz Mini-Escena (Calma / Kaioken)",
+      "category": "Goku",
+      "sounds": []
+    },
+    "goku.dramatic_finish": {
+      "label": "Goku: Voz Dramatic Finish (K.O.)",
+      "category": "Goku",
+      "sounds": []
     },
     "vegeta.galick_gun_charge": {
       "label": "Vegeta: Galick Ho (Carga)",
@@ -337,6 +402,21 @@
         "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_156.ogg",
         "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_162.ogg"
       ]
+    },
+    "vegeta.dramatic_intro": {
+      "label": "Vegeta: Voz Dramatic Intro (Careo)",
+      "category": "Vegeta",
+      "sounds": []
+    },
+    "vegeta.dramatic_miniscene": {
+      "label": "Vegeta: Voz Mini-Escena (Orgullo / Precisión)",
+      "category": "Vegeta",
+      "sounds": []
+    },
+    "vegeta.dramatic_finish": {
+      "label": "Vegeta: Voz Dramatic Finish (K.O.)",
+      "category": "Vegeta",
+      "sounds": []
     }
   },
   "ignored": []
