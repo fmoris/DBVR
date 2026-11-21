@@ -24,6 +24,7 @@
 - **Zero Allocations en Hot Paths:** Prohibido instanciar arrays/diccionarios en `_process` o `_physics_process`.
 - **Generación Automática del APK y Autorización Obligatoria para Envío a los Lentes:**
   - **SIEMPRE** generar/compilar el APK (`d:\Mis Documentos\dbzvr\builds\dbzvr.apk`) automáticamente al terminar cualquier tarea o ciclo de cambios.
+  - **Evitar cuelgues del Gradle Daemon al exportar:** Ejecutar siempre el export con `org.gradle.daemon=false` (ya configurado en `android/build/gradle.properties`) o envolverlo con `Start-Process -Wait` + `android\build\gradlew.bat --stop` para que el proceso hijo de Java no mantenga abiertos los pipes de consola tras `[ DONE ] export`.
   - **NUNCA** desplegar, instalar ni ejecutar automáticamente el APK en los lentes VR tras compilarlo: **SIEMPRE preguntar primero al usuario** si desea enviarlo a los lentes o no y esperar su confirmación explícita.
   - Cuando el usuario autorice el envío, verificar primero si el dispositivo está conectado (`adb devices`). Si **NO se detecta ningún visor** conectado, omitir el envío automáticamente, avisar que el APK ya está compilado y listo, y esperar conexión.
 - **Informe Final Obligatorio al Completar Tareas:**
