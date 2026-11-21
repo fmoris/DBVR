@@ -884,7 +884,7 @@ func _cleanup_and_finish(result: String, dmg: float) -> void:
 
 	emit_signal("sequence_completed", result, dmg)
 
-	if result == "hit" and attacker and is_instance_valid(attacker) and not bool(attacker.get("is_match_over")):
+	if (result == "direct_hit" or result == "hit") and attacker and is_instance_valid(attacker) and not bool(attacker.get("is_match_over")):
 		if defender and is_instance_valid(defender) and attacker.has_method("start_post_super_followup"):
 			attacker.start_post_super_followup(defender)
 
