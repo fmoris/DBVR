@@ -1,0 +1,24 @@
+[gd_resource type="Resource" script_class="DramaticMiniEventData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dramatic_mini_event_data.gd" id="1_dme"]
+
+[resource]
+script = ExtResource("1_dme")
+event_id = "instinto_defensivo"
+display_name = "Reflejos Z"
+instruction_text = "¡TOCA LOS 3 ORBES DE PRESIÓN EN SECUENCIA!"
+character_filter = ""
+condition_type = "after_melee_or_behind"
+minigame_type = "orb_tap"
+target_count = 3
+duration_sec = 3.2
+is_permanent_bonus = false
+bonus_duration_sec = 20.0
+bonus_label = "REFLEJOS Z"
+bonus_effect_text = "+500 BP · +25% Bullet-Time"
+bonus_color = Color(0.35, 1, 0.65, 1)
+bonus_mods = {
+"bullet_time_mult": 1.25,
+"instant_bp": 500.0
+}
+weight = 1.1

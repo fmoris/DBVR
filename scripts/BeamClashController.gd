@@ -30,6 +30,12 @@ var beam_inner_atk: MeshInstance3D = null
 var beam_inner_def: MeshInstance3D = null
 var shockwave_mesh: MeshInstance3D = null
 var header_label: Label3D = null
+var clash_bar_root: Node3D = null
+var clash_player_fill: MeshInstance3D = null
+var clash_enemy_fill: MeshInstance3D = null
+var clash_divider_spark: MeshInstance3D = null
+var clash_player_mat: StandardMaterial3D = null
+var clash_enemy_mat: StandardMaterial3D = null
 
 # Audio 3D del choque
 var audio_loop: AudioStreamPlayer3D = null
@@ -115,6 +121,10 @@ func _process(delta: float) -> void:
 	# 3. Actualizar geometría y posición de los rayos y la esfera central
 	_update_beam_transforms()
 	_update_hud()
+	var dd_clash: DramaticDirector = DramaticDirector.get_active(get_tree())
+	if dd_clash:
+		var c_pos: Vector3 = clash_sphere.global_position if (clash_sphere and is_instance_valid(clash_sphere)) else global_position
+		dd_clash.update_beam_clash_atmosphere(clash_ratio, color_atk, color_def, c_pos, true)
 
 	# 4. Pulsos hápticos continuos a los mandos del jugador
 	_apply_continuous_clash_haptics()
@@ -167,23 +177,24 @@ func _process_player_inputs(real_delta: float) -> void:
 	prev_l_grip = l_grip
 	prev_r_grip = r_grip
 
-	# 2. Medir agitación enérgica de los controles (velocidad + cambio de dirección)
+	# 2. Medir agitación enérgica de los controles en espacio local del XROrigin3D (inmune a vibración/movimiento de cámara)
 	if _physical_push_cd > 0.0:
 		_physical_push_cd -= real_delta
 	var shake_mag: float = 0.0
 	if l_ctrl and r_ctrl and l_ctrl.get_is_active() and r_ctrl.get_is_active() and real_delta > 0.0001:
-		var l_pos: Vector3 = l_ctrl.global_position
-		var r_pos: Vector3 = r_ctrl.global_position
+		var orig_basis: Basis = origin.global_transform.basis.orthonormalized()
+		var l_loc: Vector3 = l_ctrl.position
+		var r_loc: Vector3 = r_ctrl.position
 		if _hand_track_init:
-			var l_vel: Vector3 = (l_pos - _prev_l_hand_pos) / real_delta
-			var r_vel: Vector3 = (r_pos - _prev_r_hand_pos) / real_delta
-			var l_accel: float = (l_vel - _prev_l_vel).length()
-			var r_accel: float = (r_vel - _prev_r_vel).length()
-			shake_mag = (l_vel.length() + r_vel.length()) * 0.5 + (l_accel + r_accel) * 0.04
+			var l_vel: Vector3 = orig_basis * ((l_loc - _prev_l_hand_pos) / real_delta)
+			var r_vel: Vector3 = orig_basis * ((r_loc - _prev_r_hand_pos) / real_delta)
+			var l_accel: float = (l_vel - _prev_l_vel).length() / maxf(real_delta, 0.001)
+			var r_accel: float = (r_vel - _prev_r_vel).length() / maxf(real_delta, 0.001)
+			shake_mag = (l_vel.length() + r_vel.length()) * 0.5 + (l_accel + r_accel) * 0.035
 			_prev_l_vel = l_vel
 			_prev_r_vel = r_vel
-		_prev_l_hand_pos = l_pos
-		_prev_r_hand_pos = r_pos
+		_prev_l_hand_pos = l_loc
+		_prev_r_hand_pos = r_loc
 		_hand_track_init = true
 
 	_is_burning_bp_in_clash = false
@@ -352,26 +363,36 @@ func _position_beam(mesh_inst: MeshInstance3D, p_from: Vector3, p_to: Vector3, r
 		mesh_inst.rotate_object_local(Vector3.RIGHT, PI * 0.5)
 
 
+func get_player_clash_progress() -> float:
+	var player: Node3D = _get_player_instance()
+	if player and attacker and player == attacker:
+		return clampf((0.85 - clash_ratio) / 0.70, 0.0, 1.0)
+	if player and defender and player == defender:
+		return clampf((clash_ratio - 0.15) / 0.70, 0.0, 1.0)
+	return clampf((0.85 - clash_ratio) / 0.70, 0.0, 1.0)
+
+
 func _update_hud() -> void:
 	if not header_label or not is_instance_valid(header_label):
 		return
 
-	var pct = clampf(clash_ratio, 0.0, 1.0)
-	var bar_width = 16
-	var marker_idx = int(pct * float(bar_width))
-	var bar_str = ""
-	for i in range(bar_width):
-		if i == marker_idx:
-			bar_str += "⚡"
-		elif i < marker_idx:
-			bar_str += "◀"
-		else:
-			bar_str += "▶"
+	var p_prog: float = get_player_clash_progress()
+	var player: Node3D = _get_player_instance()
+	var is_winning: bool = p_prog >= 0.50
 
-	var player = _get_player_instance()
-	var is_winning = (player == attacker and clash_ratio < 0.5) or (player == defender and clash_ratio > 0.5)
-	var status_text: String = "¡MANTÉN FASE 2 Y AGITA!" if is_winning else "¡AGITA LOS CONTROLES PARA EMPUJAR!"
-	var col = Color(0.2, 1.0, 0.4) if is_winning else Color(1.0, 0.4, 0.2)
+	if clash_player_fill and is_instance_valid(clash_player_fill):
+		var p_fill: float = clampf(p_prog, 0.01, 0.99)
+		clash_player_fill.scale = Vector3(p_fill, 1.0, 1.0)
+		clash_player_fill.position.x = -0.23 + 0.23 * p_fill
+	if clash_enemy_fill and is_instance_valid(clash_enemy_fill):
+		var e_fill: float = clampf(1.0 - p_prog, 0.01, 0.99)
+		clash_enemy_fill.scale = Vector3(e_fill, 1.0, 1.0)
+		clash_enemy_fill.position.x = 0.23 - 0.23 * e_fill
+	if clash_divider_spark and is_instance_valid(clash_divider_spark):
+		clash_divider_spark.position.x = -0.23 + 0.46 * p_prog
+
+	var status_text: String = "¡SIGUE EMPUJANDO! AGITA LOS CONTROLES" if is_winning else "¡TE ESTÁN GANANDO! AGITA RÁPIDO"
+	var col: Color = Color(0.25, 1.0, 0.45) if is_winning else Color(1.0, 0.45, 0.2)
 	if not _in_phase2_pose:
 		status_text = "⚠️ ¡EXTIENDE MANOS CON GRIP (FASE 2)!"
 		col = Color(1.0, 0.25, 0.25)
@@ -379,7 +400,8 @@ func _update_hud() -> void:
 		status_text = "⚠️ ¡SIN KI! QUEMANDO BP PARA RESISTIR"
 		col = Color(1.0, 0.55, 0.15)
 
-	header_label.text = "⚡ ¡CHOQUE DE PODERES! ⚡\n[ %s ]\n%s" % [bar_str, status_text]
+	var pct_p: int = int(roundf(p_prog * 100.0))
+	header_label.text = "⚡ CHOQUE DE PODER: TÚ %d%% vs %d%% RIVAL ⚡\n%s" % [pct_p, 100 - pct_p, status_text]
 	header_label.modulate = col
 
 
@@ -393,25 +415,33 @@ func _resolve_clash(winner: Node3D, loser: Node3D, winning_tech: String) -> void
 		winner.name if winner else "None", winning_tech
 	])
 
-	# Daño masivo de impacto directo para el perdedor (2200 NP base)
-	var clash_damage = 2200.0
-	if winner.get("is_in_zenkai_state"):
+	# Daño masivo de impacto directo para el perdedor (2200 NP base) + lanzamiento único con Air Brake
+	var clash_damage: float = 2200.0
+	if winner and winner.get("is_in_zenkai_state"):
 		clash_damage *= 1.65
 
-	var dir_to_loser = (loser.global_position - winner.global_position).normalized()
+	var dir_to_loser: Vector3 = (loser.global_position - winner.global_position).normalized() if (winner and loser) else Vector3.BACK
 	if loser and is_instance_valid(loser) and loser.has_method("take_hit"):
-		loser.take_hit(clash_damage, dir_to_loser)
+		loser.take_hit(clash_damage, dir_to_loser, false)
 		if loser.has_method("apply_knockback"):
-			loser.apply_knockback(dir_to_loser, 9.5)
+			loser.apply_knockback(dir_to_loser, 16.0, 2.4)
+
+	var dd_res: DramaticDirector = DramaticDirector.get_active(get_tree())
+	if dd_res:
+		var r_pos: Vector3 = clash_sphere.global_position if (clash_sphere and is_instance_valid(clash_sphere)) else global_position
+		dd_res.on_beam_clash_resolved(r_pos)
 
 	# Recompensas de Ki y BP al vencedor
 	if winner and is_instance_valid(winner):
+		var was_winner_zenkai: bool = bool(winner.get("is_in_zenkai_state"))
 		if winner.has_method("recharge_ki"):
 			winner.recharge_ki(45.0)
 		if winner.has_method("increase_np"):
 			winner.increase_np(600.0)
-		if bool(winner.get("is_in_zenkai_state")) and winner.has_method("trigger_zenkai_match_finish"):
+		if was_winner_zenkai and winner.has_method("trigger_zenkai_match_finish"):
 			winner.trigger_zenkai_match_finish(winner, loser, winning_tech)
+		elif (bool(winner.get("is_in_furia")) or clash_timer >= 2.8) and winner.has_method("trigger_comeback_zenkai"):
+			winner.trigger_comeback_zenkai()
 
 	_spawn_colossal_explosion()
 
@@ -501,20 +531,111 @@ func _build_visuals() -> void:
 	beam_inner_def.material_override = mat_inner_white
 	add_child(beam_inner_def)
 
-	# 5. HUD 3D de balance
+	# 5. HUD 3D de balance (título + barra diegética de tira y afloja)
 	header_label = Label3D.new()
 	header_label.name = "ClashHUD"
 	header_label.text = "⚡ ¡CHOQUE DE PODERES! ⚡"
 	header_label.font_size = 24
 	header_label.pixel_size = 0.0014
 	header_label.no_depth_test = true
-	header_label.render_priority = 115
+	header_label.render_priority = 125
 	header_label.outline_size = 10
 	header_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.95)
+	_build_clash_diegetic_bar()
 	_build_visuals_hud_attach()
+	_update_hud()
+
+
+func _build_clash_diegetic_bar() -> void:
+	if clash_bar_root and is_instance_valid(clash_bar_root):
+		return
+	clash_bar_root = Node3D.new()
+	clash_bar_root.name = "ClashDiegeticBar"
+
+	var player: Node3D = _get_player_instance()
+	var player_col: Color = color_atk if (player and attacker and player == attacker) else color_def
+	var enemy_col: Color = color_def if (player and attacker and player == attacker) else color_atk
+
+	var bg_mesh := MeshInstance3D.new()
+	bg_mesh.name = "ClashBarBg"
+	var bg_q := QuadMesh.new()
+	bg_q.size = Vector2(0.48, 0.044)
+	bg_mesh.mesh = bg_q
+	var bg_mat := StandardMaterial3D.new()
+	bg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	bg_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	bg_mat.no_depth_test = true
+	bg_mat.render_priority = 122
+	bg_mat.albedo_color = Color(0.05, 0.07, 0.12, 0.88)
+	bg_mesh.material_override = bg_mat
+	clash_bar_root.add_child(bg_mesh)
+
+	clash_player_fill = MeshInstance3D.new()
+	clash_player_fill.name = "ClashPlayerFill"
+	var pf_q := QuadMesh.new()
+	pf_q.size = Vector2(0.46, 0.030)
+	clash_player_fill.mesh = pf_q
+	clash_player_fill.position = Vector3(-0.115, 0.0, 0.002)
+	clash_player_mat = StandardMaterial3D.new()
+	clash_player_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	clash_player_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	clash_player_mat.no_depth_test = true
+	clash_player_mat.render_priority = 123
+	clash_player_mat.albedo_color = Color(player_col.r, player_col.g, player_col.b, 0.96)
+	clash_player_fill.material_override = clash_player_mat
+	clash_bar_root.add_child(clash_player_fill)
+
+	clash_enemy_fill = MeshInstance3D.new()
+	clash_enemy_fill.name = "ClashEnemyFill"
+	var ef_q := QuadMesh.new()
+	ef_q.size = Vector2(0.46, 0.030)
+	clash_enemy_fill.mesh = ef_q
+	clash_enemy_fill.position = Vector3(0.115, 0.0, 0.002)
+	clash_enemy_mat = StandardMaterial3D.new()
+	clash_enemy_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	clash_enemy_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	clash_enemy_mat.no_depth_test = true
+	clash_enemy_mat.render_priority = 123
+	clash_enemy_mat.albedo_color = Color(enemy_col.r, enemy_col.g, enemy_col.b, 0.96)
+	clash_enemy_fill.material_override = clash_enemy_mat
+	clash_bar_root.add_child(clash_enemy_fill)
+
+	var center_tick := MeshInstance3D.new()
+	center_tick.name = "ClashCenterTick"
+	var ct_q := QuadMesh.new()
+	ct_q.size = Vector2(0.005, 0.052)
+	center_tick.mesh = ct_q
+	center_tick.position = Vector3(0.0, 0.0, 0.003)
+	var ct_mat := StandardMaterial3D.new()
+	ct_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ct_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	ct_mat.no_depth_test = true
+	ct_mat.render_priority = 125
+	ct_mat.albedo_color = Color(1.0, 1.0, 1.0, 0.72)
+	center_tick.material_override = ct_mat
+	clash_bar_root.add_child(center_tick)
+
+	clash_divider_spark = MeshInstance3D.new()
+	clash_divider_spark.name = "ClashDividerSpark"
+	var ds_q := QuadMesh.new()
+	ds_q.size = Vector2(0.014, 0.058)
+	clash_divider_spark.mesh = ds_q
+	clash_divider_spark.position = Vector3(0.0, 0.0, 0.004)
+	var ds_mat := StandardMaterial3D.new()
+	ds_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	ds_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	ds_mat.no_depth_test = true
+	ds_mat.render_priority = 126
+	ds_mat.albedo_color = Color(1.0, 0.96, 0.45, 1.0)
+	clash_divider_spark.material_override = ds_mat
+	clash_bar_root.add_child(clash_divider_spark)
 
 
 func _exit_tree() -> void:
+	if is_active:
+		var dd_ex: DramaticDirector = DramaticDirector.get_active(get_tree())
+		if dd_ex:
+			dd_ex.update_beam_clash_atmosphere(0.5, color_atk, color_def, global_position, false)
 	if Engine.time_scale < 1.0:
 		Engine.time_scale = 1.0
 	if clash_hud_anchor and is_instance_valid(clash_hud_anchor):
@@ -527,16 +648,26 @@ func _build_visuals_hud_attach() -> void:
 	if cam and is_instance_valid(cam):
 		clash_hud_anchor = Node3D.new()
 		clash_hud_anchor.name = "ClashHUDAnchor"
-		clash_hud_anchor.position = Vector3(0.0, 0.22, -1.20)
+		clash_hud_anchor.position = Vector3(0.0, 0.24, -1.20)
 		cam.add_child(clash_hud_anchor)
 		if header_label.get_parent() and header_label.get_parent() != clash_hud_anchor:
 			header_label.get_parent().remove_child(header_label)
 		if not header_label.get_parent():
 			clash_hud_anchor.add_child(header_label)
 		header_label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
-		header_label.position = Vector3.ZERO
-	elif not header_label.get_parent():
-		add_child(header_label)
+		header_label.position = Vector3(0.0, 0.045, 0.0)
+		if clash_bar_root and is_instance_valid(clash_bar_root):
+			if clash_bar_root.get_parent() and clash_bar_root.get_parent() != clash_hud_anchor:
+				clash_bar_root.get_parent().remove_child(clash_bar_root)
+			if not clash_bar_root.get_parent():
+				clash_hud_anchor.add_child(clash_bar_root)
+			clash_bar_root.position = Vector3(0.0, -0.025, 0.0)
+	else:
+		if not header_label.get_parent():
+			add_child(header_label)
+		if clash_bar_root and is_instance_valid(clash_bar_root) and not clash_bar_root.get_parent():
+			add_child(clash_bar_root)
+			clash_bar_root.position = Vector3(0.0, 1.0, 0.0)
 
 
 func _build_audio() -> void:
@@ -585,7 +716,9 @@ func _spawn_colossal_explosion() -> void:
 	mat.shader = ShockwaveShader
 	mat.set_shader_parameter("ring_color", Color(1.0, 0.85, 0.2, 0.95))
 	sw.material_override = mat
-	get_tree().current_scene.add_child(sw)
+	var exp_parent: Node = get_tree().current_scene if (get_tree() and get_tree().current_scene) else get_parent()
+	if exp_parent:
+		exp_parent.add_child(sw)
 
 	var tw = sw.create_tween()
 	tw.tween_property(sw, "scale", Vector3.ONE * 5.0, 0.65).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)

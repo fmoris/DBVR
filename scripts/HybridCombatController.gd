@@ -37,6 +37,8 @@ var left_is_charging: bool = false
 var right_is_charging: bool = false
 var left_blast_locked_haptic: bool = false
 var right_blast_locked_haptic: bool = false
+var left_blast_cooldown: float = 0.0
+var right_blast_cooldown: float = 0.0
 
 # 3. Super Poderes (Kamehameha / Galick Ho / Final Flash)
 enum SuperPowerState { IDLE, CHARGING, READY_TO_FIRE }
@@ -94,9 +96,12 @@ var pose_overhead_both: bool = false
 # 3b. Bio-Hápticos de Ki y Transformación (Heartbeat continuo no invasivo)
 var bio_haptic_timer: float = 0.0
 
-# 4. Melee / Velocidades anteriores para aceleración
+# 4. Melee / Velocidades anteriores para aceleración (en espacio local del XROrigin3D)
 var prev_left_pos: Vector3 = Vector3.ZERO
 var prev_right_pos: Vector3 = Vector3.ZERO
+var prev_left_local_pos: Vector3 = Vector3.ZERO
+var prev_right_local_pos: Vector3 = Vector3.ZERO
+var _has_prev_local_pos: bool = false
 var left_velocity: Vector3 = Vector3.ZERO
 var right_velocity: Vector3 = Vector3.ZERO
 var melee_cooldown: float = 0.0
@@ -112,11 +117,14 @@ var was_ax_pressed: bool = false
 var was_by_pressed: bool = false
 var startup_cooldown: float = 1.5
 var recharge_exit_cooldown: float = 0.0 # Compuerta de gracia para evitar Ki Blasts indeseados al soltar gatillos de recarga
+var is_charging_determination: bool = false
+var determination_timer: float = 0.0
+var determination_hit_cooldown: float = 0.0
 
 # --- Movimiento por Casillas / Pasos (Yu Yu Hakusho / DB Legends / Ajedrez) ---
-const STEP_DISTANCE: float = 2.0 # Metros por paso/casilla
-const VERTICAL_STEP: float = 1.4 # Metros por salto o descenso en el aire
-const MIN_ALLOWED_DISTANCE: float = 2.4 # Distancia frontal mínima prohibida contra el rival
+const STEP_DISTANCE: float = 3.0 # Metros por paso/casilla
+const VERTICAL_STEP: float = 2.0 # Metros por salto o descenso en el aire
+const MIN_ALLOWED_DISTANCE: float = 6.0 # Distancia mínima táctica en Modo Libre ("turnos en tiempo real")
 const MAX_VERTICAL_HEIGHT: float = 9.0 # Límite superior de vuelo en metros
 var step_cooldown: float = 0.0
 var vertical_step_cooldown: float = 0.0
@@ -124,6 +132,18 @@ var right_stick_flicked: bool = false
 var is_step_moving: bool = false
 var step_audio_player: AudioStreamPlayer = null
 var snd_step: AudioStream = null
+
+# --- Frenado Aéreo (Air Brake agitando ambos controles físicos tras ser lanzado) ---
+var _prev_air_l_vel: Vector3 = Vector3.ZERO
+var _prev_air_r_vel: Vector3 = Vector3.ZERO
+var _air_l_active_timer: float = 0.0
+var _air_r_active_timer: float = 0.0
+var _air_haptic_cd: float = 0.0
+var _transform_progress_cd: float = 0.0
+var _air_brake_root: Node3D = null
+var _air_brake_fill_mesh: MeshInstance3D = null
+var _air_brake_fill_mat: StandardMaterial3D = null
+var _air_brake_label: Label3D = null
 
 # Temporizador para comprobación periódica de estado en HUD
 var status_pulse_timer: float = 0.0
@@ -146,8 +166,16 @@ func _ready() -> void:
 	add_child(step_audio_player)
 
 
+func _exit_tree() -> void:
+	if _air_brake_root and is_instance_valid(_air_brake_root):
+		_air_brake_root.queue_free()
+		_air_brake_root = null
+
+
 func _find_xr_nodes() -> void:
-	var scene_root = get_tree().current_scene
+	var scene_root: Node = get_tree().current_scene
+	if not scene_root and get_tree():
+		scene_root = get_tree().root
 	if scene_root:
 		xr_origin = scene_root.find_child("Player_XROrigin3D", true, false)
 		if not xr_origin:
@@ -205,12 +233,17 @@ func _process(delta: float) -> void:
 		if gesture_tree and gesture_tree.has_signal("gesture_logged"):
 			gesture_tree.emit_signal("gesture_logged", "[INPUT] Modo activo: " + mode_name, "info")
 
-	# 2. Calcular velocidades lineales de los mandos
+	# 2. Calcular velocidades lineales de los mandos en espacio local del XROrigin3D (inmune a knocksbacks/pasos)
 	if delta > 0.0:
-		if prev_left_pos != Vector3.ZERO:
-			left_velocity = (left_controller.global_position - prev_left_pos) / delta
-		if prev_right_pos != Vector3.ZERO:
-			right_velocity = (right_controller.global_position - prev_right_pos) / delta
+		var orig_basis: Basis = xr_origin.global_transform.basis.orthonormalized() if (xr_origin and is_instance_valid(xr_origin)) else Basis.IDENTITY
+		var l_loc: Vector3 = left_controller.position
+		var r_loc: Vector3 = right_controller.position
+		if _has_prev_local_pos:
+			left_velocity = orig_basis * ((l_loc - prev_left_local_pos) / delta)
+			right_velocity = orig_basis * ((r_loc - prev_right_local_pos) / delta)
+		prev_left_local_pos = l_loc
+		prev_right_local_pos = r_loc
+		_has_prev_local_pos = true
 	prev_left_pos = left_controller.global_position
 	prev_right_pos = right_controller.global_position
 
@@ -219,6 +252,35 @@ func _process(delta: float) -> void:
 		startup_cooldown -= delta
 		left_velocity = Vector3.ZERO
 		right_velocity = Vector3.ZERO
+		_process_hud_toggle(delta)
+		return
+
+	if determination_hit_cooldown > 0.0:
+		determination_hit_cooldown = maxf(determination_hit_cooldown - delta, 0.0)
+
+	if DramaticDirector.is_dramatic_pause_active:
+		var dd_pause: DramaticDirector = DramaticDirector.get_active(get_tree())
+		if dd_pause and dd_pause.is_in_intro:
+			var skip_pressed: bool = (
+				left_controller.is_button_pressed("ax_button")
+				or left_controller.is_button_pressed("by_button")
+				or right_controller.is_button_pressed("ax_button")
+				or right_controller.is_button_pressed("by_button")
+				or left_controller.is_button_pressed("trigger_click")
+				or right_controller.is_button_pressed("trigger_click")
+			)
+			if skip_pressed:
+				dd_pause.skip_dramatic_intro()
+		left_velocity = Vector3.ZERO
+		right_velocity = Vector3.ZERO
+		left_charge_time = 0.0
+		right_charge_time = 0.0
+		left_is_charging = false
+		right_is_charging = false
+		is_charging_determination = false
+		determination_timer = 0.0
+		if _air_brake_root and is_instance_valid(_air_brake_root):
+			_air_brake_root.visible = false
 		_process_hud_toggle(delta)
 		return
 
@@ -236,6 +298,12 @@ func _process(delta: float) -> void:
 		recharge_exit_cooldown -= delta
 	if super_unusable_warn_cooldown > 0.0:
 		super_unusable_warn_cooldown -= delta
+	if _transform_progress_cd > 0.0:
+		_transform_progress_cd = maxf(_transform_progress_cd - delta, 0.0)
+	if left_blast_cooldown > 0.0:
+		left_blast_cooldown = maxf(left_blast_cooldown - delta, 0.0)
+	if right_blast_cooldown > 0.0:
+		right_blast_cooldown = maxf(right_blast_cooldown - delta, 0.0)
 
 	# 3. Comprobación de estado Melee / Bullet-Time (Minijuego de cajas)
 	var player = gesture_tree._get_player_instance() if gesture_tree else null
@@ -243,6 +311,8 @@ func _process(delta: float) -> void:
 	var in_melee_minigame = player and (player.get("is_in_bullet_time") or player.get("is_flying_to_opponent") or player.get("is_flying_to_melee"))
 	if in_melee_minigame:
 		was_in_melee_minigame = true
+		if _air_brake_root and is_instance_valid(_air_brake_root):
+			_air_brake_root.visible = false
 		# Durante el combate melee o minijuego de cajas se bloquean poderes y recarga de Ki,
 		# pero SÍ se permite la Guardia (cruzar brazos) y el Desplazamiento evasivo (step back).
 		_reset_super_state()
@@ -280,7 +350,10 @@ func _process(delta: float) -> void:
 		if gesture_tree:
 			gesture_tree._reset_to_idle()
 
-	# Fix 2: Mientras el jugador sale volando / ragdoll / incrustado, no puede realizar acciones de combate
+	# Fix 2: Procesar Frenado Aéreo mientras el jugador vuela lanzado por impacto
+	_process_air_brake(delta, player)
+
+	# Mientras el jugador sale volando / ragdoll / incrustado, no puede realizar acciones de combate
 	if player and player.has_method("is_airborne_incapacitated") and player.is_airborne_incapacitated():
 		_reset_super_state()
 		if left_is_charging or right_is_charging:
@@ -298,19 +371,24 @@ func _process(delta: float) -> void:
 		return
 
 	# 4. Procesar las acciones híbridas en combate libre
+	_process_determination(delta)
 	_process_ki_recharge(delta)
 	_process_melee_punches()
 	_process_ki_blasts(delta)
-	_process_super_powers(delta)
+	if not is_charging_determination:
+		_process_super_powers(delta)
 	_process_transformations()
 	_process_grid_step_movement(delta)
 	_process_hud_toggle(delta)
-	_process_guard()
+	if not is_charging_determination:
+		_process_guard()
 	_process_bio_haptics(delta)
 
 
 # --- 1. RECARGA DE KI (2 FASES: Gatillos a Hombros -> Descenso a Cintura/Cadera) ---
 func _update_body_space_metrics(player: Node) -> void:
+	if not left_controller or not right_controller or (not xr_origin and not camera):
+		return
 	body_scale = clampf(xr_origin.scale.y, 0.70, 1.40) if (xr_origin and is_instance_valid(xr_origin)) else 1.0
 	inv_body_scale = 1.0 / body_scale
 
@@ -380,10 +458,12 @@ func _process_ki_recharge(delta: float) -> void:
 			is_charging_ki = false
 			return
 
-		# FASE 1: Concentración a la altura de los hombros o pecho (OBLIGATORIAMENTE DELANTE DE LOS HOMBROS)
+		# FASE 1: Concentración a la altura de los hombros o pecho (manos recogidas, nunca extendidas disparando Ki Blasts)
+		var l_palm_fwd_rec: bool = _is_arm_extended_palm_forward(left_controller, true, 0.35, 0.36, 0.30)
+		var r_palm_fwd_rec: bool = _is_arm_extended_palm_forward(right_controller, false, 0.35, 0.36, 0.30)
 		if not is_charging_ki:
 			if not ki_prep_phase and not left_is_charging and not right_is_charging:
-				if pose_chest_ki_p1:
+				if pose_chest_ki_p1 and not l_palm_fwd_rec and not r_palm_fwd_rec:
 					ki_prep_phase = true
 					if gesture_tree:
 						gesture_tree.sync_controller_gesture_state("RECHARGE_PREP")
@@ -394,8 +474,8 @@ func _process_ki_recharge(delta: float) -> void:
 					_pulse_haptic(left_controller, 70.0, 0.40, 0.12)
 					_pulse_haptic(right_controller, 70.0, 0.40, 0.12)
 			else:
-				# Si durante la Fase 1 aleja las manos hacia los lados o rompe la pose sin descender a la cintura, cancelar
-				if not pose_chest_ki_p1 and avg_rel_y > -0.26:
+				# Si durante la Fase 1 extiende las palmas hacia adelante o rompe la pose sin descender a la cintura, cancelar
+				if (not pose_chest_ki_p1 and avg_rel_y > -0.26) or (l_palm_fwd_rec and r_palm_fwd_rec):
 					ki_prep_phase = false
 					if gesture_tree:
 						gesture_tree._cancel_action("Recarga cancelada (manos fuera de posición)")
@@ -480,6 +560,38 @@ func _is_arm_extended(controller: XRController3D) -> bool:
 	return forward_proj >= 0.35 and dist >= 0.38
 
 
+func _get_controller_palm_world_dir(controller: XRController3D, is_left: bool) -> Vector3:
+	if not controller:
+		return Vector3.FORWARD
+	# Alineado con _compute_hand_align_basis en character_instance.gd: palma hacia +X (izq) o -X (der)
+	var b: Basis = controller.global_transform.basis
+	return (b.x if is_left else -b.x).normalized()
+
+
+func _is_arm_extended_palm_forward(
+	controller: XRController3D,
+	is_left: bool,
+	min_palm_dot: float = 0.45,
+	min_reach: float = 0.40,
+	min_fwd: float = 0.34
+) -> bool:
+	if not controller or not is_instance_valid(controller):
+		return false
+	var hand_from_chest: float = controller.global_position.distance_to(chest_pos_cached) * inv_body_scale
+	var hand_torso: Vector3 = l_torso_pos if is_left else r_torso_pos
+	var hand_cam_z: float = l_cam_fwd_proj if is_left else r_cam_fwd_proj
+	var cam_fwd_3d: Vector3 = (-camera.global_transform.basis.z).normalized() if (camera and is_instance_valid(camera)) else cam_fwd_flat
+	var palm_dir: Vector3 = _get_controller_palm_world_dir(controller, is_left)
+	return (
+		hand_from_chest >= min_reach
+		and maxf(hand_torso.z, hand_cam_z) >= min_fwd
+		and absf(hand_torso.x) <= 0.62
+		and hand_torso.y >= -0.35
+		and hand_torso.y <= 0.55
+		and palm_dir.dot(cam_fwd_3d) >= min_palm_dot
+	)
+
+
 # --- 2. KI BLASTS (Izquierda y Derecha) ---
 func _process_ki_blasts(delta: float) -> void:
 	# Bloqueo total si se está recargando Ki, en preparación, en debounce de salida (250ms) o cargando super poder
@@ -497,9 +609,11 @@ func _process_ki_blasts(delta: float) -> void:
 	var l_trig: bool = left_controller.get_float("trigger") > 0.35 or left_controller.is_button_pressed("trigger_click")
 	var r_trig: bool = right_controller.get_float("trigger") > 0.35 or right_controller.is_button_pressed("trigger_click")
 
-	# Si ambos gatillos están presionados simultáneamente, no iniciar nuevos Ki Blasts (reservado para Recarga de Ki),
-	# pero NO cancelar cargas de Ki Blast ya activas en curso
-	if l_trig and r_trig and not left_is_charging and not right_is_charging:
+	# Si ambos gatillos están presionados en pose de recarga (pecho/cintura sin palmas extendidas), ceder a Recarga de Ki;
+	# si las palmas están extendidas adelante, permitir fuego bimanual alternado/simultáneo fluido
+	var l_palm_fwd_kb: bool = _is_arm_extended_palm_forward(left_controller, true, 0.35, 0.36, 0.30)
+	var r_palm_fwd_kb: bool = _is_arm_extended_palm_forward(right_controller, false, 0.35, 0.36, 0.30)
+	if l_trig and r_trig and (pose_chest_ki_p1 or pose_waist_ki_p2) and not l_palm_fwd_kb and not r_palm_fwd_kb and not left_is_charging and not right_is_charging:
 		return
 
 	# Si ambos mandos tienen Grip presionado y no hay Ki Blast cargando, es Super Poder o Guardia
@@ -522,24 +636,42 @@ func _process_ki_blasts(delta: float) -> void:
 func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta: float) -> void:
 	var trig_val = controller.get_float("trigger")
 	var trig_pressed = trig_val > 0.65 or controller.is_button_pressed("trigger_click")
+	var grip_pressed: bool = controller.get_float("grip") > 0.40 or controller.is_button_pressed("grip_click")
 	var is_left = (hand_side == 0)
 
+	# Si la mano cierra Grip (puño para Melee o Big Bang), NUNCA iniciar ni disparar Ki Blast accidentalmente
+	if grip_pressed:
+		var had_charge: bool = left_is_charging if is_left else right_is_charging
+		if had_charge and gesture_tree:
+			gesture_tree._cleanup_ki_blast_charge_sphere(hand_side)
+		if is_left:
+			left_charge_time = 0.0
+			left_is_charging = false
+			left_blast_locked_haptic = false
+		else:
+			right_charge_time = 0.0
+			right_is_charging = false
+			right_blast_locked_haptic = false
+		return
+
 	var ctrl_p: Vector3 = controller.global_position
-	var ctrl_fwd: Vector3 = (-controller.global_transform.basis.z).normalized()
-	var hand_torso: Vector3 = l_torso_pos if is_left else r_torso_pos
-	var dist_from_cam_norm: float = ctrl_p.distance_to(cam_pos_cached) * inv_body_scale
+	var palm_dir: Vector3 = _get_controller_palm_world_dir(controller, is_left)
 
-	# REQUISITO CANÓNICO: Para iniciar Ki Blast, el brazo debe estar en zona frontal normalizada.
-	# Una vez iniciada la carga (was_charging), mantener mientras el gatillo siga presionado y la mano no pase detrás de la espalda.
+	# REQUISITO CANÓNICO: Brazo extendido al frente y palma orientada hacia adelante (solo Trigger, sin Grip)
 	var was_charging: bool = left_is_charging if is_left else right_is_charging
-	var is_arm_extended: bool = (dist_from_cam_norm >= 0.26 and hand_torso.z >= 0.14 and absf(hand_torso.x) <= 0.65 and hand_torso.y >= -0.45 and hand_torso.y <= 0.55 and ctrl_fwd.dot(cam_fwd_flat) > 0.10)
-	var can_continue_charge: bool = was_charging and hand_torso.z >= -0.10
+	var hand_cd: float = left_blast_cooldown if is_left else right_blast_cooldown
+	var is_arm_extended: bool = _is_arm_extended_palm_forward(controller, is_left, 0.45, 0.40, 0.34)
+	var can_continue_charge: bool = was_charging and _is_arm_extended_palm_forward(controller, is_left, 0.25, 0.34, 0.24)
+	var can_start_or_charge: bool = can_continue_charge or (is_arm_extended and (was_charging or hand_cd <= 0.0))
 
-	if trig_pressed and (is_arm_extended or can_continue_charge):
+	if trig_pressed and can_start_or_charge:
 		var aim_origin: Vector3 = ctrl_p
-		var c2h_vec: Vector3 = aim_origin - chest_pos_cached
-		var chest_to_hand: Vector3 = c2h_vec.normalized() if c2h_vec.length_squared() > 0.001 else cam_fwd_flat
-		var raw_hand_dir: Vector3 = (chest_to_hand * 0.65 + ctrl_fwd * 0.35).normalized()
+		var cam_dir_3d: Vector3 = (-camera.global_transform.basis.z).normalized() if (camera and is_instance_valid(camera)) else cam_fwd_flat
+		var shoulder_pos: Vector3 = cam_pos_cached - Vector3(0.0, 0.16 * body_scale, 0.0)
+		var arm_v: Vector3 = aim_origin - shoulder_pos
+		var arm_dir: Vector3 = arm_v.normalized() if arm_v.length_squared() > 0.001 else cam_dir_3d
+		var safe_palm_dir: Vector3 = palm_dir if palm_dir.dot(cam_dir_3d) >= 0.0 else cam_dir_3d
+		var raw_hand_dir: Vector3 = (cam_dir_3d * 0.45 + safe_palm_dir * 0.35 + arm_dir * 0.20).normalized()
 
 		# Consumir Ki mientras carga. Si no queda Ki, quema vital (BP)
 		var player = gesture_tree._get_player_instance() if gesture_tree else null
@@ -553,13 +685,14 @@ func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta:
 				player._notify_stats()
 				_pulse_haptic(controller, 130.0, 0.70, delta)
 
+		var blast_spd_mult: float = player.get_dramatic_modifier("blast_charge_speed_mult", 1.0) if (player and is_instance_valid(player) and player.has_method("get_dramatic_modifier")) else 1.0
 		if is_left:
 			var was_left_charging: bool = left_is_charging
-			left_charge_time += delta
+			left_charge_time += delta * blast_spd_mult
 			left_is_charging = true
 			if not was_left_charging and gesture_tree:
 				gesture_tree.sync_controller_gesture_state("ARM_STRETCHED_OPEN_LEFT")
-			if left_charge_time >= 0.50 and not left_blast_locked_haptic:
+			if left_charge_time >= 0.45 and not left_blast_locked_haptic:
 				left_blast_locked_haptic = true
 				_pulse_haptic(controller, 140.0, 0.85, 0.12)
 				if gesture_tree and gesture_tree.has_signal("phase_changed"):
@@ -572,11 +705,11 @@ func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta:
 			_pulse_haptic(controller, 100.0, clamp(0.15 + left_charge_time * 0.4, 0.15, 0.95), delta)
 		else:
 			var was_right_charging: bool = right_is_charging
-			right_charge_time += delta
+			right_charge_time += delta * blast_spd_mult
 			right_is_charging = true
 			if not was_right_charging and gesture_tree:
 				gesture_tree.sync_controller_gesture_state("ARM_STRETCHED_OPEN_RIGHT")
-			if right_charge_time >= 0.50 and not right_blast_locked_haptic:
+			if right_charge_time >= 0.45 and not right_blast_locked_haptic:
 				right_blast_locked_haptic = true
 				_pulse_haptic(controller, 140.0, 0.85, 0.12)
 				if gesture_tree and gesture_tree.has_signal("phase_changed"):
@@ -593,8 +726,16 @@ func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta:
 
 		# Solo dispara si se mantuvo cargando al menos 0.025s (acepta taps rápidos de gatillo)
 		if held_time >= 0.025:
-			var is_charged = held_time >= 0.50
+			var is_charged = held_time >= 0.45
 			var action_name = "ki_blast_left" if is_left else "ki_blast_right"
+			var player_cd: Node = gesture_tree._get_player_instance() if gesture_tree else null
+			var c_data_cd = player_cd.get("character_data") if (player_cd and is_instance_valid(player_cd)) else null
+			var is_veg_cd: bool = c_data_cd != null and "VEGETA" in String(c_data_cd.character_name).to_upper()
+			var shot_cd: float = 0.25 if is_charged else (0.125 if is_veg_cd else 0.15)
+			if is_left:
+				left_blast_cooldown = shot_cd
+			else:
+				right_blast_cooldown = shot_cd
 
 			if gesture_tree:
 				gesture_tree.set("last_firing_controller", controller)
@@ -674,31 +815,32 @@ func _record_and_smooth_aim_dir(raw_dir: Vector3) -> Vector3:
 
 func _compute_super_raw_aim_dir(tech_name: String, is_launch_moment: bool) -> Vector3:
 	var cam_dir: Vector3 = (-camera.global_transform.basis.z).normalized() if (camera and is_instance_valid(camera)) else torso_fwd
+	var shoulder_pos: Vector3 = cam_pos_cached - Vector3(0.0, 0.16 * body_scale, 0.0)
 	var raw: Vector3 = cam_dir
 	if tech_name == "big_bang":
 		var bb_side: int = int(gesture_tree.get("big_bang_hand")) if gesture_tree else 1
 		var bb_ctrl: XRController3D = left_controller if bb_side == 0 else right_controller
 		if bb_ctrl and is_instance_valid(bb_ctrl):
-			var arm_v: Vector3 = bb_ctrl.global_position - chest_pos_cached
-			var chest_to_hand: Vector3 = arm_v.normalized() if arm_v.length_squared() > 0.001 else cam_dir
-			var ctrl_fwd: Vector3 = (-bb_ctrl.global_transform.basis.z).normalized()
-			var hands_blend: Vector3 = (chest_to_hand * 0.65 + ctrl_fwd * 0.35).normalized()
-			raw = (cam_dir * 0.55 + hands_blend * 0.45).normalized()
+			var arm_v: Vector3 = bb_ctrl.global_position - shoulder_pos
+			var arm_dir: Vector3 = arm_v.normalized() if arm_v.length_squared() > 0.001 else cam_dir
+			var palm_dir: Vector3 = _get_controller_palm_world_dir(bb_ctrl, bb_side == 0)
+			if palm_dir.dot(cam_dir) < 0.0:
+				palm_dir = cam_dir
+			raw = (cam_dir * 0.45 + palm_dir * 0.35 + arm_dir * 0.20).normalized()
 	elif tech_name == "genkidama":
 		if is_launch_moment and left_controller and right_controller and avg_torso_pos.z >= 0.16:
 			var mid_h: Vector3 = (left_controller.global_position + right_controller.global_position) * 0.5
-			var c2h: Vector3 = mid_h - chest_pos_cached
+			var c2h: Vector3 = mid_h - shoulder_pos
 			var hand_dir: Vector3 = c2h.normalized() if c2h.length_squared() > 0.001 else cam_dir
 			raw = (cam_dir * 0.65 + hand_dir * 0.35).normalized()
 	elif is_launch_moment or (avg_torso_pos.z >= 0.25 and hands_dist_norm <= 0.50):
 		if left_controller and right_controller:
 			var mid_hands: Vector3 = (left_controller.global_position + right_controller.global_position) * 0.5
-			var c2h_vec: Vector3 = mid_hands - chest_pos_cached
-			var chest_to_hands: Vector3 = c2h_vec.normalized() if c2h_vec.length_squared() > 0.001 else cam_dir
-			var hands_fwd: Vector3 = ((-left_controller.global_transform.basis.z) + (-right_controller.global_transform.basis.z))
-			hands_fwd = hands_fwd.normalized() if hands_fwd.length_squared() > 0.001 else chest_to_hands
-			var hands_blend_2: Vector3 = (chest_to_hands * 0.70 + hands_fwd * 0.30).normalized()
-			raw = (cam_dir * 0.55 + hands_blend_2 * 0.45).normalized()
+			var arm_v_2: Vector3 = mid_hands - shoulder_pos
+			var shoulder_dir_2: Vector3 = arm_v_2.normalized() if arm_v_2.length_squared() > 0.001 else cam_dir
+			var palms_sum: Vector3 = _get_controller_palm_world_dir(left_controller, true) + _get_controller_palm_world_dir(right_controller, false)
+			var palms_dir: Vector3 = palms_sum.normalized() if (palms_sum.length_squared() > 0.01 and palms_sum.dot(cam_dir) > 0.0) else cam_dir
+			raw = (cam_dir * 0.50 + palms_dir * 0.30 + shoulder_dir_2 * 0.20).normalized()
 	return _record_and_smooth_aim_dir(raw)
 
 
@@ -867,9 +1009,12 @@ func _is_phase2_autofire_pose(tech_name: String, eff_l_z: float, eff_r_z: float,
 			var avg_rel_y: float = (l_cam_rel_y + r_cam_rel_y) * 0.5
 			return avg_rel_y <= 0.08 and (eff_l_z >= 0.16 or eff_r_z >= 0.16)
 		"big_bang":
+			var bb_ctrl: XRController3D = left_controller if bb_side == 0 else right_controller
+			if not _is_arm_extended_palm_forward(bb_ctrl, bb_side == 0, 0.30, 0.34, 0.24):
+				return false
 			var active_z: float = maxf(l_torso_pos.z, l_cam_fwd_proj) if bb_side == 0 else maxf(r_torso_pos.z, r_cam_fwd_proj)
 			var active_vel_z: float = l_torso_vel.z if bb_side == 0 else r_torso_vel.z
-			return active_z >= 0.30 and (active_vel_z >= 0.55 or active_z >= super_phase1_anchor_z + 0.08)
+			return active_z >= 0.34 and (active_vel_z >= 0.55 or active_z >= super_phase1_anchor_z + 0.08)
 	return false
 
 
@@ -882,8 +1027,10 @@ func _is_valid_super_release_pose(tech_name: String, l_local_z: float, r_local_z
 		"galick_ho", "kamehameha":
 			return eff_l_z >= 0.16 and eff_r_z >= 0.16 and hands_dist <= 0.58
 		"big_bang":
-			var active_z: float = eff_l_z if bb_side == 0 else eff_r_z
-			return active_z >= 0.16
+			var bb_ctrl_rel: XRController3D = left_controller if bb_side == 0 else right_controller
+			if super_phase2_latched:
+				return true
+			return _is_arm_extended_palm_forward(bb_ctrl_rel, bb_side == 0, 0.15, 0.30, 0.22)
 		"genkidama":
 			var avg_rel_y: float = (l_cam_rel_y + r_cam_rel_y) * 0.5
 			return avg_rel_y <= 0.22 or eff_l_z >= 0.15 or eff_r_z >= 0.15
@@ -976,11 +1123,9 @@ func _process_super_powers(delta: float) -> void:
 				target_display = "Galick Ho"
 			elif (l_grip != r_grip) and melee_cooldown <= 0.0:
 				var is_l: bool = l_grip
+				var active_ctrl: XRController3D = left_controller if is_l else right_controller
 				var active_trig: bool = l_trig if is_l else r_trig
-				var active_z: float = l_local_z if is_l else r_local_z
-				var active_x: float = l_local_x if is_l else r_local_x
-				var active_y: float = l_local_y if is_l else r_local_y
-				if not active_trig and active_z >= 0.34 and absf(active_x) <= 0.34 and active_y >= -0.24 and active_y <= 0.34:
+				if not active_trig and _is_arm_extended_palm_forward(active_ctrl, is_l, 0.45, 0.40, 0.34):
 					target_tech = "big_bang"
 					target_display = "Big Bang Attack"
 		else:
@@ -997,8 +1142,9 @@ func _process_super_powers(delta: float) -> void:
 				candidate_hold_timer = 0.0
 				if super_unusable_warn_cooldown <= 0.0:
 					super_unusable_warn_cooldown = 1.6
+					var req_msg: String = "requiere SSJ o Zenkai" if target_tech == "final_flash" else "requiere Base o Zenkai"
 					if gesture_tree and gesture_tree.has_signal("gesture_logged"):
-						gesture_tree.emit_signal("gesture_logged", "[BLOQUEADO] %s no disponible en esta forma (requiere Base o Zenkai)." % target_display, "warning")
+						gesture_tree.emit_signal("gesture_logged", "[BLOQUEADO] %s no disponible en esta forma (%s)." % [target_display, req_msg], "warning")
 				return
 
 			if target_tech == candidate_super_tech:
@@ -1077,7 +1223,19 @@ func _process_super_powers(delta: float) -> void:
 					if gesture_tree and gesture_tree.has_signal("phase_changed"):
 						gesture_tree.emit_signal("phase_changed", "¡SOBRE-ESFUERZO VITAL! (QUEMANDO FUERZA VITAL)")
 
-		super_charge_timer += delta
+		var super_spd_mult: float = player.get_dramatic_modifier("super_charge_speed_mult", 1.0) if (player and is_instance_valid(player) and player.has_method("get_dramatic_modifier")) else 1.0
+		var opp_sup: Node = player._get_opponent() if (player and is_instance_valid(player) and player.has_method("_get_opponent")) else null
+		if opp_sup and is_instance_valid(opp_sup):
+			var cfg_sup: KiEconomyConfig = KiEconomyConfig.get_default()
+			var sup_window_mult: float = 1.0
+			var smoke_t_val: Variant = opp_sup.get("smoke_obscured_timer")
+			if bool(opp_sup.get("smoke_obscures_active")) and smoke_t_val != null and float(smoke_t_val) > 0.0:
+				sup_window_mult = maxf(sup_window_mult, cfg_sup.ki_blast_smoke_super_charge_mult)
+			var crater_t_val: Variant = opp_sup.get("ground_crater_stun_timer")
+			if crater_t_val != null and float(crater_t_val) > 0.0:
+				sup_window_mult = maxf(sup_window_mult, cfg_sup.melee_crater_super_charge_mult)
+			super_spd_mult *= sup_window_mult
+		super_charge_timer += delta * super_spd_mult
 		_pulse_haptic(left_controller, 110.0, clamp(0.25 + super_charge_timer * 0.35, 0.25, 0.95), delta)
 		_pulse_haptic(right_controller, 110.0, clamp(0.25 + super_charge_timer * 0.35, 0.25, 0.95), delta)
 
@@ -1148,7 +1306,7 @@ func _process_super_powers(delta: float) -> void:
 			elif super_power_type == "genkidama":
 				ready_cue = "¡GENKIDAMA LISTA! ¡BAJA LOS BRAZOS AL FRENTE PARA LANZAR!"
 			elif super_power_type == "big_bang":
-				ready_cue = "¡BIG BANG LISTO! ¡EMPUJA EL PUÑO AL FRENTE O SUELTA EL GRIP!"
+				ready_cue = "¡BIG BANG LISTO! ¡EMPUJA LA PALMA AL FRENTE O SUELTA EL GRIP!"
 			if gesture_tree and gesture_tree.has_signal("phase_changed"):
 				gesture_tree.emit_signal("phase_changed", ready_cue)
 			if gesture_tree and gesture_tree.has_signal("gesture_logged"):
@@ -1176,6 +1334,11 @@ func _process_super_powers(delta: float) -> void:
 
 		# Evaluar ventana tolerante si el jugador extiende parcialmente y suelta los Grips
 		var in_phase2_now: bool = _is_valid_super_release_pose(super_power_type, l_local_z, r_local_z, avg_local_y, avg_local_z, hands_dist_norm, bb_side, l_cam_z, r_cam_z)
+		if super_power_type == "big_bang" and super_charge_timer >= min_fire_time:
+			var eff_bb_z: float = eff_l_z if bb_side == 0 else eff_r_z
+			if eff_bb_z >= 0.26:
+				super_phase2_latched = true
+				super_phase2_grace_timer = 0.85
 		if super_charge_timer >= min_fire_time:
 			if in_phase2_now:
 				super_phase2_latched = true
@@ -1221,6 +1384,39 @@ func _execute_super_fire(tech_name: String) -> void:
 	var tech_display_name = tech_name.capitalize()
 	var player = gesture_tree._get_player_instance() if gesture_tree else null
 	if player and is_instance_valid(player):
+		# Evitar gastar Ki si ya existe una secuencia de super ataque activa (salvo Beam Clash contra rayo/esfera entrante)
+		if tech_name in ["kamehameha", "galick_ho", "final_flash", "big_bang", "genkidama"]:
+			var blocked_by_active_seq: bool = false
+			if bool(player.get("is_in_bullet_time")):
+				var active_dome: Variant = player.get("active_target_dome")
+				if active_dome != null and is_instance_valid(active_dome):
+					blocked_by_active_seq = true
+				else:
+					player.set("is_in_bullet_time", false)
+			if not blocked_by_active_seq and bool(player.get("is_in_beam_sequence")):
+				var own_seq: Variant = player.get("active_beam_sequence")
+				var opp_node: Node3D = player._get_opponent() if player.has_method("_get_opponent") else null
+				var opp_seq: Variant = opp_node.get("active_beam_sequence") if (opp_node and is_instance_valid(opp_node)) else null
+				if own_seq != null and is_instance_valid(own_seq) and int(own_seq.get("state")) < 2:
+					blocked_by_active_seq = true
+				elif opp_seq != null and is_instance_valid(opp_seq):
+					var opp_state: int = int(opp_seq.get("state"))
+					if opp_state == 0:
+						blocked_by_active_seq = false # Beam Clash permitido
+					elif opp_state == 1:
+						blocked_by_active_seq = true
+					else:
+						player.set("is_in_beam_sequence", false)
+				else:
+					player.set("is_in_beam_sequence", false)
+			if blocked_by_active_seq:
+				if gesture_tree and gesture_tree.has_signal("phase_changed"):
+					gesture_tree.emit_signal("phase_changed", "ESPERA A QUE TERMINE EL RAYO")
+				_hide_guide_laser()
+				_reset_super_state()
+				super_cooldown = 0.25
+				return
+
 		player.set("last_super_charge_time", super_charge_timer)
 		var power_lookup = ""
 		match tech_name:
@@ -1336,6 +1532,26 @@ func cancel_super_from_poise_break() -> void:
 			gesture_tree.emit_signal("gesture_logged", "[CONCENTRACIÓN ROTA] ¡Ataques enemigos interrumpieron tu técnica!", "warning")
 
 
+## Cancela la recarga de Ki cuando el jugador recibe una interrupción táctica (Counter-Interrupt)
+func cancel_ki_recharge_from_hit() -> void:
+	if is_charging_ki or ki_prep_phase:
+		is_charging_ki = false
+		ki_prep_phase = false
+		left_charge_time = 0.0
+		right_charge_time = 0.0
+		left_is_charging = false
+		right_is_charging = false
+		recharge_exit_cooldown = 0.45
+		_pulse_haptic(left_controller, 200.0, 1.0, 0.35)
+		_pulse_haptic(right_controller, 200.0, 1.0, 0.35)
+		if gesture_tree:
+			gesture_tree._cleanup_ki_blast_charge_sphere(0)
+			gesture_tree._cleanup_ki_blast_charge_sphere(1)
+			gesture_tree._cancel_action("¡Intercepción de Ki! Recarga cancelada por impacto")
+			gesture_tree._reset_to_idle()
+			gesture_tree.sync_controller_gesture_state("IDLE")
+
+
 # --- 4. TRANSFORMACIONES (Botones A / X y B / Y con Edge-Trigger y Progresión Estricta) ---
 func _process_transformations() -> void:
 	var right_ax = right_controller.is_button_pressed("ax_button") if right_controller else false
@@ -1388,11 +1604,17 @@ func _process_transformations() -> void:
 
 			var target_trans = player.character_data.transformations[target_idx]
 			if not player.is_transformation_unlocked(target_trans.form_name):
-				print("[Transformation] %s intentó activar %s pero aún no está desbloqueada." % [player.character_data.character_name, target_trans.form_name])
+				var status_info: Dictionary = player.get_next_transformation_status() if player.has_method("get_next_transformation_status") else {}
+				var req_txt: String = String(status_info.get("requirement_text", "¡Lucha para desbloquearla!"))
+				print("[Transformation] %s intentó activar %s pero aún no está desbloqueada (%s)." % [player.character_data.character_name, target_trans.form_name, req_txt])
 				_pulse_haptic(right_controller, 90.0, 0.45, 0.15)
 				_pulse_haptic(left_controller, 90.0, 0.45, 0.15)
 				if gesture_tree and gesture_tree.has_signal("gesture_logged"):
-					gesture_tree.emit_signal("gesture_logged", "[BLOQUEADO] %s aún no despertado. ¡Lucha para desbloquearlo!" % target_trans.form_name, "warning")
+					gesture_tree.emit_signal("gesture_logged", "[BLOQUEADO] %s: %s" % [target_trans.form_name, req_txt], "warning")
+				if gesture_tree and gesture_tree.has_signal("phase_changed"):
+					gesture_tree.emit_signal("phase_changed", "🔒 %s: %s" % [target_trans.form_name.to_upper(), req_txt])
+				if ki_lockon_system and is_instance_valid(ki_lockon_system) and ki_lockon_system.has_method("show_scouter_alert"):
+					ki_lockon_system.show_scouter_alert("🔒 %s BLOQUEADO" % target_trans.form_name.to_upper(), req_txt, Color(1.0, 0.65, 0.2), 2.4)
 				transform_cooldown = 0.35
 				return
 
@@ -1418,7 +1640,7 @@ func _process_transformations() -> void:
 			transform_cooldown = 0.35
 			return
 
-	# Gesto Canónico de Transformación en VR (Puños a la cintura durante 1.8s)
+	# Gesto Canónico de Transformación en VR (Puños a la cintura durante 1.2s)
 	var l_trig = left_controller.get_float("trigger") > 0.45 or left_controller.is_button_pressed("trigger_click") if left_controller else false
 	var r_trig = right_controller.get_float("trigger") > 0.45 or right_controller.is_button_pressed("trigger_click") if right_controller else false
 	var l_grip = left_controller.get_float("grip") > 0.45 or left_controller.is_button_pressed("grip_click") if left_controller else false
@@ -1430,29 +1652,39 @@ func _process_transformations() -> void:
 
 		if is_at_waist and is_waist_dist:
 			gesture_transform_timer += get_process_delta_time()
-			if gesture_transform_timer > 0.2:
-				var pulse_freq = lerp(70.0, 200.0, clampf(gesture_transform_timer / 1.8, 0.0, 1.0))
+			var current_trans = player.get("current_transformation")
+			var total_forms = player.character_data.transformations.size()
+			var next_idx = 0
+			if current_trans != null:
+				for i in range(total_forms):
+					if player.character_data.transformations[i] == current_trans:
+						next_idx = i + 1
+						break
+			var next_trans = player.character_data.transformations[next_idx] if next_idx < total_forms else null
+			var next_unlocked: bool = (next_trans != null) and player.is_transformation_unlocked(next_trans.form_name)
+
+			if gesture_transform_timer > 0.2 and next_unlocked:
+				var pct: int = int(clampf(gesture_transform_timer / 1.2, 0.0, 1.0) * 100.0)
+				var pulse_freq = lerp(70.0, 200.0, clampf(gesture_transform_timer / 1.2, 0.0, 1.0))
 				_pulse_haptic(left_controller, pulse_freq, 0.45, 0.05)
 				_pulse_haptic(right_controller, pulse_freq, 0.45, 0.05)
+				if _transform_progress_cd <= 0.0 and gesture_tree and gesture_tree.has_signal("phase_changed"):
+					_transform_progress_cd = 0.14
+					gesture_tree.emit_signal("phase_changed", "⚡ TRANSFORMANDO A %s... %d%%" % [next_trans.form_name.to_upper(), pct])
 
-			if gesture_transform_timer >= 1.8:
+			if gesture_transform_timer >= 1.2:
 				gesture_transform_timer = 0.0
-				var current_trans = player.get("current_transformation")
-				var total_forms = player.character_data.transformations.size()
-				var next_idx = 0
-				if current_trans != null:
-					for i in range(total_forms):
-						if player.character_data.transformations[i] == current_trans:
-							next_idx = i + 1
-							break
-				if next_idx < total_forms:
-					var trans_to_activate = player.character_data.transformations[next_idx]
-					if player.is_transformation_unlocked(trans_to_activate.form_name):
+				if next_trans != null:
+					if next_unlocked:
 						player.transform_to(next_idx)
 						transform_cooldown = 0.60
 						_pulse_haptic(left_controller, 220.0, 1.0, 0.50)
 						_pulse_haptic(right_controller, 220.0, 1.0, 0.50)
 					else:
+						var status_g: Dictionary = player.get_next_transformation_status() if player.has_method("get_next_transformation_status") else {}
+						var req_g: String = String(status_g.get("requirement_text", "¡Lucha para desbloquearla!"))
+						if gesture_tree and gesture_tree.has_signal("phase_changed"):
+							gesture_tree.emit_signal("phase_changed", "🔒 %s: %s" % [next_trans.form_name.to_upper(), req_g])
 						_pulse_haptic(left_controller, 80.0, 0.35, 0.15)
 						_pulse_haptic(right_controller, 80.0, 0.35, 0.15)
 						transform_cooldown = 0.40
@@ -1475,12 +1707,6 @@ func _process_melee_punches() -> void:
 		right_punch_cocked = false
 		return
 
-	if left_is_charging or right_is_charging or current_super_state != SuperPowerState.IDLE:
-		if not (current_super_state == SuperPowerState.CHARGING and super_power_type == "big_bang" and super_charge_timer < 0.45):
-			left_punch_cocked = false
-			right_punch_cocked = false
-			return
-
 	var l_grip: bool = left_controller.get_float("grip") > 0.40 or left_controller.is_button_pressed("grip_click")
 	var l_trig: bool = left_controller.get_float("trigger") > 0.40 or left_controller.is_button_pressed("trigger_click")
 	# REQUISITO CANÓNICO: Puño cerrado simulado con Grab + Gatillo (ambos botones presionados)
@@ -1497,6 +1723,26 @@ func _process_melee_punches() -> void:
 		right_punch_cocked = false
 		return
 
+	# Garantizar que formar puño (Grip+Trigger) limpia cualquier carga residual de Ki Blast en esa mano
+	if l_fist and left_is_charging:
+		left_charge_time = 0.0
+		left_is_charging = false
+		left_blast_locked_haptic = false
+		if gesture_tree:
+			gesture_tree._cleanup_ki_blast_charge_sphere(0)
+	if r_fist and right_is_charging:
+		right_charge_time = 0.0
+		right_is_charging = false
+		right_blast_locked_haptic = false
+		if gesture_tree:
+			gesture_tree._cleanup_ki_blast_charge_sphere(1)
+
+	if (left_is_charging and not l_fist) or (right_is_charging and not r_fist) or current_super_state != SuperPowerState.IDLE:
+		if not (current_super_state == SuperPowerState.CHARGING and super_power_type == "big_bang" and super_charge_timer < 0.45):
+			left_punch_cocked = false
+			right_punch_cocked = false
+			return
+
 	# Si se estaba cargando Big Bang al inicio (< 0.45s) y el usuario cierra el puño completo (grab + gatillo), priorizar Melee
 	if current_super_state == SuperPowerState.CHARGING and super_power_type == "big_bang" and super_charge_timer < 0.45:
 		if l_fist or r_fist:
@@ -1508,22 +1754,28 @@ func _process_melee_punches() -> void:
 
 	# ETAPA 1: Armado del puño cerca del pecho / hombro (en torso-space normalizado)
 	if l_fist:
-		if l_torso_pos.z <= 0.28 and absf(l_torso_pos.x) <= 0.42 and l_torso_pos.y >= -0.35 and l_torso_pos.y <= 0.28:
+		if l_torso_pos.z <= 0.36 and absf(l_torso_pos.x) <= 0.48 and l_torso_pos.y >= -0.40 and l_torso_pos.y <= 0.35:
 			left_punch_cocked = true
 	else:
 		left_punch_cocked = false
 
 	if r_fist:
-		if r_torso_pos.z <= 0.28 and absf(r_torso_pos.x) <= 0.42 and r_torso_pos.y >= -0.35 and r_torso_pos.y <= 0.28:
+		if r_torso_pos.z <= 0.36 and absf(r_torso_pos.x) <= 0.48 and r_torso_pos.y >= -0.40 and r_torso_pos.y <= 0.35:
 			right_punch_cocked = true
 	else:
 		right_punch_cocked = false
 
-	# ETAPA 2: Extensión explosiva hacia adelante tras armado real
-	if l_fist and left_punch_cocked and l_torso_pos.z >= 0.34 and l_torso_vel.z >= 1.65:
+	# ETAPA 2: Extensión explosiva hacia adelante tras armado o golpe directo veloz al frente
+	var l_fwd_vel: float = maxf(l_torso_vel.z, left_velocity.dot(cam_fwd_flat) * inv_body_scale)
+	var r_fwd_vel: float = maxf(r_torso_vel.z, right_velocity.dot(cam_fwd_flat) * inv_body_scale)
+	var l_fwd_pos: float = maxf(l_torso_pos.z, l_cam_fwd_proj)
+	var r_fwd_pos: float = maxf(r_torso_pos.z, r_cam_fwd_proj)
+	var l_punch_fire: bool = l_fist and ((left_punch_cocked and l_fwd_pos >= 0.34 and l_fwd_vel >= 1.35) or (l_fwd_pos >= 0.36 and l_fwd_vel >= 1.85))
+	var r_punch_fire: bool = r_fist and ((right_punch_cocked and r_fwd_pos >= 0.34 and r_fwd_vel >= 1.35) or (r_fwd_pos >= 0.36 and r_fwd_vel >= 1.85))
+	if l_punch_fire:
 		left_punch_cocked = false
 		_execute_melee_punch(left_controller)
-	elif r_fist and right_punch_cocked and r_torso_pos.z >= 0.34 and r_torso_vel.z >= 1.65:
+	elif r_punch_fire:
 		right_punch_cocked = false
 		_execute_melee_punch(right_controller)
 
@@ -1539,13 +1791,22 @@ func _execute_melee_punch(controller: XRController3D) -> void:
 	if player and is_instance_valid(player):
 		var curr_ki: float = float(player.get("current_ki")) if player.get("current_ki") != null else 0.0
 		var dash_cost: float = KiEconomyConfig.get_default().melee_dash_cost
+		var opp_m: Node = player._get_opponent() if player.has_method("_get_opponent") else null
+		if not opp_m and get_tree() and get_tree().current_scene:
+			opp_m = get_tree().current_scene.find_child("EnemyCharacterInstance", true, false)
+		var free_opening: bool = opp_m != null and is_instance_valid(opp_m) and player.has_method("has_free_melee_opening_against") and player.has_free_melee_opening_against(opp_m)
+		if free_opening:
+			dash_cost = 0.0
 		if curr_ki < dash_cost:
 			melee_cooldown = 0.6
 			_pulse_haptic(controller, 90.0, 0.35, 0.12)
-			if gesture_tree and gesture_tree.has_signal("gesture_logged"):
-				gesture_tree.emit_signal("gesture_logged", "¡Ki insuficiente para embestida Melee (%d Ki)!" % int(dash_cost), "warning")
+			if gesture_tree:
+				if gesture_tree.has_signal("phase_changed"):
+					gesture_tree.emit_signal("phase_changed", "SIN KI PARA MELEE (%d KI)" % int(dash_cost))
+				if gesture_tree.has_signal("gesture_logged"):
+					gesture_tree.emit_signal("gesture_logged", "¡Ki insuficiente para embestida Melee (%d Ki)!" % int(dash_cost), "warning")
 			return
-		if player.has_method("consume_ki"):
+		if dash_cost > 0.0 and player.has_method("consume_ki"):
 			player.consume_ki(dash_cost)
 
 	_reset_super_state()
@@ -1617,7 +1878,7 @@ func _process_grid_step_movement(delta: float) -> void:
 
 	# Clic stick derecho: SUBIR un espacio vertical
 	if r_click and vertical_step_cooldown <= 0.0 and not is_step_moving:
-		vertical_step_cooldown = 0.35
+		vertical_step_cooldown = 0.20
 		var ground_h = player.get_ground_elevation(xr_origin.global_position)
 		var max_h = ground_h + MAX_VERTICAL_HEIGHT
 		if xr_origin.global_position.y + VERTICAL_STEP <= max_h:
@@ -1628,7 +1889,7 @@ func _process_grid_step_movement(delta: float) -> void:
 
 	# Clic stick izquierdo: BAJAR un espacio vertical
 	elif l_click and vertical_step_cooldown <= 0.0 and not is_step_moving:
-		vertical_step_cooldown = 0.35
+		vertical_step_cooldown = 0.20
 		var ground_h = player.get_ground_elevation(xr_origin.global_position)
 		var min_h = ground_h + 0.05
 		if xr_origin.global_position.y - VERTICAL_STEP >= min_h:
@@ -1650,7 +1911,7 @@ func _process_grid_step_movement(delta: float) -> void:
 		right_stick_flicked = false
 	elif stick_len >= 0.55 and not right_stick_flicked and step_cooldown <= 0.0 and not is_step_moving:
 		right_stick_flicked = true
-		step_cooldown = 0.28
+		step_cooldown = 0.16
 
 		var cam_basis = camera.global_transform.basis if camera else xr_origin.global_transform.basis
 		var cam_fwd = -cam_basis.z
@@ -1699,11 +1960,11 @@ func _execute_horizontal_step(move_dir: Vector3) -> void:
 		future_diff.y = 0.0
 		var future_dist = future_diff.length()
 
-		# Si el paso nos acerca al rival y nos dejaría a una distancia no permitida (< 2.4m)
+		# Si el paso nos acerca al rival y nos dejaría a una distancia no permitida (< 6.0m)
 		if future_dist < current_dist and future_dist < MIN_ALLOWED_DISTANCE:
-			print("[Movement] Paso frontal bloqueado: distancia mínima con el rival (2.4m). Distancia futura: %.2fm" % future_dist)
+			print("[Movement] Paso frontal bloqueado: distancia mínima con el rival (%.1fm). Distancia futura: %.2fm" % [MIN_ALLOWED_DISTANCE, future_dist])
 			_pulse_haptic(right_controller, 90.0, 0.5, 0.15)
-			player._log_combat_event("[MOVIMIENTO] ¡Distancia mínima alcanzada (2.4m)! No puedes avanzar más.", "warning")
+			player._log_combat_event("[MOVIMIENTO] ¡Distancia mínima alcanzada (%.1fm)! No puedes acercarte más." % MIN_ALLOWED_DISTANCE, "warning")
 			return
 
 	# 2. Comprobación de colisión física con obstáculos del entorno (rocas café, pilares, mesetas)
@@ -1728,13 +1989,13 @@ func _execute_horizontal_step(move_dir: Vector3) -> void:
 		_pulse_haptic(right_controller, 90.0, 0.4, 0.15)
 		return
 
-	# 4. Desplazamiento ágil estilo anime (0.16s Tween)
+	# 4. Desplazamiento ágil estilo anime (0.12s Tween)
 	is_step_moving = true
 	_play_step_audio(1.25)
 	_pulse_haptic(right_controller, 140.0, 0.45, 0.08)
 
 	var tween = create_tween().set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tween.tween_property(xr_origin, "global_position", target_pos, 0.16)
+	tween.tween_property(xr_origin, "global_position", target_pos, 0.12)
 	tween.tween_callback(func(): is_step_moving = false)
 
 
@@ -1748,7 +2009,7 @@ func _execute_vertical_step(target_pos: Vector3, is_up: bool) -> void:
 	_pulse_haptic(ctrl, 160.0, 0.6, 0.10)
 
 	var tween = create_tween().set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tween.tween_property(xr_origin, "global_position", target_pos, 0.16)
+	tween.tween_property(xr_origin, "global_position", target_pos, 0.12)
 	tween.tween_callback(func(): is_step_moving = false)
 
 
@@ -1757,6 +2018,203 @@ func _play_step_audio(pitch: float = 1.25) -> void:
 		step_audio_player.pitch_scale = pitch * randf_range(0.92, 1.08)
 		step_audio_player.volume_db = -5.0
 		AudioActionManager.play_action("common.dodge_vanish", step_audio_player, snd_step)
+
+
+func _ensure_air_brake_bar() -> void:
+	if _air_brake_root and is_instance_valid(_air_brake_root):
+		return
+	if not camera or not is_instance_valid(camera):
+		return
+
+	_air_brake_root = Node3D.new()
+	_air_brake_root.name = "AirBrakeDiegeticBar"
+	_air_brake_root.position = Vector3(0.0, -0.10, -1.05)
+	_air_brake_root.visible = false
+	camera.add_child(_air_brake_root)
+
+	var bg_mesh := MeshInstance3D.new()
+	bg_mesh.name = "AirBrakeBg"
+	var bg_q := QuadMesh.new()
+	bg_q.size = Vector2(0.42, 0.042)
+	bg_mesh.mesh = bg_q
+	var bg_mat := StandardMaterial3D.new()
+	bg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	bg_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	bg_mat.no_depth_test = true
+	bg_mat.render_priority = 122
+	bg_mat.albedo_color = Color(0.05, 0.08, 0.12, 0.85)
+	bg_mesh.material_override = bg_mat
+	_air_brake_root.add_child(bg_mesh)
+
+	_air_brake_fill_mesh = MeshInstance3D.new()
+	_air_brake_fill_mesh.name = "AirBrakeFill"
+	var fill_q := QuadMesh.new()
+	fill_q.size = Vector2(0.40, 0.028)
+	_air_brake_fill_mesh.mesh = fill_q
+	_air_brake_fill_mesh.position = Vector3(-0.20, 0.0, 0.002)
+	_air_brake_fill_mat = StandardMaterial3D.new()
+	_air_brake_fill_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_air_brake_fill_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_air_brake_fill_mat.no_depth_test = true
+	_air_brake_fill_mat.render_priority = 123
+	_air_brake_fill_mat.albedo_color = Color(0.2, 0.9, 1.0, 0.95)
+	_air_brake_fill_mesh.material_override = _air_brake_fill_mat
+	_air_brake_root.add_child(_air_brake_fill_mesh)
+
+	_air_brake_label = Label3D.new()
+	_air_brake_label.name = "AirBrakeLabel"
+	_air_brake_label.font_size = 22
+	_air_brake_label.pixel_size = 0.0013
+	_air_brake_label.no_depth_test = true
+	_air_brake_label.render_priority = 124
+	_air_brake_label.outline_size = 8
+	_air_brake_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.95)
+	_air_brake_label.position = Vector3(0.0, 0.055, 0.002)
+	_air_brake_label.text = "⚡ ¡AGITA LOS CONTROLES! 0%"
+	_air_brake_root.add_child(_air_brake_label)
+
+
+func _process_air_brake(delta: float, player: Node) -> void:
+	_update_air_brake_with_motion(delta, player, left_velocity, right_velocity)
+
+
+func _update_air_brake_with_motion(delta: float, player: Node, l_vel: Vector3, r_vel: Vector3) -> void:
+	if not player or not is_instance_valid(player) or not bool(player.get("is_air_brake_active")) or DramaticDirector.is_dramatic_pause_active:
+		_prev_air_l_vel = l_vel
+		_prev_air_r_vel = r_vel
+		_air_l_active_timer = 0.0
+		_air_r_active_timer = 0.0
+		_air_haptic_cd = 0.0
+		if _air_brake_root and is_instance_valid(_air_brake_root):
+			_air_brake_root.visible = false
+		return
+
+	_ensure_air_brake_bar()
+	if _air_brake_root and is_instance_valid(_air_brake_root):
+		_air_brake_root.visible = true
+
+	var safe_dt: float = maxf(delta, 0.001)
+	var l_accel: float = (l_vel - _prev_air_l_vel).length() / safe_dt
+	var r_accel: float = (r_vel - _prev_air_r_vel).length() / safe_dt
+	_prev_air_l_vel = l_vel
+	_prev_air_r_vel = r_vel
+
+	# Combinar velocidad lineal y sacudida por cambio de dirección (espacio local XR, inmune al knockback)
+	var l_shake: float = l_vel.length() + l_accel * 0.045
+	var r_shake: float = r_vel.length() + r_accel * 0.045
+
+	# Ventana deslizante de 0.24s para tolerar inversiones de sentido a 90 FPS
+	if l_shake >= 1.35:
+		_air_l_active_timer = 0.24
+	else:
+		_air_l_active_timer = maxf(_air_l_active_timer - delta, 0.0)
+
+	if r_shake >= 1.35:
+		_air_r_active_timer = 0.24
+	else:
+		_air_r_active_timer = maxf(_air_r_active_timer - delta, 0.0)
+
+	var l_moving: bool = _air_l_active_timer > 0.0
+	var r_moving: bool = _air_r_active_timer > 0.0
+	var both_shaking: bool = l_moving and r_moving
+	var sync_mult: float = 1.0 if both_shaking else 0.38
+
+	var active_shake: float = (l_shake if l_moving else 0.0) + (r_shake if r_moving else 0.0)
+	var effort_rate: float = clampf(active_shake * 0.52, 0.0, 7.8) * sync_mult
+	var effort_gain: float = effort_rate * delta
+	var completed_now: bool = false
+	if effort_gain > 0.0 and player.has_method("add_air_brake_effort"):
+		completed_now = bool(player.add_air_brake_effort(effort_gain, delta))
+	elif player.has_method("add_air_brake_effort"):
+		completed_now = bool(player.add_air_brake_effort(0.0, delta))
+
+	var prog: float = 1.0 if completed_now else (float(player.get("air_brake_progress")) if player.get("air_brake_progress") != null else 0.0)
+	var diff_lbl: String = String(player.get("air_brake_difficulty_label")) if player.get("air_brake_difficulty_label") != null else "NORMAL"
+	if _air_brake_fill_mesh and is_instance_valid(_air_brake_fill_mesh):
+		var fill_scale: float = clampf(prog, 0.02, 1.0)
+		_air_brake_fill_mesh.scale = Vector3(fill_scale, 1.0, 1.0)
+		_air_brake_fill_mesh.position.x = -0.20 + 0.20 * fill_scale
+	if _air_brake_fill_mat:
+		_air_brake_fill_mat.albedo_color = Color(0.2, 0.9, 1.0, 0.95).lerp(Color(1.0, 0.88, 0.2, 0.98), prog)
+	if _air_brake_label and is_instance_valid(_air_brake_label):
+		var l_ind: String = "◀L▶" if l_moving else " L "
+		var r_ind: String = "◀R▶" if r_moving else " R "
+		_air_brake_label.text = "⚡ [%s] ¡AGITA LOS CONTROLES! [%s] %d%% (%s)" % [l_ind, r_ind, int(roundf(prog * 100.0)), diff_lbl]
+		_air_brake_label.modulate = Color(1.0, 0.92, 0.28) if both_shaking else Color(0.75, 0.92, 1.0)
+	if completed_now and _air_brake_root and is_instance_valid(_air_brake_root):
+		_air_brake_root.visible = false
+
+	_air_haptic_cd = maxf(_air_haptic_cd - delta, 0.0)
+	if (l_moving or r_moving) and _air_haptic_cd <= 0.0:
+		_air_haptic_cd = 0.06
+		var pulse_amp: float = clampf(0.28 + effort_rate * 0.08, 0.28, 0.78)
+		if l_moving:
+			_pulse_haptic(left_controller, 130.0, pulse_amp, 0.05)
+		if r_moving:
+			_pulse_haptic(right_controller, 130.0, pulse_amp, 0.05)
+
+
+func cancel_determination_from_hit() -> void:
+	if not is_charging_determination:
+		return
+	is_charging_determination = false
+	determination_timer = 0.0
+	determination_hit_cooldown = 0.8
+	var player: Node3D = gesture_tree._get_player_instance() if gesture_tree else null
+	var dd: DramaticDirector = DramaticDirector.get_active(get_tree())
+	if dd:
+		dd.update_determination_vfx(player, 0.0, false)
+	if gesture_tree and gesture_tree.has_signal("gesture_logged"):
+		gesture_tree.emit_signal("gesture_logged", "[DETERMINACIÓN] ¡Concentración interrumpida por impacto fuerte!", "warning")
+
+
+func _process_determination(delta: float) -> void:
+	if not left_controller or not right_controller:
+		return
+	var player: Node3D = gesture_tree._get_player_instance() if gesture_tree else null
+	var eligible: bool = (
+		player != null
+		and is_instance_valid(player)
+		and not bool(player.get("is_match_over"))
+		and bool(player.get("is_in_furia"))
+		and not bool(player.get("has_used_determination"))
+		and not is_charging_ki
+		and current_super_state == SuperPowerState.IDLE
+		and determination_hit_cooldown <= 0.0
+	)
+	var dd: DramaticDirector = DramaticDirector.get_active(get_tree())
+	if not eligible:
+		if is_charging_determination:
+			is_charging_determination = false
+			determination_timer = 0.0
+			if dd:
+				dd.update_determination_vfx(player, 0.0, false)
+		return
+
+	var l_grip: bool = left_controller.get_float("grip") > 0.45 or left_controller.is_button_pressed("grip_click")
+	var r_grip: bool = right_controller.get_float("grip") > 0.45 or right_controller.is_button_pressed("grip_click")
+	var l_trig: bool = left_controller.get_float("trigger") > 0.45 or left_controller.is_button_pressed("trigger_click")
+	var r_trig: bool = right_controller.get_float("trigger") > 0.45 or right_controller.is_button_pressed("trigger_click")
+	var pose_ok: bool = pose_chest_guard and l_grip and r_grip and not l_trig and not r_trig
+
+	if pose_ok:
+		is_charging_determination = true
+		determination_timer += delta
+		var ratio: float = clampf(determination_timer / 2.8, 0.0, 1.0)
+		if dd:
+			dd.update_determination_vfx(player, ratio, true)
+		_pulse_haptic(left_controller, 110.0, lerpf(0.25, 0.85, ratio), delta)
+		_pulse_haptic(right_controller, 110.0, lerpf(0.25, 0.85, ratio), delta)
+		if determination_timer >= 2.8:
+			is_charging_determination = false
+			determination_timer = 0.0
+			if player.has_method("complete_moment_of_determination"):
+				player.complete_moment_of_determination()
+	elif is_charging_determination:
+		is_charging_determination = false
+		determination_timer = 0.0
+		if dd:
+			dd.update_determination_vfx(player, 0.0, false)
 
 
 # --- 7. GUARDIA DEFENSIVA (BLOQUEO) ---

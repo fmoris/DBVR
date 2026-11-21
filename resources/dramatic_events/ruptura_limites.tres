@@ -1,0 +1,24 @@
+[gd_resource type="Resource" script_class="DramaticMiniEventData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dramatic_mini_event_data.gd" id="1_dme"]
+
+[resource]
+script = ExtResource("1_dme")
+event_id = "ruptura_limites"
+display_name = "Ruptura de Límites"
+instruction_text = "¡ABRE LOS BRAZOS CON GRIPS Y ROMPE LOS 3 ANILLOS!"
+character_filter = ""
+condition_type = "threshold_50_plus"
+minigame_type = "hold_expand"
+target_count = 3
+duration_sec = 3.5
+is_permanent_bonus = true
+bonus_duration_sec = 0.0
+bonus_label = "LÍMITES ROTOS"
+bonus_effect_text = "+12% Ganancia BP · -15% Drenaje Transf."
+bonus_color = Color(1, 0.85, 0.2, 1)
+bonus_mods = {
+"bp_gain_mult": 1.12,
+"transform_drain_mult": 0.85
+}
+weight = 1.0

@@ -27,6 +27,7 @@ var power_name: String = "Kamehameha"
 var energy_color: Color = Color(0.2, 0.8, 1.0)
 var base_damage: float = 1800.0
 var tier: int = 3
+var is_orb_super: bool = false
 
 var state: BeamState = BeamState.ADVANCING_BULLET_TIME
 var is_active: bool = false
@@ -53,6 +54,9 @@ var beam_light: OmniLight3D = null
 var reticle_mesh: MeshInstance3D = null
 var alert_label: Label3D = null
 var beam_hud_anchor: Node3D = null
+var super_action_card_anchor: Node3D = null
+var _super_card_label: Label3D = null
+var _super_card_border_mat: StandardMaterial3D = null
 var hold_progress: float = 0.0
 var hold_required_sec: float = 1.65
 var hold_stall_timer: float = 0.0
@@ -76,18 +80,29 @@ const BeamClashControllerClass = preload("res://scripts/BeamClashController.gd")
 func _get_attacker_hand_position() -> Vector3:
 	if not attacker or not is_instance_valid(attacker):
 		return start_pos
-	
+
+	var p_low: String = power_name.to_lower()
+	var is_genkidama: bool = "genkidama" in p_low
+	var is_big_bang: bool = "big bang" in p_low
+
 	if attacker.get("is_player"):
 		var origin = attacker.get_parent() as XROrigin3D
 		if origin:
 			var l_ctrl = origin.get_node_or_null("LeftHand") as XRController3D
 			var r_ctrl = origin.get_node_or_null("RightHand") as XRController3D
+			if is_big_bang:
+				var gss: Node = origin.get_parent().get_node_or_null("GesturePhaseTree") if origin.get_parent() else null
+				var bb_hand: int = int(gss.get("big_bang_hand")) if (gss and gss.get("big_bang_hand") != null) else 1
+				var active_ctrl: XRController3D = l_ctrl if (bb_hand == 0 and l_ctrl) else (r_ctrl if r_ctrl else l_ctrl)
+				if active_ctrl:
+					return active_ctrl.global_position
 			if l_ctrl and r_ctrl:
-				return (l_ctrl.global_position + r_ctrl.global_position) * 0.5
+				var mid: Vector3 = (l_ctrl.global_position + r_ctrl.global_position) * 0.5
+				return (mid + Vector3(0.0, 0.75, 0.0)) if is_genkidama else mid
 			elif r_ctrl:
-				return r_ctrl.global_position
+				return (r_ctrl.global_position + Vector3(0.0, 0.75, 0.0)) if is_genkidama else r_ctrl.global_position
 			elif l_ctrl:
-				return l_ctrl.global_position
+				return (l_ctrl.global_position + Vector3(0.0, 0.75, 0.0)) if is_genkidama else l_ctrl.global_position
 	else:
 		var skel = attacker.get_node_or_null("Armature/Skeleton3D") as Skeleton3D
 		if not skel:
@@ -95,13 +110,17 @@ func _get_attacker_hand_position() -> Vector3:
 		if skel:
 			var rw_idx = skel.find_bone("RightWrist")
 			var lw_idx = skel.find_bone("LeftWrist")
+			if is_big_bang and rw_idx != -1:
+				return skel.to_global(skel.get_bone_global_pose(rw_idx).origin)
 			if rw_idx != -1 and lw_idx != -1:
 				var r_global = skel.to_global(skel.get_bone_global_pose(rw_idx).origin)
 				var l_global = skel.to_global(skel.get_bone_global_pose(lw_idx).origin)
-				return (r_global + l_global) * 0.5
-		return attacker.global_position + attacker.global_transform.basis * Vector3(0.0, 1.25, 0.55)
+				var mid_ai: Vector3 = (r_global + l_global) * 0.5
+				return (mid_ai + Vector3(0.0, 0.75, 0.0)) if is_genkidama else mid_ai
+		var fb_y: float = 2.05 if is_genkidama else 1.25
+		return attacker.global_position + attacker.global_transform.basis * Vector3(0.0, fb_y, 0.55)
 	
-	return attacker.global_position + Vector3(0.0, 1.25, 0.0)
+	return attacker.global_position + Vector3(0.0, 2.05 if is_genkidama else 1.25, 0.0)
 
 
 func _get_defender_target_position() -> Vector3:
@@ -130,7 +149,11 @@ func setup(
 	power_name = p_power_name
 	energy_color = p_color
 	base_damage = p_base_damage
+	if attacker and is_instance_valid(attacker) and attacker.has_method("get_dramatic_modifier"):
+		base_damage *= attacker.get_dramatic_modifier("damage_mult", 1.0) * attacker.get_dramatic_modifier("super_damage_mult", 1.0)
 	tier = p_tier
+	var p_low: String = power_name.to_lower()
+	is_orb_super = ("big bang" in p_low) or ("genkidama" in p_low)
 
 	state = BeamState.ADVANCING_BULLET_TIME
 	is_active = true
@@ -159,9 +182,10 @@ func setup(
 		var dot_def: float = fired_aim_dir.dot(to_def_dir)
 		var closest_pt: Vector3 = start_pos + fired_aim_dir * (dist_to_def * maxf(dot_def, 0.0))
 		var perp_dist: float = closest_pt.distance_to(def_pos)
-		if dot_def > 0.25 and perp_dist <= 1.15:
+		var hit_radius: float = maxf(1.35, dist_to_def * 0.085)
+		if dot_def > 0.25 and (perp_dist <= hit_radius or dot_def >= 0.985):
 			is_aimed_miss = false
-			target_pos = def_pos.lerp(closest_pt, 0.35)
+			target_pos = def_pos.lerp(closest_pt, 0.25)
 			fired_aim_dir = (target_pos - start_pos).normalized()
 		else:
 			is_aimed_miss = true
@@ -178,13 +202,13 @@ func setup(
 	current_head_pos = start_pos
 	prev_head_pos = start_pos
 
-	# 3. Aplicar dilatación temporal (Bullet-Time normal en impacto o vuelo rápido en tiro fallado)
+	# 3. Aplicar dilatación temporal (Bullet-Time profundo en impacto o vuelo rápido en tiro fallado)
 	if is_aimed_miss:
 		reaction_duration = 0.65
 		time_left = reaction_duration
 		Engine.time_scale = 0.65
 	else:
-		Engine.time_scale = 0.18
+		Engine.time_scale = 0.11
 
 	_build_visual_beam()
 	_build_reticle_and_hud()
@@ -219,9 +243,17 @@ func _process(delta: float) -> void:
 			target_pos = def_now.lerp(aimed_pt, 0.30)
 		beam_dir = (target_pos - start_pos).normalized()
 
-		# El rayo crece continuamente desde las manos hacia el objetivo
+		# Desacoplar avance visual (arranque explosivo al 65% + cámara súper lenta decisiva + impacto final)
 		prev_head_pos = current_head_pos
-		beam_progress = clampf(1.0 - (time_left / maxf(reaction_duration, 0.01)), 0.0, 1.0)
+		var norm_t: float = clampf(1.0 - (time_left / maxf(reaction_duration, 0.01)), 0.0, 1.0)
+		if is_aimed_miss:
+			beam_progress = norm_t
+		elif norm_t < 0.18:
+			beam_progress = 0.65 * (1.0 - pow(1.0 - (norm_t / 0.18), 2.2))
+		elif norm_t < 0.92:
+			beam_progress = lerpf(0.65, 0.92, (norm_t - 0.18) / 0.74)
+		else:
+			beam_progress = lerpf(0.92, 1.0, (norm_t - 0.92) / 0.08)
 		current_head_pos = start_pos.lerp(target_pos, beam_progress)
 
 		_update_beam_geometry()
@@ -236,12 +268,23 @@ func _process(delta: float) -> void:
 			else:
 				_check_ai_defense_trigger()
 
-		# Detección de colisión: cuando la cabeza del rayo alcanza el objetivo, expira el tiempo o toca el suelo
-		var dist_to_target = current_head_pos.distance_to(target_pos)
-		if dist_to_target <= 0.85 or time_left <= 0.0 or beam_progress >= 0.98 or current_head_pos.y <= 0.15:
-			if is_aimed_miss:
+		# Detección de colisión: en tiros desviados, comprobar impacto contra terreno/rocas (capa 1)
+		var dist_to_target: float = current_head_pos.distance_to(target_pos)
+		if is_aimed_miss:
+			var space_env: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state if is_inside_tree() and get_world_3d() else null
+			if space_env and prev_head_pos.distance_squared_to(current_head_pos) > 0.0025:
+				var rq := PhysicsRayQueryParameters3D.create(prev_head_pos, current_head_pos)
+				rq.collision_mask = 1
+				var r_hit: Dictionary = space_env.intersect_ray(rq)
+				if not r_hit.is_empty():
+					current_head_pos = r_hit["position"]
+					target_pos = current_head_pos
+					_resolve_aimed_miss()
+					return
+			if dist_to_target <= 0.85 or time_left <= 0.0 or beam_progress >= 0.98 or current_head_pos.y <= 0.15:
 				_resolve_aimed_miss()
-			else:
+		else:
+			if time_left <= 0.0 or beam_progress >= 0.98 or (norm_t >= 0.88 and dist_to_target <= 0.85):
 				_resolve_direct_hit()
 
 	elif state == BeamState.HAND_HOLDING:
@@ -269,12 +312,13 @@ func _calculate_adaptive_reaction_time() -> float:
 	var np_atk = attacker.get("current_np") if attacker and attacker.get("current_np") != null else 10000.0
 	var np_def = defender.get("current_np") if defender and defender.get("current_np") != null else 10000.0
 
-	var diff_ratio = clampf((float(np_def) - float(np_atk)) / maxf(float(np_atk), 100.0), -0.65, 1.2)
-	var base_t = 2.2
-	if defender and defender.get("is_in_zenkai_state"):
-		base_t = 2.8 # Ventana más amplia en Zenkai para permitir remontada épica
+	var diff_ratio = clampf((float(np_def) - float(np_atk)) / maxf(float(np_atk), 100.0), -0.50, 0.80)
+	var base_t: float = 3.2
+	if defender and (bool(defender.get("is_in_zenkai_state")) or bool(defender.get("is_in_furia"))):
+		base_t = 3.8 # Ventana más amplia en Zenkai o Furia para permitir remontada épica
 
-	return base_t * (1.0 + diff_ratio)
+	var bt_mult: float = defender.get_dramatic_modifier("bullet_time_mult", 1.0) if (defender and is_instance_valid(defender) and defender.has_method("get_dramatic_modifier")) else 1.0
+	return maxf(base_t * (1.0 + diff_ratio), 1.6) * bt_mult
 
 
 func _check_player_defense_options() -> void:
@@ -349,16 +393,22 @@ var ai_action_time: float = 0.8
 func _plan_ai_defense_reaction() -> void:
 	var ai_ki = defender.get("current_ki") if defender and defender.get("current_ki") != null else 50.0
 	var ai_zenkai = defender.get("is_in_zenkai_state") if defender and defender.get("is_in_zenkai_state") != null else false
+	var is_obscured: bool = defender != null and is_instance_valid(defender) and bool(defender.get("smoke_obscures_active")) and (float(defender.get("smoke_obscured_timer")) if defender.get("smoke_obscured_timer") != null else 0.0) > 0.0
+	var in_crater_stun: bool = defender != null and is_instance_valid(defender) and (defender.get("ground_crater_stun_timer") != null and float(defender.get("ground_crater_stun_timer")) > 0.0)
+	var clash_prob: float = 0.15 if in_crater_stun else (0.35 if is_obscured else 0.70)
+	var vanish_prob: float = 0.0 if in_crater_stun else (0.25 if is_obscured else 0.55)
+	var block_prob: float = 0.40 if in_crater_stun else 0.65
+	var delay_extra: float = 0.55 if in_crater_stun else (0.35 if is_obscured else 0.0)
 
-	if ai_ki >= 45.0 and (ai_zenkai or randf() < 0.70):
+	if ai_ki >= 45.0 and ((ai_zenkai and not in_crater_stun) or randf() < clash_prob):
 		ai_planned_action = "clash"
-		ai_action_time = randf_range(0.45, reaction_duration * 0.75)
-	elif ai_ki >= 25.0 and randf() < 0.55:
+		ai_action_time = minf(randf_range(0.45, reaction_duration * 0.75) + delay_extra, reaction_duration * 0.92)
+	elif ai_ki >= 25.0 and randf() < vanish_prob:
 		ai_planned_action = "vanish"
-		ai_action_time = randf_range(0.5, reaction_duration * 0.85)
-	elif randf() < 0.65:
+		ai_action_time = minf(randf_range(0.5, reaction_duration * 0.85) + delay_extra, reaction_duration * 0.92)
+	elif randf() < block_prob:
 		ai_planned_action = "block"
-		ai_action_time = randf_range(0.3, reaction_duration * 0.60)
+		ai_action_time = minf(randf_range(0.3, reaction_duration * 0.60) + delay_extra * 0.6, reaction_duration * 0.92)
 	else:
 		ai_planned_action = "hit"
 
@@ -415,7 +465,11 @@ func _trigger_beam_clash(clash_defender: Node3D, counter_tech: String, counter_c
 	# Instanciar el controlador del Choque de Haces con BP y carga reales
 	var clash = BeamClashControllerClass.new()
 	clash.name = "BeamClashController"
-	get_tree().current_scene.add_child(clash)
+	var clash_parent: Node = get_tree().current_scene if (get_tree() and get_tree().current_scene) else get_parent()
+	if clash_parent:
+		clash_parent.add_child(clash)
+	else:
+		add_sibling(clash)
 	clash.setup(attacker, clash_defender, power_name, energy_color, counter_tech, counter_color, 4.0, base_damage, counter_damage, atk_charge, def_charge)
 
 	emit_signal("beam_clash_initiated", clash)
@@ -439,6 +493,8 @@ func _resolve_deflection() -> void:
 			defender.recharge_ki(25.0)
 		if defender.has_method("increase_np"):
 			defender.increase_np(300.0)
+		if bool(defender.get("is_in_furia")) and not bool(defender.get("is_in_zenkai_state")) and defender.has_method("trigger_comeback_zenkai"):
+			defender.trigger_comeback_zenkai()
 
 	_spawn_spark_at(current_head_pos, Color(1.0, 0.9, 0.2))
 
@@ -525,7 +581,7 @@ func _resolve_hand_hold_dissipated() -> void:
 	var chip_dmg: float = base_damage * 0.10
 	if defender and is_instance_valid(defender):
 		if defender.has_method("take_hit"):
-			defender.take_hit(chip_dmg, beam_dir)
+			defender.take_hit(chip_dmg, beam_dir, false)
 		if defender.has_method("apply_knockback"):
 			defender.apply_knockback(beam_dir, 4.0)
 	_spawn_spark_at(current_head_pos, Color(0.45, 0.95, 1.0))
@@ -549,10 +605,10 @@ func _resolve_containment_block(is_failed_deflect: bool = false) -> void:
 		if defender.has_method("consume_ki"):
 			defender.consume_ki(minf(def_ki, 16.0))
 		if defender.has_method("take_hit"):
-			defender.take_hit(mitigated_damage, beam_dir)
+			defender.take_hit(mitigated_damage, beam_dir, false)
 		if defender.has_method("apply_knockback"):
 			var kb_spd: float = (9.5 if guard_broken else 5.0) * bp_ratio
-			defender.apply_knockback(beam_dir, kb_spd)
+			defender.apply_knockback(beam_dir, kb_spd, 2.6)
 
 	if attacker and is_instance_valid(attacker) and bool(attacker.get("is_comeback_zenkai")) and attacker.has_method("notify_attack_failed") and not guard_broken:
 		attacker.notify_attack_failed()
@@ -572,6 +628,128 @@ func _resolve_containment_block(is_failed_deflect: bool = false) -> void:
 	_cleanup_and_finish("guard_break" if guard_broken else "blocked", mitigated_damage)
 
 
+static func compute_super_explosion_splash(
+	blast_pos: Vector3,
+	target_pos: Vector3,
+	blast_radius: float,
+	base_super_dmg: float,
+	atk_bp: float,
+	def_bp: float
+) -> Dictionary:
+	var dist: float = blast_pos.distance_to(target_pos)
+	if dist > blast_radius:
+		return { "in_radius": false, "damage_bp": 0.0, "knockback_speed": 0.0, "no_sell": false, "proximity": 0.0, "power_ratio": 0.0 }
+	var prox: float = clampf(1.0 - (dist / maxf(blast_radius, 0.1)), 0.0, 1.0)
+	var attack_power_bp: float = maxf(atk_bp, 1000.0) * clampf(base_super_dmg / 1800.0, 0.75, 2.20)
+	var power_ratio: float = attack_power_bp / maxf(def_bp, 1000.0)
+	if power_ratio <= 0.55 or (power_ratio * prox) <= 0.22:
+		return { "in_radius": true, "damage_bp": 0.0, "knockback_speed": 0.0, "no_sell": true, "proximity": prox, "power_ratio": power_ratio }
+	var intensity: float = clampf((power_ratio - 0.50) * prox, 0.05, 1.60)
+	var dmg_bp: float = base_super_dmg * 0.45 * intensity
+	var kb_speed: float = clampf(4.5 + intensity * 14.0, 0.0, 24.0)
+	if kb_speed < 3.0:
+		kb_speed = 0.0
+	return { "in_radius": true, "damage_bp": dmg_bp, "knockback_speed": kb_speed, "no_sell": false, "proximity": prox, "power_ratio": power_ratio }
+
+
+func _get_super_explosion_radius() -> float:
+	var p_low: String = power_name.to_lower()
+	if "genkidama" in p_low:
+		return 14.0
+	if "big bang" in p_low or "final flash" in p_low or "super kamehameha" in p_low or "10x" in p_low:
+		return 11.0
+	return 9.0
+
+
+func _spawn_super_aoe_explosion(blast_pos: Vector3, apply_splash_to_defender: bool) -> Dictionary:
+	var blast_radius: float = _get_super_explosion_radius()
+	var exp_parent: Node = (get_tree().current_scene if (is_inside_tree() and get_tree() and get_tree().current_scene) else get_parent())
+
+	if exp_parent and exp_parent.is_inside_tree():
+		# Cúpula esférica de explosión + onda expansiva anular
+		var dome := MeshInstance3D.new()
+		dome.name = "SuperAoEDome"
+		var sph := SphereMesh.new()
+		sph.radius = maxf(blast_radius * 0.18, 1.2)
+		sph.height = sph.radius * 2.0
+		sph.radial_segments = 18
+		sph.rings = 10
+		dome.mesh = sph
+
+		var dome_mat := ShaderMaterial.new()
+		dome_mat.shader = KiCoronaShader
+		dome_mat.set_shader_parameter("base_color", Color(energy_color.r, energy_color.g, energy_color.b, 0.90))
+		dome_mat.set_shader_parameter("speed", 6.5)
+		dome_mat.set_shader_parameter("vertex_displacement", 0.14)
+		dome.material_override = dome_mat
+		exp_parent.add_child(dome)
+		dome.global_position = blast_pos
+
+		var dome_tw: Tween = dome.create_tween()
+		if dome_tw:
+			dome_tw.tween_property(dome, "scale", Vector3.ONE * clampf(blast_radius * 0.42, 2.5, 5.5), 0.45).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+			dome_tw.tween_property(dome, "scale", Vector3.ONE * 0.05, 0.25)
+			dome_tw.tween_callback(dome.queue_free)
+
+		var ring := MeshInstance3D.new()
+		ring.name = "SuperAoERing"
+		var quad := QuadMesh.new()
+		quad.size = Vector2(3.0, 3.0)
+		ring.mesh = quad
+		ring.rotation.x = -PI * 0.5
+		var r_mat := ShaderMaterial.new()
+		r_mat.shader = ShockwaveShader
+		r_mat.set_shader_parameter("ring_color", Color(energy_color.r, energy_color.g, energy_color.b, 0.92))
+		ring.material_override = r_mat
+		exp_parent.add_child(ring)
+		ring.global_position = blast_pos
+
+		var r_tw: Tween = ring.create_tween()
+		if r_tw:
+			r_tw.tween_property(ring, "scale", Vector3.ONE * (blast_radius * 0.65), 0.55).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+			r_tw.parallel().tween_property(r_mat, "shader_parameter/ring_color:a", 0.0, 0.55)
+			r_tw.tween_callback(ring.queue_free)
+
+		if is_inside_tree() and get_tree():
+			KiSmokeFX.spawn_smoke(get_tree(), blast_pos, 2.2)
+
+	var result: Dictionary = { "in_radius": false, "damage_bp": 0.0, "knockback_speed": 0.0, "no_sell": false }
+	if apply_splash_to_defender and defender and is_instance_valid(defender) and not bool(defender.get("is_match_over")):
+		var atk_bp: float = float(attacker.get("current_np")) if (attacker and is_instance_valid(attacker) and attacker.get("current_np") != null) else 10000.0
+		var def_bp: float = float(defender.get("current_np")) if (defender.get("current_np") != null) else 10000.0
+		var def_center: Vector3 = defender.global_position + Vector3(0.0, 1.0, 0.0)
+		result = compute_super_explosion_splash(blast_pos, def_center, blast_radius, base_damage, atk_bp, def_bp)
+
+		if bool(result.get("in_radius", false)):
+			var def_name: String = defender.character_data.character_name if (defender.get("character_data") and "character_name" in defender.character_data) else defender.name
+			if bool(result.get("no_sell", false)):
+				if defender.has_method("_spawn_bp_delta_popup"):
+					defender._spawn_bp_delta_popup(0.0, "0 BP · INMUNE")
+				if defender.has_method("_log_combat_event"):
+					defender._log_combat_event("🛡️ ¡%s RESISTIÓ LA ONDA EXPANSIVA SIN MOVERSE! (0 BP)" % def_name, "success")
+				if attacker and is_instance_valid(attacker) and attacker.has_method("_log_combat_event"):
+					attacker._log_combat_event("🛡️ ¡%s aguantó la onda explosiva de %s sin daño ni retroceso! (0 BP)" % [def_name, power_name], "warning")
+			else:
+				var dmg_bp: float = float(result.get("damage_bp", 0.0))
+				var kb_speed: float = float(result.get("knockback_speed", 0.0))
+				var radial_dir: Vector3 = defender.global_position - blast_pos
+				radial_dir.y = 0.0
+				if radial_dir.length_squared() < 0.01:
+					radial_dir = beam_dir
+				else:
+					radial_dir = (radial_dir.normalized() + Vector3(0.0, 0.25, 0.0)).normalized()
+
+				defender.set("_last_hit_attacker_bp", maxf(atk_bp, 1000.0))
+				defender.set("_last_hit_damage_np", dmg_bp)
+				if defender.has_method("take_hit"):
+					defender.take_hit(dmg_bp, radial_dir, false)
+				if kb_speed >= 3.0 and defender.has_method("apply_knockback"):
+					defender.apply_knockback(radial_dir, kb_speed, 2.4)
+				if defender.has_method("_log_combat_event"):
+					defender._log_combat_event("💥 ¡ONDA EXPANSIVA DE %s! (-%d BP | Empuje %.1f m/s)" % [power_name.to_upper(), int(dmg_bp), kb_speed], "warning")
+	return result
+
+
 func _resolve_evasion() -> void:
 	state = BeamState.EVADED
 	is_active = false
@@ -583,16 +761,28 @@ func _resolve_evasion() -> void:
 	if defender and is_instance_valid(defender) and defender.has_method("consume_ki"):
 		defender.consume_ki(15.0)
 
-	# El haz continúa su trayectoria recta y colisiona contra las montañas lejanas
-	var mountain_target = start_pos + beam_dir * 80.0
+	# Determinar punto real de explosión al continuar su trayectoria recta (colisión con suelo/montaña o fin de rango cercano)
+	var mountain_target: Vector3 = start_pos + beam_dir * 48.0
+	var space_env: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state if is_inside_tree() and get_world_3d() else null
+	if space_env:
+		var rq := PhysicsRayQueryParameters3D.create(current_head_pos, mountain_target)
+		rq.collision_mask = 1
+		var hit: Dictionary = space_env.intersect_ray(rq)
+		if not hit.is_empty():
+			mountain_target = hit["position"]
+
 	var tw = create_tween()
 	tw.tween_method(func(p: Vector3):
 		current_head_pos = p
 		_update_beam_geometry()
 	, current_head_pos, mountain_target, 0.40).set_trans(Tween.TRANS_LINEAR)
 
-	print("[SuperBeamSequence] 💨 ¡Z-VANISH EVASIVO! El haz pasó de largo hacia las cordilleras.")
-	tw.tween_callback(func(): _cleanup_and_finish("evaded", 0.0))
+	print("[SuperBeamSequence] 💨 ¡Z-VANISH EVASIVO! El haz pasó de largo y detonó al impacto.")
+	tw.tween_callback(func():
+		if is_instance_valid(self):
+			_spawn_super_aoe_explosion(mountain_target, true)
+			_cleanup_and_finish("evaded", 0.0)
+	)
 
 
 func _resolve_aimed_miss() -> void:
@@ -607,12 +797,15 @@ func _resolve_aimed_miss() -> void:
 
 	_spawn_spark_at(current_head_pos, energy_color)
 	if current_head_pos.y <= 3.0:
-		_spawn_plasma_crater(Vector3(current_head_pos.x, 0.12, current_head_pos.z), 2.0, energy_color)
+		_spawn_plasma_crater(Vector3(current_head_pos.x, 0.12, current_head_pos.z), 2.4, energy_color)
+
+	# Explosión AoE con onda expansiva (daño BP + empuje según BP ataque vs BP defensor)
+	_spawn_super_aoe_explosion(current_head_pos, true)
 
 	if attacker and is_instance_valid(attacker) and attacker.has_method("_log_combat_event"):
-		attacker._log_combat_event("💨 ¡%s pasó de largo! Apunta tus manos hacia el rival al lanzar en Fase 2." % power_name, "warning")
+		attacker._log_combat_event("💥 ¡%s detonó cerca del objetivo! (Onda expansiva)" % power_name, "info")
 
-	print("[SuperBeamSequence] 💨 ¡TIRO FALLADO POR PUNTERÍA! %s viajó desviado sin impactar al rival." % power_name)
+	print("[SuperBeamSequence] 💥 ¡DETONACIÓN DE EXPLOSIÓN %s en %s!" % [power_name, str(current_head_pos)])
 	_cleanup_and_finish("missed", 0.0)
 
 
@@ -633,9 +826,9 @@ func _resolve_direct_hit() -> void:
 	var bp_ratio: float = clampf(sqrt(bp_atk / bp_def), 0.45, 2.8)
 	if defender and is_instance_valid(defender):
 		if defender.has_method("take_hit"):
-			defender.take_hit(final_damage, beam_dir)
+			defender.take_hit(final_damage, beam_dir, false)
 		if defender.has_method("apply_knockback"):
-			defender.apply_knockback(beam_dir, 10.0 * bp_ratio)
+			defender.apply_knockback(beam_dir, clampf(16.0 * bp_ratio, 12.0, 26.0), 2.4)
 		if defender.get("procedural_animator"):
 			defender.procedural_animator.trigger_hit_flinch(2.2, beam_dir)
 
@@ -742,6 +935,17 @@ func _is_defender_crossing_arms(origin: XROrigin3D) -> bool:
 
 
 func _update_beam_geometry() -> void:
+	if is_orb_super:
+		if beam_core_mesh and is_instance_valid(beam_core_mesh):
+			beam_core_mesh.visible = false
+		if beam_head_mesh and is_instance_valid(beam_head_mesh):
+			beam_head_mesh.visible = true
+			beam_head_mesh.global_position = current_head_pos
+			beam_head_mesh.rotate_y(0.04)
+		if beam_light and is_instance_valid(beam_light):
+			beam_light.global_position = current_head_pos
+		return
+
 	if not beam_core_mesh or not is_instance_valid(beam_core_mesh):
 		return
 
@@ -779,6 +983,82 @@ func _exit_tree() -> void:
 	if beam_hud_anchor and is_instance_valid(beam_hud_anchor):
 		beam_hud_anchor.queue_free()
 		beam_hud_anchor = null
+	if super_action_card_anchor and is_instance_valid(super_action_card_anchor):
+		super_action_card_anchor.queue_free()
+		super_action_card_anchor = null
+
+
+func _ensure_super_action_card() -> void:
+	var cam: Camera3D = _get_active_camera()
+	if not cam or not is_instance_valid(cam):
+		return
+	if super_action_card_anchor and is_instance_valid(super_action_card_anchor):
+		return
+
+	super_action_card_anchor = Node3D.new()
+	super_action_card_anchor.name = "SuperActionGuideCardAnchor"
+	super_action_card_anchor.position = Vector3(-0.42, -0.20, -1.12)
+	super_action_card_anchor.rotation_degrees = Vector3(0.0, 14.0, 0.0)
+	cam.add_child(super_action_card_anchor)
+
+	var border := MeshInstance3D.new()
+	border.name = "CardBorder"
+	var b_q := QuadMesh.new()
+	b_q.size = Vector2(0.435, 0.275)
+	border.mesh = b_q
+	_super_card_border_mat = StandardMaterial3D.new()
+	_super_card_border_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_super_card_border_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_super_card_border_mat.no_depth_test = true
+	_super_card_border_mat.render_priority = 122
+	_super_card_border_mat.albedo_color = Color(0.15, 0.85, 1.0, 0.88)
+	border.material_override = _super_card_border_mat
+	super_action_card_anchor.add_child(border)
+
+	var bg := MeshInstance3D.new()
+	bg.name = "CardBg"
+	var bg_q := QuadMesh.new()
+	bg_q.size = Vector2(0.42, 0.26)
+	bg.mesh = bg_q
+	bg.position = Vector3(0.0, 0.0, 0.001)
+	var bg_mat := StandardMaterial3D.new()
+	bg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	bg_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	bg_mat.no_depth_test = true
+	bg_mat.render_priority = 123
+	bg_mat.albedo_color = Color(0.03, 0.06, 0.11, 0.88)
+	bg.material_override = bg_mat
+	super_action_card_anchor.add_child(bg)
+
+	_super_card_label = Label3D.new()
+	_super_card_label.name = "SuperCardText"
+	_super_card_label.font_size = 18
+	_super_card_label.pixel_size = 0.00115
+	_super_card_label.no_depth_test = true
+	_super_card_label.render_priority = 124
+	_super_card_label.outline_size = 6
+	_super_card_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.95)
+	_super_card_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_super_card_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_super_card_label.position = Vector3(-0.195, 0.0, 0.002)
+	super_action_card_anchor.add_child(_super_card_label)
+	_refresh_super_action_card_text()
+
+
+func _refresh_super_action_card_text() -> void:
+	if not _super_card_label or not is_instance_valid(_super_card_label):
+		return
+	var is_defending_player: bool = (defender != null and is_instance_valid(defender) and bool(defender.get("is_player")) and not is_aimed_miss)
+	if is_defending_player:
+		if _super_card_border_mat:
+			_super_card_border_mat.albedo_color = Color(0.20, 0.88, 1.0, 0.90)
+		_super_card_label.modulate = Color(0.90, 0.97, 1.0)
+		_super_card_label.text = "⚠️ SUPER ENTRANTE — ACCIONES\n• Stick Izq/Der: Esquive Z-Vanish\n• Manotazo fuerte: Desviar\n• 2 Grips + Agitar: Aguantar\n• 2 Puños en X (pecho): Bloqueo\n• Lanza tu Super: ¡CHOQUE!"
+	else:
+		if _super_card_border_mat:
+			_super_card_border_mat.albedo_color = Color(1.0, 0.65, 0.18, 0.90)
+		_super_card_label.modulate = Color(1.0, 0.93, 0.72)
+		_super_card_label.text = "🔥 SUPER ATAQUE EN CURSO\n• Mantén puntería al objetivo\n• Si el rival contrataca:\n  ¡Agita los controles para Choque!"
 
 
 func _update_hud(rem_time: float) -> void:
@@ -790,7 +1070,7 @@ func _update_hud(rem_time: float) -> void:
 		if cam and is_instance_valid(cam):
 			beam_hud_anchor = Node3D.new()
 			beam_hud_anchor.name = "BeamBulletTimeHUDAnchor"
-			beam_hud_anchor.position = Vector3(0.0, 0.22, -1.18)
+			beam_hud_anchor.position = Vector3(0.0, 0.24, -1.18)
 			cam.add_child(beam_hud_anchor)
 			if alert_label.get_parent() and alert_label.get_parent() != beam_hud_anchor:
 				alert_label.get_parent().remove_child(alert_label)
@@ -798,6 +1078,8 @@ func _update_hud(rem_time: float) -> void:
 				beam_hud_anchor.add_child(alert_label)
 			alert_label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 			alert_label.position = Vector3.ZERO
+	_ensure_super_action_card()
+	_refresh_super_action_card_text()
 
 	if is_aimed_miss:
 		alert_label.modulate = Color(1.0, 0.72, 0.25)
@@ -826,10 +1108,10 @@ func _update_hud(rem_time: float) -> void:
 			zenkai_prefix = "💀 ¡ATAQUE ZENKAI ENTRANTE! 💀\n"
 			alert_label.modulate = Color(1.0, 0.22, 0.22)
 	else:
-		alert_label.modulate = Color(1.0, 0.8, 0.2)
+		alert_label.modulate = Color(1.0, 0.85, 0.25)
 
 	if defender and is_instance_valid(defender) and bool(defender.get("is_player")):
-		alert_label.text = "%s⚡ ¡%s! [%s] %.1fs\n🛡️Cruzada(G+T) | 👐Aguantar(Grips+Agita) | ✋Desvío | ⚡Super | 💨Stick" % [
+		alert_label.text = "%s⚠️ ¡%s ENTRANTE! ⚠️\n[%s] %.1fs (Ver acciones abajo izq.)" % [
 			zenkai_prefix, power_name.to_upper(), bar, maxf(rem_time, 0.0)
 		]
 	else:
@@ -839,9 +1121,11 @@ func _update_hud(rem_time: float) -> void:
 
 
 func _build_visual_beam() -> void:
-	var radius = 0.45 if tier >= 4 else 0.35
+	var p_low: String = power_name.to_lower()
+	var is_genki: bool = "genkidama" in p_low
+	var radius: float = (1.45 if is_genki else 0.72) if is_orb_super else (0.45 if tier >= 4 else 0.35)
 
-	# 1. Cuerpo cilíndrico del haz (Manto de plasma exterior)
+	# 1. Cuerpo cilíndrico del haz (oculto si es Esfera Super como Big Bang / Genkidama)
 	beam_core_mesh = MeshInstance3D.new()
 	beam_core_mesh.name = "BeamCore"
 	var cyl = CylinderMesh.new()
@@ -857,6 +1141,7 @@ func _build_visual_beam() -> void:
 	mat_beam.set_shader_parameter("flow_speed", 14.0)
 	mat_beam.set_shader_parameter("core_intensity", 3.8)
 	beam_core_mesh.material_override = mat_beam
+	beam_core_mesh.visible = not is_orb_super
 	add_child(beam_core_mesh)
 
 	# 1.1 Núcleo interior blanco incandescente (White-Hot Inner Core)
@@ -874,21 +1159,33 @@ func _build_visual_beam() -> void:
 	inner_core.material_override = mat_inner
 	beam_core_mesh.add_child(inner_core)
 
-	# 2. Cabeza del haz (esfera de impacto)
+	# 2. Cabeza del haz o Esfera Masiva (Big Bang / Genkidama)
 	beam_head_mesh = MeshInstance3D.new()
 	beam_head_mesh.name = "BeamHead"
 	var sph = SphereMesh.new()
-	sph.radius = radius * 1.3
-	sph.height = radius * 2.6
+	var head_r: float = radius if is_orb_super else radius * 1.3
+	sph.radius = head_r
+	sph.height = head_r * 2.0
+	sph.radial_segments = 24
+	sph.rings = 12
 	beam_head_mesh.mesh = sph
-	beam_head_mesh.material_override = mat_beam
+	if is_orb_super:
+		var mat_orb := ShaderMaterial.new()
+		mat_orb.shader = KiCoronaShader
+		mat_orb.set_shader_parameter("base_color", Color(energy_color.r, energy_color.g, energy_color.b, 0.94))
+		mat_orb.set_shader_parameter("speed", 5.5)
+		mat_orb.set_shader_parameter("vertex_displacement", 0.08)
+		beam_head_mesh.material_override = mat_orb
+	else:
+		beam_head_mesh.material_override = mat_beam
 	add_child(beam_head_mesh)
 
 	var inner_head = MeshInstance3D.new()
 	inner_head.name = "InnerHeadCore"
 	var sph_inner = SphereMesh.new()
-	sph_inner.radius = radius * 0.8
-	sph_inner.height = radius * 1.6
+	var inner_r: float = head_r * (0.62 if is_orb_super else 0.62)
+	sph_inner.radius = inner_r
+	sph_inner.height = inner_r * 2.0
 	inner_head.mesh = sph_inner
 	inner_head.material_override = mat_inner
 	beam_head_mesh.add_child(inner_head)
@@ -897,8 +1194,8 @@ func _build_visual_beam() -> void:
 	beam_light = OmniLight3D.new()
 	beam_light.name = "BeamLight"
 	beam_light.light_color = energy_color
-	beam_light.light_energy = 4.5
-	beam_light.omni_range = 7.0
+	beam_light.light_energy = 6.0 if is_orb_super else 4.5
+	beam_light.omni_range = 10.0 if is_orb_super else 7.0
 	add_child(beam_light)
 
 
@@ -916,11 +1213,12 @@ func _build_reticle_and_hud() -> void:
 	if cam and is_instance_valid(cam):
 		beam_hud_anchor = Node3D.new()
 		beam_hud_anchor.name = "BeamBulletTimeHUDAnchor"
-		beam_hud_anchor.position = Vector3(0.0, 0.22, -1.18)
+		beam_hud_anchor.position = Vector3(0.0, 0.24, -1.18)
 		cam.add_child(beam_hud_anchor)
 		alert_label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 		alert_label.position = Vector3.ZERO
 		beam_hud_anchor.add_child(alert_label)
+		_ensure_super_action_card()
 	else:
 		add_child(alert_label)
 
@@ -957,7 +1255,10 @@ func _build_audio() -> void:
 
 
 func _spawn_spark_at(pos: Vector3, col: Color) -> void:
-	if not is_inside_tree() or not get_tree() or not get_tree().current_scene:
+	if not is_inside_tree() or not get_tree():
+		return
+	var target_parent: Node = get_tree().current_scene if get_tree().current_scene else get_parent()
+	if not target_parent:
 		return
 	var sw = MeshInstance3D.new()
 	var quad = QuadMesh.new()
@@ -969,7 +1270,7 @@ func _spawn_spark_at(pos: Vector3, col: Color) -> void:
 	mat.shader = ShockwaveShader
 	mat.set_shader_parameter("ring_color", col)
 	sw.material_override = mat
-	get_tree().current_scene.add_child(sw)
+	target_parent.add_child(sw)
 	sw.global_position = pos
 
 	var tw = sw.create_tween()
@@ -980,7 +1281,10 @@ func _spawn_spark_at(pos: Vector3, col: Color) -> void:
 
 
 func _spawn_plasma_crater(pos: Vector3, radius: float, col: Color) -> void:
-	if not is_inside_tree() or not get_tree() or not get_tree().current_scene:
+	if not is_inside_tree() or not get_tree():
+		return
+	var target_parent: Node = get_tree().current_scene if get_tree().current_scene else get_parent()
+	if not target_parent:
 		return
 	var disc := MeshInstance3D.new()
 	disc.name = "BeamPlasmaCrater"
@@ -998,7 +1302,7 @@ func _spawn_plasma_crater(pos: Vector3, radius: float, col: Color) -> void:
 	mat.albedo_color = Color(col.r, col.g, col.b, 0.78)
 	disc.material_override = mat
 
-	get_tree().current_scene.add_child(disc)
+	target_parent.add_child(disc)
 	disc.global_position = pos
 
 	var fade_tw := get_tree().create_tween()

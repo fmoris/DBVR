@@ -1,0 +1,25 @@
+[gd_resource type="Resource" script_class="DramaticMiniEventData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dramatic_mini_event_data.gd" id="1_dme"]
+
+[resource]
+script = ExtResource("1_dme")
+event_id = "sobrecarga_ki"
+display_name = "Sobrecarga de Aura"
+instruction_text = "¡AGITA AMBOS PUÑOS PARA ESTABILIZAR TU KI!"
+character_filter = ""
+condition_type = "low_ki_or_even"
+minigame_type = "shake_pump"
+target_count = 6
+duration_sec = 3.5
+is_permanent_bonus = false
+bonus_duration_sec = 18.0
+bonus_label = "SOBRECARGA"
+bonus_effect_text = "+35 Ki · x2 Ki Pasivo · -25% Coste Blast"
+bonus_color = Color(0.2, 0.9, 1, 1)
+bonus_mods = {
+"blast_cost_mult": 0.75,
+"instant_ki": 35.0,
+"passive_ki_mult": 2.0
+}
+weight = 1.15

@@ -402,17 +402,27 @@ func _execute_character_swap() -> void:
 		return
 
 	var goku_res: CharacterData = load("res://resources/goku.tres")
+	var goku_zenkai_res: CharacterData = load("res://resources/goku_zenkai.tres")
 	var vegeta_res: CharacterData = load("res://resources/vegeta.tres")
 	if not goku_res or not vegeta_res:
 		push_warning("[VRInGameMenu] No se pudieron cargar goku.tres o vegeta.tres para intercambio.")
 		return
 
-	var p_is_vegeta: bool = false
+	var p_name_upper: String = ""
 	if player.get("character_data"):
-		p_is_vegeta = "VEGETA" in str(player.character_data.character_name).to_upper()
+		p_name_upper = str(player.character_data.character_name).to_upper()
 
-	var new_player_data: CharacterData = goku_res if p_is_vegeta else vegeta_res
-	var new_enemy_data: CharacterData = vegeta_res if p_is_vegeta else goku_res
+	var new_player_data: CharacterData = vegeta_res
+	var new_enemy_data: CharacterData = goku_res
+	if "ZENKAI" in p_name_upper:
+		new_player_data = goku_res
+		new_enemy_data = vegeta_res
+	elif "VEGETA" in p_name_upper:
+		new_player_data = goku_zenkai_res if goku_zenkai_res else goku_res
+		new_enemy_data = vegeta_res
+	else:
+		new_player_data = vegeta_res
+		new_enemy_data = goku_zenkai_res if goku_zenkai_res else goku_res
 
 	if player.has_method("swap_character_data"):
 		player.swap_character_data(new_player_data)
