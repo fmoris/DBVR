@@ -60,6 +60,8 @@ var _super_card_border_mat: StandardMaterial3D = null
 var hold_progress: float = 0.0
 var hold_required_sec: float = 1.65
 var hold_stall_timer: float = 0.0
+var _reading_pause_timer: float = 0.0
+var _last_card_state_key: String = ""
 
 # Audio espacial
 var audio_player: AudioStreamPlayer3D = null
@@ -206,9 +208,12 @@ func setup(
 	if is_aimed_miss:
 		reaction_duration = 0.65
 		time_left = reaction_duration
+		_reading_pause_timer = 0.0
 		Engine.time_scale = 0.65
 	else:
-		Engine.time_scale = 0.11
+		var is_player_def: bool = defender != null and is_instance_valid(defender) and bool(defender.get("is_player"))
+		_reading_pause_timer = 1.0 if is_player_def else 0.0
+		Engine.time_scale = 0.05 if _reading_pause_timer > 0.0 else 0.11
 
 	_build_visual_beam()
 	_build_reticle_and_hud()
@@ -230,7 +235,12 @@ func _process(delta: float) -> void:
 	if state == BeamState.ADVANCING_BULLET_TIME:
 		# delta real no afectado por time_scale para la cuenta regresiva subjetiva
 		var real_delta = delta / maxf(Engine.time_scale, 0.01)
-		time_left -= real_delta
+		if _reading_pause_timer > 0.0:
+			_reading_pause_timer = maxf(_reading_pause_timer - real_delta, 0.0)
+			if _reading_pause_timer <= 0.0 and not is_aimed_miss:
+				Engine.time_scale = 0.11
+		else:
+			time_left -= real_delta
 
 		# Anclar el origen del rayo en tiempo real a las manos del atacante
 		start_pos = _get_attacker_hand_position()
@@ -313,12 +323,12 @@ func _calculate_adaptive_reaction_time() -> float:
 	var np_def = defender.get("current_np") if defender and defender.get("current_np") != null else 10000.0
 
 	var diff_ratio = clampf((float(np_def) - float(np_atk)) / maxf(float(np_atk), 100.0), -0.50, 0.80)
-	var base_t: float = 3.2
+	var base_t: float = 4.5
 	if defender and (bool(defender.get("is_in_zenkai_state")) or bool(defender.get("is_in_furia"))):
-		base_t = 3.8 # Ventana más amplia en Zenkai o Furia para permitir remontada épica
+		base_t = 5.0 # Ventana más amplia en Zenkai o Furia para permitir remontada épica
 
 	var bt_mult: float = defender.get_dramatic_modifier("bullet_time_mult", 1.0) if (defender and is_instance_valid(defender) and defender.has_method("get_dramatic_modifier")) else 1.0
-	return maxf(base_t * (1.0 + diff_ratio), 1.6) * bt_mult
+	return maxf(base_t * (1.0 + diff_ratio), 2.4) * bt_mult
 
 
 func _check_player_defense_options() -> void:
@@ -470,7 +480,7 @@ func _trigger_beam_clash(clash_defender: Node3D, counter_tech: String, counter_c
 		clash_parent.add_child(clash)
 	else:
 		add_sibling(clash)
-	clash.setup(attacker, clash_defender, power_name, energy_color, counter_tech, counter_color, 4.0, base_damage, counter_damage, atk_charge, def_charge)
+	clash.setup(attacker, clash_defender, power_name, energy_color, counter_tech, counter_color, 5.5, base_damage, counter_damage, atk_charge, def_charge)
 
 	emit_signal("beam_clash_initiated", clash)
 	print("[SuperBeamSequence] ⚡ ¡CHOQUE DE PODERES ACTIVADO! Transfiriendo control a BeamClashController.")
@@ -997,14 +1007,14 @@ func _ensure_super_action_card() -> void:
 
 	super_action_card_anchor = Node3D.new()
 	super_action_card_anchor.name = "SuperActionGuideCardAnchor"
-	super_action_card_anchor.position = Vector3(-0.42, -0.20, -1.12)
-	super_action_card_anchor.rotation_degrees = Vector3(0.0, 14.0, 0.0)
+	super_action_card_anchor.position = Vector3(0.0, -0.19, -1.06)
+	super_action_card_anchor.rotation_degrees = Vector3.ZERO
 	cam.add_child(super_action_card_anchor)
 
 	var border := MeshInstance3D.new()
 	border.name = "CardBorder"
 	var b_q := QuadMesh.new()
-	b_q.size = Vector2(0.435, 0.275)
+	b_q.size = Vector2(0.60, 0.27)
 	border.mesh = b_q
 	_super_card_border_mat = StandardMaterial3D.new()
 	_super_card_border_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -1018,7 +1028,7 @@ func _ensure_super_action_card() -> void:
 	var bg := MeshInstance3D.new()
 	bg.name = "CardBg"
 	var bg_q := QuadMesh.new()
-	bg_q.size = Vector2(0.42, 0.26)
+	bg_q.size = Vector2(0.585, 0.255)
 	bg.mesh = bg_q
 	bg.position = Vector3(0.0, 0.0, 0.001)
 	var bg_mat := StandardMaterial3D.new()
@@ -1032,29 +1042,58 @@ func _ensure_super_action_card() -> void:
 
 	_super_card_label = Label3D.new()
 	_super_card_label.name = "SuperCardText"
-	_super_card_label.font_size = 18
-	_super_card_label.pixel_size = 0.00115
+	_super_card_label.font_size = 22
+	_super_card_label.pixel_size = 0.00130
 	_super_card_label.no_depth_test = true
 	_super_card_label.render_priority = 124
 	_super_card_label.outline_size = 6
 	_super_card_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.95)
 	_super_card_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	_super_card_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_super_card_label.position = Vector3(-0.195, 0.0, 0.002)
+	_super_card_label.position = Vector3(-0.27, 0.0, 0.002)
 	super_action_card_anchor.add_child(_super_card_label)
+	_last_card_state_key = ""
 	_refresh_super_action_card_text()
 
 
 func _refresh_super_action_card_text() -> void:
 	if not _super_card_label or not is_instance_valid(_super_card_label):
 		return
+	if state == BeamState.HAND_HOLDING:
+		var pct_hold: int = int(clampf(hold_progress, 0.0, 1.0) * 100.0)
+		var hold_key: String = "HOLD:" + str(pct_hold)
+		if hold_key == _last_card_state_key:
+			return
+		_last_card_state_key = hold_key
+		if _super_card_border_mat:
+			_super_card_border_mat.albedo_color = Color(0.25, 0.95, 1.0, 0.95)
+		_super_card_label.modulate = Color(0.90, 0.99, 1.0)
+		_super_card_label.text = "👐 ¡AGUANTANDO EL PODER! (%d%%)\n1. Mantén AMBOS GRIPS (sin Gatillo)\n2. ¡AGITA AMBOS MANDOS RÁPIDO!" % pct_hold
+		return
+
 	var is_defending_player: bool = (defender != null and is_instance_valid(defender) and bool(defender.get("is_player")) and not is_aimed_miss)
 	if is_defending_player:
+		var def_ki: float = float(defender.get("current_ki")) if (defender.get("current_ki") != null) else 0.0
+		var has_ki: bool = def_ki >= 15.0
+		var in_crater: bool = defender.get("ground_crater_stun_timer") != null and float(defender.get("ground_crater_stun_timer")) > 0.0
+		var bp_atk: float = maxf(float(attacker.get("current_np")) if (attacker and attacker.get("current_np") != null) else 10000.0, 100.0)
+		var bp_def: float = maxf(float(defender.get("current_np")) if (defender.get("current_np") != null) else 10000.0, 100.0)
+		var bp_deflect_ok: bool = bp_def >= bp_atk * 0.70
+		var state_key: String = "DEF:%d:%d:%d" % [1 if has_ki else 0, 1 if in_crater else 0, 1 if bp_deflect_ok else 0]
+		if state_key == _last_card_state_key:
+			return
+		_last_card_state_key = state_key
 		if _super_card_border_mat:
 			_super_card_border_mat.albedo_color = Color(0.20, 0.88, 1.0, 0.90)
 		_super_card_label.modulate = Color(0.90, 0.97, 1.0)
-		_super_card_label.text = "⚠️ SUPER ENTRANTE — ACCIONES\n• Stick Izq/Der: Esquive Z-Vanish\n• Manotazo fuerte: Desviar\n• 2 Grips + Agitar: Aguantar\n• 2 Puños en X (pecho): Bloqueo\n• Lanza tu Super: ¡CHOQUE!"
+		var vanish_line: String = "• [Aturdido Cráter] Z-Vanish bloqueado" if in_crater else ("• Stick Izq/Der: Esquive Z-Vanish (-15 Ki)" if has_ki else "• [Sin Ki <15] Z-Vanish no disponible")
+		var deflect_line: String = "• Manotazo veloz: Desviar haz" if bp_deflect_ok else "• Manotazo (BP<70%: Guardia parcial)"
+		var clash_line: String = "• Lanza tu Super (Grips cadera→frente): ¡CHOQUE!" if has_ki else "• [Sin Ki <15] ¡CHOQUE! no disponible"
+		_super_card_label.text = "⚠️ SUPER ENTRANTE — ACCIONES\n%s\n%s\n• 2 Grips al frente + Agitar: Aguantar\n• 2 Puños en X (pecho): Bloqueo\n%s" % [vanish_line, deflect_line, clash_line]
 	else:
+		if _last_card_state_key == "ATK":
+			return
+		_last_card_state_key = "ATK"
 		if _super_card_border_mat:
 			_super_card_border_mat.albedo_color = Color(1.0, 0.65, 0.18, 0.90)
 		_super_card_label.modulate = Color(1.0, 0.93, 0.72)
@@ -1111,9 +1150,14 @@ func _update_hud(rem_time: float) -> void:
 		alert_label.modulate = Color(1.0, 0.85, 0.25)
 
 	if defender and is_instance_valid(defender) and bool(defender.get("is_player")):
-		alert_label.text = "%s⚠️ ¡%s ENTRANTE! ⚠️\n[%s] %.1fs (Ver acciones abajo izq.)" % [
-			zenkai_prefix, power_name.to_upper(), bar, maxf(rem_time, 0.0)
-		]
+		if _reading_pause_timer > 0.0:
+			alert_label.text = "%s👁️ ¡ELIGE TU DEFENSA! (%.1fs lectura)\n[%s] %.1fs (Ver panel inferior)" % [
+				zenkai_prefix, _reading_pause_timer, bar, maxf(rem_time, 0.0)
+			]
+		else:
+			alert_label.text = "%s⚠️ ¡%s ENTRANTE! ⚠️\n[%s] %.1fs (Ver panel inferior)" % [
+				zenkai_prefix, power_name.to_upper(), bar, maxf(rem_time, 0.0)
+			]
 	else:
 		alert_label.text = "%s⚡ ¡%s ENTRANTE! [%s] %.1fs" % [
 			zenkai_prefix, power_name.to_upper(), bar, maxf(rem_time, 0.0)
