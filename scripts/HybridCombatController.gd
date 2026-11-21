@@ -354,8 +354,9 @@ func _process(delta: float) -> void:
 		if gesture_tree:
 			gesture_tree._reset_to_idle()
 
-	# Fix 2: Procesar Frenado Aéreo mientras el jugador vuela lanzado por impacto
+	# Fix 2: Procesar Frenado Aéreo y bloqueo de caída mientras el jugador vuela/cae por impacto
 	_process_air_brake(delta, player)
+	_process_air_fall_recovery(player)
 
 	# Bloqueo mutuo estricto: durante Choque de Poderes o Secuencia de Super Haz se bloquean otras acciones
 	if _is_exclusive_combat_sequence_active(player):
@@ -2154,6 +2155,32 @@ func _ensure_air_brake_bar() -> void:
 	_air_brake_label.position = Vector3(0.0, 0.055, 0.002)
 	_air_brake_label.text = "⚡ ¡AGITA LOS CONTROLES! 0%"
 	_air_brake_root.add_child(_air_brake_label)
+
+
+func _process_air_fall_recovery(player: Node) -> void:
+	if not player or not is_instance_valid(player) or DramaticDirector.is_dramatic_pause_active:
+		return
+	var is_falling_or_kb: bool = bool(player.get("is_air_brake_active")) or bool(player.get("is_knocked_back")) or (player.get("velocity") != null and player.velocity.y < -4.0)
+	if not is_falling_or_kb or bool(player.get("is_ragdoll_active")) or float(player.get("wall_stick_timer")) > 0.0:
+		return
+
+	var l_grip: bool = _ctrl_float(left_controller, &"grip") > 0.45 or _ctrl_pressed(left_controller, &"grip_click")
+	var r_grip: bool = _ctrl_float(right_controller, &"grip") > 0.45 or _ctrl_pressed(right_controller, &"grip_click")
+	var l_trig: bool = _ctrl_float(left_controller, &"trigger") > 0.45 or _ctrl_pressed(left_controller, &"trigger_click")
+	var r_trig: bool = _ctrl_float(right_controller, &"trigger") > 0.45 or _ctrl_pressed(right_controller, &"trigger_click")
+	var cross_guard: bool = l_grip and l_trig and r_grip and r_trig and pose_chest_guard
+
+	var st_l: Vector2 = left_controller.get_vector2("primary") if left_controller else Vector2.ZERO
+	var st_r: Vector2 = right_controller.get_vector2("primary") if right_controller else Vector2.ZERO
+	var vanish_input: bool = (st_l.length() >= 0.72 or st_r.length() >= 0.72) and float(player.get("current_ki")) >= 8.0
+
+	if cross_guard or vanish_input:
+		if vanish_input and player.has_method("drain_ki"):
+			player.drain_ki(8.0)
+		if player.has_method("cancel_air_fall"):
+			player.cancel_air_fall()
+		_pulse_haptic(left_controller, 180.0, 0.9, 0.14)
+		_pulse_haptic(right_controller, 180.0, 0.9, 0.14)
 
 
 func _process_air_brake(delta: float, player: Node) -> void:

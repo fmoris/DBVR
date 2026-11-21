@@ -3157,6 +3157,16 @@ func get_projectile_exclude_rids() -> Array[RID]:
 	return cached_exclude_rids
 
 
+func cancel_air_fall() -> void:
+	velocity = Vector3.ZERO
+	is_knocked_back = false
+	is_air_brake_active = false
+	air_brake_progress = 0.0
+	knockback_drag = 24.0
+	_spawn_bp_delta_popup(0.0, "🛡️ ¡CAÍDA FRENADA!")
+	_log_combat_event("🛡️ ¡Bukujutsu recuperado! Frenaste la caída en el aire.", "success")
+
+
 func apply_knockback(dir: Vector3, force: float, air_drag_override: float = 2.6) -> void:
 	var horiz_dir = Vector3(dir.x, 0.0, dir.z).normalized()
 	if horiz_dir.length_squared() < 0.01:
@@ -4485,5 +4495,3 @@ func play_character_action_audio(action_or_suffix: String, is_voice: bool = true
 		return
 	target_player.pitch_scale = randf_range(0.95, 1.05)
 	AudioActionManager.play_action(act_id, target_player)
-
-

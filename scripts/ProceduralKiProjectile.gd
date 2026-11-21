@@ -636,7 +636,9 @@ func _apply_projectile_hit(char_node: Node, caster: Node, pos: Vector3, hit_dir:
 			char_node._spawn_bp_delta_popup(0.0, "✋ ¡DEVOLUCIÓN PERFECTA!")
 
 	if (forced_guard_break or (bool(profile.get("launches_air_brake", false)) and not was_char_blocking)) and char_node.has_method("apply_knockback"):
-		char_node.apply_knockback(hit_dir, 18.0, 2.5)
+		var kb_dir: Vector3 = hit_dir
+		kb_dir.y = maxf(kb_dir.y, 0.08)
+		char_node.apply_knockback(kb_dir.normalized(), 18.0, 2.5)
 
 	if not was_char_blocking:
 		var total_ki_drain: float = float(profile.get("ki_drain", 3.0)) + extra_victim_ki_drain
@@ -654,9 +656,6 @@ func _apply_projectile_hit(char_node: Node, caster: Node, pos: Vector3, hit_dir:
 		caster.increase_np(effective_damage * 0.35)
 		caster.check_zenkai_conditions(char_node.current_np)
 		char_node.check_zenkai_conditions(caster.current_np)
-		if is_charged_blast and not was_char_blocking and (was_launched_in_zenkai or bool(caster.get("is_in_zenkai_state"))) and caster.has_method("trigger_zenkai_match_finish"):
-			var p_title_kb: String = power.power_name if (power and "power_name" in power) else "Ki Blast Cargado"
-			caster.trigger_zenkai_match_finish(caster, char_node, p_title_kb)
 
 
 ## Detonación principal con daño en área (AoE), saturación táctica e impacto físico
