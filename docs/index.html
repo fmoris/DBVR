@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DBZVR — Dragon Ball VR | Info y Manual de Mecánicas</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🐉 DBZVR · DRAGON BALL VR</div>
+    <nav class="nav-links">
+      <a href="#resumen">Juego</a>
+      <a href="#personajes">Personajes</a>
+      <a href="#manual">Manual por Fases</a>
+      <a href="#eventos-lore">Eventos Lore</a>
+      <a href="#miniescenas">Mini-Escenas</a>
+      <a href="#guia-rapida">¿Qué hago si…?</a>
+    </nav>
+  </header>
+
+  <main class="container">
+    <section class="hero" id="resumen">
+      <div class="hero-badges">
+        <span class="badge">Godot 4.8 · OpenXR</span>
+        <span class="badge gold">Meta Quest 90 FPS</span>
+        <span class="badge violet">Mandos + Hand Tracking 26 Huesos</span>
+      </div>
+      <h1>Dragon Ball VR (DBZVR)</h1>
+      <p>
+        Combate VR <strong>1v1 en tiempo real</strong> sin barra de vida tradicional: administra tu <strong>Ki</strong>, escala tu
+        <strong>Battle Power (BP)</strong>, desata combos físicos de 3 niveles de potencia, domina el <strong>Semáforo Defensivo</strong>,
+        choca Súper Poderes en <strong>Bullet-Time</strong> y remata con el <strong>Estado Zenkai</strong>.
+      </p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="#manual">📘 Abrir Manual por Fases</a>
+        <a class="btn btn-secondary" href="https://github.com/fmoris/DBVR" target="_blank" rel="noopener">💻 Ver Repositorio en GitHub</a>
+      </div>
+    </section>
+
+    <section>
+      <h2 class="section-title">⚡ Reglas Fundamentales (Sin barra de HP)</h2>
+      <div class="grid-3">
+        <div class="card">
+          <h3>🔵 Ki (0–100) · Combustible Táctico</h3>
+          <ul>
+            <li>Regeneración pasiva: <strong>+1.0 Ki/s</strong> tras <code>2.0 s</code> sin gastar Ki.</li>
+            <li>Resistencia al daño: recuperas <code>0.0055 Ki</code> por cada BP perdido al recibir golpes.</li>
+            <li><strong>Último Aliento:</strong> Lanzar ataques o empujar un choque con <code>0 Ki</code> quema tu propio BP. Si tu BP llega a <code>0</code>, pierdes por <em>Agotamiento Vital</em>.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>🟡 Battle Power (BP) y Pisos</h3>
+          <ul>
+            <li><strong>Vegeta:</strong> Base <code>10.000</code> · Máximo Base <code>20.000</code>.</li>
+            <li><strong>Goku:</strong> Base <code>9.000</code> · Máximo Base <code>18.000</code>.</li>
+            <li><strong>Pisos Irreversibles:</strong> Al subir tu BP aseguras mínimos de <code>25%</code> (inicio), <code>50%</code> (al 60%), <code>75%</code> (al 80%) y <code>85%</code> (al 98%).</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>🏆 Condiciones de Victoria</h3>
+          <ul>
+            <li><strong>Finisher en Estado Zenkai:</strong> Alcanza <em>Zenkai</em> (Dominio o Comeback) y conecta un Súper Ataque o Finisher sin ser esquivado ni desviado.</li>
+            <li><strong>K.O. por Agotamiento Vital:</strong> Lleva el BP del rival a <code>0</code>.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="personajes">
+      <h2 class="section-title">🥋 Luchadores, Transformaciones y Súper Poderes</h2>
+      <div class="grid-2">
+        <div class="card">
+          <h3>👑 Vegeta (Base 10.000 / Máx 20.000)</h3>
+          <p><strong>Transformaciones:</strong> <code>SSJ (x2.0 · 2.1 Ki/s)</code> ➔ <code>Super Vegeta (x3.5 · 3.2/s)</code> ➔ <code>SSB (x5.0 · 4.4/s)</code> ➔ <code>Ultra Ego (x8.0 · 5.5/s)</code></p>
+          <ul>
+            <li><strong>Galick Ho (28 Ki · 1.800 BP · min 0.45 s):</strong> Ambos Grips al costado/cadera ➔ empuja al frente.</li>
+            <li><strong>Big Bang Attack (35 Ki · 3.200 BP · min 0.55 s):</strong> 1 brazo extendido palma abierta + Grip <em>(sin Gatillo)</em>.</li>
+            <li><strong>Final Flash (45 Ki · Finisher · min 0.55 s · requiere SSJ/Zenkai):</strong> Brazos abiertos en cruz T-Pose con Grips ➔ junta al frente.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>🟠 Goku + variante Goku Zenkai (Base 9.000 / Máx 18.000)</h3>
+          <p><strong>Transformaciones:</strong> <code>SSJ (x2.0 · 1.8 Ki/s)</code> ➔ <code>SSJ2 (x3.5 · 2.8/s)</code> ➔ <code>SSB (x5.0 · 4.0/s)</code> ➔ <code>Ultra Instinto (x8.0 · 5.5/s)</code></p>
+          <ul>
+            <li><strong>Kamehameha (28 Ki · 1.800 BP · min 0.45 s):</strong> Ambos Grips recogidos en la cadera ➔ empuja al frente.</li>
+            <li><strong>Genkidama (45 Ki · 6.000 BP · min 0.65 s · solo Forma Base):</strong> Ambos brazos al cielo con Grips ➔ baja al frente.</li>
+            <li><strong>Super Kamehameha (45 Ki · Finisher · requiere SSJ/Zenkai):</strong> Mismo gesto que Kamehameha estando transformado.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="manual">
+      <h2 class="section-title">📘 Manual Interactivo de Mecánicas por Fase y Secuencia</h2>
+
+      <div class="phase-tabs" role="tablist">
+        <button class="phase-tab active" data-phase="p0">Fase 0 · Libre</button>
+        <button class="phase-tab" data-phase="p1">Fase 1 · Ki Blasts</button>
+        <button class="phase-tab" data-phase="p2">Fase 2 · Melee Dash</button>
+        <button class="phase-tab" data-phase="p3">Fase 3 · Minijuego Melee</button>
+        <button class="phase-tab" data-phase="p4">Fase 4 · Súper &amp; Bullet-Time</button>
+        <button class="phase-tab" data-phase="p5">Fase 5 · Beam Clash</button>
+        <button class="phase-tab" data-phase="p6">Fase 6 · Air Brake</button>
+        <button class="phase-tab" data-phase="p7">Fase 7 · Furia &amp; Zenkai</button>
+      </div>
+
+      <!-- FASE 0 -->
+      <div class="phase-panel active card" id="p0">
+        <h3>Fase 0 — Combate Libre y Posicionamiento</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Acción</th><th>Control (Mandos Quest)</th><th>Costo / Efecto</th><th>Cuándo usarla</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><strong>Moverse horizontal</strong></td><td>Stick Der o Izq (4 direcciones)</td><td>Paso discreto de <strong>3.0 m</strong> (<code>0.16 s</code> CD)</td><td>Esquivar líneas de tiro y reacomodar ángulo</td></tr>
+              <tr><td><strong>Subir / Bajar</strong></td><td>Click Stick Der (Subir) / Izq (Bajar)</td><td>Salto vertical <strong>2.0 m</strong> (máx <code>+9.0 m</code>)</td><td>Ganar altura o bajar al suelo</td></tr>
+              <tr><td><strong>Recarga Ki (2 Fases)</strong></td><td>1° Ambos Gatillos a hombros/pecho ➔ 2° Baja puños a cintura</td><td><strong>+24.0 Ki/s</strong> y <strong>+250 BP/s</strong> (techo <code>60%</code> máx)</td><td>Cuando el rival está lejos o cegado en humo</td></tr>
+              <tr><td><strong>Guardia Cruzada X</strong></td><td>Grip + Gatillo ambos mandos cruzados al pecho</td><td>Mitiga <strong>85%</strong> del daño BP</td><td>Ante ráfagas o ataques entrantes</td></tr>
+              <tr><td><strong>Scouter / Retícula</strong></td><td>Automático al fijar al rival</td><td>Amarillo (normal) · Naranja (humo/abierta) · Violeta (cráter)</td><td>Detectar ventanas gratuitas de ataque</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- FASE 1 -->
+      <div class="phase-panel card" id="p1">
+        <h3>Fase 1 — Combate a Distancia (Ki Blasts, Presión y Humo)</h3>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Acción</th><th>Cómo ejecutarla</th><th>Costo / Recompensa</th><th>Uso Táctico</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><strong>Ki Blast Rápido</strong></td><td>Brazo extendido + palma al frente + Gatillo (sin Grip)</td><td><strong>3.0 Ki</strong> (<strong>2.5 Ki</strong> Vegeta)</td><td>Corta Recarga Ki rival y suma <code>+1</code> stack de presión</td></tr>
+              <tr><td><strong>Ki Blast Cargado</strong></td><td>Mantener Gatillo <code>&gt;= 0.45 s</code> y soltar</td><td><strong>9.0 Ki</strong> (+<code>2.0 Ki/s</code> carga)</td><td>Proyectil <strong>Homing</strong>, suma <code>+3</code> stacks y rompe Poise</td></tr>
+              <tr><td><strong>Desvío con la mano</strong></td><td>Manotazo veloz al proyectil</td><td><strong>+12 Ki</strong> · <strong>+150 BP</strong></td><td>Gana energía defendiendo ráfagas</td></tr>
+              <tr><td><strong>Devolución Perfecta</strong></td><td>Manotazo frontal <code>&gt;= 2.2 m/s</code> al Cargado o tiro final</td><td><strong>+12 Ki</strong> · <strong>+150 BP</strong> + Homing</td><td>Devuelve el proyectil teledirigido al tirador</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p style="margin-top:0.85rem;">
+          <strong>Escalado por Ratio BP:</strong> Inferior (<code>&lt;=0.55</code>) sufre <em>No-Sell</em> en rápidos (Furia da <code>+0.35</code> al ratio). Parejo (<code>0.75–1.35</code>) abre guardia con <strong>3 stacks</strong>; Superior (<code>&gt;=1.35</code>) con <strong>2 stacks</strong>.<br />
+          <strong>Cortina de Humo (Guardia Abierta):</strong> Habilita <strong>Melee Dash gratuito (0 Ki, +1/+2 golpes)</strong> o <strong>Súper con +25% velocidad de carga</strong>.
+        </p>
+      </div>
+
+      <!-- FASE 2 -->
+      <div class="phase-panel card" id="p2">
+        <h3>Fase 2 — Acercamiento (Melee Dash)</h3>
+        <ul>
+          <li><strong>Cómo lanzarlo:</strong> Cierra <strong>1 puño (Grip + Gatillo)</strong> cerca del pecho/hombro y lánzalo hacia adelante apuntando al rival fijado.</li>
+          <li><strong>Costo:</strong> <strong>10.0 Ki</strong> (o <strong>0 Ki</strong> durante apertura de Cortina de Humo).</li>
+          <li><strong>Interrupción en vuelo:</strong> Un <em>Ki Blast Cargado</em> o un <em>Rápido</em> de un rival muy superior (<code>ratio &gt;= 1.5</code>) corta el Dash y te aturde <code>0.35 s</code> (salvo si tienes Super Armor con <code>&gt;= 1.5x BP</code>).</li>
+        </ul>
+      </div>
+
+      <!-- FASE 3 -->
+      <div class="phase-panel card" id="p3">
+        <h3>Fase 3 — Minijuego de Melee (Cúpula Holográfica · Administrador de Ki)</h3>
+        <p>En el HUD superior verás tu <strong>Barra Doble de Ki</strong> (<code>⚠️ KI CRÍTICO &lt; 22 Ki</code>). La tarjeta de esquina cambia automáticamente entre <strong>⭕ CÍRCULOS (Atacar)</strong> y <strong>⬜ CUADRADOS (Defender)</strong>.</p>
+
+        <h4>⚔️ Turno de Ataque (4–7 golpes · hasta 8 con Emboscada)</h4>
+        <p>Requisitos físicos: Puño cerrado (<code>Grip+Gatillo</code>), recorrido <code>&gt;= 22 cm</code>, velocidad <code>&gt;= 1.55 m/s</code> (<code>1.35</code> cargado) y retracción <code>&gt;= 20 cm</code> entre golpes.</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Ataque / Nivel</th><th>Cómo ejecutarlo</th><th>Costo Ki</th><th>Efecto</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><strong>~ Suave / 💥 Sólido / ⚡ Sónico</strong></td><td>Según velocidad y recorrido del brazo (Sónico: <code>&gt;=2.85 m/s</code> y <code>30 cm</code>)</td><td>Sónico reembolsa <strong>+1.5 Ki</strong></td><td>Daño <strong>0.60× / 1.00× / 1.35×</strong> + hit-stop + avance en arena</td></tr>
+              <tr><td><strong>Golpe Rápido / Cargado / V3</strong></td><td>Rápido (<code>&lt;0.5 s</code>) · Cargado (<code>0.50 s</code>) · V3 (<code>&gt;=1.10 s</code>)</td><td><strong>−5 / −11 / −16 Ki</strong></td><td>V3 ya <strong>NO cancela</strong> el resto del combo</td></tr>
+              <tr><td><strong>🔨 Martillazo DBZ</strong></td><td>Ambos puños arriba <code>0.85 s</code> y bajar fuerte juntos</td><td><strong>−22.0 Ki</strong></td><td>Rompe 1 mano y estrella contra el suelo al cerrar</td></tr>
+              <tr><td><strong>Cancelar</strong></td><td>Stick Derecho atrás (<code>↓</code>) antes de golpear</td><td><strong>0 Ki</strong></td><td>Termina la ofensiva para guardar Ki</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h4 style="margin-top:1.1rem;">🛡️ Turno de Defensa · Semáforo de Timing</h4>
+        <div class="semaphore">
+          <div class="sem-box sem-wait"><strong>🔵 / 🟣 ESPERA (&gt; 0.24 s)</strong><br />Aro Cian (o Violeta = Martillazo). No spamees Gatillo antes de <code>0.32 s</code>.</div>
+          <div class="sem-box sem-go"><strong>🟢 ¡YA! (0.14 – 0.24 s)</strong><br />Aro Verde + pulso háptico guía. Momento de Desvío o Guardia.</div>
+          <div class="sem-box sem-parry"><strong>🟡 ¡PARRY! (&lt;= 0.14 s)</strong><br />Aro Dorado. Pulsa Gatillo en el <code>⬜</code> para Parry Perfecto.</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Defensa</th><th>Gesto / Botón en ventana</th><th>Ki</th><th>Efecto y Dominio</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><strong>✨ Parry Perfecto</strong></td><td>Gatillo en <code>⬜</code> con Aro Dorado (<code>&lt;=0.14 s</code>)</td><td><strong>+14 Ki</strong> (rival −10)</td><td>Roba el turno al instante + Z-Blink (+ Comeback Zenkai en Furia)</td></tr>
+              <tr><td><strong>✋ Desvío 1 Mano</strong></td><td>Palma abierta en movimiento (<code>&gt;=0.45 m/s</code>) o solo Gatillo</td><td><strong>+5 / −6 / −10 Ki</strong></td><td><code>+1.00 / +0.50 / +0.75</code> ptos (No frena Martillazo)</td></tr>
+              <tr><td><strong>💨 Z-Vanish</strong></td><td>Flick rápido de Stick Izq/Der (<code>&lt;=0.28 s</code>)</td><td><strong>−14.0 Ki</strong></td><td><code>+1.00</code>, 0 daño y Z-Blink por la arena</td></tr>
+              <tr><td><strong>⚡ Choque de Puños</strong></td><td>Puño cerrado veloz (<code>&gt;=0.85 m/s</code>) en <code>⬜</code></td><td><strong>+4 / +8 Ki</strong></td><td>0 daño si BP <code>&gt;=70%</code>, quita 1 golpe rival</td></tr>
+              <tr><td><strong>🛡️ Guardia Cruzada X</strong></td><td>Puños en X al pecho (siempre disponible)</td><td><strong>−7..−20 Ki</strong> (+2/racha)</td><td><code>+0.25</code>, solo 15% daño; corta Martillazo si BP <code>&lt;1.25x</code></td></tr>
+              <tr><td><strong>💥 Onda Explosiva</strong></td><td>Tras <code>&gt;=2</code> golpes recibidos: abrir brazos (<code>&gt;=75 cm</code>) + 2 Grips</td><td><strong>−22.0 Ki</strong></td><td>Corta el combo enemigo y separa <code>10 m</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- FASE 4 -->
+      <div class="phase-panel card" id="p4">
+        <h3>Fase 4 — Súper Ataques y Secuencia Bullet-Time</h3>
+        <p>Al recibir un Súper Ataque el tiempo se ralentiza según el diferencial de BP (<strong>más amplio</strong> en Furia/Zenkai, <strong>mínimo</strong> si estás en Cráter). Tienes <strong>5 respuestas</strong>:</p>
+        <ol>
+          <li><strong>🔥 Beam Clash:</strong> Prepara y lanza un Súper tuyo utilizable (<code>&gt;= 15 Ki</code>) apuntando al frente.</li>
+          <li><strong>💨 Z-Vanish:</strong> Flick rápido de Stick Izq o Der (<code>15 Ki</code>). <em>(Bloqueado si estás en Cráter).</em></li>
+          <li><strong>✋ Aguantar con las Manos:</strong> Extiende ambas manos al frente apretando <strong>ambos Grips (sin Gatillo)</strong> y agita rápido (<code>9 Ki/s</code>).</li>
+          <li><strong>🥋 Desvío al Cielo:</strong> Si tu BP es <code>&gt;= 70%</code>, golpea la cabeza del haz con una mano a <code>&gt; 2.0 m/s</code> ➔ <strong>+25 Ki, +300 BP</strong> y desvío estratosférico.</li>
+          <li><strong>🛡️ Guardia Cruzada X:</strong> Puños cerrados cruzados al pecho para contener el impacto.</li>
+        </ol>
+      </div>
+
+      <!-- FASE 5 -->
+      <div class="phase-panel card" id="p5">
+        <h3>Fase 5 — Choque de Poderes (Beam Clash)</h3>
+        <ul>
+          <li><strong>Postura obligatoria:</strong> Mantén <strong>ambos Grips sostenidos</strong> con manos proyectadas al frente.</li>
+          <li><strong>Empuje:</strong> Agita ambos mandos con energía y pulsa repetidamente ambos <strong>Gatillos</strong> para ganar terreno en la barra 3D.</li>
+          <li><strong>Multiplicador Zenkai:</strong> En Estado Zenkai tu empuje sube <strong>×1.45</strong>. Con <code>0 Ki</code> entras en <em>Último Aliento</em> quemando BP.</li>
+        </ul>
+      </div>
+
+      <!-- FASE 6 -->
+      <div class="phase-panel card" id="p6">
+        <h3>Fase 6 — Frenado Aéreo (Air Brake) y Wall-Stick</h3>
+        <ul>
+          <li>Al salir despedido a alta velocidad aparece la barra <code>⚡ [◀L▶] ¡AGITA LOS CONTROLES! [◀R▶]</code>.</li>
+          <li><strong>Qué hacer:</strong> Agita <strong>ambos mandos alternando direcciones rápidamente</strong> hasta llegar al <strong>100%</strong> (ambos mandos juntos rinden 100% vs 38% uno solo).</li>
+          <li>Si golpeas los límites del mapa sin frenar, quedas incrustado <strong>0.65 s (Wall-Stick)</strong>.</li>
+        </ul>
+      </div>
+
+      <!-- FASE 7 -->
+      <div class="phase-panel card" id="p7">
+        <h3>Fase 7 — Transformaciones, Furia, Determinación y Zenkai</h3>
+        <ul>
+          <li><strong>Transformar:</strong> Pulsa <strong>Botón A / X</strong> o mantén <strong>Puños en la cintura (Grip + Gatillo) durante 1.2 s</strong>. Pulsa <strong>B / Y</strong> para revertir a Base.</li>
+          <li><strong>Desbloqueo de Formas:</strong> Fase 1 (<code>&gt;=75%</code> máx, <code>&lt;=78%</code> base o Furia) · Fase 2 (en Fase 1+ y <code>&gt;=85%</code> máx, <code>&lt;=68%</code> base o Furia) · Fase 3 (entrar en Zenkai) · Fase 4 (Fase 3+ con Zenkai o piso <code>&gt;=75%</code>).</li>
+          <li><strong>Furia (<code>&gt;=30%</code> déficit):</strong> <code>+100%</code> recarga Ki y <code>x2</code> BP ganado.</li>
+          <li><strong>Momento de Determinación (1× por combate):</strong> En Furia, brazos cruzados al pecho solo con <strong>Grips (sin Gatillos) 2.8 s</strong> ➔ <code>+45 Ki</code>, <code>+25%</code> del déficit BP y <strong>Zenkai Comeback</strong>.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section id="eventos-lore">
+      <h2 class="section-title">🌌 Los 6 Eventos Dinámicos de Lore DBZ (Melee)</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Evento</th><th>Disparador</th><th>Acción del Jugador</th><th>Resultado</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><strong>1. ⚡ Choque Frenético de Puños</strong></td><td>Choque de Puños con BP competitivo (<code>0.65–1.50</code>) y <code>&gt;=20 Ki</code></td><td>Golpea <strong>IZQ–DER sin parar</strong> (<code>6 Ki/s</code>)</td><td><code>650–950 BP</code>, <code>+10 Ki</code> y toma ofensiva</td></tr>
+            <tr><td><strong>2. 🌌 Caída del Meteoro</strong></td><td>Fin de combo (<code>&gt;=2</code> golpes con Sónico o V3 Arriba, <code>&gt;=12 Ki</code>)</td><td>1° Sube manos / Stick ↑ (<code>−12 Ki</code>) · 2° Baja ambos puños sobre el orbe</td><td><code>480 BP</code> + <strong>Cráter 3.5 s</strong> (<code>+35%</code> vel. Súper, rival sin Z-Vanish)</td></tr>
+            <tr><td><strong>3. 💨 Guerra de Z-Vanish</strong></td><td>Z-Vanish Defensivo con atacante <code>&gt;=18 Ki</code> y BP <code>&gt;=0.70x</code></td><td>Stick (<code>12 Ki/salto</code>, hasta 3 saltos) o Guardia X</td><td>Patada trasera (<code>360 BP</code>) o separación táctica</td></tr>
+            <tr><td><strong>4. 💥 Desgarre de Guardia</strong></td><td><code>&gt;=2</code> Guardias X seguidas o Ki defensor <code>&lt;=22</code></td><td>Atacante golpea orbe naranja · Defensor abre brazos + Grips (<code>−15 Ki</code>)</td><td>Quiebre de guardia (<code>1.6 s</code>, <code>320 BP</code>) o repulsión a <code>9 m</code></td></tr>
+            <tr><td><strong>5. 🛡️ Onda Explosiva (Kiai)</strong></td><td>En Defensa tras <code>&gt;=2</code> golpes recibidos y <code>&gt;=22 Ki</code></td><td>Abre brazos (<code>&gt;=75 cm</code>) + 2 Grips</td><td>Corta combo (<code>160 BP</code>) y separa a <code>10 m</code></td></tr>
+            <tr><td><strong>6. 🔥 Intercambio Sónico Z-Burst</strong></td><td>Mitad de combo largo (<code>&gt;=3</code> golpes, <code>&gt;=2</code> Sónicos o Furia/Transf.)</td><td>Golpea el Orbe Dorado en 3 saltos (<code>−6 Ki/salto</code>) o Stick ↓</td><td>Hasta 3 golpes extra (<code>240 BP c/u</code>) recorriendo la arena</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="miniescenas">
+      <h2 class="section-title">🎬 Las 7 Mini-Escenas Dramáticas Contextuales</h2>
+      <div class="grid-3">
+        <div class="card"><h3>☀️ Corazón Sereno (Goku)</h3><p>Eleva palmas a 3 anillos dorados (<code>3.5 s</code>) ➔ <strong>Permanente:</strong> +20% Recarga Ki y +18% Vel. Carga Súper.</p></div>
+        <div class="card"><h3>🔴 Pulso Kaioken (Goku)</h3><p>Extiende manos al ritmo de 2 pulsos carmesí (<code>3.0 s</code>) ➔ <strong>15 s:</strong> +30% Daño Total y +25% Vel. Vuelo.</p></div>
+        <div class="card"><h3>🟣 Orgullo del Príncipe (Vegeta)</h3><p>5 golpes rápidos al núcleo (<code>3.5 s</code>) ➔ <strong>Permanente:</strong> Furia al 22% y +15% Daño Súpers.</p></div>
+        <div class="card"><h3>🎯 Precisión Real (Vegeta)</h3><p>Apunta y dispara Gatillo a 3 blancos (<code>3.2 s</code>) ➔ <strong>16 s:</strong> 2× Carga Blast y −50% Coste Blast.</p></div>
+        <div class="card"><h3>🟢 Reflejos Z (Todos)</h3><p>Toca 3 orbes en secuencia (<code>3.2 s</code>) ➔ <strong>20 s:</strong> +500 BP y +25% Bullet-Time.</p></div>
+        <div class="card"><h3>🟡 Ruptura de Límites (Todos)</h3><p>Abre brazos con Grips rompiendo 3 anillos (<code>3.5 s</code>) ➔ <strong>Permanente:</strong> +12% BP y −15% Drenaje Transf.</p></div>
+        <div class="card"><h3>🔵 Sobrecarga de Aura (Todos)</h3><p>Agita ambos puños 6 veces (<code>3.5 s</code>) ➔ <strong>18 s:</strong> +35 Ki, 2× Ki Pasivo y −25% Coste Blast.</p></div>
+      </div>
+    </section>
+
+    <section id="guia-rapida">
+      <h2 class="section-title">🧭 Guía Rápida: “¿Qué hago si…?”</h2>
+      <input type="text" id="cheatSearch" class="search-box" placeholder="Filtrar situación (ej: cráter, humo, parry, sin ki, furia, martillazo, súper)..." />
+
+      <div class="cheat-item">
+        <strong>El rival está recargando Ki lejos</strong>
+        Dispara <em>Ki Blast Rápido o Cargado</em> con palma extendida + Gatillo para cortarle la recarga y ganar stacks de presión.
+      </div>
+      <div class="cheat-item">
+        <strong>Saturaste al rival y salió Cortina de Humo (💥 ¡GUARDIA RIVAL ABIERTA!)</strong>
+        Lanza <em>Melee Dash gratuito (0 Ki, +1/+2 golpes)</em> o carga un <em>Súper un 25% más rápido</em>.
+      </div>
+      <div class="cheat-item">
+        <strong>Estás atacando en Melee y tu Ki bajó de 22 (⚠️ KI CRÍTICO)</strong>
+        Alterna golpes <em>Rápidos Sónicos (−3.5 Ki neto)</em> o cancela con <em>Stick Der ↓</em> para no quedarte seco al defender.
+      </div>
+      <div class="cheat-item">
+        <strong>Estás defendiendo en Melee y ves venir el golpe</strong>
+        Espera al <em>Aro Verde (¡YA!)</em> para Desvío con palma abierta (<code>+5 Ki</code>), o al <em>Aro Dorado</em> para Parry (<code>+14 Ki</code>). Si te apuraste (<em>¡MUY PRONTO!</em>), cruza los puños en <em>X al pecho</em>.
+      </div>
+      <div class="cheat-item">
+        <strong>Recibes varios golpes seguidos en Melee y tienes >= 22 Ki</strong>
+        Abre ambos brazos (<code>&gt;= 75 cm</code>) apretando <em>ambos Grips</em> para soltar <em>Onda Explosiva Kiai</em> y cortar el combo.
+      </div>
+      <div class="cheat-item">
+        <strong>Acabas de estrellar al rival en el Cráter (🌌 Caída del Meteoro · 3.5 s)</strong>
+        Carga inmediatamente tu Súper (<em>Galick Ho / Final Flash / Kamehameha</em>) con <em>+35% velocidad</em> mientras el rival no tiene <code>Z-Vanish</code>.
+      </div>
+      <div class="cheat-item">
+        <strong>Vas >= 30% atrás en BP (🔥 Furia)</strong>
+        Mantén brazos cruzados al pecho solo con <em>Grips (sin Gatillos) 2.8 s</em> para activar <em>Determinación</em> y buscar el K.O. con <em>Zenkai Comeback</em>.
+      </div>
+      <div class="cheat-item">
+        <strong>Te lanzaron volando a toda velocidad (Air Brake)</strong>
+        Agita ambos mandos físicos rápidamente alternando dirección hasta alcanzar el <code>100%</code> antes de chocar con la muralla.
+      </div>
+    </section>
+
+    <footer>
+      <span>🐉 DBZVR · Godot 4.8 + OpenXR Meta Quest</span>
+      <span><a href="https://github.com/fmoris/DBVR" style="color: var(--ki);">github.com/fmoris/DBVR</a> · Manual completo en <code>TUTORIAL_MECANICAS_DBZVR.md</code></span>
+    </footer>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
