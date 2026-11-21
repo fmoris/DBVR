@@ -157,6 +157,11 @@ var is_in_followup_bullet_time: bool = false
 var followup_bullet_time_timer: float = 0.0
 var opponent_airborne_target: Node3D = null
 var combat_chain_depth: int = 0
+var airborne_recovery_state: String = "NONE" # "NONE" | "UNRECOVERED" | "RECOVERED" | "DEFENSELESS_CRASH"
+var is_defenseless_crash: bool = false
+var defenseless_crash_timer: float = 0.0
+var pending_followup_bonus_hits: int = 0
+var pending_followup_damage_mult: float = 1.0
 
 # Estado y control de Secuencia de Super Haz (Bullet-Time para técnicas supremas)
 var is_in_beam_sequence: bool = false
@@ -570,11 +575,21 @@ func _physics_process(delta: float) -> void:
 
 	_tick_dramatic_buffs(delta)
 
-	# 0. Temporizador de Follow-Up Bullet-Time en el aire
+	# 0. Temporizador de Follow-Up Bullet-Time en el aire (tiempo real independiente de time_scale)
 	if is_in_followup_bullet_time:
-		followup_bullet_time_timer -= delta
+		var real_dt_fu: float = delta / maxf(Engine.time_scale, 0.01)
+		followup_bullet_time_timer -= real_dt_fu
 		if followup_bullet_time_timer <= 0.0:
 			_end_followup_bullet_time(true)
+
+	# 0b. Temporizador de estado indefenso tras choque físico (roca, cañón, muralla o suelo)
+	if defenseless_crash_timer > 0.0:
+		defenseless_crash_timer -= delta
+		if defenseless_crash_timer <= 0.0:
+			defenseless_crash_timer = 0.0
+			is_defenseless_crash = false
+			if airborne_recovery_state == "DEFENSELESS_CRASH":
+				airborne_recovery_state = "RECOVERED"
 
 	# 1. Movimiento de vuelo rápido hacia el oponente (Melee Dash con seguimiento 3D completo)
 	if is_flying_to_opponent:
@@ -2393,8 +2408,10 @@ func _find_skeleton(node: Node) -> Skeleton3D:
 	return null
 
 func start_flight_to_opponent() -> void:
+	var was_followup_chase: bool = is_in_followup_bullet_time
 	if is_in_followup_bullet_time:
 		is_in_followup_bullet_time = false
+		Engine.time_scale = 1.0
 		combat_chain_depth += 1
 
 	if is_player and not is_target_locked:
@@ -2424,8 +2441,18 @@ func start_flight_to_opponent() -> void:
 	air_brake_progress = 0.0
 	wall_stick_timer = 0.0
 	pending_ambush_bonus_hits = 0
+	pending_followup_bonus_hits = 0
+	pending_followup_damage_mult = 1.0
 	is_ambush_dash = false
 	var ambush_speed_mult: float = 1.0
+	if was_followup_chase and opp_f and is_instance_valid(opp_f):
+		var rec_state: String = String(opp_f.get("airborne_recovery_state")) if opp_f.get("airborne_recovery_state") != null else "UNRECOVERED"
+		if rec_state == "UNRECOVERED" or rec_state == "DEFENSELESS_CRASH" or bool(opp_f.get("is_defenseless_crash")):
+			pending_followup_bonus_hits = 2
+			pending_followup_damage_mult = 1.25
+			_log_combat_event("⚡ ¡PERSECUCIÓN CON BONUS! Rival sin recuperar (+2 golpes, +25%% daño)", "success")
+		else:
+			_log_combat_event("⚔️ Rival recuperado a tiempo: Melee normal.", "info")
 	if opp_f and is_instance_valid(opp_f) and has_free_melee_opening_against(opp_f):
 		var opening_bonus: Dictionary = opp_f.consume_blast_opening_bonus() if opp_f.has_method("consume_blast_opening_bonus") else { "bonus_hits": 1, "speed_mult": 1.35 }
 		is_ambush_dash = true
@@ -3217,6 +3244,9 @@ func complete_air_brake() -> void:
 	_proximity_repulsion_cooldown = 0.45
 
 	var opp: Node3D = _get_opponent()
+	airborne_recovery_state = "RECOVERED"
+	is_defenseless_crash = false
+	defenseless_crash_timer = 0.0
 	if opp and is_instance_valid(opp) and bool(opp.get("is_in_followup_bullet_time")) and opp.has_method("_end_followup_bullet_time"):
 		opp._end_followup_bullet_time(false)
 
@@ -3403,6 +3433,9 @@ func _on_ground_crash_impact(fall_speed: float, crash_pos: Vector3, ground_h: fl
 
 ## Daño secundario por choque contra los límites rocosos / montañas de la arena
 func _on_boundary_crash_impact(speed: float) -> void:
+	is_defenseless_crash = true
+	defenseless_crash_timer = 1.80
+	airborne_recovery_state = "DEFENSELESS_CRASH"
 	if speed > 10.0 and is_knocked_back:
 		var wall_damage = speed * 32.0
 		take_hit(wall_damage, Vector3.ZERO, false)
@@ -3717,8 +3750,11 @@ func _start_melee_bullet_time(opponent: Node3D) -> void:
 	is_in_bullet_time = true
 	if opponent.has_method("set"):
 		opponent.set("is_in_bullet_time", true)
-	var allowed_hits: int = calculate_melee_attack_count(self, opponent)
+	var allowed_hits: int = calculate_melee_attack_count(self, opponent) + pending_followup_bonus_hits
+	var fu_dmg_mult: float = pending_followup_damage_mult
 	pending_ambush_bonus_hits = 0
+	pending_followup_bonus_hits = 0
+	pending_followup_damage_mult = 1.0
 	is_ambush_dash = false
 	var duration: float = float(allowed_hits) * 1.35 + 0.80
 	print("[CharacterInstance] ¡Iniciando Melee Secuencial! Golpes permitidos: %d | Duración: %.2fs" % [allowed_hits, duration])
@@ -3760,6 +3796,8 @@ func _start_melee_bullet_time(opponent: Node3D) -> void:
 		target_scene_dome = get_parent().get_parent() if (is_player and get_parent() and get_parent().get_parent()) else get_parent()
 	if target_scene_dome:
 		target_scene_dome.add_child(active_target_dome)
+	active_target_dome.set("attacker_damage_mult", fu_dmg_mult)
+	active_target_dome.set("defender_is_defenseless", bool(opponent.get("is_defenseless_crash")))
 	active_target_dome.setup(self, opponent, duration, allowed_hits)
 	active_target_dome.bullet_time_completed.connect(_on_bullet_time_completed.bind(opponent))
 	active_target_dome.finisher_triggered.connect(_on_bullet_time_finisher.bind(opponent))
@@ -4313,37 +4351,17 @@ func _start_followup_airborne_sequence(opponent: Node3D, launch_vector: Vector3)
 	if bool(opponent.get("is_player")) and opponent.has_method("begin_air_brake"):
 		opponent.begin_air_brake(final_impulse.length(), 450.0, bp_atk, fu_drag)
 
-	# Esperar 1.0 segundo mientras el contrincante vuela por los aires
-	await get_tree().create_timer(1.0).timeout
-	if not opponent or not is_instance_valid(opponent):
-		return
-
-	# Si el jugador completó el Frenado Aéreo antes del follow-up, cancelar suspensión
-	if bool(opponent.get("is_player")) and not bool(opponent.get("is_knocked_back")) and not bool(opponent.get("is_air_brake_active")):
-		return
-	if bool(opponent.get("is_player")) and bool(opponent.get("is_air_brake_active")):
-		await get_tree().create_timer(0.8).timeout
-		if not opponent or not is_instance_valid(opponent):
-			return
-		if not bool(opponent.get("is_knocked_back")) and not bool(opponent.get("is_air_brake_active")):
-			return
-
-	# Restaurar fricción canónica
-	opponent.set("knockback_drag", 24.0)
-
-	# Si el combate sigue activo, encender el Follow-Up Bullet-Time
+	# Activar Bullet-Time de Seguimiento de inmediato (0.28x) para decidir la siguiente secuencia mientras el defensor intenta recuperarse
+	opponent.set("airborne_recovery_state", "UNRECOVERED")
 	is_in_followup_bullet_time = true
 	followup_bullet_time_timer = 4.0
 	opponent_airborne_target = opponent
+	Engine.time_scale = 0.28
 
-	# Suspender al oponente en el aire en cámara lenta
-	opponent.set("velocity", Vector3.ZERO)
-	opponent.set("is_knocked_back", false)
-
-	_log_combat_event("⚡ ¡CADENA DE SEGUIMIENTO EN EL AIRE! (4.0s) Dispara Ki Blasts, Melee Dash o Super Poder", "success")
+	_log_combat_event("⚡ ¡BULLET-TIME DE SEGUIMIENTO! (4.0s) Elige: Melee / Súper Rápido / Ki Blasts", "success")
 	var gss = _get_gesture_tree()
 	if gss and gss.has_signal("phase_changed"):
-		gss.emit_signal("phase_changed", "¡CADENA EN EL AIRE! (FOLLOW-UP BULLET TIME)")
+		gss.emit_signal("phase_changed", "⚡ ¡ELIGE SIGUIENTE SECUENCIA! (MELEE / SÚPER / BLASTS)")
 
 
 ## Finaliza el Follow-Up Bullet-Time
@@ -4351,6 +4369,7 @@ func _end_followup_bullet_time(timed_out: bool = false) -> void:
 	if not is_in_followup_bullet_time:
 		return
 	is_in_followup_bullet_time = false
+	Engine.time_scale = 1.0
 
 	var target_opp = opponent_airborne_target
 	opponent_airborne_target = null
@@ -4388,6 +4407,8 @@ func start_post_super_followup(opponent: Node3D) -> void:
 	is_in_followup_bullet_time = true
 	followup_bullet_time_timer = cfg.post_super_followup_duration
 	opponent_airborne_target = opponent
+	opponent.set("airborne_recovery_state", "UNRECOVERED")
+	Engine.time_scale = 0.28
 	_log_combat_event("⚡ ¡PERSECUCIÓN POST-SUPER! (%.1fs) Lluvia de Ki Blasts o Meteor Chase" % cfg.post_super_followup_duration, "success")
 	var gss = _get_gesture_tree()
 	if gss and gss.has_signal("phase_changed"):

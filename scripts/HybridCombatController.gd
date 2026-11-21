@@ -1305,6 +1305,7 @@ func _process_super_powers(delta: float) -> void:
 
 		var super_spd_mult: float = player.get_dramatic_modifier("super_charge_speed_mult", 1.0) if (player and is_instance_valid(player) and player.has_method("get_dramatic_modifier")) else 1.0
 		var opp_sup: Node = player._get_opponent() if (player and is_instance_valid(player) and player.has_method("_get_opponent")) else null
+		var is_chain_fast_charge: bool = bool(player and is_instance_valid(player) and player.get("is_in_followup_bullet_time"))
 		if opp_sup and is_instance_valid(opp_sup):
 			var cfg_sup: KiEconomyConfig = KiEconomyConfig.get_default()
 			var sup_window_mult: float = 1.0
@@ -1314,8 +1315,13 @@ func _process_super_powers(delta: float) -> void:
 			var crater_t_val: Variant = opp_sup.get("ground_crater_stun_timer")
 			if crater_t_val != null and float(crater_t_val) > 0.0:
 				sup_window_mult = maxf(sup_window_mult, cfg_sup.melee_crater_super_charge_mult)
+			if bool(opp_sup.get("is_defenseless_crash")):
+				is_chain_fast_charge = true
 			super_spd_mult *= sup_window_mult
-		super_charge_timer += delta * super_spd_mult
+		var charge_dt: float = delta / maxf(Engine.time_scale, 0.01) if is_chain_fast_charge else delta
+		if is_chain_fast_charge:
+			super_spd_mult *= 2.2
+		super_charge_timer += charge_dt * super_spd_mult
 		_pulse_haptic(left_controller, 110.0, clamp(0.25 + super_charge_timer * 0.35, 0.25, 0.95), delta)
 		_pulse_haptic(right_controller, 110.0, clamp(0.25 + super_charge_timer * 0.35, 0.25, 0.95), delta)
 

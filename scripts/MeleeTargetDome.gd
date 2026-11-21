@@ -43,6 +43,8 @@ var duration: float = 5.5
 var time_left: float = 5.5
 var is_active: bool = false
 var hits: Array = []
+var attacker_damage_mult: float = 1.0
+var defender_is_defenseless: bool = false
 
 # Transición legible entre turnos y estado de ronda
 var transition_timer: float = 0.0
@@ -915,10 +917,11 @@ func _process_defense_rhythm(delta: float) -> void:
 			break
 
 	var all_resolved: bool = (first_unresolved_idx == -1)
-	var defender_is_player: bool = bool(defender.get("is_player")) if (defender and is_instance_valid(defender)) else false
+	var is_def_crashed: bool = defender_is_defenseless or (defender != null and is_instance_valid(defender) and bool(defender.get("is_defenseless_crash")))
+	var defender_is_player: bool = (not is_def_crashed) and bool(defender.get("is_player")) if (defender and is_instance_valid(defender)) else false
 
 	# Onda Explosiva (Kiai de Emergencia) al recibir >= 2 golpes sin bloquear en la ronda y tener >= 22 Ki
-	if defender_is_player and _round_unblocked_hits_taken >= 2 and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")):
+	if defender_is_player and not is_def_crashed and _round_unblocked_hits_taken >= 2 and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")):
 		var def_orig: XROrigin3D = defender.get_parent() as XROrigin3D
 		if def_orig:
 			var l_c: XRController3D = def_orig.get_node_or_null("LeftHand") as XRController3D
@@ -1363,8 +1366,9 @@ func _resolve_cross_arm_guard(note: Dictionary, zone: Dictionary) -> void:
 
 	_modify_fighter_ki(defender, -ki_cost)
 	_modify_fighter_ki(attacker, 2.0)
+	var final_dmg_scaled: float = final_dmg * attacker_damage_mult
 	if defender and defender.has_method("take_hit"):
-		defender.take_hit(final_dmg, Vector3.ZERO)
+		defender.take_hit(final_dmg_scaled, Vector3.ZERO)
 	if defender and defender.has_method("increase_np"):
 		defender.increase_np(20.0)
 
@@ -1462,8 +1466,9 @@ func _resolve_unblocked_hit(note: Dictionary, zone: Dictionary) -> void:
 	_trigger_dynamic_melee_mobility(note_power, is_charged, is_v3, is_hammer, attacker, defender, hit_fwd + lat_h + hit_vert, 0.22, is_v3 and String(note.get("v3_launch_mode", "")) == "UP")
 
 	if defender and is_instance_valid(defender):
+		var raw_dmg_scaled: float = raw_dmg * attacker_damage_mult
 		if defender.has_method("take_hit"):
-			defender.take_hit(raw_dmg, -global_transform.basis.z)
+			defender.take_hit(raw_dmg_scaled, -global_transform.basis.z)
 		if defender.get("procedural_animator"):
 			defender.procedural_animator.trigger_hit_flinch(0.75 if (is_hammer or is_v3) else 0.45, -global_transform.basis.z)
 
