@@ -417,9 +417,9 @@ func _is_exclusive_combat_sequence_active(player: Node) -> bool:
 	if DramaticDirector.is_dramatic_pause_active:
 		return true
 	if player and is_instance_valid(player):
-		if bool(player.get("is_in_beam_clash")) or bool(player.get("is_in_beam_sequence")):
+		if player.get("is_in_beam_clash") == true or player.get("is_in_beam_sequence") == true:
 			return true
-		if bool(player.get("is_in_bullet_time")) or bool(player.get("is_flying_to_melee")) or bool(player.get("is_flying_to_opponent")):
+		if player.get("is_in_bullet_time") == true or player.get("is_flying_to_melee") == true or player.get("is_flying_to_opponent") == true:
 			return true
 	return false
 
