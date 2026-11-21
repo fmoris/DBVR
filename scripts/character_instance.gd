@@ -156,6 +156,7 @@ var is_target_locked: bool = false # Requisito canónico de fijación visual par
 var is_in_followup_bullet_time: bool = false
 var followup_bullet_time_timer: float = 0.0
 var opponent_airborne_target: Node3D = null
+var combat_chain_depth: int = 0
 
 # Estado y control de Secuencia de Super Haz (Bullet-Time para técnicas supremas)
 var is_in_beam_sequence: bool = false
@@ -2394,6 +2395,7 @@ func _find_skeleton(node: Node) -> Skeleton3D:
 func start_flight_to_opponent() -> void:
 	if is_in_followup_bullet_time:
 		is_in_followup_bullet_time = false
+		combat_chain_depth += 1
 
 	if is_player and not is_target_locked:
 		var opp = _get_opponent()
@@ -4352,6 +4354,8 @@ func _end_followup_bullet_time(timed_out: bool = false) -> void:
 
 	var target_opp = opponent_airborne_target
 	opponent_airborne_target = null
+	if timed_out:
+		combat_chain_depth = 0
 
 	if target_opp and is_instance_valid(target_opp):
 		# En cualquier finalización donde los combatientes queden cerca o tras expirar el tiempo, separarlos a 5.5m
@@ -4366,6 +4370,66 @@ func _end_followup_bullet_time(timed_out: bool = false) -> void:
 		else:
 			target_opp.set("velocity", Vector3.ZERO)
 			target_opp.set("is_knocked_back", false)
+
+
+func get_chain_ki_multiplier() -> float:
+	var step: float = KiEconomyConfig.get_default().chain_ki_cost_step
+	return 1.0 + float(combat_chain_depth) * step
+
+
+func start_post_super_followup(opponent: Node3D) -> void:
+	if is_match_over or not opponent or not is_instance_valid(opponent):
+		return
+	var cfg: KiEconomyConfig = KiEconomyConfig.get_default()
+	if current_ki < cfg.post_super_followup_min_ki:
+		combat_chain_depth = 0
+		return
+	combat_chain_depth += 1
+	is_in_followup_bullet_time = true
+	followup_bullet_time_timer = cfg.post_super_followup_duration
+	opponent_airborne_target = opponent
+	_log_combat_event("⚡ ¡PERSECUCIÓN POST-SUPER! (%.1fs) Lluvia de Ki Blasts o Meteor Chase" % cfg.post_super_followup_duration, "success")
+	var gss = _get_gesture_tree()
+	if gss and gss.has_signal("phase_changed"):
+		gss.emit_signal("phase_changed", "¡CADENA POST-SUPER! (KI BLASTS / METEOR CHASE)")
+
+
+func trigger_explosive_wave_chain_break() -> bool:
+	if is_match_over:
+		return false
+	var cfg: KiEconomyConfig = KiEconomyConfig.get_default()
+	if current_ki < cfg.melee_explosive_wave_cost:
+		return false
+	var opp: Node3D = _get_opponent()
+	var in_opp_chain: bool = opp != null and is_instance_valid(opp) and bool(opp.get("is_in_followup_bullet_time"))
+	if not in_opp_chain and not is_knocked_back and not is_air_brake_active:
+		return false
+
+	consume_ki(cfg.melee_explosive_wave_cost)
+	velocity = Vector3.ZERO
+	is_knocked_back = false
+	is_air_brake_active = false
+	combat_chain_depth = 0
+
+	var my_pos: Vector3 = get_parent().global_position if (is_player and get_parent()) else global_position
+	_spawn_melee_shockwave(my_pos + Vector3.UP * 1.0)
+	KiSmokeFX.spawn_smoke(get_tree(), my_pos, 1.3)
+	play_character_action_audio("common.ki_burst", false, "common.dodge_vanish")
+
+	if opp and is_instance_valid(opp):
+		if opp.has_method("_end_followup_bullet_time"):
+			opp._end_followup_bullet_time(false)
+		opp.set("combat_chain_depth", 0)
+		if opp.has_method("_stop_flight"):
+			opp._stop_flight()
+		var push_dir: Vector3 = (opp.global_position - my_pos)
+		push_dir.y = 0.0
+		push_dir = push_dir.normalized() if push_dir.length_squared() > 0.01 else -global_transform.basis.z
+		if opp.has_method("apply_knockback"):
+			opp.apply_knockback(push_dir, 18.0)
+
+	_log_combat_event("💥 ¡ONDA EXPANSIVA! Cadena enemiga cortada (-%d Ki)" % int(cfg.melee_explosive_wave_cost), "warning")
+	return true
 
 
 ## Genera la onda de choque expansiva del impacto físico masivo (Melee Shockwave)

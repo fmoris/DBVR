@@ -54,6 +54,7 @@ var _hand_track_init: bool = false
 var _physical_push_cd: float = 0.0
 var _is_burning_bp_in_clash: bool = false
 var _in_phase2_pose: bool = true
+var _player_desist_timer: float = 0.0
 var clash_hud_anchor: Node3D = null
 var clash_action_card_anchor: Node3D = null
 var _clash_card_label: Label3D = null
@@ -137,17 +138,13 @@ func _process(delta: float) -> void:
 	# 4. Pulsos hápticos continuos a los mandos del jugador
 	_apply_continuous_clash_haptics()
 
-	# 5. Evaluar condiciones de victoria del choque
-	if clash_ratio <= 0.15:
+	# 5. Evaluar colapso por Ki == 0, desistimiento, tiempo expirado o impacto físico (0.0 / 1.0)
+	_apply_exhaustion_or_timeout_surge(real_delta)
+
+	if clash_ratio <= 0.0:
 		_resolve_clash(attacker, defender, tech_atk)
-	elif clash_ratio >= 0.85:
+	elif clash_ratio >= 1.0:
 		_resolve_clash(defender, attacker, tech_def)
-	elif clash_timer >= clash_duration:
-		# Al expirar el tiempo, el combatiente con la ventaja de empuje gana
-		if clash_ratio < 0.5:
-			_resolve_clash(attacker, defender, tech_atk)
-		else:
-			_resolve_clash(defender, attacker, tech_def)
 
 
 func _process_player_inputs(real_delta: float) -> void:
@@ -206,7 +203,14 @@ func _process_player_inputs(real_delta: float) -> void:
 		_hand_track_init = true
 
 	_is_burning_bp_in_clash = false
-	if not _in_phase2_pose:
+	if _in_phase2_pose:
+		_player_desist_timer = 0.0
+	else:
+		_player_desist_timer += real_delta
+		return
+
+	var p_ki_check: float = float(player.get("current_ki")) if player.get("current_ki") != null else 0.0
+	if p_ki_check <= 0.0:
 		return
 
 	var push_power: float = 0.0
@@ -243,9 +247,9 @@ func _process_player_inputs(real_delta: float) -> void:
 			return
 
 	if player == attacker:
-		clash_ratio = maxf(clash_ratio - push_power, 0.05)
+		clash_ratio = maxf(clash_ratio - push_power, 0.0)
 	else:
-		clash_ratio = minf(clash_ratio + push_power, 0.95)
+		clash_ratio = minf(clash_ratio + push_power, 1.0)
 
 	if _physical_push_cd <= 0.0:
 		_physical_push_cd = 0.20
@@ -253,12 +257,34 @@ func _process_player_inputs(real_delta: float) -> void:
 		_spawn_clash_shockwave()
 
 
+func _apply_exhaustion_or_timeout_surge(real_delta: float) -> void:
+	var atk_ki: float = float(attacker.get("current_ki")) if (attacker and is_instance_valid(attacker) and attacker.get("current_ki") != null) else 0.0
+	var def_ki: float = float(defender.get("current_ki")) if (defender and is_instance_valid(defender) and defender.get("current_ki") != null) else 0.0
+	var atk_is_player: bool = bool(attacker and is_instance_valid(attacker) and attacker.get("is_player"))
+	var def_is_player: bool = bool(defender and is_instance_valid(defender) and defender.get("is_player"))
+
+	var atk_collapsed: bool = (atk_ki <= 0.0) or (atk_is_player and _player_desist_timer >= 0.40)
+	var def_collapsed: bool = (def_ki <= 0.0) or (def_is_player and _player_desist_timer >= 0.40)
+
+	if atk_collapsed and not def_collapsed:
+		clash_ratio = minf(clash_ratio + 1.65 * real_delta, 1.0)
+	elif def_collapsed and not atk_collapsed:
+		clash_ratio = maxf(clash_ratio - 1.65 * real_delta, 0.0)
+	elif clash_timer >= clash_duration:
+		if clash_ratio < 0.5:
+			clash_ratio = maxf(clash_ratio - 1.90 * real_delta, 0.0)
+		else:
+			clash_ratio = minf(clash_ratio + 1.90 * real_delta, 1.0)
+
+
 func _process_ai_resistance(real_delta: float) -> void:
 	var ai = defender if attacker.get("is_player") else attacker
 	if not ai or not is_instance_valid(ai):
 		return
 
-	var ai_ki = ai.get("current_ki") if ai.get("current_ki") != null else 50.0
+	var ai_ki: float = float(ai.get("current_ki")) if ai.get("current_ki") != null else 0.0
+	if ai_ki <= 0.0:
+		return
 	var ai_in_zenkai = ai.get("is_in_zenkai_state") if ai.get("is_in_zenkai_state") != null else false
 
 	var base_ai_force = 0.08
@@ -276,9 +302,9 @@ func _process_ai_resistance(real_delta: float) -> void:
 		ai.consume_ki(3.0 * real_delta)
 
 	if ai == attacker:
-		clash_ratio = maxf(clash_ratio - ai_push, 0.05)
+		clash_ratio = maxf(clash_ratio - ai_push, 0.0)
 	else:
-		clash_ratio = minf(clash_ratio + ai_push, 0.95)
+		clash_ratio = minf(clash_ratio + ai_push, 1.0)
 
 
 func _get_fighter_hand_origin(fighter: Node3D, aim_toward: Vector3) -> Vector3:

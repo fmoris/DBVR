@@ -884,6 +884,10 @@ func _cleanup_and_finish(result: String, dmg: float) -> void:
 
 	emit_signal("sequence_completed", result, dmg)
 
+	if result == "hit" and attacker and is_instance_valid(attacker) and not bool(attacker.get("is_match_over")):
+		if defender and is_instance_valid(defender) and attacker.has_method("start_post_super_followup"):
+			attacker.start_post_super_followup(defender)
+
 	var tw = create_tween()
 	tw.tween_property(self, "scale", Vector3.ZERO, 0.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	tw.tween_callback(queue_free)

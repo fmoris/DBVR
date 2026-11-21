@@ -1872,11 +1872,15 @@ func _execute_melee_punch(controller: XRController3D) -> void:
 
 	if player and is_instance_valid(player):
 		var curr_ki: float = float(player.get("current_ki")) if player.get("current_ki") != null else 0.0
-		var dash_cost: float = KiEconomyConfig.get_default().melee_dash_cost
+		var cfg_m: KiEconomyConfig = KiEconomyConfig.get_default()
+		var is_followup_chase: bool = bool(player.get("is_in_followup_bullet_time"))
+		var base_dash_cost: float = cfg_m.melee_meteor_chase_cost if is_followup_chase else cfg_m.melee_dash_cost
+		var chain_mult: float = player.get_chain_ki_multiplier() if (is_followup_chase and player.has_method("get_chain_ki_multiplier")) else 1.0
+		var dash_cost: float = base_dash_cost * chain_mult
 		var opp_m: Node = player._get_opponent() if player.has_method("_get_opponent") else null
 		if not opp_m and get_tree() and get_tree().current_scene:
 			opp_m = get_tree().current_scene.find_child("EnemyCharacterInstance", true, false)
-		var free_opening: bool = opp_m != null and is_instance_valid(opp_m) and player.has_method("has_free_melee_opening_against") and player.has_free_melee_opening_against(opp_m)
+		var free_opening: bool = (not is_followup_chase) and opp_m != null and is_instance_valid(opp_m) and player.has_method("has_free_melee_opening_against") and player.has_free_melee_opening_against(opp_m)
 		if free_opening:
 			dash_cost = 0.0
 		if curr_ki < dash_cost:
@@ -2314,6 +2318,15 @@ func _process_guard() -> void:
 	var r_grip: bool = _ctrl_float(right_controller, &"grip") > 0.45 or _ctrl_pressed(right_controller, &"grip_click")
 	var l_trig: bool = _ctrl_float(left_controller, &"trigger") > 0.45 or _ctrl_pressed(left_controller, &"trigger_click")
 	var r_trig: bool = _ctrl_float(right_controller, &"trigger") > 0.45 or _ctrl_pressed(right_controller, &"trigger_click")
+
+	# Onda Expansiva para cortar cadena enemiga (B/Y durante knockback o seguimiento aéreo rival)
+	var by_burst: bool = _ctrl_pressed(left_controller, &"by_button") or _ctrl_pressed(right_controller, &"by_button")
+	if by_burst and player.has_method("trigger_explosive_wave_chain_break"):
+		if player.trigger_explosive_wave_chain_break():
+			_pulse_haptic(left_controller, 200.0, 1.0, 0.18)
+			_pulse_haptic(right_controller, 200.0, 1.0, 0.18)
+			_set_player_blocking(false)
+			return
 
 	# Guardia Cruzada en 'X': Ambos puños cerrados (Grip + Gatillo en ambas manos) frente al pecho
 	if l_grip and l_trig and r_grip and r_trig and pose_chest_guard:

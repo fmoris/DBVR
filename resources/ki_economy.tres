@@ -45,3 +45,6 @@ ki_blast_charged_ki_drain = 9.0
 ki_blast_charged_guard_ki_drain = 16.0
 ki_blast_smoke_super_charge_mult = 1.25
 secured_floor_at_full = 0.9
+chain_ki_cost_step = 0.35
+post_super_followup_min_ki = 15.0
+post_super_followup_duration = 3.0
