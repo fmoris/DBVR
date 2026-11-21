@@ -384,8 +384,8 @@ func _ensure_action_card() -> void:
 
 	action_card_anchor = Node3D.new()
 	action_card_anchor.name = "MeleeActionGuideCardAnchor"
-	action_card_anchor.position = Vector3(0.0, -0.19, -1.06)
-	action_card_anchor.rotation_degrees = Vector3.ZERO
+	action_card_anchor.position = Vector3(0.0, -0.36, -1.10)
+	action_card_anchor.rotation_degrees = Vector3(10.0, 0.0, 0.0)
 	cam.add_child(action_card_anchor)
 
 	var border := MeshInstance3D.new()
@@ -396,8 +396,8 @@ func _ensure_action_card() -> void:
 	_action_card_border_mat = StandardMaterial3D.new()
 	_action_card_border_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_action_card_border_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_action_card_border_mat.no_depth_test = true
-	_action_card_border_mat.render_priority = 122
+	_action_card_border_mat.no_depth_test = false
+	_action_card_border_mat.render_priority = 10
 	_action_card_border_mat.albedo_color = Color(1.0, 0.55, 0.15, 0.90)
 	border.material_override = _action_card_border_mat
 	action_card_anchor.add_child(border)
@@ -411,8 +411,8 @@ func _ensure_action_card() -> void:
 	var bg_mat := StandardMaterial3D.new()
 	bg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	bg_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	bg_mat.no_depth_test = true
-	bg_mat.render_priority = 123
+	bg_mat.no_depth_test = false
+	bg_mat.render_priority = 11
 	bg_mat.albedo_color = Color(0.03, 0.06, 0.11, 0.88)
 	bg.material_override = bg_mat
 	action_card_anchor.add_child(bg)
@@ -421,8 +421,8 @@ func _ensure_action_card() -> void:
 	_action_card_label.name = "MeleeCardText"
 	_action_card_label.font_size = 21
 	_action_card_label.pixel_size = 0.00125
-	_action_card_label.no_depth_test = true
-	_action_card_label.render_priority = 124
+	_action_card_label.no_depth_test = false
+	_action_card_label.render_priority = 12
 	_action_card_label.outline_size = 6
 	_action_card_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.95)
 	_action_card_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT

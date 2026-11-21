@@ -660,8 +660,8 @@ func _ensure_clash_action_card() -> void:
 
 	clash_action_card_anchor = Node3D.new()
 	clash_action_card_anchor.name = "ClashActionGuideCardAnchor"
-	clash_action_card_anchor.position = Vector3(0.0, -0.19, -1.08)
-	clash_action_card_anchor.rotation_degrees = Vector3.ZERO
+	clash_action_card_anchor.position = Vector3(0.0, -0.34, -1.10)
+	clash_action_card_anchor.rotation_degrees = Vector3(10.0, 0.0, 0.0)
 	cam.add_child(clash_action_card_anchor)
 
 	var border := MeshInstance3D.new()
