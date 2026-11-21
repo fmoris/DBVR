@@ -125,8 +125,11 @@ var determination_hit_cooldown: float = 0.0
 # --- Movimiento por Casillas / Pasos (Yu Yu Hakusho / DB Legends / Ajedrez) ---
 const STEP_DISTANCE: float = 3.0 # Metros por paso/casilla
 const VERTICAL_STEP: float = 2.0 # Metros por salto o descenso en el aire
-const MIN_ALLOWED_DISTANCE: float = 6.0 # Distancia mínima táctica en Modo Libre ("turnos en tiempo real")
+const MIN_ALLOWED_DISTANCE: float = 9.5 # Distancia mínima táctica en Modo Libre ("turnos en tiempo real")
 const MAX_VERTICAL_HEIGHT: float = 9.0 # Límite superior de vuelo en metros
+const MELEE_APPROACH_RANGE: float = 13.5
+const MELEE_DECAY_RANGE: float = 14.5
+var melee_approach_progress: float = 0.0
 var step_cooldown: float = 0.0
 var vertical_step_cooldown: float = 0.0
 var right_stick_flicked: bool = false
@@ -354,6 +357,28 @@ func _process(delta: float) -> void:
 	# Fix 2: Procesar Frenado Aéreo mientras el jugador vuela lanzado por impacto
 	_process_air_brake(delta, player)
 
+	# Bloqueo mutuo estricto: durante Choque de Poderes o Secuencia de Super Haz se bloquean otras acciones
+	if _is_exclusive_combat_sequence_active(player):
+		_reset_super_state()
+		if left_is_charging or right_is_charging:
+			if gesture_tree:
+				gesture_tree._cleanup_ki_blast_charge_sphere(0)
+				gesture_tree._cleanup_ki_blast_charge_sphere(1)
+			left_charge_time = 0.0
+			right_charge_time = 0.0
+			left_is_charging = false
+			right_is_charging = false
+		if is_charging_ki or ki_prep_phase:
+			is_charging_ki = false
+			ki_prep_phase = false
+			if gesture_tree:
+				gesture_tree._cancel_action("Secuencia exclusiva en curso")
+				gesture_tree._reset_to_idle()
+		left_punch_cocked = false
+		right_punch_cocked = false
+		_process_hud_toggle(delta)
+		return
+
 	# Mientras el jugador sale volando / ragdoll / incrustado, no puede realizar acciones de combate
 	if player and player.has_method("is_airborne_incapacitated") and player.is_airborne_incapacitated():
 		_reset_super_state()
@@ -372,6 +397,7 @@ func _process(delta: float) -> void:
 		return
 
 	# 4. Procesar las acciones híbridas en combate libre
+	_process_melee_approach_bar(delta, player)
 	_process_determination(delta)
 	_process_ki_recharge(delta)
 	_process_melee_punches()
@@ -387,6 +413,55 @@ func _process(delta: float) -> void:
 
 
 # --- 1. RECARGA DE KI (2 FASES: Gatillos a Hombros -> Descenso a Cintura/Cadera) ---
+func _is_exclusive_combat_sequence_active(player: Node) -> bool:
+	if DramaticDirector.is_dramatic_pause_active:
+		return true
+	if player and is_instance_valid(player):
+		if bool(player.get("is_in_beam_clash")) or bool(player.get("is_in_beam_sequence")):
+			return true
+		if bool(player.get("is_in_bullet_time")) or bool(player.get("is_flying_to_melee")) or bool(player.get("is_flying_to_opponent")):
+			return true
+	return false
+
+
+func _process_melee_approach_bar(delta: float, player: Node) -> void:
+	if not player or not is_instance_valid(player) or bool(player.get("is_match_over")):
+		melee_approach_progress = maxf(melee_approach_progress - delta * 0.35, 0.0)
+		if player and is_instance_valid(player):
+			player.set("melee_approach_progress", melee_approach_progress)
+		return
+
+	var opp: Node3D = player._get_opponent() if player.has_method("_get_opponent") else null
+	if not opp or not is_instance_valid(opp) or bool(opp.get("is_in_bullet_time")) or (opp.has_method("is_airborne_incapacitated") and opp.is_airborne_incapacitated()):
+		melee_approach_progress = maxf(melee_approach_progress - delta * 0.25, 0.0)
+		player.set("melee_approach_progress", melee_approach_progress)
+		return
+
+	var p_xz := Vector2(player.global_position.x, player.global_position.z)
+	var o_xz := Vector2(opp.global_position.x, opp.global_position.z)
+	var dist_xz: float = p_xz.distance_to(o_xz)
+
+	if dist_xz <= MELEE_APPROACH_RANGE:
+		var closeness: float = clampf((MELEE_APPROACH_RANGE - dist_xz) / 4.0, 0.0, 1.0)
+		var fill_rate: float = lerpf(0.14, 0.34, closeness)
+		melee_approach_progress = minf(melee_approach_progress + fill_rate * delta, 1.0)
+	elif dist_xz > MELEE_DECAY_RANGE:
+		melee_approach_progress = maxf(melee_approach_progress - delta * 0.18, 0.0)
+
+	player.set("melee_approach_progress", melee_approach_progress)
+	if melee_approach_progress >= 1.0 and melee_cooldown <= 0.0:
+		melee_approach_progress = 0.0
+		player.set("melee_approach_progress", 0.0)
+		var bp_p: float = maxf(float(player.get("current_np")) if player.get("current_np") != null else 10000.0, 100.0)
+		var bp_e: float = maxf(float(opp.get("current_np")) if opp.get("current_np") != null else 10000.0, 100.0)
+		var p_atk_prob: float = clampf(bp_p / (bp_p + bp_e), 0.30, 0.70)
+		var player_attacks: bool = randf() < p_atk_prob
+		if player_attacks and player.has_method("_start_melee_bullet_time"):
+			player._start_melee_bullet_time(opp)
+		elif not player_attacks and opp.has_method("_start_melee_bullet_time"):
+			opp._start_melee_bullet_time(player)
+
+
 func _update_body_space_metrics(player: Node) -> void:
 	if not left_controller or not right_controller or (not xr_origin and not camera):
 		return
@@ -1463,6 +1538,9 @@ func _execute_super_fire(tech_name: String) -> void:
 
 	var raw_launch_dir: Vector3 = _compute_super_raw_aim_dir(tech_name, true)
 	if gesture_tree:
+		var chg_pl: Node = gesture_tree.get("ki_blast_charge_player")
+		if chg_pl and is_instance_valid(chg_pl) and chg_pl.has_method("stop"):
+			chg_pl.stop()
 		gesture_tree._hide_aim_reticle()
 		gesture_tree.set("last_super_launch_dir", raw_launch_dir)
 		gesture_tree.set("_ki_already_consumed_by_hybrid", true)
@@ -1510,6 +1588,9 @@ func _reset_super_state() -> void:
 	if player and player.has_method("stop_charging_super"):
 		player.stop_charging_super()
 	if gesture_tree:
+		var chg_pl: Node = gesture_tree.get("ki_blast_charge_player")
+		if chg_pl and is_instance_valid(chg_pl) and chg_pl.has_method("stop"):
+			chg_pl.stop()
 		gesture_tree._hide_aim_reticle()
 		gesture_tree.sync_controller_gesture_state("IDLE")
 		gesture_tree.set("is_charging_kamehameha", false)

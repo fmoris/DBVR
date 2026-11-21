@@ -675,4 +675,12 @@ func _generate_runtime_colliders() -> void:
 			boulder_body.add_child(col)
 		add_child(boulder_body)
 
+	var parent_scene: Node = get_tree().current_scene if (get_tree() and get_tree().current_scene) else self
+	var adm := parent_scene.get_node_or_null("ArenaDestructionManager") as ArenaDestructionManager
+	if not adm:
+		adm = ArenaDestructionManager.new()
+		adm.name = "ArenaDestructionManager"
+		parent_scene.add_child(adm)
+	adm.register_arena_destructibles(self)
+
 	print("[ArenaBuilder] Colisionadores físicos canónicos generados con éxito.")
