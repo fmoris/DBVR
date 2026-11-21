@@ -173,15 +173,17 @@ func _freeze_enemy_ai(frozen: bool) -> void:
 	var opp: Node = root.find_child("EnemyCharacterInstance", true, false)
 	if not opp:
 		return
-	var ai: Node = opp.find_child("CombatAIController", true, false)
+	var ai: Node = opp.get("cached_ai_controller") as Node
 	if not ai:
-		for c: Node in opp.get_children():
-			if c.get_script() and str(c.get_script().resource_path).ends_with("CombatAIController.gd"):
-				ai = c
-				break
+		ai = opp.find_child("CombatAIController", true, false)
+	if not ai:
+		ai = root.find_child("CombatAIController", true, false)
 	if ai:
+		ai.process_mode = Node.PROCESS_MODE_DISABLED if frozen else Node.PROCESS_MODE_INHERIT
 		ai.set_process(not frozen)
 		ai.set_physics_process(not frozen)
+	else:
+		print("[WARN] CombatSequenceRunner: no se encontró CombatAIController en EnemyCharacterInstance.")
 
 
 func _reset_between_tests() -> void:
@@ -198,6 +200,10 @@ func _reset_between_tests() -> void:
 		player.set("is_in_bullet_time", false)
 		player.set("is_flying_to_opponent", false)
 		player.set("is_flying_to_melee", false)
+		player.set("is_in_beam_clash", false)
+		player.set("is_in_beam_sequence", false)
+		player.set("is_charging_super", false)
+		player.set("is_firing_beam", false)
 		var dome: Variant = player.get("active_target_dome")
 		if dome and is_instance_valid(dome):
 			dome.queue_free()
@@ -210,6 +216,8 @@ func _reset_between_tests() -> void:
 		hybrid.set("right_blast_cooldown", 0.0)
 		hybrid.set("must_release_super_buttons", false)
 		hybrid.set("transform_cooldown", 0.0)
+		hybrid.set("melee_approach_progress", 0.0)
+		player.set("melee_approach_progress", 0.0)
 
 	await _step_seconds(0.35)
 
@@ -263,20 +271,9 @@ func _seq_ki_recharge() -> bool:
 func _seq_ki_blast() -> bool:
 	player.set("current_ki", 100.0)
 
-	# 1) Ki Blast rápido (mano derecha extendida + trigger corto)
+	# 1) Ki Blast cargado (>1.0s) primero (evita que un impacto rápido previo dispare melee)
 	simulator.set_scripted_hands(Vector3(-0.22, -0.18, 0.22), Vector3(0.18, 0.02, 0.52), false, true, true)
 	await _step_seconds(0.08)
-	simulator.v_right_trigger = 1.0
-	await _step_seconds(0.12)
-	simulator.v_right_trigger = 0.0
-	await _step_seconds(0.25)
-
-	if _sig_ki_blast_quick < 1:
-		print("  -> Motivo: no se disparó Ki Blast rápido.")
-		return false
-
-	# 2) Ki Blast cargado (>1.0s)
-	hybrid.set("right_blast_cooldown", 0.0)
 	simulator.v_right_trigger = 1.0
 	await _step_seconds(1.25)
 	simulator.v_right_trigger = 0.0
@@ -284,6 +281,20 @@ func _seq_ki_blast() -> bool:
 
 	if _sig_ki_blast_charged < 1:
 		print("  -> Motivo: no se disparó Ki Blast cargado.")
+		return false
+
+	# 2) Ki Blast rápido (trigger corto)
+	player.set("is_in_bullet_time", false)
+	player.set("is_flying_to_opponent", false)
+	hybrid.set("was_in_melee_minigame", false)
+	hybrid.set("right_blast_cooldown", 0.0)
+	simulator.v_right_trigger = 1.0
+	await _step_seconds(0.12)
+	simulator.v_right_trigger = 0.0
+	await _step_seconds(0.25)
+
+	if _sig_ki_blast_quick < 1:
+		print("  -> Motivo: no se disparó Ki Blast rápido.")
 		return false
 	return true
 
