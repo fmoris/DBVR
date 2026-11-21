@@ -50,7 +50,8 @@ func _run_all_sequences() -> void:
 		"kamehameha",
 		"guard_and_move",
 		"transformation",
-		"melee_punch"
+		"melee_punch",
+		"chain_sequences"
 	]
 
 	var selected: Array[String] = []
@@ -88,6 +89,8 @@ func _run_all_sequences() -> void:
 				ok = await _seq_guard_and_move()
 			"transformation":
 				ok = await _seq_transformation()
+			"chain_sequences":
+				ok = await _seq_chain_sequences()
 
 		if ok:
 			passed += 1
@@ -128,6 +131,14 @@ func _wait_for_scene_ready() -> bool:
 
 	# Saltar intro dramática si está activa
 	var dd: DramaticDirector = DramaticDirector.get_active(get_tree())
+	if dd:
+		dd.set("is_dramatic_pause_active", false)
+
+	var cur_scene: Node = get_tree().current_scene
+	var startup_modal: Node = cur_scene.get_node_or_null("StartupChangelogModal") if cur_scene else null
+	if startup_modal and is_instance_valid(startup_modal) and startup_modal.has_method("_close_and_start"):
+		startup_modal._close_and_start()
+	get_tree().paused = false
 	if dd and dd.is_in_intro:
 		dd.skip_dramatic_intro()
 		await get_tree().process_frame
@@ -397,4 +408,102 @@ func _seq_transformation() -> bool:
 	if player.get("current_transformation") == null:
 		print("  -> Motivo: ax_button no activó la transformación.")
 		return false
+	return true
+
+
+func _seq_chain_sequences() -> bool:
+	var opp: Node3D = player._get_opponent() if player.has_method("_get_opponent") else null
+	if not opp or not is_instance_valid(opp):
+		print("  -> Motivo: no se encontró oponente en la escena.")
+		return false
+
+	# 1. Follow-Up Bullet-Time + Melee con Bonus (UNRECOVERED) vs Normal (RECOVERED)
+	player.set("current_ki", 90.0)
+	opp.set("current_ki", 90.0)
+	player._start_followup_airborne_sequence(opp, Vector3(0.0, 5.0, -18.0))
+	await get_tree().process_frame
+	if not bool(player.get("is_in_followup_bullet_time")) or not is_equal_approx(Engine.time_scale, 0.28):
+		print("  -> Motivo: Follow-Up Bullet-Time (0.28x) no se activó.")
+		Engine.time_scale = 1.0
+		return false
+
+	player.start_flight_to_opponent()
+	if int(player.get("pending_followup_bonus_hits")) != 2 or not is_equal_approx(float(player.get("pending_followup_damage_mult")), 1.25):
+		print("  -> Motivo: Meteor Chase sin recuperar no otorgó bonus (+2 golpes, 1.25x).")
+		Engine.time_scale = 1.0
+		return false
+	player._stop_flight()
+
+	# Probar recuperación Air Brake -> Melee Normal
+	player._start_followup_airborne_sequence(opp, Vector3(0.0, 5.0, -18.0))
+	await get_tree().process_frame
+	opp.complete_air_brake()
+	player.start_flight_to_opponent()
+	if int(player.get("pending_followup_bonus_hits")) != 0 or not is_equal_approx(float(player.get("pending_followup_damage_mult")), 1.0):
+		print("  -> Motivo: Rival recuperado no debió recibir bonus de seguimiento.")
+		Engine.time_scale = 1.0
+		return false
+	player._stop_flight()
+
+	# 2. Choque físico -> Estado Indefenso + Explosive Wave corta-cadena
+	opp._on_boundary_crash_impact(18.0)
+	if not bool(opp.get("is_defenseless_crash")) or String(opp.get("airborne_recovery_state")) != "DEFENSELESS_CRASH":
+		print("  -> Motivo: _on_boundary_crash_impact no activó DEFENSELESS_CRASH.")
+		return false
+	opp.set("is_defenseless_crash", false)
+	opp.set("defenseless_crash_timer", 0.0)
+
+	player.start_post_super_followup(opp)
+	if not bool(player.get("is_in_followup_bullet_time")):
+		print("  -> Motivo: start_post_super_followup no activó Follow-Up.")
+		Engine.time_scale = 1.0
+		return false
+	if not opp.trigger_explosive_wave_chain_break() or bool(player.get("is_in_followup_bullet_time")) or int(player.get("combat_chain_depth")) != 0:
+		print("  -> Motivo: Explosive Wave no cortó la cadena enemiga.")
+		Engine.time_scale = 1.0
+		return false
+
+	# 3. Beam Clash: bloqueo IA + avance hasta 0.0 por Ki == 0
+	var clash_ctrl: Node3D = load("res://scripts/BeamClashController.gd").new()
+	get_tree().current_scene.add_child(clash_ctrl)
+	clash_ctrl.setup(player, opp, "Kamehameha", Color(0.1, 0.7, 1.0), "Galick Ho", Color(0.8, 0.2, 1.0), 5.5, 1800.0, 1800.0, 1.0, 1.0)
+	if not bool(opp.get("is_in_beam_clash")):
+		print("  -> Motivo: BeamClashController no bloqueó a la IA con is_in_beam_clash.")
+		clash_ctrl.queue_free()
+		Engine.time_scale = 1.0
+		return false
+	opp.set("current_ki", 0.0)
+	clash_ctrl._apply_exhaustion_or_timeout_surge(0.8)
+	if float(clash_ctrl.get("clash_ratio")) > 0.001:
+		print("  -> Motivo: el choque no avanzó a 0.0 al quedarse la IA sin Ki (ratio=%.2f)." % float(clash_ctrl.get("clash_ratio")))
+		clash_ctrl.queue_free()
+		Engine.time_scale = 1.0
+		return false
+	clash_ctrl._resolve_clash(player, opp, "Kamehameha")
+
+	# 4. Fase 2 & 3: Shunkan Idō + Nuevos Poderes
+	player.set("current_ki", 50.0)
+	if not player.execute_shunkan_ido_flank() or float(player.get("current_ki")) >= 50.0:
+		print("  -> Motivo: execute_shunkan_ido_flank falló o no consumió Ki.")
+		return false
+
+	var goku_res: Resource = load("res://resources/goku.tres")
+	var vegeta_res: Resource = load("res://resources/vegeta.tres")
+	var has_kame_inst: bool = false
+	for p: Resource in goku_res.get("powers"):
+		if String(p.get("power_name")) == "Kamehameha Instantáneo":
+			has_kame_inst = true
+	var has_gamma: bool = false
+	var has_final_exp: bool = false
+	for p: Resource in vegeta_res.get("powers"):
+		var pn: String = String(p.get("power_name"))
+		if pn == "Gamma Burst Flash":
+			has_gamma = true
+		elif pn == "Final Explosion":
+			has_final_exp = true
+	if not (has_kame_inst and has_gamma and has_final_exp):
+		print("  -> Motivo: faltan poderes de Fase 3 en goku.tres / vegeta.tres.")
+		return false
+
+	Engine.time_scale = 1.0
 	return true

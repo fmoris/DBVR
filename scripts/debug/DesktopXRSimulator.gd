@@ -366,7 +366,8 @@ func set_scripted_hands(
 	if instant:
 		_current_l_torso = l_torso
 		_current_r_torso = r_torso
-		_apply_hand_transforms(0.016)
+		if camera and is_instance_valid(camera):
+			_apply_hand_transforms(0.016)
 
 
 func _apply_hand_transforms(delta: float) -> void:
