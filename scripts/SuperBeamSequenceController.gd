@@ -253,17 +253,15 @@ func _process(delta: float) -> void:
 			target_pos = def_now.lerp(aimed_pt, 0.30)
 		beam_dir = (target_pos - start_pos).normalized()
 
-		# Desacoplar avance visual (arranque explosivo al 65% + cámara súper lenta decisiva + impacto final)
+		# Avance continuo desde que sale de las manos del atacante (0% -> 88% en Bullet-Time, 88% -> 100% impacto)
 		prev_head_pos = current_head_pos
 		var norm_t: float = clampf(1.0 - (time_left / maxf(reaction_duration, 0.01)), 0.0, 1.0)
 		if is_aimed_miss:
 			beam_progress = norm_t
-		elif norm_t < 0.18:
-			beam_progress = 0.65 * (1.0 - pow(1.0 - (norm_t / 0.18), 2.2))
-		elif norm_t < 0.92:
-			beam_progress = lerpf(0.65, 0.92, (norm_t - 0.18) / 0.74)
+		elif norm_t < 0.90:
+			beam_progress = lerpf(0.0, 0.88, norm_t / 0.90)
 		else:
-			beam_progress = lerpf(0.92, 1.0, (norm_t - 0.92) / 0.08)
+			beam_progress = lerpf(0.88, 1.0, (norm_t - 0.90) / 0.10)
 		current_head_pos = start_pos.lerp(target_pos, beam_progress)
 
 		_update_beam_geometry()
@@ -842,7 +840,7 @@ func _resolve_direct_hit() -> void:
 		if defender.has_method("take_hit"):
 			defender.take_hit(final_damage, beam_dir, false)
 		if defender.has_method("apply_knockback"):
-			defender.apply_knockback(beam_dir, clampf(22.0 * bp_ratio, 18.0, 34.0), 2.1)
+			defender.apply_knockback(beam_dir, clampf(28.0 * bp_ratio, 22.0, 40.0), 1.6)
 		if defender.get("procedural_animator"):
 			defender.procedural_animator.trigger_hit_flinch(2.5, beam_dir)
 

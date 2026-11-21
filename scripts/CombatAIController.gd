@@ -54,9 +54,9 @@ var is_stepping: bool = false
 # Parámetros de combate por casillas / pasos
 const AI_STEP_DISTANCE: float = 2.0
 const VERTICAL_STEP: float = 1.4
-const MIN_ALLOWED_DISTANCE: float = 9.5
-const OPTIMAL_DIST_MIN: float = 10.5
-const OPTIMAL_DIST_MAX: float = 15.0
+const MIN_ALLOWED_DISTANCE: float = 11.5
+const OPTIMAL_DIST_MIN: float = 12.5
+const OPTIMAL_DIST_MAX: float = 18.0
 const LONG_CHASE_TRIGGER_DIST: float = 9999.0
 const LONG_CHASE_TARGET_DIST: float = 12.0
 
@@ -192,8 +192,8 @@ func _process_state_idle_spacing(delta: float) -> void:
 		elif y_diff < -1.2:
 			execute_vertical_step(false)
 		elif dist > OPTIMAL_DIST_MAX:
-			# Acercarse un paso hacia adelante si no invade distancia mínima
-			execute_step_movement(fwd)
+			# A larga distancia, alternar órbita lateral y pasos suaves (sin acercamiento forzado)
+			execute_step_movement(lateral if randf() < 0.65 else fwd)
 		elif dist < OPTIMAL_DIST_MIN:
 			# Paso atrás para recuperar espacio
 			execute_step_movement(-fwd)

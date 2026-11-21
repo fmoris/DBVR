@@ -3161,12 +3161,14 @@ func apply_knockback(dir: Vector3, force: float, air_drag_override: float = 2.6)
 	var horiz_dir = Vector3(dir.x, 0.0, dir.z).normalized()
 	if horiz_dir.length_squared() < 0.01:
 		horiz_dir = -global_transform.basis.z
-	var controlled_force = clampf(force, 1.5, 28.0)
+	var controlled_force = clampf(force, 1.5, 42.0)
 	# Ligera sustentación en impactos fuertes (>= 9 m/s) para deslizarse por el aire y activar Air Brake
-	var vert_comp = clampf(dir.y, -1.0, 1.0) if abs(dir.y) > 0.35 else (0.12 if controlled_force >= 9.0 else 0.0)
+	var vert_comp = clampf(dir.y, -1.0, 1.0) if abs(dir.y) > 0.35 else (0.14 if controlled_force >= 9.0 else 0.0)
 	var impulse = (horiz_dir + Vector3.UP * vert_comp).normalized() * controlled_force
 	velocity = impulse
 	is_knocked_back = true
+	if controlled_force >= 8.5:
+		knockback_drag = minf(knockback_drag, air_drag_override)
 	if is_player and controlled_force >= 8.5 and not is_in_bullet_time:
 		begin_air_brake(controlled_force, _last_hit_damage_np, _last_hit_attacker_bp, air_drag_override)
 	print("[Physics] %s empujado con fuerza controlada %.1f m/s en dirección %s." % [character_data.character_name if character_data else name, controlled_force, horiz_dir])
