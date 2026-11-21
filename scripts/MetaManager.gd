@@ -16,9 +16,9 @@ func _ready():
 			return
 		setup_meta()
 
-func setup_meta():
-	if !OS.has_feature("android"):
-		print("[MetaManager] Ejecutando en PC/Simulador. Saltando inicialización de Platform SDK.")
+func setup_meta() -> void:
+	if not OS.has_feature("android") or not Engine.has_singleton("MetaPlatformSDK"):
+		print("[MetaManager] Ejecutando sin singleton MetaPlatformSDK activo. Saltando inicialización de Platform SDK.")
 		initialization_completed.emit(true)
 		return
 

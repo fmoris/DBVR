@@ -1,0 +1,47 @@
+[gd_resource type="Resource" script_class="KiEconomyConfig" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/ki_economy_config.gd" id="1_kieco"]
+
+[resource]
+script = ExtResource("1_kieco")
+charge_ki_per_sec_heavy = 24.0
+charge_ki_per_sec_light = 10.0
+charge_bp_per_sec_heavy = 250.0
+charge_bp_per_sec_light = 80.0
+charge_bp_ceiling_ratio = 0.6
+passive_ki_regen_per_sec = 1.0
+passive_regen_delay_sec = 2.0
+ki_regen_per_bp_lost = 0.0055
+super_charge_drain_per_sec = 6.0
+ki_blast_charge_drain_per_sec = 2.0
+ki_blast_cost = 3.0
+ki_blast_charged_cost = 9.0
+ki_blast_rapid_vegeta_cost = 2.5
+melee_dash_cost = 10.0
+melee_quick_cost = 5.0
+melee_charged_cost = 11.0
+melee_v3_cost = 16.0
+melee_hammer_guard_cost = 20.0
+melee_guard_escalation = 2.0
+ai_dodge_cost = 4.0
+melee_hammer_cost = 22.0
+melee_guard_quick_cost = 7.0
+melee_guard_charged_cost = 12.0
+melee_guard_v3_cost = 16.0
+melee_vanish_cost = 14.0
+melee_explosive_wave_cost = 22.0
+melee_meteor_chase_cost = 12.0
+melee_sonic_ki_refund = 1.5
+melee_parry_ki_reward = 14.0
+melee_deflect_ki_reward = 5.0
+melee_clash_cost = 4.0
+melee_clash_win_reward = 8.0
+melee_crater_super_charge_mult = 1.35
+ki_blast_deflect_ki_reward = 12.0
+ki_blast_deflect_bp_reward = 150.0
+ki_blast_pressure_decay_sec = 2.8
+ki_blast_rapid_ki_drain = 3.0
+ki_blast_charged_ki_drain = 9.0
+ki_blast_charged_guard_ki_drain = 16.0
+ki_blast_smoke_super_charge_mult = 1.25
+secured_floor_at_full = 0.9

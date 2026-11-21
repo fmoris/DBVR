@@ -1,0 +1,1403 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DBZVR — Clasificador de Audio por Acciones</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --panel: #161b22;
+      --panel-2: #1c222b;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --accent: #f97316;
+      --accent-hover: #fb923c;
+      --blue: #38bdf8;
+      --green: #22c55e;
+      --red: #ef4444;
+      --purple: #a855f7;
+      --yellow: #eab308;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 16px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .brand h1 {
+      margin: 0;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+    }
+    .brand .badge {
+      background: rgba(249, 115, 22, 0.15);
+      color: var(--accent);
+      border: 1px solid rgba(249, 115, 22, 0.4);
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    button, .btn {
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 11px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: 0.12s ease;
+    }
+    button:hover, .btn:hover {
+      border-color: var(--muted);
+      background: #242b35;
+    }
+    button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #0b0e14;
+    }
+    button.primary:hover {
+      background: var(--accent-hover);
+      border-color: var(--accent-hover);
+    }
+    button.success {
+      background: rgba(34, 197, 94, 0.15);
+      border-color: rgba(34, 197, 94, 0.5);
+      color: var(--green);
+    }
+    button.danger {
+      background: rgba(239, 68, 68, 0.12);
+      border-color: rgba(239, 68, 68, 0.4);
+      color: var(--red);
+    }
+    button.blue {
+      background: rgba(56, 189, 248, 0.14);
+      border-color: rgba(56, 189, 248, 0.45);
+      color: var(--blue);
+    }
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .player-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 16px;
+      background: #12171e;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      flex-shrink: 0;
+    }
+    .now-playing {
+      min-width: 220px;
+      max-width: 340px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: var(--blue);
+      font-weight: 600;
+    }
+    .player-bar input[type="range"] {
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+    .shortcuts-hint {
+      margin-left: auto;
+      color: var(--muted);
+      font-size: 11px;
+      display: flex;
+      gap: 10px;
+    }
+    kbd {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 5px;
+      font-family: monospace;
+      font-size: 11px;
+      color: var(--text);
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: 1.25fr 1fr;
+      flex: 1;
+      min-height: 0;
+    }
+    .pane {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      border-right: 1px solid var(--border);
+    }
+    .pane:last-child { border-right: none; }
+
+    .pane-header {
+      padding: 10px 14px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .tabs {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .tab {
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .tab.active {
+      background: rgba(249, 115, 22, 0.18);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .filters-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    input[type="text"], select {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 12px;
+      outline: none;
+    }
+    input[type="text"]:focus, select:focus {
+      border-color: var(--accent);
+    }
+    .search-input {
+      flex: 1;
+      min-width: 150px;
+    }
+    .bulk-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 14px;
+      background: #141a22;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      flex-shrink: 0;
+    }
+
+    .list-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px;
+    }
+
+    .sound-row {
+      display: grid;
+      grid-template-columns: auto auto 1fr auto auto;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 6px;
+      border: 1px solid transparent;
+      margin-bottom: 3px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+    .sound-row:hover {
+      background: var(--panel);
+    }
+    .sound-row.selected {
+      background: rgba(56, 189, 248, 0.1);
+      border-color: rgba(56, 189, 248, 0.45);
+    }
+    .sound-row.playing {
+      border-color: var(--accent);
+      background: rgba(249, 115, 22, 0.1);
+    }
+    .sound-row.ignored {
+      opacity: 0.45;
+      text-decoration: line-through;
+    }
+    .sound-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 500;
+    }
+    .sound-meta {
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .tag-list {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      max-width: 240px;
+    }
+    .tag {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(34, 197, 94, 0.14);
+      border: 1px solid rgba(34, 197, 94, 0.35);
+      color: var(--green);
+      white-space: nowrap;
+    }
+    .icon-btn {
+      padding: 4px 8px;
+      font-size: 11px;
+      min-width: 28px;
+      justify-content: center;
+    }
+
+    /* Right panel: Actions */
+    .actions-layout {
+      display: grid;
+      grid-template-rows: 1fr auto;
+      flex: 1;
+      min-height: 0;
+    }
+    .action-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: 0.12s;
+    }
+    .action-card:hover {
+      border-color: var(--muted);
+    }
+    .action-card.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px rgba(249, 115, 22, 0.35);
+      background: #1a2029;
+    }
+    .action-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .action-title {
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .action-id {
+      font-family: monospace;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .count-pill {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+    .count-pill.has-sounds {
+      background: rgba(34, 197, 94, 0.15);
+      border-color: rgba(34, 197, 94, 0.4);
+      color: var(--green);
+    }
+
+    .active-action-detail {
+      border-top: 1px solid var(--border);
+      background: var(--panel);
+      padding: 12px 14px;
+      max-height: 44%;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      min-height: 180px;
+    }
+    .assigned-list {
+      overflow-y: auto;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .assigned-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 5px 8px;
+      font-size: 12px;
+    }
+    .assigned-item span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .category-heading {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.7px;
+      color: var(--accent);
+      margin: 12px 4px 6px;
+    }
+
+    /* Modal */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+      padding: 20px;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      max-width: 680px;
+      width: 100%;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .modal h2 { margin: 0; font-size: 16px; }
+    .modal pre {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 12px;
+      overflow-x: auto;
+      font-size: 12px;
+      line-height: 1.45;
+      margin: 0;
+    }
+    .form-grid {
+      display: grid;
+      gap: 10px;
+    }
+    .form-grid label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .toast {
+      position: fixed;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1f2937;
+      border: 1px solid var(--accent);
+      color: var(--text);
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      z-index: 100;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <h1>DBZVR Audio Classifier</h1>
+      <span class="badge" id="statsBadge">Cargando...</span>
+    </div>
+    <div class="header-actions">
+      <label class="btn" title="Cargar otro audio_manifest.json">
+        📂 Cargar Manifest JSON
+        <input type="file" id="manifestFileInput" accept=".json" hidden />
+      </label>
+      <label class="btn" title="Importar clasificación previa (audio_actions.json)">
+        📥 Importar Acciones
+        <input type="file" id="importActionsInput" accept=".json" hidden />
+      </label>
+      <button class="blue" id="btnGodotCode">⚙️ Código Godot</button>
+      <button class="primary" id="btnExport">💾 Exportar audio_actions.json</button>
+      <button class="danger" id="btnReset">🗑️ Reiniciar</button>
+    </div>
+  </header>
+
+  <div class="player-bar">
+    <button id="btnPlayPause" class="icon-btn">▶</button>
+    <button id="btnStop" class="icon-btn">⏹</button>
+    <div class="now-playing" id="nowPlaying">Ningún audio reproduciéndose</div>
+    <input type="range" id="seekBar" min="0" max="100" value="0" style="width: 180px;" />
+    <span id="timeLabel" style="color:var(--muted); min-width:75px;">0:00 / 0:00</span>
+    <label style="display:flex; align-items:center; gap:5px; color:var(--muted);">
+      🔊 <input type="range" id="volumeBar" min="0" max="1" step="0.05" value="0.85" style="width:80px;" />
+    </label>
+    <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+      <input type="checkbox" id="chkAutoAdvance" checked /> Auto-avanzar al asignar
+    </label>
+    <div class="shortcuts-hint">
+      <span><kbd>Space</kbd> Play</span>
+      <span><kbd>Enter</kbd>/<kbd>A</kbd> Asignar</span>
+      <span><kbd>D</kbd> Descartar</span>
+      <span><kbd>R</kbd> Azar</span>
+    </div>
+  </div>
+
+  <main>
+    <!-- LEFT: FOLDERS & SOUNDS -->
+    <section class="pane">
+      <div class="pane-header">
+        <div class="tabs" id="folderTabs"></div>
+        <div class="filters-row">
+          <input type="text" id="searchSound" class="search-input" placeholder="Buscar archivo de audio..." />
+          <select id="filterStatus">
+            <option value="all">Todos</option>
+            <option value="unassigned">Sin clasificar</option>
+            <option value="assigned">Clasificados</option>
+            <option value="ignored">Descartados</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="bulk-bar">
+        <label style="display:flex; align-items:center; gap:6px; cursor:pointer;">
+          <input type="checkbox" id="chkSelectAllVisible" />
+          <span id="visibleCountLabel">0 archivos</span>
+        </label>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <span id="checkedCountLabel" style="color:var(--muted);">0 seleccionados</span>
+          <button class="success" id="btnAssignChecked" disabled>+ Asignar seleccionados a acción activa</button>
+        </div>
+      </div>
+
+      <div class="list-scroll" id="soundList"></div>
+    </section>
+
+    <!-- RIGHT: GAME ACTIONS -->
+    <section class="pane">
+      <div class="pane-header">
+        <div class="filters-row">
+          <input type="text" id="searchAction" class="search-input" placeholder="Buscar acción del juego..." />
+          <select id="filterCategory">
+            <option value="all">Todas las categorías</option>
+            <option value="Comunes">Comunes / Combate</option>
+            <option value="Escenas Dramáticas">Escenas Dramáticas</option>
+            <option value="Goku">Goku</option>
+            <option value="Vegeta">Vegeta</option>
+            <option value="Personalizadas">Personalizadas</option>
+          </select>
+          <button class="primary" id="btnNewAction">+ Nueva Acción</button>
+        </div>
+      </div>
+
+      <div class="actions-layout">
+        <div class="list-scroll" id="actionList"></div>
+
+        <div class="active-action-detail" id="activeActionDetail">
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+            <div>
+              <div class="action-title" id="activeActionTitle">Selecciona una acción</div>
+              <div class="action-id" id="activeActionId">—</div>
+            </div>
+            <button class="blue" id="btnTestRandom" disabled>🎲 Probar al Azar</button>
+          </div>
+          <div class="assigned-list" id="assignedSoundsList"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Modal Nueva Acción -->
+  <div class="modal-backdrop" id="newActionModal">
+    <div class="modal">
+      <h2>Nueva Acción del Juego</h2>
+      <div class="form-grid">
+        <label>
+          ID único (ej: goku.spirit_bomb_hit)
+          <input type="text" id="newActionIdInput" placeholder="personaje.nombre_accion" />
+        </label>
+        <label>
+          Nombre visible
+          <input type="text" id="newActionLabelInput" placeholder="Ej: Goku: Impacto Genkidama" />
+        </label>
+        <label>
+          Categoría
+          <select id="newActionCatInput">
+            <option value="Comunes">Comunes</option>
+            <option value="Escenas Dramáticas">Escenas Dramáticas</option>
+            <option value="Goku">Goku</option>
+            <option value="Vegeta">Vegeta</option>
+            <option value="Personalizadas" selected>Personalizadas</option>
+          </select>
+        </label>
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button id="btnCancelNewAction">Cancelar</button>
+        <button class="primary" id="btnSaveNewAction">Crear Acción</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Código Godot -->
+  <div class="modal-backdrop" id="godotModal">
+    <div class="modal">
+      <h2>Cómo reproducir acciones al azar en Godot 4 (GDScript)</h2>
+      <p style="margin:0; font-size:12px; color:var(--muted);">
+        Guarda el archivo exportado como <code>res://assets/audio/audio_actions.json</code> y usa este helper para reproducir un sonido aleatorio de cada acción:
+      </p>
+      <pre id="godotSnippet">var _audio_actions: Dictionary = {}
+var _stream_cache: Dictionary = {}
+
+func _ready() -> void:
+	var file := FileAccess.open("res://assets/audio/audio_actions.json", FileAccess.READ)
+	if file:
+		var parsed: Variant = JSON.parse_string(file.get_as_text())
+		if parsed is Dictionary and parsed.has("actions"):
+			_audio_actions = parsed["actions"]
+
+func play_random_action_sound(action_id: String, player: AudioStreamPlayer3D) -> void:
+	if not _audio_actions.has(action_id):
+		return
+	var sounds: Array = _audio_actions[action_id].get("sounds", [])
+	if sounds.is_empty():
+		return
+	var chosen_path: String = sounds.pick_random()
+	if not _stream_cache.has(chosen_path):
+		_stream_cache[chosen_path] = load(chosen_path)
+	player.stream = _stream_cache[chosen_path]
+	player.play()</pre>
+      <div style="display:flex; justify-content:flex-end; gap:8px;">
+        <button id="btnCopyGodot">📋 Copiar código</button>
+        <button class="primary" id="btnCloseGodot">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <!-- Fallback para abrir directamente con doble clic (file://) sin servidor HTTP -->
+  <script src="audio_manifest.js"></script>
+  <script>
+    const STORAGE_KEY = 'dbzvr_audio_classifier_v2';
+    const LEGACY_STORAGE_KEY = 'dbzvr_audio_classifier_v1';
+
+    const DEFAULT_ACTIONS = [
+      // Comunes / Combate (pre-cargados con los sonidos en uso actual del juego)
+      { id: 'common.ki_charge_phase1', label: 'Recarga de Ki (Fase 1 - Brazos cruzados)', category: 'Comunes', sounds: ['res://assets/sfx/AURA.mp3'] },
+      { id: 'common.ki_charge_phase2', label: 'Recarga de Ki (Fase 2 - Puños cintura)', category: 'Comunes', sounds: ['res://assets/sfx/aura_loop.mp3'] },
+      { id: 'common.ki_blast_charge', label: 'Ki Blast (Carga)', category: 'Comunes', sounds: ['res://assets/sfx/Charged_KI_Blast_1.mp3'] },
+      { id: 'common.ki_blast_fire', label: 'Ki Blast (Disparo)', category: 'Comunes', sounds: ['res://assets/sfx/Charged_KI_Blast_1.mp3'] },
+      { id: 'common.ki_blast_impact', label: 'Ki Blast (Impacto / Spawn)', category: 'Comunes', sounds: ['res://assets/audio/gekishin_test/003073_s1.wav'] },
+      { id: 'common.ki_sense_lockon', label: 'Ki Sense / Lock-on', category: 'Comunes', sounds: ['res://assets/audio/gekishin_test/003073_s1.wav'] },
+      { id: 'common.melee_swing', label: 'Melee (Golpe al aire / Swoosh)', category: 'Comunes', sounds: [] },
+      { id: 'common.melee_hit_light', label: 'Melee (Impacto ligero)', category: 'Comunes', sounds: ['res://assets/audio/gekishin_test/003073_s1.wav'] },
+      { id: 'common.melee_hit_heavy', label: 'Melee (Impacto fuerte / Knockback)', category: 'Comunes', sounds: ['res://assets/audio/gekishin_test/003073_s3.wav'] },
+      { id: 'common.block_guard', label: 'Bloqueo / Guardia', category: 'Comunes', sounds: [] },
+      { id: 'common.block_perfect', label: 'Bloqueo Predictivo Perfecto (Parry)', category: 'Comunes', sounds: ['res://assets/audio/gekishin_test/003074_s4.wav'] },
+      { id: 'common.dodge_vanish', label: 'Esquive / Zanzoken (Teletransportación)', category: 'Comunes', sounds: ['res://assets/audio/gekishin_test/003074_s4.wav'] },
+      { id: 'common.dash_fly', label: 'Dash / Step / Vuelo rápido', category: 'Comunes', sounds: ['res://assets/audio/gekishin_test/003074_s4.wav'] },
+      { id: 'common.aura_burst', label: 'Explosión de Aura / Power Up', category: 'Comunes', sounds: ['res://assets/sfx/AURA.mp3'] },
+      { id: 'common.beam_clash', label: 'Choque de Poderes (Beam Clash)', category: 'Comunes', sounds: ['res://assets/sfx/AURA.mp3'] },
+      { id: 'common.furia_activate', label: 'Activación de Furia (Comeback)', category: 'Comunes', sounds: [] },
+      { id: 'common.zenkai_activate', label: 'Activación Estado Zenkai', category: 'Comunes', sounds: [] },
+      { id: 'common.ko_finisher', label: 'Finisher K.O. / Explosión final', category: 'Comunes', sounds: [] },
+      { id: 'common.ui_select', label: 'UI / Menú Selección', category: 'Comunes', sounds: [] },
+
+      // Escenas Dramáticas
+      { id: 'dramatic.intro_fanfare', label: 'Dramatic Intro: Inicio / Careo Saiyan', category: 'Escenas Dramáticas', sounds: [] },
+      { id: 'dramatic.transform_buildup', label: 'Transformación Dramática: Tensión / Relámpagos', category: 'Escenas Dramáticas', sounds: [] },
+      { id: 'dramatic.determination_charge', label: 'Momento de Determinación: Carga / Concentración', category: 'Escenas Dramáticas', sounds: [] },
+      { id: 'dramatic.determination_burst', label: 'Momento de Determinación: Explosión de Aura', category: 'Escenas Dramáticas', sounds: [] },
+      { id: 'dramatic.miniscene_trigger', label: 'Mini-Escena: Pausa / Alerta de Evento', category: 'Escenas Dramáticas', sounds: [] },
+      { id: 'dramatic.miniscene_tick', label: 'Mini-Escena: Acierto / Pulso de Minijuego', category: 'Escenas Dramáticas', sounds: [] },
+      { id: 'dramatic.miniscene_success', label: 'Mini-Escena: ¡Éxito! Bono Obtenido', category: 'Escenas Dramáticas', sounds: [] },
+      { id: 'dramatic.miniscene_fail', label: 'Mini-Escena: Fallo / Tiempo Agotado', category: 'Escenas Dramáticas', sounds: [] },
+      { id: 'dramatic.finish_impact', label: 'Dramatic Finish: Impacto / Columna de Luz K.O.', category: 'Escenas Dramáticas', sounds: [] },
+      { id: 'dramatic.crater_impact', label: 'Entorno: Cráter / Choque contra Pilares o Roca', category: 'Escenas Dramáticas', sounds: [] },
+
+      // Goku
+      { id: 'goku.kamehameha_charge', label: 'Goku: Kamehameha (Carga)', category: 'Goku', sounds: [] },
+      { id: 'goku.kamehameha_fire', label: 'Goku: Kamehameha (Disparo)', category: 'Goku', sounds: ['res://assets/sfx/Kamehameha Regular.mp3'] },
+      { id: 'goku.genkidama_charge', label: 'Goku: Genkidama (Carga)', category: 'Goku' },
+      { id: 'goku.genkidama_fire', label: 'Goku: Genkidama (Lanzamiento)', category: 'Goku' },
+      { id: 'goku.kaioken', label: 'Goku: Kaioken', category: 'Goku' },
+      { id: 'goku.transform_ssj', label: 'Goku: Transformación (SSJ / SSJ2 / SSB)', category: 'Goku' },
+      { id: 'goku.attack_effort', label: 'Goku: Grito de ataque (Melee / Blast)', category: 'Goku' },
+      { id: 'goku.ki_charge_voice', label: 'Goku: Grito recargando Ki', category: 'Goku' },
+      { id: 'goku.hurt_light', label: 'Goku: Daño ligero / Quejido', category: 'Goku' },
+      { id: 'goku.hurt_heavy', label: 'Goku: Daño fuerte / Derrota', category: 'Goku' },
+      { id: 'goku.intro_taunt', label: 'Goku: Intro / Provocación', category: 'Goku' },
+      { id: 'goku.victory', label: 'Goku: Victoria', category: 'Goku' },
+      { id: 'goku.dramatic_intro', label: 'Goku: Voz Dramatic Intro (Careo)', category: 'Goku', sounds: [] },
+      { id: 'goku.dramatic_miniscene', label: 'Goku: Voz Mini-Escena (Calma / Kaioken)', category: 'Goku', sounds: [] },
+      { id: 'goku.dramatic_finish', label: 'Goku: Voz Dramatic Finish (K.O.)', category: 'Goku', sounds: [] },
+
+      // Vegeta
+      { id: 'vegeta.galick_gun_charge', label: 'Vegeta: Galick Ho (Carga)', category: 'Vegeta' },
+      { id: 'vegeta.galick_gun_fire', label: 'Vegeta: Galick Ho (Disparo)', category: 'Vegeta' },
+      { id: 'vegeta.big_bang_charge', label: 'Vegeta: Big Bang Attack (Carga)', category: 'Vegeta' },
+      { id: 'vegeta.big_bang_fire', label: 'Vegeta: Big Bang Attack (Disparo)', category: 'Vegeta' },
+      { id: 'vegeta.final_flash_charge', label: 'Vegeta: Final Flash (Carga)', category: 'Vegeta' },
+      { id: 'vegeta.final_flash_fire', label: 'Vegeta: Final Flash (Disparo)', category: 'Vegeta' },
+      { id: 'vegeta.transform_ssj', label: 'Vegeta: Transformación (SSJ / Super Vegeta / SSB)', category: 'Vegeta' },
+      { id: 'vegeta.attack_effort', label: 'Vegeta: Grito de ataque (Melee / Blast)', category: 'Vegeta' },
+      { id: 'vegeta.ki_charge_voice', label: 'Vegeta: Grito recargando Ki', category: 'Vegeta' },
+      { id: 'vegeta.hurt_light', label: 'Vegeta: Daño ligero / Quejido', category: 'Vegeta' },
+      { id: 'vegeta.hurt_heavy', label: 'Vegeta: Daño fuerte / Derrota', category: 'Vegeta' },
+      { id: 'vegeta.intro_taunt', label: 'Vegeta: Intro / Provocación', category: 'Vegeta' },
+      { id: 'vegeta.victory', label: 'Vegeta: Victoria', category: 'Vegeta' },
+      { id: 'vegeta.dramatic_intro', label: 'Vegeta: Voz Dramatic Intro (Careo)', category: 'Vegeta', sounds: [] },
+      { id: 'vegeta.dramatic_miniscene', label: 'Vegeta: Voz Mini-Escena (Orgullo / Precisión)', category: 'Vegeta', sounds: [] },
+      { id: 'vegeta.dramatic_finish', label: 'Vegeta: Voz Dramatic Finish (K.O.)', category: 'Vegeta', sounds: [] }
+    ];
+
+    let manifest = null;
+    let allSounds = []; // flattened with folder property
+    let visibleSounds = [];
+    let state = {
+      actions: {},      // id -> { id, label, category, sounds: [res_path] }
+      ignored: {},      // res_path -> true
+      activeFolder: '__ALL__',
+      activeActionId: 'common.melee_hit_light',
+      selectedSoundPath: null, // res_path
+      checkedPaths: new Set()
+    };
+
+    const audio = new Audio();
+    let currentPlayingPath = null;
+
+    // DOM refs
+    const folderTabsEl = document.getElementById('folderTabs');
+    const soundListEl = document.getElementById('soundList');
+    const actionListEl = document.getElementById('actionList');
+    const searchSoundEl = document.getElementById('searchSound');
+    const filterStatusEl = document.getElementById('filterStatus');
+    const searchActionEl = document.getElementById('searchAction');
+    const filterCategoryEl = document.getElementById('filterCategory');
+    const statsBadgeEl = document.getElementById('statsBadge');
+    const visibleCountLabelEl = document.getElementById('visibleCountLabel');
+    const checkedCountLabelEl = document.getElementById('checkedCountLabel');
+    const btnAssignCheckedEl = document.getElementById('btnAssignChecked');
+    const chkSelectAllVisibleEl = document.getElementById('chkSelectAllVisible');
+    const activeActionTitleEl = document.getElementById('activeActionTitle');
+    const activeActionIdEl = document.getElementById('activeActionId');
+    const assignedSoundsListEl = document.getElementById('assignedSoundsList');
+    const btnTestRandomEl = document.getElementById('btnTestRandom');
+
+    const nowPlayingEl = document.getElementById('nowPlaying');
+    const btnPlayPauseEl = document.getElementById('btnPlayPause');
+    const btnStopEl = document.getElementById('btnStop');
+    const seekBarEl = document.getElementById('seekBar');
+    const timeLabelEl = document.getElementById('timeLabel');
+    const volumeBarEl = document.getElementById('volumeBar');
+    const chkAutoAdvanceEl = document.getElementById('chkAutoAdvance');
+
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.style.display = 'block';
+      clearTimeout(t._timer);
+      t._timer = setTimeout(() => { t.style.display = 'none'; }, 2400);
+    }
+
+    function initDefaultActions() {
+      const map = {};
+      for (const a of DEFAULT_ACTIONS) {
+        map[a.id] = { ...a, sounds: Array.isArray(a.sounds) ? [...a.sounds] : [] };
+      }
+      return map;
+    }
+
+    function loadSavedState() {
+      state.actions = initDefaultActions();
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed.actions) {
+            for (const [id, data] of Object.entries(parsed.actions)) {
+              state.actions[id] = {
+                id,
+                label: data.label || id,
+                category: data.category || 'Personalizadas',
+                sounds: Array.isArray(data.sounds) ? data.sounds : []
+              };
+            }
+          }
+          if (parsed.ignored) state.ignored = parsed.ignored;
+          if (parsed.activeActionId && state.actions[parsed.activeActionId]) {
+            state.activeActionId = parsed.activeActionId;
+          }
+          return;
+        }
+
+        // Migrar clasificaciones previas de v1 (si existían) manteniendo los sonidos actuales pre-cargados
+        const legacyRaw = localStorage.getItem(LEGACY_STORAGE_KEY);
+        if (legacyRaw) {
+          const legacy = JSON.parse(legacyRaw);
+          if (legacy.actions) {
+            for (const [id, data] of Object.entries(legacy.actions)) {
+              if (!state.actions[id]) {
+                state.actions[id] = {
+                  id,
+                  label: data.label || id,
+                  category: data.category || 'Personalizadas',
+                  sounds: []
+                };
+              }
+              if (Array.isArray(data.sounds)) {
+                for (const s of data.sounds) {
+                  if (!state.actions[id].sounds.includes(s)) state.actions[id].sounds.push(s);
+                }
+              }
+            }
+          }
+          if (legacy.ignored) state.ignored = legacy.ignored;
+          saveState();
+        }
+      } catch (e) {
+        console.warn('No se pudo cargar localStorage:', e);
+      }
+    }
+
+    function saveState() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+          actions: state.actions,
+          ignored: state.ignored,
+          activeActionId: state.activeActionId
+        }));
+      } catch (e) {
+        console.warn('Error guardando en localStorage:', e);
+      }
+    }
+
+    async function loadManifest() {
+      try {
+        const res = await fetch('./audio_manifest.json');
+        if (res.ok) {
+          manifest = await res.json();
+          onManifestLoaded();
+          return;
+        }
+      } catch (_) {
+        // file:// CORS fallback
+      }
+      if (window.AUDIO_MANIFEST) {
+        manifest = window.AUDIO_MANIFEST;
+        onManifestLoaded();
+      } else {
+        statsBadgeEl.textContent = 'Carga audio_manifest.json manualmente';
+      }
+    }
+
+    function onManifestLoaded() {
+      allSounds = [];
+      const folders = manifest.folders || {};
+      for (const [folderName, files] of Object.entries(folders)) {
+        for (const f of files) {
+          allSounds.push({ ...f, folder: folderName });
+        }
+      }
+      const folderNames = Object.keys(folders);
+      if (state.activeFolder !== '__ALL__' && !folders[state.activeFolder]) {
+        state.activeFolder = folderNames[0] || '__ALL__';
+      }
+      renderFolderTabs();
+      renderSounds();
+      renderActions();
+      renderActiveActionDetail();
+      updateStats();
+    }
+
+    function getSoundActions(resPath) {
+      const result = [];
+      for (const a of Object.values(state.actions)) {
+        if (a.sounds.includes(resPath)) result.push(a);
+      }
+      return result;
+    }
+
+    function updateStats() {
+      const assignedSet = new Set();
+      for (const a of Object.values(state.actions)) {
+        for (const s of a.sounds) assignedSet.add(s);
+      }
+      const ignoredCount = Object.keys(state.ignored).length;
+      statsBadgeEl.textContent = `${allSounds.length} sonidos · ${assignedSet.size} clasificados · ${ignoredCount} descartados`;
+    }
+
+    function renderFolderTabs() {
+      if (!manifest) return;
+      const folders = manifest.folders || {};
+      let html = `<button class="tab ${state.activeFolder === '__ALL__' ? 'active' : ''}" data-folder="__ALL__">Todos (${allSounds.length})</button>`;
+      for (const [name, files] of Object.entries(folders)) {
+        html += `<button class="tab ${state.activeFolder === name ? 'active' : ''}" data-folder="${escapeHtml(name)}">${escapeHtml(name)} (${files.length})</button>`;
+      }
+      folderTabsEl.innerHTML = html;
+      folderTabsEl.querySelectorAll('.tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+          state.activeFolder = btn.dataset.folder;
+          renderFolderTabs();
+          renderSounds();
+        });
+      });
+    }
+
+    function renderSounds() {
+      const q = searchSoundEl.value.trim().toLowerCase();
+      const status = filterStatusEl.value;
+
+      visibleSounds = allSounds.filter(s => {
+        if (state.activeFolder !== '__ALL__' && s.folder !== state.activeFolder) return false;
+        if (q && !s.file.toLowerCase().includes(q) && !s.folder.toLowerCase().includes(q)) return false;
+
+        const isIgnored = !!state.ignored[s.res_path];
+        const assigned = getSoundActions(s.res_path);
+        if (status === 'unassigned' && (assigned.length > 0 || isIgnored)) return false;
+        if (status === 'assigned' && assigned.length === 0) return false;
+        if (status === 'ignored' && !isIgnored) return false;
+        return true;
+      });
+
+      visibleCountLabelEl.textContent = `${visibleSounds.length} archivos mostrados`;
+
+      const frag = document.createDocumentFragment();
+      // Render up to 600 at once (all folders fit comfortably; if ALL, still fast)
+      for (const s of visibleSounds) {
+        const row = document.createElement('div');
+        const assigned = getSoundActions(s.res_path);
+        const isIgnored = !!state.ignored[s.res_path];
+        const isSelected = state.selectedSoundPath === s.res_path;
+        const isPlaying = currentPlayingPath === s.path && !audio.paused;
+
+        row.className = 'sound-row' +
+          (isSelected ? ' selected' : '') +
+          (isPlaying ? ' playing' : '') +
+          (isIgnored ? ' ignored' : '');
+        row.dataset.resPath = s.res_path;
+
+        const kb = Math.max(1, Math.round(s.size_bytes / 1024));
+        const tagsHtml = assigned.map(a => `<span class="tag">${escapeHtml(a.id)}</span>`).join('');
+
+        row.innerHTML = `
+          <input type="checkbox" class="sound-chk" ${state.checkedPaths.has(s.res_path) ? 'checked' : ''} />
+          <button class="icon-btn play-btn" title="Reproducir">${isPlaying ? '⏹' : '▶'}</button>
+          <div style="min-width:0;">
+            <div class="sound-name" title="${escapeHtml(s.path)}">${escapeHtml(s.file)}</div>
+            <div class="sound-meta">${escapeHtml(s.folder)} · ${s.ext.toUpperCase()} · ${kb} KB</div>
+          </div>
+          <div class="tag-list">${tagsHtml}</div>
+          <div style="display:flex; gap:4px;">
+            <button class="icon-btn success assign-btn" title="Asignar a acción activa">+</button>
+            <button class="icon-btn ignore-btn" title="${isIgnored ? 'Restaurar' : 'Descartar'}">${isIgnored ? '↩' : '✕'}</button>
+          </div>
+        `;
+
+        const chk = row.querySelector('.sound-chk');
+        chk.addEventListener('click', e => e.stopPropagation());
+        chk.addEventListener('change', () => {
+          if (chk.checked) state.checkedPaths.add(s.res_path);
+          else state.checkedPaths.delete(s.res_path);
+          updateCheckedUI();
+        });
+
+        row.querySelector('.play-btn').addEventListener('click', e => {
+          e.stopPropagation();
+          state.selectedSoundPath = s.res_path;
+          togglePlaySound(s);
+          renderSounds();
+        });
+
+        row.querySelector('.assign-btn').addEventListener('click', e => {
+          e.stopPropagation();
+          assignSoundsToActiveAction([s.res_path], true);
+        });
+
+        row.querySelector('.ignore-btn').addEventListener('click', e => {
+          e.stopPropagation();
+          toggleIgnoreSound(s.res_path);
+        });
+
+        row.addEventListener('click', () => {
+          state.selectedSoundPath = s.res_path;
+          playSound(s);
+          renderSounds();
+        });
+
+        frag.appendChild(row);
+      }
+
+      soundListEl.innerHTML = '';
+      soundListEl.appendChild(frag);
+      updateCheckedUI();
+    }
+
+    function updateCheckedUI() {
+      const n = state.checkedPaths.size;
+      checkedCountLabelEl.textContent = `${n} seleccionados`;
+      btnAssignCheckedEl.disabled = n === 0 || !state.activeActionId;
+    }
+
+    function renderActions() {
+      const q = searchActionEl.value.trim().toLowerCase();
+      const catFilter = filterCategoryEl.value;
+
+      const grouped = {};
+      for (const a of Object.values(state.actions)) {
+        if (catFilter !== 'all' && a.category !== catFilter) continue;
+        if (q && !a.label.toLowerCase().includes(q) && !a.id.toLowerCase().includes(q)) continue;
+        if (!grouped[a.category]) grouped[a.category] = [];
+        grouped[a.category].push(a);
+      }
+
+      let html = '';
+      for (const [cat, items] of Object.entries(grouped)) {
+        html += `<div class="category-heading">${escapeHtml(cat)}</div>`;
+        for (const a of items) {
+          const isActive = state.activeActionId === a.id;
+          const count = a.sounds.length;
+          html += `
+            <div class="action-card ${isActive ? 'active' : ''}" data-action-id="${escapeHtml(a.id)}">
+              <div class="action-card-header">
+                <div>
+                  <div class="action-title">${escapeHtml(a.label)}</div>
+                  <div class="action-id">${escapeHtml(a.id)}</div>
+                </div>
+                <span class="count-pill ${count > 0 ? 'has-sounds' : ''}">${count} sonido${count === 1 ? '' : 's'}</span>
+              </div>
+            </div>
+          `;
+        }
+      }
+
+      actionListEl.innerHTML = html || '<div style="padding:16px; color:var(--muted); font-size:12px;">No hay acciones que coincidan.</div>';
+      actionListEl.querySelectorAll('.action-card').forEach(card => {
+        card.addEventListener('click', () => {
+          state.activeActionId = card.dataset.actionId;
+          saveState();
+          renderActions();
+          renderActiveActionDetail();
+          updateCheckedUI();
+        });
+      });
+    }
+
+    function renderActiveActionDetail() {
+      const action = state.actions[state.activeActionId];
+      if (!action) {
+        activeActionTitleEl.textContent = 'Selecciona una acción';
+        activeActionIdEl.textContent = '—';
+        assignedSoundsListEl.innerHTML = '';
+        btnTestRandomEl.disabled = true;
+        return;
+      }
+
+      activeActionTitleEl.textContent = action.label;
+      activeActionIdEl.textContent = `${action.id} · ${action.sounds.length} sonido(s) (reproducción al azar)`;
+      btnTestRandomEl.disabled = action.sounds.length === 0;
+
+      if (action.sounds.length === 0) {
+        assignedSoundsListEl.innerHTML = '<div style="color:var(--muted); font-size:12px; padding:8px 0;">Aún no hay sonidos asignados. Haz clic en "+" en cualquier sonido de la izquierda.</div>';
+        return;
+      }
+
+      const frag = document.createDocumentFragment();
+      for (const resPath of action.sounds) {
+        const soundObj = allSounds.find(s => s.res_path === resPath);
+        const displayName = soundObj ? `${soundObj.folder} / ${soundObj.file}` : resPath;
+        const item = document.createElement('div');
+        item.className = 'assigned-item';
+        item.innerHTML = `
+          <span title="${escapeHtml(resPath)}">${escapeHtml(displayName)}</span>
+          <div style="display:flex; gap:4px; flex-shrink:0;">
+            <button class="icon-btn play-assigned-btn" title="Reproducir">▶</button>
+            <button class="icon-btn danger remove-assigned-btn" title="Quitar de esta acción">✕</button>
+          </div>
+        `;
+        item.querySelector('.play-assigned-btn').addEventListener('click', () => {
+          if (soundObj) playSound(soundObj);
+          else playRelativePath(resToRelPath(resPath), resPath);
+        });
+        item.querySelector('.remove-assigned-btn').addEventListener('click', () => {
+          action.sounds = action.sounds.filter(p => p !== resPath);
+          saveState();
+          renderActions();
+          renderActiveActionDetail();
+          renderSounds();
+          updateStats();
+        });
+        frag.appendChild(item);
+      }
+      assignedSoundsListEl.innerHTML = '';
+      assignedSoundsListEl.appendChild(frag);
+    }
+
+    function assignSoundsToActiveAction(resPaths, advanceIfSingle = false) {
+      const action = state.actions[state.activeActionId];
+      if (!action) {
+        showToast('Selecciona primero una acción a la derecha');
+        return;
+      }
+      let added = 0;
+      for (const rp of resPaths) {
+        if (!action.sounds.includes(rp)) {
+          action.sounds.push(rp);
+          added++;
+        }
+        delete state.ignored[rp];
+      }
+      saveState();
+      updateStats();
+      renderActions();
+      renderActiveActionDetail();
+
+      if (advanceIfSingle && resPaths.length === 1 && chkAutoAdvanceEl.checked) {
+        advanceSelection(1);
+      } else {
+        renderSounds();
+      }
+      showToast(added > 0 ? `+${added} sonido(s) asignado(s) a ${action.label}` : 'Ya estaba asignado a esta acción');
+    }
+
+    function toggleIgnoreSound(resPath) {
+      if (state.ignored[resPath]) delete state.ignored[resPath];
+      else state.ignored[resPath] = true;
+      saveState();
+      updateStats();
+      renderSounds();
+    }
+
+    function advanceSelection(delta) {
+      if (visibleSounds.length === 0) return;
+      const idx = visibleSounds.findIndex(s => s.res_path === state.selectedSoundPath);
+      const nextIdx = idx === -1 ? 0 : Math.max(0, Math.min(visibleSounds.length - 1, idx + delta));
+      const next = visibleSounds[nextIdx];
+      state.selectedSoundPath = next.res_path;
+      playSound(next);
+      renderSounds();
+      const row = soundListEl.querySelector(`.sound-row.selected`);
+      if (row) row.scrollIntoView({ block: 'nearest' });
+    }
+
+    function resToRelPath(resPath) {
+      if (resPath.startsWith('res://assets/sfx/')) {
+        return '../sfx/' + resPath.slice('res://assets/sfx/'.length);
+      }
+      return resPath.replace('res://assets/audio/', '');
+    }
+
+    function playSound(s) {
+      playRelativePath(s.path, s.file);
+    }
+
+    function playRelativePath(relPath, label) {
+      currentPlayingPath = relPath;
+      audio.src = relPath.split('/').map(p => (p === '..' || p === '.') ? p : encodeURIComponent(p)).join('/');
+      audio.volume = parseFloat(volumeBarEl.value);
+      audio.play().catch(err => {
+        console.warn('Error reproduciendo:', err);
+        showToast('No se pudo reproducir el archivo');
+      });
+      nowPlayingEl.textContent = label || relPath;
+      btnPlayPauseEl.textContent = '⏸';
+    }
+
+    function togglePlaySound(s) {
+      if (currentPlayingPath === s.path && !audio.paused) {
+        audio.pause();
+        btnPlayPauseEl.textContent = '▶';
+      } else {
+        playSound(s);
+      }
+    }
+
+    function testRandomActionSound() {
+      const action = state.actions[state.activeActionId];
+      if (!action || action.sounds.length === 0) return;
+      const chosen = action.sounds[Math.floor(Math.random() * action.sounds.length)];
+      const soundObj = allSounds.find(s => s.res_path === chosen);
+      if (soundObj) {
+        playSound(soundObj);
+        showToast(`🎲 Azar (${action.sounds.length}): ${soundObj.file}`);
+      } else {
+        playRelativePath(resToRelPath(chosen), chosen);
+      }
+    }
+
+    // Audio events
+    audio.addEventListener('timeupdate', () => {
+      if (!audio.duration) return;
+      seekBarEl.value = (audio.currentTime / audio.duration) * 100;
+      timeLabelEl.textContent = `${fmtTime(audio.currentTime)} / ${fmtTime(audio.duration)}`;
+    });
+    audio.addEventListener('ended', () => {
+      btnPlayPauseEl.textContent = '▶';
+      renderSounds();
+    });
+    seekBarEl.addEventListener('input', () => {
+      if (audio.duration) audio.currentTime = (seekBarEl.value / 100) * audio.duration;
+    });
+    volumeBarEl.addEventListener('input', () => {
+      audio.volume = parseFloat(volumeBarEl.value);
+    });
+    btnPlayPauseEl.addEventListener('click', () => {
+      if (!audio.src) return;
+      if (audio.paused) { audio.play(); btnPlayPauseEl.textContent = '⏸'; }
+      else { audio.pause(); btnPlayPauseEl.textContent = '▶'; }
+      renderSounds();
+    });
+    btnStopEl.addEventListener('click', () => {
+      audio.pause();
+      audio.currentTime = 0;
+      btnPlayPauseEl.textContent = '▶';
+      renderSounds();
+    });
+
+    function fmtTime(sec) {
+      const m = Math.floor(sec / 60);
+      const s = Math.floor(sec % 60);
+      return `${m}:${s.toString().padStart(2, '0')}`;
+    }
+
+    function escapeHtml(str) {
+      return String(str).replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[c]));
+    }
+
+    // Filters & Bulk
+    searchSoundEl.addEventListener('input', renderSounds);
+    filterStatusEl.addEventListener('change', renderSounds);
+    searchActionEl.addEventListener('input', renderActions);
+    filterCategoryEl.addEventListener('change', renderActions);
+
+    chkSelectAllVisibleEl.addEventListener('change', () => {
+      if (chkSelectAllVisibleEl.checked) {
+        for (const s of visibleSounds) state.checkedPaths.add(s.res_path);
+      } else {
+        for (const s of visibleSounds) state.checkedPaths.delete(s.res_path);
+      }
+      renderSounds();
+    });
+
+    btnAssignCheckedEl.addEventListener('click', () => {
+      const list = Array.from(state.checkedPaths);
+      if (list.length === 0) return;
+      assignSoundsToActiveAction(list, false);
+      state.checkedPaths.clear();
+      chkSelectAllVisibleEl.checked = false;
+      renderSounds();
+    });
+
+    btnTestRandomEl.addEventListener('click', testRandomActionSound);
+
+    // Export / Import
+    document.getElementById('btnExport').addEventListener('click', () => {
+      const payload = {
+        version: 1,
+        exported_at: new Date().toISOString(),
+        playback_mode: 'random',
+        actions: {},
+        ignored: Object.keys(state.ignored)
+      };
+      for (const [id, a] of Object.entries(state.actions)) {
+        payload.actions[id] = {
+          label: a.label,
+          category: a.category,
+          sounds: a.sounds
+        };
+      }
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'audio_actions.json';
+      link.click();
+      URL.revokeObjectURL(url);
+      showToast('Exportado audio_actions.json');
+    });
+
+    document.getElementById('importActionsInput').addEventListener('change', async e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      try {
+        const parsed = JSON.parse(await file.text());
+        if (parsed.actions) {
+          state.actions = initDefaultActions();
+          for (const [id, data] of Object.entries(parsed.actions)) {
+            state.actions[id] = {
+              id,
+              label: data.label || id,
+              category: data.category || 'Personalizadas',
+              sounds: Array.isArray(data.sounds) ? data.sounds : []
+            };
+          }
+        }
+        state.ignored = {};
+        if (Array.isArray(parsed.ignored)) {
+          for (const rp of parsed.ignored) state.ignored[rp] = true;
+        }
+        saveState();
+        renderActions();
+        renderActiveActionDetail();
+        renderSounds();
+        updateStats();
+        showToast('Acciones importadas correctamente');
+      } catch (err) {
+        alert('JSON inválido: ' + err.message);
+      }
+      e.target.value = '';
+    });
+
+    document.getElementById('manifestFileInput').addEventListener('change', async e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      try {
+        manifest = JSON.parse(await file.text());
+        onManifestLoaded();
+        showToast('Manifest cargado');
+      } catch (err) {
+        alert('Manifest JSON inválido: ' + err.message);
+      }
+      e.target.value = '';
+    });
+
+    document.getElementById('btnReset').addEventListener('click', () => {
+      if (!confirm('¿Reiniciar toda la clasificación guardada en este navegador?')) return;
+      localStorage.removeItem(STORAGE_KEY);
+      state.ignored = {};
+      state.checkedPaths.clear();
+      loadSavedState();
+      renderActions();
+      renderActiveActionDetail();
+      renderSounds();
+      updateStats();
+      showToast('Clasificación reiniciada');
+    });
+
+    // Modals
+    const newActionModal = document.getElementById('newActionModal');
+    document.getElementById('btnNewAction').addEventListener('click', () => {
+      newActionModal.classList.add('open');
+      document.getElementById('newActionIdInput').focus();
+    });
+    document.getElementById('btnCancelNewAction').addEventListener('click', () => newActionModal.classList.remove('open'));
+    document.getElementById('btnSaveNewAction').addEventListener('click', () => {
+      const id = document.getElementById('newActionIdInput').value.trim();
+      const label = document.getElementById('newActionLabelInput').value.trim() || id;
+      const category = document.getElementById('newActionCatInput').value;
+      if (!id) { alert('Ingresa un ID'); return; }
+      if (!state.actions[id]) {
+        state.actions[id] = { id, label, category, sounds: [] };
+      }
+      state.activeActionId = id;
+      saveState();
+      newActionModal.classList.remove('open');
+      document.getElementById('newActionIdInput').value = '';
+      document.getElementById('newActionLabelInput').value = '';
+      renderActions();
+      renderActiveActionDetail();
+      updateCheckedUI();
+    });
+
+    const godotModal = document.getElementById('godotModal');
+    document.getElementById('btnGodotCode').addEventListener('click', () => godotModal.classList.add('open'));
+    document.getElementById('btnCloseGodot').addEventListener('click', () => godotModal.classList.remove('open'));
+    document.getElementById('btnCopyGodot').addEventListener('click', () => {
+      navigator.clipboard.writeText(document.getElementById('godotSnippet').textContent);
+      showToast('Código GDScript copiado');
+    });
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', e => {
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+      if (newActionModal.classList.contains('open') || godotModal.classList.contains('open')) return;
+
+      if (e.code === 'ArrowDown') {
+        e.preventDefault();
+        advanceSelection(1);
+      } else if (e.code === 'ArrowUp') {
+        e.preventDefault();
+        advanceSelection(-1);
+      } else if (e.code === 'Space') {
+        e.preventDefault();
+        const s = allSounds.find(x => x.res_path === state.selectedSoundPath);
+        if (s) togglePlaySound(s);
+        renderSounds();
+      } else if (e.code === 'Enter' || e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        if (state.selectedSoundPath) assignSoundsToActiveAction([state.selectedSoundPath], true);
+      } else if (e.key.toLowerCase() === 'd' || e.code === 'Delete') {
+        e.preventDefault();
+        if (state.selectedSoundPath) {
+          toggleIgnoreSound(state.selectedSoundPath);
+          advanceSelection(1);
+        }
+      } else if (e.key.toLowerCase() === 'r') {
+        e.preventDefault();
+        testRandomActionSound();
+      }
+    });
+
+    // Init
+    loadSavedState();
+    loadManifest();
+  </script>
+</body>
+</html>

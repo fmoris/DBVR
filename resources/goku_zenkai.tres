@@ -1,0 +1,97 @@
+[gd_resource type="Resource" script_class="CharacterData" format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/power_data.gd" id="1_ansdh"]
+[ext_resource type="Script" path="res://scripts/resources/character_data.gd" id="2_whopp"]
+[ext_resource type="Script" path="res://scripts/resources/transformation_data.gd" id="3_30s5j"]
+
+[sub_resource type="Resource" id="Resource_gy1yg"]
+script = ExtResource("1_ansdh")
+power_name = "Ki Blast Rápido"
+gesture_trigger = "ki_blast"
+ki_cost = 4.0
+base_damage_np = 250.0
+energy_color = Color(1, 0.6, 0.1, 0.9)
+
+[sub_resource type="Resource" id="Resource_x82nt"]
+script = ExtResource("1_ansdh")
+power_name = "Kamehameha"
+gesture_trigger = "kamehameha"
+ki_cost = 28.0
+base_damage_np = 1800.0
+projectile_speed = 32.0
+energy_color = Color(0.1, 0.6, 1, 0.95)
+
+[sub_resource type="Resource" id="Resource_012ef"]
+script = ExtResource("1_ansdh")
+power_name = "Genkidama"
+gesture_trigger = "genkidama"
+ki_cost = 45.0
+base_damage_np = 6000.0
+projectile_speed = 10.0
+energy_color = Color(0.6, 0.9, 1, 0.95)
+forbidden_transformations = Array[String](["Kaioken", "SSJ", "SSJ3", "SSB", "Ultra Instinto"])
+
+[sub_resource type="Resource" id="Resource_biqls"]
+script = ExtResource("1_ansdh")
+power_name = "Super Kamehameha"
+gesture_trigger = "kamehameha"
+ki_cost = 45.0
+base_damage_np = 99999.0
+projectile_speed = 42.0
+energy_color = Color(0, 0.8, 1, 1)
+unlock_requirement_transformation = "SSJ"
+is_finisher = true
+
+[sub_resource type="Resource" id="Resource_i1tb2"]
+script = ExtResource("3_30s5j")
+form_name = "SSJ"
+tier_level = 1
+np_multiplier = 2.0
+ki_drain_per_sec = 1.8
+aura_color = Color(1, 0.85, 0.1, 0.85)
+body_model_path = "res://assets/models/goku_zenkai/21_goku1_body.glb"
+hands_model_path = "res://assets/models/goku_zenkai/21_goku1_hands.glb"
+api_id = 1
+canonical_ki_text = "3 Billion"
+
+[sub_resource type="Resource" id="Resource_hmayj"]
+script = ExtResource("3_30s5j")
+form_name = "SSJ3"
+tier_level = 2
+np_multiplier = 3.5
+ki_drain_per_sec = 2.8
+aura_color = Color(1, 0.92, 0.25, 0.92)
+body_model_path = "res://assets/models/goku_zenkai/42_goku_3_body.glb"
+hands_model_path = "res://assets/models/goku_zenkai/42_goku_3_hands.glb"
+api_id = 3
+canonical_ki_text = "24 Billion"
+
+[sub_resource type="Resource" id="Resource_luo4d"]
+script = ExtResource("3_30s5j")
+form_name = "SSB"
+tier_level = 3
+np_multiplier = 5.0
+ki_drain_per_sec = 4.0
+aura_color = Color(0.1, 0.7, 1, 0.9)
+body_model_path = "res://assets/models/goku_zenkai/44_goku_5_body.glb"
+hands_model_path = "res://assets/models/goku_zenkai/44_goku_5_hands.glb"
+api_id = 5
+canonical_ki_text = "9 Quintillion"
+
+[resource]
+script = ExtResource("2_whopp")
+character_name = "Goku (Zenkai)"
+base_np = 9000.0
+max_np = 18000.0
+body_model_path = "res://assets/models/goku_zenkai/00_goku0_body.glb"
+hands_model_path = "res://assets/models/goku_hands_optimized.glb"
+api_id = 1
+race = "Saiyan"
+gender = "Male"
+affiliation = "Z Fighter"
+canonical_ki_text = "60.000.000"
+canonical_max_ki_text = "9 Quintillion"
+description = "Perfil paralelo de Goku basado en los assets de Dragon Ball Zenkai Battle Royale (Base, SSJ, SSJ3, SSB)."
+origin_planet_name = "Tierra"
+powers = Array[Resource]([SubResource("Resource_gy1yg"), SubResource("Resource_x82nt"), SubResource("Resource_012ef"), SubResource("Resource_biqls")])
+transformations = Array[Resource]([SubResource("Resource_i1tb2"), SubResource("Resource_hmayj"), SubResource("Resource_luo4d")])

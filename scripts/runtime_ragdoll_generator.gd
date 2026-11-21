@@ -234,6 +234,11 @@ static func generate_ragdoll(skeleton: Skeleton3D, config: Dictionary = {}) -> P
 		push_error("[RuntimeRagdollGenerator] Skeleton3D nulo o inválido.")
 		return null
 
+	var sk_scale: Vector3 = skeleton.global_transform.basis.get_scale()
+	if (sk_scale - Vector3.ONE).length() > 0.05:
+		push_warning("[RuntimeRagdollGenerator] Skeleton con escala no unitaria (%s). Se omite ragdoll Jolt para evitar deformación de malla." % str(sk_scale))
+		return null
+
 	print("[RuntimeRagdollGenerator] Generando esqueleto físico para: ", skeleton.name)
 
 	var total_mass: float = config.get("total_mass", TOTAL_BODY_MASS)
@@ -627,8 +632,10 @@ static func _create_physical_bone(skeleton: Skeleton3D, bone_name: String, part:
 
 	pb.body_offset = _compute_body_offset(skeleton, bone_idx, target_global, flip_forward)
 	pb.mass = maxf(total_mass * mass_share, 0.05)
-	pb.linear_damp = 0.5
-	pb.angular_damp = 3.0
+	pb.bounce = 0.0
+	pb.friction = 1.0
+	pb.linear_damp = 5.0
+	pb.angular_damp = 6.0
 
 	var col = CollisionShape3D.new()
 	col.name = "CollisionShape3D"

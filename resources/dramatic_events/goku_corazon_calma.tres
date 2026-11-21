@@ -1,0 +1,24 @@
+[gd_resource type="Resource" script_class="DramaticMiniEventData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/resources/dramatic_mini_event_data.gd" id="1_dme"]
+
+[resource]
+script = ExtResource("1_dme")
+event_id = "goku_corazon_calma"
+display_name = "Corazón Sereno"
+instruction_text = "¡ELEVA PALMAS A LOS ANILLOS DORADOS Y ABSORBE LUZ!"
+character_filter = "goku"
+condition_type = "base_or_behind"
+minigame_type = "sky_absorb"
+target_count = 3
+duration_sec = 3.5
+is_permanent_bonus = true
+bonus_duration_sec = 0.0
+bonus_label = "CORAZÓN SERENO"
+bonus_effect_text = "+20% Recarga Ki · +18% Vel. Carga Super"
+bonus_color = Color(1, 0.9, 0.35, 1)
+bonus_mods = {
+"ki_recharge_mult": 1.2,
+"super_charge_speed_mult": 1.18
+}
+weight = 1.25

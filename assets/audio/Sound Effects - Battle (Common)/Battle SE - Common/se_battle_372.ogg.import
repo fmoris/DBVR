@@ -1,0 +1,19 @@
+[remap]
+
+importer="oggvorbisstr"
+type="AudioStreamOggVorbis"
+uid="uid://crvh04j4bntuk"
+path="res://.godot/imported/se_battle_372.ogg-23d7d36c9c21f3f2f0764cf3c274bb7d.oggvorbisstr"
+
+[deps]
+
+source_file="res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_372.ogg"
+dest_files=["res://.godot/imported/se_battle_372.ogg-23d7d36c9c21f3f2f0764cf3c274bb7d.oggvorbisstr"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

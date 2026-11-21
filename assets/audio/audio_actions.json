@@ -1,0 +1,423 @@
+{
+  "version": 1,
+  "exported_at": "2026-11-17T18:24:30.472Z",
+  "playback_mode": "random",
+  "actions": {
+    "common.ki_charge_phase1": {
+      "label": "Recarga de Ki (Fase 1 - Brazos cruzados)",
+      "category": "Comunes",
+      "sounds": []
+    },
+    "common.ki_charge_phase2": {
+      "label": "Recarga de Ki (Fase 2 - Puños cintura)",
+      "category": "Comunes",
+      "sounds": [
+        "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_24.ogg"
+      ]
+    },
+    "common.ki_blast_charge": {
+      "label": "Ki Blast (Carga)",
+      "category": "Comunes",
+      "sounds": [
+        "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_20.ogg",
+        "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_40.ogg"
+      ]
+    },
+    "common.ki_blast_fire": {
+      "label": "Ki Blast (Disparo)",
+      "category": "Comunes",
+      "sounds": [
+        "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_22.ogg",
+        "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_38.ogg"
+      ]
+    },
+    "common.ki_blast_impact": {
+      "label": "Ki Blast (Impacto)",
+      "category": "Comunes",
+      "sounds": []
+    },
+    "common.melee_swing": {
+      "label": "Melee (Golpe al aire / Swoosh)",
+      "category": "Comunes",
+      "sounds": [
+        "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_3.ogg",
+        "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_5.ogg",
+        "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_15.ogg"
+      ]
+    },
+    "common.melee_hit_light": {
+      "label": "Melee (Impacto ligero)",
+      "category": "Comunes",
+      "sounds": [
+        "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_34.ogg",
+        "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_37.ogg"
+      ]
+    },
+    "common.melee_hit_heavy": {
+      "label": "Melee (Impacto fuerte / Knockback)",
+      "category": "Comunes",
+      "sounds": [
+        "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_35.ogg",
+        "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_43.ogg"
+      ]
+    },
+    "common.block_guard": {
+      "label": "Bloqueo / Guardia",
+      "category": "Comunes",
+      "sounds": [
+        "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_11.ogg"
+      ]
+    },
+    "common.block_perfect": {
+      "label": "Bloqueo Predictivo Perfecto (Parry)",
+      "category": "Comunes",
+      "sounds": []
+    },
+    "common.dodge_vanish": {
+      "label": "Esquive / Zanzoken (Teletransportación)",
+      "category": "Comunes",
+      "sounds": [
+        "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_2.ogg"
+      ]
+    },
+    "common.dash_fly": {
+      "label": "Dash / Vuelo rápido",
+      "category": "Comunes",
+      "sounds": []
+    },
+    "common.aura_burst": {
+      "label": "Explosión de Aura / Power Up",
+      "category": "Comunes",
+      "sounds": []
+    },
+    "common.beam_clash": {
+      "label": "Choque de Poderes (Beam Clash)",
+      "category": "Comunes",
+      "sounds": []
+    },
+    "common.furia_activate": {
+      "label": "Activación de Furia (Comeback)",
+      "category": "Comunes",
+      "sounds": []
+    },
+    "common.zenkai_activate": {
+      "label": "Activación Estado Zenkai",
+      "category": "Comunes",
+      "sounds": []
+    },
+    "common.ko_finisher": {
+      "label": "Finisher K.O. / Explosión final",
+      "category": "Comunes",
+      "sounds": []
+    },
+    "common.ui_select": {
+      "label": "UI / Menú Selección",
+      "category": "Comunes",
+      "sounds": []
+    },
+    "dramatic.intro_fanfare": {
+      "label": "Dramatic Intro: Inicio / Careo Saiyan",
+      "category": "Escenas Dramáticas",
+      "sounds": []
+    },
+    "dramatic.transform_buildup": {
+      "label": "Transformación Dramática: Tensión / Relámpagos",
+      "category": "Escenas Dramáticas",
+      "sounds": []
+    },
+    "dramatic.determination_charge": {
+      "label": "Momento de Determinación: Carga / Concentración",
+      "category": "Escenas Dramáticas",
+      "sounds": []
+    },
+    "dramatic.determination_burst": {
+      "label": "Momento de Determinación: Explosión de Aura",
+      "category": "Escenas Dramáticas",
+      "sounds": []
+    },
+    "dramatic.miniscene_trigger": {
+      "label": "Mini-Escena: Pausa / Alerta de Evento",
+      "category": "Escenas Dramáticas",
+      "sounds": []
+    },
+    "dramatic.miniscene_tick": {
+      "label": "Mini-Escena: Acierto / Pulso de Minijuego",
+      "category": "Escenas Dramáticas",
+      "sounds": []
+    },
+    "dramatic.miniscene_success": {
+      "label": "Mini-Escena: ¡Éxito! Bono Obtenido",
+      "category": "Escenas Dramáticas",
+      "sounds": []
+    },
+    "dramatic.miniscene_fail": {
+      "label": "Mini-Escena: Fallo / Tiempo Agotado",
+      "category": "Escenas Dramáticas",
+      "sounds": []
+    },
+    "dramatic.finish_impact": {
+      "label": "Dramatic Finish: Impacto / Columna de Luz K.O.",
+      "category": "Escenas Dramáticas",
+      "sounds": []
+    },
+    "dramatic.crater_impact": {
+      "label": "Entorno: Cráter / Choque contra Pilares o Roca",
+      "category": "Escenas Dramáticas",
+      "sounds": []
+    },
+    "goku.kamehameha_charge": {
+      "label": "Goku: Kamehameha (Carga)",
+      "category": "Goku",
+      "sounds": [
+        "res://assets/audio/Goku (Z - End)/Goku (Z - End)_106.ogg"
+      ]
+    },
+    "goku.kamehameha_fire": {
+      "label": "Goku: Kamehameha (Disparo)",
+      "category": "Goku",
+      "sounds": [
+        "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_4.ogg",
+        "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_16.ogg",
+        "res://assets/audio/Goku (Z - End)/Goku (Z - End)_107.ogg",
+        "res://assets/audio/Goku (Z - End)/Goku (Z - End)_119.ogg"
+      ]
+    },
+    "goku.genkidama_charge": {
+      "label": "Goku: Genkidama (Carga)",
+      "category": "Goku",
+      "sounds": []
+    },
+    "goku.genkidama_fire": {
+      "label": "Goku: Genkidama (Lanzamiento)",
+      "category": "Goku",
+      "sounds": [
+        "res://assets/audio/Goku (Z - End)/Goku (Z - End)_167.ogg",
+        "res://assets/audio/Goku (Z - End)/Goku (Z - End)_223.ogg",
+        "res://assets/audio/Goku (Z - End)/Goku (Z - End)_97.ogg"
+      ]
+    },
+    "goku.kaioken": {
+      "label": "Goku: Kaioken",
+      "category": "Goku",
+      "sounds": [
+        "res://assets/audio/Goku (Z - End)/Goku (Z - End)_56.ogg",
+        "res://assets/audio/Goku (Z - End)/Goku (Z - End)_57.ogg"
+      ]
+    },
+    "goku.transform_ssj": {
+      "label": "Goku: Transformación (SSJ / SSJ2 / SSB)",
+      "category": "Goku",
+      "sounds": [
+        "res://assets/audio/Goku (Z - End)/Goku (Z - End)_93.ogg",
+        "res://assets/audio/Goku (Z - End)/Goku (Z - End)_94.ogg"
+      ]
+    },
+    "goku.attack_effort": {
+      "label": "Goku: Grito de ataque (Melee / Blast)",
+      "category": "Goku",
+      "sounds": [
+        "res://assets/audio/Goku (Z - End)/Goku (Z - End)_220.ogg",
+        "res://assets/audio/Goku (Z - End)/Goku (Z - End)_221.ogg"
+      ]
+    },
+    "goku.ki_charge_voice": {
+      "label": "Goku: Grito recargando Ki",
+      "category": "Goku",
+      "sounds": [
+        "res://assets/audio/Goku (Z - End)/Goku (Z - End)_49.ogg",
+        "res://assets/audio/Goku (Z - End)/Goku (Z - End)_50.ogg"
+      ]
+    },
+    "goku.hurt_light": {
+      "label": "Goku: Daño ligero / Quejido",
+      "category": "Goku",
+      "sounds": [
+        "res://assets/audio/Goku (Z - End)/Goku (Z - End)_31.ogg",
+        "res://assets/audio/Goku (Z - End)/Goku (Z - End)_30.ogg",
+        "res://assets/audio/Goku (Z - End)/Goku (Z - End)_28.ogg",
+        "res://assets/audio/Goku (Z - End)/Goku (Z - End)_218.ogg"
+      ]
+    },
+    "goku.hurt_heavy": {
+      "label": "Goku: Daño fuerte / Derrota",
+      "category": "Goku",
+      "sounds": [
+        "res://assets/audio/Goku (Z - End)/Goku (Z - End)_37.ogg",
+        "res://assets/audio/Goku (Z - End)/Goku (Z - End)_32.ogg",
+        "res://assets/audio/Goku (Z - End)/Goku (Z - End)_208.ogg",
+        "res://assets/audio/Goku (Z - End)/Goku (Z - End)_207.ogg"
+      ]
+    },
+    "goku.intro_taunt": {
+      "label": "Goku: Intro / Provocación",
+      "category": "Goku",
+      "sounds": [
+        "res://assets/audio/Goku (Z - End)/Goku (Z - End)_53.ogg",
+        "res://assets/audio/Goku (Z - End)/Goku (Z - End)_55.ogg"
+      ]
+    },
+    "goku.victory": {
+      "label": "Goku: Victoria",
+      "category": "Goku",
+      "sounds": [
+        "res://assets/audio/Goku (Z - End)/Goku (Z - End)_145.ogg"
+      ]
+    },
+    "goku.dramatic_intro": {
+      "label": "Goku: Voz Dramatic Intro (Careo)",
+      "category": "Goku",
+      "sounds": []
+    },
+    "goku.dramatic_miniscene": {
+      "label": "Goku: Voz Mini-Escena (Calma / Kaioken)",
+      "category": "Goku",
+      "sounds": []
+    },
+    "goku.dramatic_finish": {
+      "label": "Goku: Voz Dramatic Finish (K.O.)",
+      "category": "Goku",
+      "sounds": []
+    },
+    "vegeta.galick_gun_charge": {
+      "label": "Vegeta: Galick Ho (Carga)",
+      "category": "Vegeta",
+      "sounds": [
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_6.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_11.ogg",
+        "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_20.ogg"
+      ]
+    },
+    "vegeta.galick_gun_fire": {
+      "label": "Vegeta: Galick Ho (Disparo)",
+      "category": "Vegeta",
+      "sounds": [
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_104.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_105.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_132.ogg",
+        "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_16.ogg"
+      ]
+    },
+    "vegeta.big_bang_charge": {
+      "label": "Vegeta: Big Bang Attack (Carga)",
+      "category": "Vegeta",
+      "sounds": [
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_77.ogg",
+        "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_40.ogg"
+      ]
+    },
+    "vegeta.big_bang_fire": {
+      "label": "Vegeta: Big Bang Attack (Disparo)",
+      "category": "Vegeta",
+      "sounds": [
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_9.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_79.ogg",
+        "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_4.ogg"
+      ]
+    },
+    "vegeta.final_flash_charge": {
+      "label": "Vegeta: Final Flash (Carga)",
+      "category": "Vegeta",
+      "sounds": [
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_80.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_120.ogg",
+        "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_24.ogg"
+      ]
+    },
+    "vegeta.final_flash_fire": {
+      "label": "Vegeta: Final Flash (Disparo)",
+      "category": "Vegeta",
+      "sounds": [
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_84.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_125.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_131.ogg",
+        "res://assets/audio/Sound Effects - Battle (Common)/Battle SE - Common/se_battle_16.ogg"
+      ]
+    },
+    "vegeta.transform_ssj": {
+      "label": "Vegeta: Transformación (SSJ / Super Vegeta / SSB)",
+      "category": "Vegeta",
+      "sounds": [
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_68.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_72.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_93.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_94.ogg"
+      ]
+    },
+    "vegeta.attack_effort": {
+      "label": "Vegeta: Grito de ataque (Melee / Blast)",
+      "category": "Vegeta",
+      "sounds": [
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_17.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_27.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_43.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_44.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_47.ogg"
+      ]
+    },
+    "vegeta.ki_charge_voice": {
+      "label": "Vegeta: Grito recargando Ki",
+      "category": "Vegeta",
+      "sounds": [
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_49.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_51.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_52.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_53.ogg"
+      ]
+    },
+    "vegeta.hurt_light": {
+      "label": "Vegeta: Daño ligero / Quejido",
+      "category": "Vegeta",
+      "sounds": [
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_31.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_32.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_34.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_36.ogg"
+      ]
+    },
+    "vegeta.hurt_heavy": {
+      "label": "Vegeta: Daño fuerte / Derrota",
+      "category": "Vegeta",
+      "sounds": [
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_21.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_23.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_25.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_38.ogg"
+      ]
+    },
+    "vegeta.intro_taunt": {
+      "label": "Vegeta: Intro / Provocación",
+      "category": "Vegeta",
+      "sounds": [
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_2.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_8.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_13.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_137.ogg"
+      ]
+    },
+    "vegeta.victory": {
+      "label": "Vegeta: Victoria",
+      "category": "Vegeta",
+      "sounds": [
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_3.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_156.ogg",
+        "res://assets/audio/Vegeta (Z - End)/Vegeta (Z - End)_162.ogg"
+      ]
+    },
+    "vegeta.dramatic_intro": {
+      "label": "Vegeta: Voz Dramatic Intro (Careo)",
+      "category": "Vegeta",
+      "sounds": []
+    },
+    "vegeta.dramatic_miniscene": {
+      "label": "Vegeta: Voz Mini-Escena (Orgullo / Precisión)",
+      "category": "Vegeta",
+      "sounds": []
+    },
+    "vegeta.dramatic_finish": {
+      "label": "Vegeta: Voz Dramatic Finish (K.O.)",
+      "category": "Vegeta",
+      "sounds": []
+    }
+  },
+  "ignored": []
+}

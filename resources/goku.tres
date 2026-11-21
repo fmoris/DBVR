@@ -8,7 +8,7 @@
 script = ExtResource("1_ansdh")
 power_name = "Ki Blast Rápido"
 gesture_trigger = "ki_blast"
-ki_cost = 6.0
+ki_cost = 4.0
 base_damage_np = 250.0
 energy_color = Color(1, 0.6, 0.1, 0.9)
 
@@ -16,59 +16,87 @@ energy_color = Color(1, 0.6, 0.1, 0.9)
 script = ExtResource("1_ansdh")
 power_name = "Kamehameha"
 gesture_trigger = "kamehameha"
-ki_cost = 50.0
+ki_cost = 28.0
 base_damage_np = 1800.0
-projectile_speed = 25.0
+projectile_speed = 32.0
 energy_color = Color(0.1, 0.6, 1, 0.95)
-unlock_requirement_transformation = "SSJ"
 
 [sub_resource type="Resource" id="Resource_012ef"]
 script = ExtResource("1_ansdh")
 power_name = "Genkidama"
 gesture_trigger = "genkidama"
-ki_cost = 90.0
+ki_cost = 45.0
 base_damage_np = 6000.0
 projectile_speed = 10.0
 energy_color = Color(0.6, 0.9, 1, 0.95)
-forbidden_transformations = Array[String](["Kaioken", "SSJ", "SSB"])
+forbidden_transformations = Array[String](["Kaioken", "SSJ", "SSJ2", "SSJ3", "SSJ4", "SSB", "Ultra Instinto"])
 
 [sub_resource type="Resource" id="Resource_biqls"]
 script = ExtResource("1_ansdh")
 power_name = "Super Kamehameha"
 gesture_trigger = "kamehameha"
-ki_cost = 95.0
+ki_cost = 45.0
 base_damage_np = 99999.0
-projectile_speed = 35.0
+projectile_speed = 42.0
 energy_color = Color(0, 0.8, 1, 1)
 unlock_requirement_transformation = "SSJ"
 is_finisher = true
 
-[sub_resource type="Resource" id="Resource_hmayj"]
-script = ExtResource("3_30s5j")
-form_name = "Kaioken"
-np_multiplier = 1.5
-ki_drain_per_sec = 3.0
-aura_color = Color(1, 0.1, 0.1, 1)
-
 [sub_resource type="Resource" id="Resource_i1tb2"]
 script = ExtResource("3_30s5j")
 form_name = "SSJ"
-np_multiplier = 5.0
+tier_level = 1
+np_multiplier = 2.0
+ki_drain_per_sec = 1.8
 aura_color = Color(1, 0.85, 0.1, 0.85)
+api_id = 1
+canonical_ki_text = "3 Billion"
+
+[sub_resource type="Resource" id="Resource_hmayj"]
+script = ExtResource("3_30s5j")
+form_name = "SSJ2"
+tier_level = 2
+np_multiplier = 3.5
+ki_drain_per_sec = 2.8
+aura_color = Color(1, 0.92, 0.25, 0.92)
+api_id = 2
+canonical_ki_text = "6 Billion"
 
 [sub_resource type="Resource" id="Resource_luo4d"]
 script = ExtResource("3_30s5j")
 form_name = "SSB"
-np_multiplier = 25.0
-ki_drain_per_sec = 5.0
+tier_level = 3
+np_multiplier = 5.0
+ki_drain_per_sec = 4.0
 aura_color = Color(0.1, 0.7, 1, 0.9)
+api_id = 5
+canonical_ki_text = "9 Quintillion"
+
+[sub_resource type="Resource" id="Resource_ui_goku"]
+script = ExtResource("3_30s5j")
+form_name = "Ultra Instinto"
+tier_level = 4
+np_multiplier = 8.0
+ki_drain_per_sec = 5.5
+aura_color = Color(0.85, 0.92, 1, 0.95)
+api_id = 44
+canonical_ki_text = "90 Septillion"
 
 [resource]
 script = ExtResource("2_whopp")
 character_name = "Goku"
-base_np = 3000000000.0
-max_np = 15000000000.0
+base_np = 9000.0
+max_np = 18000.0
 body_model_path = "res://assets/models/goku_optimized.glb"
 hands_model_path = "res://assets/models/goku_hands_optimized.glb"
+api_id = 1
+race = "Saiyan"
+gender = "Male"
+affiliation = "Z Fighter"
+canonical_ki_text = "60.000.000"
+canonical_max_ki_text = "90 Septillion"
+description = "El protagonista de la serie, conocido por su gran poder y personalidad amigable. Originalmente enviado a la Tierra como un infante volador con la misión de conquistarla. Sin embargo, el caer por un barranco le proporcionó un brutal golpe que si bien casi lo mata, este alteró su memoria y anuló todos los instintos violentos de su especie, lo que lo hizo crecer con un corazón puro y bondadoso, pero conservando todos los poderes de su raza. No obstante, en la nueva continuidad de Dragon Ball se establece que él fue enviado por sus padres a la Tierra con el objetivo de sobrevivir a toda costa a la destrucción de su planeta por parte de Freeza. Más tarde, Kakarot, ahora conocido como Son Goku, se convertiría en el príncipe consorte del monte Fry-pan y líder de los Guerreros Z, así como el mayor defensor de la Tierra y del Universo 7, logrando mantenerlos a salvo de la destrucción en innumerables ocasiones, a pesar de no considerarse a sí mismo como un héroe o salvador."
+origin_planet_name = "Tierra"
+origin_planet_description = "La Tierra también llamado Mundo del Dragón (Dragon World), es el planeta principal donde se desarrolla la serie de Dragon Ball. Se encuentra en el Sistema Solar de la Vía Láctea de las Galaxias del Norte del Universo 7, lugar que supervisa el Kaio del Norte, y tiene su equivalente en el Universo 6. El hogar de los terrícolas y los Guerreros Z. Ha sido atacado en varias ocasiones por enemigos poderosos."
 powers = Array[Resource]([SubResource("Resource_gy1yg"), SubResource("Resource_x82nt"), SubResource("Resource_012ef"), SubResource("Resource_biqls")])
-transformations = Array[Resource]([SubResource("Resource_hmayj"), SubResource("Resource_i1tb2"), SubResource("Resource_luo4d")])
+transformations = Array[Resource]([SubResource("Resource_i1tb2"), SubResource("Resource_hmayj"), SubResource("Resource_luo4d"), SubResource("Resource_ui_goku")])

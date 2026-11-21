@@ -84,6 +84,10 @@ var is_charging_ki_blast_right: bool = false
 var aura_start_player: AudioStreamPlayer = null
 var aura_loop_player: AudioStreamPlayer = null
 var ki_blast_charge_player: AudioStreamPlayer = null
+var ki_blast_fire_player: AudioStreamPlayer = null
+var voice_player: AudioStreamPlayer = null
+var _default_charge_stream: AudioStream = null
+var _default_blast_fire_stream: AudioStream = null
 
 # --- Aura Visual del Jugador ---
 var visual_aura: Node3D = null
@@ -101,6 +105,7 @@ var final_flash_charge_time: float = 0.0
 var is_charging_big_bang: bool = false
 var big_bang_charge_time: float = 0.0
 var big_bang_hand: int = 1
+var _ki_already_consumed_by_hybrid: bool = false
 
 # Referencias a controladores VR activos provistos por HybridCombatController
 var left_controller_node: XRController3D = null
@@ -115,6 +120,7 @@ var aim_reticle_mat: StandardMaterial3D = null
 var aim_reticle_texture: ImageTexture = null
 var current_aim_target: Vector3 = Vector3.ZERO
 var current_aim_locked: bool = false
+var last_super_launch_dir: Vector3 = Vector3.ZERO
 
 # --- Esferas Visuales de Carga de Ki Blast en la Palma ---
 var ki_blast_sphere_left: MeshInstance3D = null
@@ -163,9 +169,13 @@ const MAX_GRACE_FRAMES: int = 4
 # Timer para limitar la frecuencia de debug de zonas en consola
 var debug_log_timer: float = 0.0
 
+## Desactivación de gestos ópticos de Hand Tracking (100% mandos de control Touch)
+@export var enable_hand_tracking_gestures: bool = false
+
 func _ready() -> void:
 	current_node = gesture_tree
 	_setup_sound_players()
+	is_controller_override = true
 
 	# Inicializar el controlador híbrido de mandos Quest 3 para auto-switching
 	var hybrid_ctrl = HybridCombatControllerScript.new()
@@ -208,19 +218,17 @@ func _unhandled_input(event: InputEvent) -> void:
 func _process(delta: float) -> void:
 	if delta <= 0.0:
 		return
-		
-	# 0. Si el controlador híbrido de mandos Quest 3 está activo, ceder el control
-	if is_controller_override:
-		return
 
 	# 0.1 Si el jugador está volando hacia el oponente, no procesar gestos
 	var player_check = _get_player_instance()
-	if player_check and is_instance_valid(player_check) and player_check.get("is_flying_to_opponent"):
-		return
+	if player_check and is_instance_valid(player_check):
+		if player_check.get("is_flying_to_opponent") or bool(player_check.get("is_match_over")):
+			return
+		if player_check.has_method("is_airborne_incapacitated") and player_check.is_airborne_incapacitated():
+			if not is_controller_override and current_node != gesture_tree:
+				_reset_to_idle()
+			return
 
-	# 1. Asegurar enlace continuo de trackers
-	_ensure_trackers()
-	
 	var camera = get_viewport().get_camera_3d()
 	if not camera:
 		return
@@ -233,12 +241,21 @@ func _process(delta: float) -> void:
 	else:
 		camera_forward_speed = 0.0
 	prev_camera_global_pos = camera.global_position
-		
-	# Actualizar la posición y rotación del aura dorada si está activa
-	if visual_aura and is_instance_valid(visual_aura):
-		var feet_pos = Vector3(camera.global_position.x, 0.5, camera.global_position.z)
-		visual_aura.global_position = feet_pos + Vector3(0, 1.2, 0)
-		visual_aura.rotate_y(delta * 0.5)
+
+	# En modo mandos Quest (is_controller_override), HybridCombatController gestiona las poses,
+	# el drenaje de Ki, el Sobre-Esfuerzo Vital y la actualización de esferas de carga.
+	if is_controller_override:
+		if is_charging_kamehameha or is_charging_genkidama or is_charging_galick_ho or is_charging_final_flash or is_charging_big_bang or is_charging_ki or is_charging_ki_blast_left or is_charging_ki_blast_right:
+			gesture_timer = 0.0
+			return
+		if current_node != gesture_tree:
+			gesture_timer += delta
+			if gesture_timer >= 2.5:
+				_cancel_action("Tiempo límite de gesto expirado (2.5s)")
+		return
+
+	# 1. Asegurar enlace continuo de trackers (solo en modo Hand Tracking óptico)
+	_ensure_trackers()
 		
 	# 2. Calcular el torso de referencia con Yaw Deadzone (amortiguación de giro de cabeza) y offset dinámico de altura
 	var xr_origin: Node3D = camera.get_parent() as Node3D if (camera and camera.get_parent() is Node3D) else null
@@ -247,33 +264,33 @@ func _process(delta: float) -> void:
 	var torso_offset_y = clamp(camera_height_local * 0.24, 0.25, 0.42)
 	var torso_pos = camera.global_position - Vector3(0, torso_offset_y * origin_scale_y, 0)
 	
-	# Obtener la dirección horizontal actual de la mirada de la cámara
-	var cam_fwd = -camera.global_transform.basis.z
-	cam_fwd.y = 0.0
-	var cam_fwd_norm = Vector3.FORWARD
-	if cam_fwd.length_squared() > 0.001:
-		cam_fwd_norm = cam_fwd.normalized()
-		
-	# Calcular el ángulo Yaw actual de la cámara
-	var current_cam_yaw = atan2(cam_fwd_norm.x, cam_fwd_norm.z)
-	
-	# Inicializar en el primer frame válido
-	if not torso_yaw_initialized:
-		torso_yaw = current_cam_yaw
+	# Sincronizar torso_yaw con la orientación canónica del torso en CharacterInstance cuando esté disponible
+	if player_check and is_instance_valid(player_check) and player_check.get("torso_yaw") != null:
+		var orig_y: float = xr_origin.global_rotation.y if xr_origin else 0.0
+		torso_yaw = orig_y + float(player_check.torso_yaw) + PI
 		torso_yaw_initialized = true
 	else:
-		# Calcular la diferencia angular más corta entre el torso actual y la cabeza
-		var angle_diff = angle_difference(torso_yaw, current_cam_yaw)
-		# Si la cabeza gira más de 35 grados (0.61086 rad), el torso es arrastrado por ella
-		var max_head_turn = deg_to_rad(35.0)
-		if abs(angle_diff) > max_head_turn:
-			if angle_diff > 0.0:
-				torso_yaw = current_cam_yaw - max_head_turn
-			else:
-				torso_yaw = current_cam_yaw + max_head_turn
+		# Obtener la dirección horizontal actual de la mirada de la cámara
+		var cam_fwd = -camera.global_transform.basis.z
+		cam_fwd.y = 0.0
+		var cam_fwd_norm = Vector3.FORWARD
+		if cam_fwd.length_squared() > 0.001:
+			cam_fwd_norm = cam_fwd.normalized()
+			
+		var current_cam_yaw = atan2(cam_fwd_norm.x, cam_fwd_norm.z)
+		if not torso_yaw_initialized:
+			torso_yaw = current_cam_yaw
+			torso_yaw_initialized = true
 		else:
-			# Centrado pasivo suave hacia la cabeza (lerp de 5.0 * delta)
-			torso_yaw = torso_yaw + angle_diff * (5.0 * delta)
+			var angle_diff = angle_difference(torso_yaw, current_cam_yaw)
+			var max_head_turn = deg_to_rad(35.0)
+			if abs(angle_diff) > max_head_turn:
+				if angle_diff > 0.0:
+					torso_yaw = current_cam_yaw - max_head_turn
+				else:
+					torso_yaw = current_cam_yaw + max_head_turn
+			else:
+				torso_yaw = torso_yaw + angle_diff * (5.0 * delta)
 				
 	# Reconstruir el vector forward del torso a partir del torso_yaw
 	var forward_xz = Vector3(sin(torso_yaw), 0.0, cos(torso_yaw)).normalized()
@@ -298,20 +315,6 @@ func _process(delta: float) -> void:
 		hands_dist = 0.0
 		hands_sep_speed = 0.0
 	
-	# Emitir señal de actualización de estados de manos para el HUD
-	var left_desc = "%s-%s-%s-%s-%s" % [left_state.height, left_state.lateral, left_state.depth, left_state.shape, left_state.speed] if left_state.valid else "DESCONECTADA"
-	var right_desc = "%s-%s-%s-%s-%s" % [right_state.height, right_state.lateral, right_state.depth, right_state.shape, right_state.speed] if right_state.valid else "DESCONECTADA"
-	emit_signal("hand_states_updated", left_desc, right_desc)
-	
-	# Debug periódico de zonas en consola
-	debug_log_timer += delta
-	if debug_log_timer >= 0.5:
-		debug_log_timer = 0.0
-		if left_state.valid or right_state.valid:
-			var left_log = "%s-%s-%s-%s-%s" % [left_state.height, left_state.lateral, left_state.depth, left_state.shape, left_state.speed] if left_state.valid else "OFF"
-			var right_log = "%s-%s-%s-%s-%s" % [right_state.height, right_state.lateral, right_state.depth, right_state.shape, right_state.speed] if right_state.valid else "OFF"
-			print("[GSS-Debug] L: %s | R: %s" % [left_log, right_log])
-	
 	# 4. Control de gracia para pérdida temporal de señal
 	var active_gesture_needs_left = false
 	var active_gesture_needs_right = false
@@ -330,11 +333,10 @@ func _process(delta: float) -> void:
 		active_gesture_needs_right = true
 		
 	var tracking_failed = false
-	if not is_controller_override:
-		if active_gesture_needs_left and not left_state.valid:
-			tracking_failed = true
-		if active_gesture_needs_right and not right_state.valid:
-			tracking_failed = true
+	if active_gesture_needs_left and not left_state.valid:
+		tracking_failed = true
+	if active_gesture_needs_right and not right_state.valid:
+		tracking_failed = true
 		
 	if tracking_failed:
 		tracking_loss_frames += 1
@@ -366,7 +368,7 @@ func _process(delta: float) -> void:
 				else:
 					_cancel_action("Ki agotado: ¡No queda energía para continuar la carga!")
 				return
-			var ki_drain = 18.0 * delta
+			var ki_drain = KiEconomyConfig.get_default().super_charge_drain_per_sec * delta
 			player.consume_ki(ki_drain)
 			kamehameha_charge_time += delta
 		gesture_timer = 0.0
@@ -393,7 +395,7 @@ func _process(delta: float) -> void:
 				else:
 					_cancel_action("Ki agotado: ¡No queda energía para reunir la Genkidama!")
 				return
-			var ki_drain = 20.0 * delta
+			var ki_drain = KiEconomyConfig.get_default().super_charge_drain_per_sec * delta
 			player.consume_ki(ki_drain)
 			genkidama_charge_time += delta
 		gesture_timer = 0.0
@@ -420,7 +422,7 @@ func _process(delta: float) -> void:
 				else:
 					_cancel_action("Ki agotado: ¡No queda energía para continuar el Galick Ho!")
 				return
-			var ki_drain = 18.0 * delta
+			var ki_drain = KiEconomyConfig.get_default().super_charge_drain_per_sec * delta
 			player.consume_ki(ki_drain)
 			galick_ho_charge_time += delta
 		gesture_timer = 0.0
@@ -447,7 +449,7 @@ func _process(delta: float) -> void:
 				else:
 					_cancel_action("Ki agotado: ¡No queda energía para el Final Flash!")
 				return
-			var ki_drain = 25.0 * delta
+			var ki_drain = KiEconomyConfig.get_default().super_charge_drain_per_sec * delta
 			player.consume_ki(ki_drain)
 			final_flash_charge_time += delta
 		gesture_timer = 0.0
@@ -474,7 +476,7 @@ func _process(delta: float) -> void:
 				else:
 					_cancel_action("Ki agotado: ¡No queda energía para el Big Bang Attack!")
 				return
-			var ki_drain = 22.0 * delta
+			var ki_drain = KiEconomyConfig.get_default().super_charge_drain_per_sec * delta
 			player.consume_ki(ki_drain)
 			big_bang_charge_time += delta
 		gesture_timer = 0.0
@@ -501,6 +503,13 @@ func _process(delta: float) -> void:
 			if not ki_charge_valid:
 				_cancel_action("Pose de recarga rota (manos abiertas o fuera de la cadera)")
 				return
+			elif player and is_instance_valid(player):
+				var cfg_ki: KiEconomyConfig = KiEconomyConfig.get_default()
+				player.recharge_ki(cfg_ki.charge_ki_per_sec_heavy * delta)
+				if player.has_method("increase_np_from_charge"):
+					player.increase_np_from_charge(cfg_ki.charge_bp_per_sec_heavy * delta)
+				else:
+					player.increase_np(cfg_ki.charge_bp_per_sec_heavy * delta)
 			
 		# Si el Ki está al 100%, evaluar gestos de los dedos para transformaciones (Simétrico de 2 manos con hold de 0.6s)
 		if is_ki_full:
@@ -542,11 +551,12 @@ func _process(delta: float) -> void:
 		
 	# 6. Procesar carga y cancelaciones de Ki Blasts (Requisitos: Brazo extendido, consumo de Ki y esfera en la palma)
 	if is_charging_ki_blast_left:
-		# REQUISITO 1: El brazo DEBE estar extendido (depth == "FAR") y no bajo
+		# REQUISITO 1: El brazo DEBE estar extendido (depth == "FAR"), no bajo y con la palma hacia adelante
 		if not is_controller_override:
-			var left_arm_ok = left_state.valid and left_state.depth == "FAR" and left_state.height != "LOW"
+			var l_palm: Vector3 = _get_palm_dir_in_torso(left_tracker, torso_transform)
+			var left_arm_ok = left_state.valid and left_state.depth == "FAR" and left_state.height != "LOW" and l_palm.z <= -0.25
 			if not left_arm_ok:
-				_cancel_action("Carga de Ki Blast cancelada: El brazo izquierdo no está extendido al frente")
+				_cancel_action("Carga de Ki Blast cancelada: Extiende el brazo izquierdo con la palma al frente")
 				_reset_ki_blast_charge(0)
 				return
 				
@@ -554,7 +564,7 @@ func _process(delta: float) -> void:
 		var player = _get_player_instance()
 		if player and is_instance_valid(player):
 			if player.current_ki > 0.0:
-				player.consume_ki(14.0 * delta)
+				player.consume_ki(KiEconomyConfig.get_default().ki_blast_charge_drain_per_sec * delta)
 			else:
 				var vital_drain = 120.0 * delta
 				player.current_np = max(1.0, player.current_np - vital_drain)
@@ -569,11 +579,12 @@ func _process(delta: float) -> void:
 			_update_aim_reticle(sp_info["pos"], sp_info["dir"], Color(0.0, 0.7, 1.0))
 			
 	if is_charging_ki_blast_right:
-		# REQUISITO 1: El brazo DEBE estar extendido (depth == "FAR") y no bajo
+		# REQUISITO 1: El brazo DEBE estar extendido (depth == "FAR"), no bajo y con la palma hacia adelante
 		if not is_controller_override:
-			var right_arm_ok = right_state.valid and right_state.depth == "FAR" and right_state.height != "LOW"
+			var r_palm: Vector3 = _get_palm_dir_in_torso(right_tracker, torso_transform)
+			var right_arm_ok = right_state.valid and right_state.depth == "FAR" and right_state.height != "LOW" and r_palm.z <= -0.25
 			if not right_arm_ok:
-				_cancel_action("Carga de Ki Blast cancelada: El brazo derecho no está extendido al frente")
+				_cancel_action("Carga de Ki Blast cancelada: Extiende el brazo derecho con la palma al frente")
 				_reset_ki_blast_charge(1)
 				return
 				
@@ -581,7 +592,7 @@ func _process(delta: float) -> void:
 		var player = _get_player_instance()
 		if player and is_instance_valid(player):
 			if player.current_ki > 0.0:
-				player.consume_ki(14.0 * delta)
+				player.consume_ki(KiEconomyConfig.get_default().ki_blast_charge_drain_per_sec * delta)
 			else:
 				var vital_drain = 120.0 * delta
 				player.current_np = max(1.0, player.current_np - vital_drain)
@@ -595,13 +606,14 @@ func _process(delta: float) -> void:
 			var sp_info = _get_hand_projectile_origin(1)
 			_update_aim_reticle(sp_info["pos"], sp_info["dir"], Color(1.0, 0.6, 0.1))
 			
-	# 7. Evaluar reglas gestuales para avanzar en el Trie
-	detected_gesture = _match_gesture(left_state, right_state, torso_transform)
-	if not detected_gesture.is_empty():
-		_feed_trie(detected_gesture)
+	# 7. Evaluar reglas gestuales para avanzar en el Trie (Solo si Hand Tracking óptico está activado)
+	if enable_hand_tracking_gestures and not is_controller_override:
+		detected_gesture = _match_gesture(left_state, right_state, torso_transform)
+		if not detected_gesture.is_empty():
+			_feed_trie(detected_gesture)
 	else:
 		# Timeout de seguridad para estados intermedios cuando no hay gestos activos
-		if current_node != gesture_tree and not is_charging_ki and not is_charging_ki_blast_left and not is_charging_ki_blast_right:
+		if current_node != gesture_tree and not is_charging_ki and not is_charging_ki_blast_left and not is_charging_ki_blast_right and not is_charging_kamehameha and not is_charging_genkidama and not is_charging_galick_ho and not is_charging_final_flash and not is_charging_big_bang:
 			gesture_timer += delta
 			if gesture_timer >= 2.5:
 				_cancel_action("Tiempo límite de gesto expirado (2.5s)")
@@ -851,38 +863,38 @@ func _match_gesture(left_state: Dictionary, right_state: Dictionary, torso_trans
 				if player and player.character_data and player.character_data.character_name == "Vegeta":
 					return "FINAL_FLASH_CHARGE"
 
-	# J. Big Bang Attack - Preparar (Un solo brazo extendido al frente)
-	if not is_charging_big_bang and not is_charging_galick_ho and not is_charging_final_flash:
+	# J. Big Bang Attack - Preparar (Un solo brazo extendido al frente con palma hacia adelante, solo en Hand Tracking puro)
+	if not is_controller_override and not is_charging_big_bang and not is_charging_galick_ho and not is_charging_final_flash:
 		var player = _get_player_instance()
 		if player and player.character_data and player.character_data.character_name == "Vegeta":
 			if right_state.valid and right_state.depth == "FAR" and right_state.height in ["CHEST", "HEAD"]:
 				var r_open = right_state.shape != "CLOSED"
 				var r_stable = right_state.speed_val < 1.5
+				var r_palm_bb = palm_dir_right.z <= -0.45
 				var l_not_extended = not left_state.valid or left_state.depth != "FAR"
-				if r_open and r_stable and l_not_extended and not hands_are_close:
+				if r_open and r_stable and r_palm_bb and l_not_extended and not hands_are_close:
 					return "BIG_BANG_CHARGE"
 			elif left_state.valid and left_state.depth == "FAR" and left_state.height in ["CHEST", "HEAD"]:
 				var l_open = left_state.shape != "CLOSED"
 				var l_stable = left_state.speed_val < 1.5
+				var l_palm_bb = palm_dir_left.z <= -0.45
 				var r_not_extended = not right_state.valid or right_state.depth != "FAR"
-				if l_open and l_stable and r_not_extended and not hands_are_close:
+				if l_open and l_stable and l_palm_bb and r_not_extended and not hands_are_close:
 					return "BIG_BANG_CHARGE"
 
-	# 1. Recarga KI - Paso 1: Puños cerrados o relajados frente al pecho (no cruzados)
+	# 1. Recarga KI - Paso 1: Brazos/puños juntos o cruzados delante del pecho (Fase 1 canónica DBVR)
 	if left_state.valid and right_state.valid:
 		var l_not_open = left_state.shape != "OPEN"
 		var r_not_open = right_state.shape != "OPEN"
 		var l_chest = left_state.height == "CHEST"
 		var r_chest = right_state.height == "CHEST"
-		var l_side = left_state.lateral == "LEFT" or left_state.lateral == "CENTER"
-		var r_side = right_state.lateral == "RIGHT" or right_state.lateral == "CENTER"
-		var hands_not_crossed = left_state.pos_local.x < right_state.pos_local.x
+		var hands_in_chest_zone = absf(left_state.pos_local.x) < 0.35 and absf(right_state.pos_local.x) < 0.35 and absf(left_state.pos_local.x - right_state.pos_local.x) < 0.42
 		var l_close = left_state.depth == "CLOSE" or left_state.depth == "MEDIUM"
 		var r_close = right_state.depth == "CLOSE" or right_state.depth == "MEDIUM"
 		var l_stable = left_state.speed_val < 2.0
 		var r_stable = right_state.speed_val < 2.0
 		
-		if l_not_open and r_not_open and l_chest and r_chest and l_side and r_side and hands_not_crossed and l_close and r_close and l_stable and r_stable:
+		if l_not_open and r_not_open and l_chest and r_chest and hands_in_chest_zone and l_close and r_close and l_stable and r_stable:
 			return "RECHARGE_PREP"
 			
 	# 2. Recarga KI - Paso 2: Ambos puños cerrados/relajados a los costados del cuerpo (no cruzados, abiertos hacia los laterales)
@@ -902,20 +914,20 @@ func _match_gesture(left_state: Dictionary, right_state: Dictionary, torso_trans
 		if l_not_open and r_not_open and l_height_ok and r_height_ok and l_side and r_side and hands_not_crossed and l_close and r_close and l_stable and r_stable:
 			return "HANDS_CLOSED_HIP"
 			
-	# 3. Ki Blast Izquierdo - Preparar (REQUISITO 1: Solo con Brazo Estirado al Frente depth == "FAR")
-	if left_state.valid:
+	# 3. Ki Blast Izquierdo - Preparar (Solo si NO estamos en controller override)
+	if not is_controller_override and left_state.valid:
 		var l_open = left_state.shape != "CLOSED"
 		var l_chest = left_state.height == "CHEST" or left_state.height == "HEAD"
 		var l_left = left_state.lateral == "LEFT" or left_state.lateral == "CENTER"
 		var l_far = left_state.depth == "FAR"
 		var l_stable = left_state.speed_val <= 2.0
-		var l_palm_fwd = palm_dir_left.z < 0.6
+		var l_palm_fwd = palm_dir_left.z <= -0.45
 		
 		if l_open and l_chest and l_left and l_far and l_stable and l_palm_fwd and not hands_are_close:
 			return "ARM_STRETCHED_OPEN_LEFT"
 			
-	# 4. Ki Blast Izquierdo - Disparar (REQUISITO 1: Solo con Brazo Estirado al Frente depth == "FAR")
-	if left_state.valid:
+	# 4. Ki Blast Izquierdo - Disparar (Solo si NO estamos en controller override)
+	if not is_controller_override and left_state.valid:
 		var l_height_valid = left_state.height != "LOW"
 		var l_far = left_state.depth == "FAR"
 		var l_fast = left_state.speed == "FAST" or left_state.speed_val > 1.2
@@ -923,20 +935,20 @@ func _match_gesture(left_state: Dictionary, right_state: Dictionary, torso_trans
 		if l_height_valid and l_far and l_fast:
 			return "FAST_THRUST_LEFT"
 			
-	# 5. Ki Blast Derecho - Preparar (REQUISITO 1: Solo con Brazo Estirado al Frente depth == "FAR")
-	if right_state.valid:
+	# 5. Ki Blast Derecho - Preparar (Solo si NO estamos en controller override)
+	if not is_controller_override and right_state.valid:
 		var r_open = right_state.shape != "CLOSED"
 		var r_chest = right_state.height == "CHEST" or right_state.height == "HEAD"
 		var r_right = right_state.lateral == "RIGHT" or right_state.lateral == "CENTER"
 		var r_far = right_state.depth == "FAR"
 		var r_stable = right_state.speed_val <= 2.0
-		var r_palm_fwd = palm_dir_right.z < 0.6
+		var r_palm_fwd = palm_dir_right.z <= -0.45
 		
 		if r_open and r_chest and r_right and r_far and r_stable and r_palm_fwd and not hands_are_close:
 			return "ARM_STRETCHED_OPEN_RIGHT"
 			
-	# 6. Ki Blast Derecho - Disparar (REQUISITO 1: Solo con Brazo Estirado al Frente depth == "FAR")
-	if right_state.valid:
+	# 6. Ki Blast Derecho - Disparar (Solo si NO estamos en controller override)
+	if not is_controller_override and right_state.valid:
 		var r_height_valid = right_state.height != "LOW"
 		var r_far = right_state.depth == "FAR"
 		var r_fast = right_state.speed == "FAST" or right_state.speed_val > 1.2
@@ -984,7 +996,7 @@ func _feed_trie(gesture_name: String) -> void:
 						emit_signal("phase_changed", "KAMEHAMEHA: CARGANDO")
 						emit_signal("gesture_logged", "Manos unidas en la cadera. ¡Cargando Kamehameha!", "info")
 					if ki_blast_charge_player:
-						ki_blast_charge_player.play()
+						_play_charge_audio_for_node("KAMEHAMEHA_CHARGE")
 				else:
 					emit_signal("gesture_logged", "No se pudo cargar Kamehameha.", "warning")
 					_cancel_action("Kamehameha cancelado")
@@ -1008,7 +1020,7 @@ func _feed_trie(gesture_name: String) -> void:
 						emit_signal("phase_changed", "GENKIDAMA: REUNIENDO ENERGÍA")
 						emit_signal("gesture_logged", "Brazos alzados al cielo. ¡Reuniendo energía para la Genkidama!", "info")
 					if ki_blast_charge_player:
-						ki_blast_charge_player.play()
+						_play_charge_audio_for_node("GENKIDAMA_CHARGE")
 				else:
 					emit_signal("gesture_logged", "No se pudo reunir la Genkidama.", "warning")
 					_cancel_action("Genkidama cancelada")
@@ -1032,7 +1044,7 @@ func _feed_trie(gesture_name: String) -> void:
 						emit_signal("phase_changed", "GALICK HO: CARGANDO")
 						emit_signal("gesture_logged", "Manos unidas al hombro. ¡Cargando Galick Ho!", "info")
 					if ki_blast_charge_player:
-						ki_blast_charge_player.play()
+						_play_charge_audio_for_node("GALICK_HO_CHARGE")
 				else:
 					emit_signal("gesture_logged", "No se pudo cargar Galick Ho.", "warning")
 					_cancel_action("Galick Ho cancelado")
@@ -1056,7 +1068,7 @@ func _feed_trie(gesture_name: String) -> void:
 						emit_signal("phase_changed", "FINAL FLASH: CARGANDO RELÁMPAGOS")
 						emit_signal("gesture_logged", "Brazos en cruz acumulando relámpagos. ¡Cargando Final Flash!", "info")
 					if ki_blast_charge_player:
-						ki_blast_charge_player.play()
+						_play_charge_audio_for_node("FINAL_FLASH_CHARGE")
 				else:
 					emit_signal("gesture_logged", "No se pudo cargar Final Flash.", "warning")
 					_cancel_action("Final Flash cancelado")
@@ -1080,7 +1092,7 @@ func _feed_trie(gesture_name: String) -> void:
 						emit_signal("phase_changed", "BIG BANG: CARGANDO ENERGÍA")
 						emit_signal("gesture_logged", "Brazo extendido con palma abierta. ¡Cargando Big Bang Attack!", "info")
 					if ki_blast_charge_player:
-						ki_blast_charge_player.play()
+						_play_charge_audio_for_node("BIG_BANG_CHARGE")
 				else:
 					emit_signal("gesture_logged", "No se pudo cargar Big Bang Attack.", "warning")
 					_cancel_action("Big Bang Attack cancelado")
@@ -1095,14 +1107,14 @@ func _feed_trie(gesture_name: String) -> void:
 				emit_signal("phase_changed", "KI BLAST IZQ: CARGANDO")
 				emit_signal("gesture_logged", "Brazo Izquierdo estirado al frente. ¡Cargando Ki Blast!", "info")
 				if ki_blast_charge_player:
-					ki_blast_charge_player.play()
+					_play_charge_audio_for_node("ARM_STRETCHED_OPEN_LEFT")
 		elif gesture_name == "ARM_STRETCHED_OPEN_RIGHT":
 			if ki_blast_charge_time_right <= 0.01:
 				is_charging_ki_blast_right = true
 				emit_signal("phase_changed", "KI BLAST DER: CARGANDO")
 				emit_signal("gesture_logged", "Brazo Derecho estirado al frente. ¡Cargando Ki Blast!", "info")
 				if ki_blast_charge_player:
-					ki_blast_charge_player.play()
+					_play_charge_audio_for_node("ARM_STRETCHED_OPEN_RIGHT")
 			
 		# Comprobar si se ha alcanzado una acción final
 		if current_node.has("action_trigger"):
@@ -1121,11 +1133,19 @@ func _trigger_action(action_name: String) -> void:
 		# Mostrar aura visual dorada y luz
 		_show_visual_aura(true)
 		
-		# Reproducir sonidos de recarga de Ki
+		# Reproducir sonidos de recarga de Ki + voz del personaje
 		if aura_start_player:
-			aura_start_player.play()
+			aura_start_player.pitch_scale = randf_range(0.92, 1.08)
+			AudioActionManager.play_action("common.aura_burst", aura_start_player, aura_start_player.stream)
 		if aura_loop_player:
-			aura_loop_player.play()
+			aura_loop_player.pitch_scale = randf_range(0.92, 1.08)
+			AudioActionManager.play_action("common.ki_charge_phase2", aura_loop_player, aura_loop_player.stream, true)
+		if voice_player:
+			var c_name_ki: String = player.character_data.character_name if (player and player.character_data) else "Goku"
+			var voice_id: String = AudioActionManager.get_character_action_id(c_name_ki, "ki_charge_voice")
+			if AudioActionManager.has_action_sounds(voice_id):
+				voice_player.pitch_scale = randf_range(0.95, 1.05)
+				AudioActionManager.play_action(voice_id, voice_player)
 		
 	elif action_name == "ki_blast_left":
 		# REQUISITO 1: Solo al tener el brazo extendido
@@ -1136,8 +1156,13 @@ func _trigger_action(action_name: String) -> void:
 			_reset_to_idle()
 			return
 
-		var is_charged = ki_blast_charge_time_left >= 0.70
-		var ki_cost = 15.0 if is_charged else 5.0
+		var is_charged = ki_blast_charge_time_left >= 0.45
+		var cfg_kb: KiEconomyConfig = KiEconomyConfig.get_default()
+		var is_veg_kb: bool = player != null and is_instance_valid(player) and player.get("character_data") != null and "VEGETA" in String(player.character_data.character_name).to_upper()
+		var base_rapid_cost: float = cfg_kb.ki_blast_rapid_vegeta_cost if is_veg_kb else cfg_kb.ki_blast_cost
+		var ki_cost: float = cfg_kb.ki_blast_charged_cost if is_charged else base_rapid_cost
+		if player and is_instance_valid(player) and player.has_method("get_dramatic_modifier"):
+			ki_cost *= player.get_dramatic_modifier("blast_cost_mult", 1.0)
 		var is_life = false
 		var sacrificed_bp = 0
 		if player:
@@ -1162,6 +1187,9 @@ func _trigger_action(action_name: String) -> void:
 			emit_signal("gesture_logged", "Paso 2: ¡Ki Blast rápido lanzado con Mano Izquierda!", "success")
 		if ki_blast_charge_player:
 			ki_blast_charge_player.stop()
+		if ki_blast_fire_player:
+			ki_blast_fire_player.pitch_scale = randf_range(0.88, 0.98) if is_charged else randf_range(0.95, 1.08)
+			AudioActionManager.play_action("common.ki_blast_fire", ki_blast_fire_player, _default_blast_fire_stream)
 		_reset_ki_blast_charge(0)
 		_reset_to_idle()
 		
@@ -1174,8 +1202,13 @@ func _trigger_action(action_name: String) -> void:
 			_reset_to_idle()
 			return
 
-		var is_charged = ki_blast_charge_time_right >= 0.70
-		var ki_cost = 15.0 if is_charged else 5.0
+		var is_charged = ki_blast_charge_time_right >= 0.45
+		var cfg_kb: KiEconomyConfig = KiEconomyConfig.get_default()
+		var is_veg_kb: bool = player != null and is_instance_valid(player) and player.get("character_data") != null and "VEGETA" in String(player.character_data.character_name).to_upper()
+		var base_rapid_cost: float = cfg_kb.ki_blast_rapid_vegeta_cost if is_veg_kb else cfg_kb.ki_blast_cost
+		var ki_cost: float = cfg_kb.ki_blast_charged_cost if is_charged else base_rapid_cost
+		if player and is_instance_valid(player) and player.has_method("get_dramatic_modifier"):
+			ki_cost *= player.get_dramatic_modifier("blast_cost_mult", 1.0)
 		var is_life = false
 		var sacrificed_bp = 0
 		if player:
@@ -1200,6 +1233,9 @@ func _trigger_action(action_name: String) -> void:
 			emit_signal("gesture_logged", "Paso 2: ¡Ki Blast rápido lanzado con Mano Derecha!", "success")
 		if ki_blast_charge_player:
 			ki_blast_charge_player.stop()
+		if ki_blast_fire_player:
+			ki_blast_fire_player.pitch_scale = randf_range(0.88, 0.98) if is_charged else randf_range(0.95, 1.08)
+			AudioActionManager.play_action("common.ki_blast_fire", ki_blast_fire_player, _default_blast_fire_stream)
 		_reset_ki_blast_charge(1)
 		_reset_to_idle()
 		
@@ -1225,15 +1261,20 @@ func _trigger_action(action_name: String) -> void:
 						power = p
 						break
 					
-			# Si el jugador está en Zenkai, disparar la versión Finisher de su técnica (Super Kamehameha o Final Flash)
-			if player.is_in_zenkai_state:
+			# Promoción Zenkai solo para Kamehameha -> Super Kamehameha (conservar la técnica real elegida para el resto)
+			if player.is_in_zenkai_state and action_name == "kamehameha":
 				for p in player.character_data.powers:
-					if p.is_finisher:
+					if p and p.power_name == "Super Kamehameha":
 						power = p
 						break
-			
+
+			var was_consumed_by_hybrid: bool = _ki_already_consumed_by_hybrid
+			_ki_already_consumed_by_hybrid = false
+
 			if power:
-				if player.is_power_usable(power):
+				if player.is_in_zenkai_state or player.is_power_usable(power):
+					if not was_consumed_by_hybrid and player.has_method("consume_ki_or_life_force") and not is_controller_override:
+						player.consume_ki_or_life_force(power.ki_cost)
 					emit_signal("phase_changed", "¡%s LANZADO!" % power.power_name.to_upper())
 					emit_signal("gesture_logged", "¡Gesto completado! Lanzando %s" % power.power_name, "success")
 					if ki_blast_charge_player:
@@ -1254,6 +1295,15 @@ func _trigger_action(action_name: String) -> void:
 		_hide_aim_reticle()
 		_cleanup_ki_blast_charge_sphere(0)
 		_cleanup_ki_blast_charge_sphere(1)
+		if ki_blast_fire_player:
+			ki_blast_fire_player.pitch_scale = randf_range(0.95, 1.08)
+			AudioActionManager.play_action("common.melee_swing", ki_blast_fire_player)
+		if voice_player and player and is_instance_valid(player):
+			var c_name_m: String = player.character_data.character_name if player.character_data else "Goku"
+			var eff_id: String = AudioActionManager.get_character_action_id(c_name_m, "attack_effort")
+			if AudioActionManager.has_action_sounds(eff_id):
+				voice_player.pitch_scale = randf_range(0.95, 1.05)
+				AudioActionManager.play_action(eff_id, voice_player)
 		if player and is_instance_valid(player):
 			emit_signal("phase_changed", "¡MELEE DISPARADO!")
 			emit_signal("gesture_logged", "¡Puñetazo lanzado! Volando al contrincante...", "success")
@@ -1262,6 +1312,30 @@ func _trigger_action(action_name: String) -> void:
 			_reset_to_idle()
 		else:
 			_reset_to_idle()
+
+## Retorna la normal real de la palma de la mano del mando Quest 3 (alineado con character_instance.gd)
+func _get_ctrl_palm_dir(ctrl: XRController3D, hand_side: int) -> Vector3:
+	if not ctrl or not is_instance_valid(ctrl):
+		return Vector3.FORWARD
+	var b: Basis = ctrl.global_transform.basis
+	return (b.x if hand_side == 0 else -b.x).normalized()
+
+
+## Calcula una dirección de disparo nivelada usando normal de palma + cámara + hombro alto (sin sesgo al cielo)
+func _compute_level_palm_aim_dir(ctrl: XRController3D, hand_side: int, camera: Camera3D, xr_origin: Node3D) -> Vector3:
+	var cam_dir: Vector3 = (-camera.global_transform.basis.z).normalized() if (camera and is_instance_valid(camera) and camera.is_inside_tree()) else Vector3.FORWARD
+	if not ctrl or not is_instance_valid(ctrl):
+		return cam_dir
+	var body_s: float = xr_origin.scale.y if (xr_origin and is_instance_valid(xr_origin) and xr_origin.is_inside_tree()) else 1.0
+	var shoulder_origin: Vector3 = camera.global_position - Vector3(0.0, 0.16 * body_s, 0.0) if (camera and is_instance_valid(camera) and camera.is_inside_tree()) else ctrl.global_position
+	var arm_vec: Vector3 = ctrl.global_position - shoulder_origin
+	var arm_dir: Vector3 = arm_vec.normalized() if arm_vec.length_squared() > 0.001 else cam_dir
+	var palm_dir: Vector3 = _get_ctrl_palm_dir(ctrl, hand_side)
+	if palm_dir.dot(cam_dir) < 0.0:
+		palm_dir = cam_dir
+	var blended: Vector3 = cam_dir * 0.45 + palm_dir * 0.35 + arm_dir * 0.20
+	return blended.normalized() if blended.length_squared() > 0.0001 else cam_dir
+
 
 ## Obtiene el punto de origen 3D y dirección de disparo de un Ki Blast desde la mano real
 func _get_hand_projectile_origin(hand_side: int) -> Dictionary:
@@ -1284,25 +1358,12 @@ func _get_hand_projectile_origin(hand_side: int) -> Dictionary:
 		var ctrl_name = "LeftHand" if hand_side == 0 else "RightHand"
 		ctrl = xr_origin.get_node_or_null(ctrl_name) if (xr_origin and xr_origin.is_inside_tree()) else null
 
-	# 1.1 Si los mandos físicos de Meta Quest están presentes y activos
-	if ctrl and ctrl.is_inside_tree() and ctrl.get_is_active():
-		var spawn_p = ctrl.global_position
-		var final_dir = default_dir
-		if current_aim_target != Vector3.ZERO and current_aim_target.distance_squared_to(spawn_p) > 0.1:
-			final_dir = (current_aim_target - spawn_p).normalized()
-		else:
-			# Auto-apuntado dinámico automático si apunta hacia el oponente en un cono suave (~55°)
-			var opp = _get_opponent_instance()
-			if opp and is_instance_valid(opp):
-				var opp_chest = opp.global_position + Vector3(0, 1.2, 0)
-				var to_opp = (opp_chest - spawn_p).normalized()
-				var hand_fwd = (spawn_p - camera.global_position).normalized() if camera else default_dir
-				if hand_fwd.dot(to_opp) > 0.55:
-					final_dir = to_opp
-				elif camera:
-					final_dir = hand_fwd
-			elif camera:
-				final_dir = (ctrl.global_position - camera.global_position).normalized()
+	# 1.1 Si los mandos físicos de Meta Quest están presentes y activos (o en override con posición válida)
+	var ctrl_usable: bool = ctrl != null and ctrl.is_inside_tree() and (ctrl.get_is_active() or (is_controller_override and ctrl.position.length_squared() > 0.001))
+	if ctrl_usable:
+		var spawn_p: Vector3 = ctrl.global_position
+		var raw_hand_dir: Vector3 = _compute_level_palm_aim_dir(ctrl, hand_side, camera, xr_origin)
+		var final_dir: Vector3 = apply_soft_aim_assist(spawn_p, raw_hand_dir, false)
 		return { "pos": spawn_p + final_dir * 0.12, "dir": final_dir }
 
 	# 2. Si hay Hand Tracking óptico (26 joints)
@@ -1310,24 +1371,16 @@ func _get_hand_projectile_origin(hand_side: int) -> Dictionary:
 	if tracker:
 		var flags = tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_PALM)
 		if (flags & XRHandTracker.HAND_JOINT_FLAG_POSITION_VALID):
-			var palm_local = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM).origin
+			var palm_local: Vector3 = tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM).origin
 			if xr_origin and xr_origin.is_inside_tree():
-				var palm_global = xr_origin.global_transform * palm_local
-				var final_dir = default_dir
-				if current_aim_target != Vector3.ZERO and current_aim_target.distance_squared_to(palm_global) > 0.1:
-					final_dir = (current_aim_target - palm_global).normalized()
-				else:
-					var opp = _get_opponent_instance()
-					if opp and is_instance_valid(opp):
-						var opp_chest = opp.global_position + Vector3(0, 1.2, 0)
-						var to_opp = (opp_chest - palm_global).normalized()
-						var hand_fwd = (palm_global - camera.global_position).normalized() if camera else default_dir
-						if hand_fwd.dot(to_opp) > 0.55:
-							final_dir = to_opp
-						elif camera:
-							final_dir = hand_fwd
-					elif camera:
-						final_dir = (palm_global - camera.global_position).normalized()
+				var palm_global: Vector3 = xr_origin.global_transform * palm_local
+				var palm_xform: Transform3D = xr_origin.global_transform * tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM)
+				var chest_origin: Vector3 = camera.global_position - Vector3(0.0, 0.25 * xr_origin.scale.y, 0.0) if (camera and camera.is_inside_tree()) else palm_global
+				var arm_vec: Vector3 = palm_global - chest_origin
+				var chest_to_hand: Vector3 = arm_vec.normalized() if arm_vec.length_squared() > 0.001 else default_dir
+				var palm_out: Vector3 = (-palm_xform.basis.y).normalized()
+				var raw_hand_dir: Vector3 = (chest_to_hand * 0.65 + palm_out * 0.35).normalized() if palm_out.dot(chest_to_hand) > 0.0 else chest_to_hand
+				var final_dir: Vector3 = apply_soft_aim_assist(palm_global, raw_hand_dir, false)
 				return { "pos": palm_global + final_dir * 0.12, "dir": final_dir }
 
 	# 3. Fallback: proyectar desde el lateral correspondiente al lado que dispara
@@ -1353,38 +1406,63 @@ func _get_special_projectile_origin(power_name: String) -> Dictionary:
 	var l_ctrl: XRController3D = left_controller_node if (left_controller_node and left_controller_node.is_inside_tree()) else (xr_origin.get_node_or_null("LeftHand") if (xr_origin and xr_origin.is_inside_tree()) else null)
 	var r_ctrl: XRController3D = right_controller_node if (right_controller_node and right_controller_node.is_inside_tree()) else (xr_origin.get_node_or_null("RightHand") if (xr_origin and xr_origin.is_inside_tree()) else null)
 
+	var launch_override: Vector3 = last_super_launch_dir
+	last_super_launch_dir = Vector3.ZERO
+	var body_s: float = xr_origin.scale.y if (xr_origin and xr_origin.is_inside_tree()) else 1.0
+	var shoulder_origin: Vector3 = camera.global_position - Vector3(0.0, 0.16 * body_s, 0.0) if (camera and camera.is_inside_tree()) else default_pos
+	var l_usable: bool = l_ctrl != null and l_ctrl.is_inside_tree() and (l_ctrl.get_is_active() or (is_controller_override and l_ctrl.position.length_squared() > 0.001))
+	var r_usable: bool = r_ctrl != null and r_ctrl.is_inside_tree() and (r_ctrl.get_is_active() or (is_controller_override and r_ctrl.position.length_squared() > 0.001))
+
 	# Caso Genkidama: Se lanza desde arriba de la cabeza / brazos alzados
 	if power_name == "Genkidama":
-		var genki_pos = default_pos + Vector3(0, 1.8, 0)
-		if l_ctrl and r_ctrl and l_ctrl.is_inside_tree() and r_ctrl.is_inside_tree() and l_ctrl.get_is_active() and r_ctrl.get_is_active():
-			genki_pos = (l_ctrl.global_position + r_ctrl.global_position) * 0.5 + Vector3(0, 0.6, 0)
-		return { "pos": genki_pos, "dir": default_dir }
+		var genki_pos: Vector3 = default_pos + Vector3(0, 1.8 * body_s, 0)
+		if l_usable and r_usable:
+			genki_pos = (l_ctrl.global_position + r_ctrl.global_position) * 0.5 + Vector3(0, 0.6 * body_s, 0)
+		var raw_genki_dir: Vector3 = launch_override if launch_override.length_squared() > 0.001 else default_dir
+		var genki_dir: Vector3 = apply_soft_aim_assist(genki_pos, raw_genki_dir, true)
+		return { "pos": genki_pos, "dir": genki_dir }
 
 	# Caso Kamehameha / Galick Ho / Final Flash / Big Bang: Sale apuntado dinámicamente desde las manos
-	if l_ctrl and r_ctrl and l_ctrl.is_inside_tree() and r_ctrl.is_inside_tree() and l_ctrl.get_is_active() and r_ctrl.get_is_active():
-		var aim_pos = (l_ctrl.global_position + r_ctrl.global_position) * 0.5
-		if power_name == "Big Bang Attack":
-			var bb_ctrl = l_ctrl if big_bang_hand == 0 else r_ctrl
-			aim_pos = bb_ctrl.global_position
-		
-		var final_dir = default_dir
-		if current_aim_target != Vector3.ZERO and current_aim_target.distance_squared_to(aim_pos) > 0.1:
-			final_dir = (current_aim_target - aim_pos).normalized()
-		elif camera:
-			final_dir = (aim_pos - camera.global_position).normalized()
+	if power_name == "Big Bang Attack":
+		var bb_ctrl: XRController3D = l_ctrl if big_bang_hand == 0 else r_ctrl
+		var bb_usable: bool = l_usable if big_bang_hand == 0 else r_usable
+		if bb_usable and bb_ctrl:
+			var aim_pos_bb: Vector3 = bb_ctrl.global_position
+			var raw_dir_bb: Vector3 = launch_override if launch_override.length_squared() > 0.001 else _compute_level_palm_aim_dir(bb_ctrl, big_bang_hand, camera, xr_origin)
+			var final_dir_bb: Vector3 = apply_soft_aim_assist(aim_pos_bb, raw_dir_bb, true)
+			return { "pos": aim_pos_bb + final_dir_bb * 0.18, "dir": final_dir_bb }
+
+	if l_usable and r_usable:
+		var aim_pos: Vector3 = (l_ctrl.global_position + r_ctrl.global_position) * 0.5
+		var raw_dir: Vector3 = default_dir
+		if launch_override.length_squared() > 0.001:
+			raw_dir = launch_override
+		else:
+			var arm_v: Vector3 = aim_pos - shoulder_origin
+			var shoulder_dir: Vector3 = arm_v.normalized() if arm_v.length_squared() > 0.001 else default_dir
+			var palms_sum: Vector3 = _get_ctrl_palm_dir(l_ctrl, 0) + _get_ctrl_palm_dir(r_ctrl, 1)
+			var palms_dir: Vector3 = palms_sum.normalized() if (palms_sum.length_squared() > 0.01 and palms_sum.dot(default_dir) > 0.0) else default_dir
+			var dir_blend: Vector3 = default_dir * 0.50 + palms_dir * 0.30 + shoulder_dir * 0.20
+			raw_dir = dir_blend.normalized() if dir_blend.length_squared() > 0.0001 else default_dir
+
+		var final_dir: Vector3 = apply_soft_aim_assist(aim_pos, raw_dir, true)
 		return { "pos": aim_pos + final_dir * 0.18, "dir": final_dir }
 
 	if left_tracker and right_tracker:
 		var l_flags = left_tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_PALM)
 		var r_flags = right_tracker.get_hand_joint_flags(XRHandTracker.HAND_JOINT_PALM)
 		if (l_flags & XRHandTracker.HAND_JOINT_FLAG_POSITION_VALID) and (r_flags & XRHandTracker.HAND_JOINT_FLAG_POSITION_VALID):
-			var l_local = left_tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM).origin
-			var r_local = right_tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM).origin
+			var l_local: Vector3 = left_tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM).origin
+			var r_local: Vector3 = right_tracker.get_hand_joint_transform(XRHandTracker.HAND_JOINT_PALM).origin
 			if xr_origin:
-				var center_global = xr_origin.global_transform * ((l_local + r_local) * 0.5)
-				return { "pos": center_global + default_dir * 0.15, "dir": default_dir }
+				var center_global: Vector3 = xr_origin.global_transform * ((l_local + r_local) * 0.5)
+				var raw_tracker_dir: Vector3 = launch_override if launch_override.length_squared() > 0.001 else ((center_global - shoulder_origin).normalized() if center_global.distance_squared_to(shoulder_origin) > 0.001 else default_dir)
+				var final_tracker_dir: Vector3 = apply_soft_aim_assist(center_global, raw_tracker_dir, true)
+				return { "pos": center_global + final_tracker_dir * 0.15, "dir": final_tracker_dir }
 
-	return { "pos": default_pos, "dir": default_dir }
+	var fallback_raw: Vector3 = launch_override if launch_override.length_squared() > 0.001 else default_dir
+	var fallback_final: Vector3 = apply_soft_aim_assist(default_pos, fallback_raw, true)
+	return { "pos": default_pos, "dir": fallback_final }
 
 ## Instancia procedimentalmente un proyectil de energía Ki 3D brillante que vuela e impacta dinámicamente
 func _spawn_ki_blast_projectile(hand_side: int, is_charged: bool) -> void:
@@ -1405,12 +1483,19 @@ func _spawn_ki_blast_projectile(hand_side: int, is_charged: bool) -> void:
 	var spawn_pos: Vector3 = spawn_info["pos"]
 	var velocity_dir: Vector3 = spawn_info["dir"]
 	
-	# Atributos de escala y velocidad según carga
-	var projectile_radius = 0.05
-	var speed = 28.0
-	if is_charged:
-		projectile_radius = 0.18
-		speed = 14.0
+	# Atributos de escala, velocidad y homing escalados por BP (Overhaul Híbrido)
+	var opp_kb: Node3D = null
+	if player and is_instance_valid(player) and player.has_method("_get_opponent"):
+		opp_kb = player._get_opponent()
+	if (not opp_kb or not is_instance_valid(opp_kb)) and get_tree() and get_tree().current_scene:
+		opp_kb = get_tree().current_scene.find_child("EnemyCharacterInstance", true, false) as Node3D
+	var atk_bp_kb: float = float(player.get("current_np")) if (player and is_instance_valid(player) and player.get("current_np") != null) else 10000.0
+	var def_bp_kb: float = float(opp_kb.get("current_np")) if (opp_kb and is_instance_valid(opp_kb) and opp_kb.get("current_np") != null) else 10000.0
+	var atk_furia_kb: bool = bool(player and is_instance_valid(player) and player.get("is_in_furia"))
+	var kb_profile: Dictionary = CharacterInstance.compute_ki_blast_bp_profile(atk_bp_kb, def_bp_kb, is_charged, atk_furia_kb)
+	var is_veg_p: bool = player != null and is_instance_valid(player) and player.get("character_data") != null and "VEGETA" in String(player.character_data.character_name).to_upper()
+	var projectile_radius: float = 0.18 if is_charged else 0.05
+	var speed: float = float(kb_profile.get("projectile_speed", 22.0 if is_charged else 28.0))
 		
 	# Crear el nodo principal del proyectil
 	var projectile = Node3D.new()
@@ -1450,12 +1535,13 @@ func _spawn_ki_blast_projectile(hand_side: int, is_charged: bool) -> void:
 	mesh_corona.material_override = mat_corona
 	projectile.add_child(mesh_corona)
 	
-	# Luz dinámica omnidireccional asociada (calibrada para VR sin destello cegador)
-	var light = OmniLight3D.new()
-	light.light_color = energy_color
-	light.light_energy = 2.2 if is_charged else 1.2
-	light.omni_range = 2.0 if is_charged else 1.0
-	projectile.add_child(light)
+	# Luz dinámica omnidireccional asociada (solo para ataques cargados para mantener 90 FPS en Quest 3)
+	if is_charged:
+		var light = OmniLight3D.new()
+		light.light_color = energy_color
+		light.light_energy = 2.2
+		light.omni_range = 2.0
+		projectile.add_child(light)
 	
 	# Asignar el script físico estático precompilado y sus variables ANTES de entrar al árbol
 	projectile.set_script(ProceduralKiProjectileScript)
@@ -1463,15 +1549,29 @@ func _spawn_ki_blast_projectile(hand_side: int, is_charged: bool) -> void:
 	projectile.set("p_radius", projectile_radius)
 	projectile.set("p_color", energy_color)
 	projectile.set("tier", 2 if is_charged else 1)
-	projectile.set("base_damage", 700.0 if is_charged else 200.0)
+	var blast_dmg: float = 680.0 if is_charged else 220.0
+	if player and is_instance_valid(player) and player.has_method("get_dramatic_modifier"):
+		blast_dmg *= player.get_dramatic_modifier("damage_mult", 1.0)
+	projectile.set("base_damage", blast_dmg)
 	projectile.set("explosion_radius", 2.6 if is_charged else 1.2)
+	projectile.set("shooter_node", player)
+	projectile.set("shooter_bp", atk_bp_kb)
+	projectile.set("shooter_in_furia", atk_furia_kb)
+	projectile.set("original_shooter", player)
+	if is_charged and opp_kb and is_instance_valid(opp_kb):
+		projectile.set("homing_target", opp_kb)
+		projectile.set("homing_strength", 1.35 if is_veg_p else 1.95)
+	projectile.set("was_launched_in_zenkai", bool(player and is_instance_valid(player) and player.get("is_in_zenkai_state")))
 	
-	# Excluir colisionadores del propio jugador para que el proyectil no choque consigo mismo al salir
+	# Excluir colisionadores del propio jugador en O(1) usando caché
 	var exclude_rids: Array[RID] = []
 	if player:
-		for child in player.get_children():
-			if child is CollisionObject3D:
-				exclude_rids.append(child.get_rid())
+		if player.has_method("get_projectile_exclude_rids"):
+			exclude_rids = player.get_projectile_exclude_rids().duplicate()
+		else:
+			for child in player.get_children():
+				if child is CollisionObject3D:
+					exclude_rids.append(child.get_rid())
 		var origin = player.get_parent()
 		if origin:
 			for child in origin.get_children():
@@ -1497,31 +1597,40 @@ func _spawn_special_projectile(power: Resource) -> void:
 	var spawn_info = _get_special_projectile_origin(power.power_name)
 	var spawn_pos: Vector3 = spawn_info["pos"]
 	var velocity_dir: Vector3 = spawn_info["dir"]
-	# Desplazar origen ligeramente hacia adelante y abajo (a nivel de manos/pecho) para que el proyectil no tape la línea de visión
-	spawn_pos += velocity_dir * 0.40 + Vector3(0.0, -0.16, 0.0)
+	# Desplazar origen ligeramente hacia adelante sin hundirlo cerca del suelo o muros
+	spawn_pos += velocity_dir * 0.25 + Vector3(0.0, -0.06, 0.0)
+	spawn_pos.y = maxf(spawn_pos.y, 0.45)
 	
 	# Capturar y limpiar tiempos de carga
+	var fallback_charge: float = maxf(
+		kamehameha_charge_time,
+		maxf(genkidama_charge_time, maxf(galick_ho_charge_time, maxf(final_flash_charge_time, big_bang_charge_time)))
+	)
 	var charge_time = 0.0
 	if power.power_name.contains("Kamehameha"):
 		charge_time = kamehameha_charge_time
-		kamehameha_charge_time = 0.0
-		is_charging_kamehameha = false
 	elif power.power_name == "Genkidama":
 		charge_time = genkidama_charge_time
-		genkidama_charge_time = 0.0
-		is_charging_genkidama = false
 	elif power.power_name == "Galick Ho":
 		charge_time = galick_ho_charge_time
-		galick_ho_charge_time = 0.0
-		is_charging_galick_ho = false
 	elif power.power_name == "Final Flash":
 		charge_time = final_flash_charge_time
-		final_flash_charge_time = 0.0
-		is_charging_final_flash = false
 	elif power.power_name == "Big Bang Attack":
 		charge_time = big_bang_charge_time
-		big_bang_charge_time = 0.0
-		is_charging_big_bang = false
+
+	if charge_time <= 0.01:
+		charge_time = maxf(fallback_charge, 1.0)
+
+	kamehameha_charge_time = 0.0
+	is_charging_kamehameha = false
+	genkidama_charge_time = 0.0
+	is_charging_genkidama = false
+	galick_ho_charge_time = 0.0
+	is_charging_galick_ho = false
+	final_flash_charge_time = 0.0
+	is_charging_final_flash = false
+	big_bang_charge_time = 0.0
+	is_charging_big_bang = false
 		
 	# Limpiar esferas de previsualización
 	_update_special_charge_sphere(0.0)
@@ -1541,32 +1650,91 @@ func _spawn_special_projectile(power: Resource) -> void:
 		
 	var speed = power.projectile_speed
 	var energy_color = power.energy_color
+	var player = _get_player_instance()
+	var base_dmg = power.base_damage_np
+	if power.is_finisher and not (player and player.is_in_zenkai_state):
+		base_dmg = 4500.0
+
+	var is_ult_tech = power.is_finisher or power.power_name.contains("Super") or power.power_name == "Genkidama" or bool(player and player.is_in_zenkai_state)
+	var tier_val = 4 if is_ult_tech else 3
+	var is_big_bang = (power.power_name == "Big Bang Attack")
+	if is_big_bang:
+		projectile_radius = maxf(projectile_radius, 0.55)
+		speed = maxf(speed, 30.0)
+		energy_color = Color(1.0, 0.88, 0.15, 1.0) # Esfera amarilla canónica de Big Bang Attack
+
+	# Activación canónica de la Secuencia Cinemática y Bullet-Time para TODOS los Super Ataques (incluidos Big Bang Attack y Genkidama)
+	if player and player.has_method("start_super_beam_sequence"):
+		var opp = player._get_opponent()
+		if opp and is_instance_valid(opp):
+			player.start_super_beam_sequence(power.power_name, energy_color, base_dmg, tier_val, velocity_dir)
+			return
+
+	# Audio de lanzamiento para esferas especiales (Genkidama / Big Bang Attack)
+	if ki_blast_fire_player:
+		var fire_act: String = "goku.genkidama_fire" if power.power_name == "Genkidama" else "vegeta.big_bang_fire"
+		if not AudioActionManager.has_action_sounds(fire_act):
+			fire_act = "common.ki_blast_fire"
+		ki_blast_fire_player.pitch_scale = randf_range(0.92, 1.04)
+		AudioActionManager.play_action(fire_act, ki_blast_fire_player, _default_blast_fire_stream)
 	
 	var projectile = Node3D.new()
 	projectile.name = "ProceduralKiProjectile_" + power.power_name.replace(" ", "") + "_" + str(Time.get_ticks_msec())
 	
-	# 1. Malla del núcleo (Core)
+	# 1. Malla del núcleo (Core) con KiSphereShader
 	var mesh_core = MeshInstance3D.new()
 	mesh_core.name = "CoreMesh"
 	var sphere_core = SphereMesh.new()
 	sphere_core.radius = projectile_radius
 	sphere_core.height = projectile_radius * 2.0
+	sphere_core.radial_segments = 24
+	sphere_core.rings = 12
 	mesh_core.mesh = sphere_core
 	
-	var mat_core = StandardMaterial3D.new()
-	mat_core.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
-	mat_core.blend_mode = StandardMaterial3D.BLEND_MODE_ADD
-	mat_core.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
-	mat_core.albedo_color = Color(energy_color.r, energy_color.g, energy_color.b, 0.55)
+	var mat_core = ShaderMaterial.new()
+	mat_core.shader = KiSphereShader
+	mat_core.set_shader_parameter("base_color", Color(energy_color.r, energy_color.g, energy_color.b, 0.95))
+	mat_core.set_shader_parameter("core_glow", 5.5 if is_big_bang else 4.5)
 	mesh_core.material_override = mat_core
 	projectile.add_child(mesh_core)
 	
-	# 2. Luz dinámica interna (suave para no enceguecer el visor VR)
+	# 1.1 Núcleo blanco incandescente interno (White-Hot Inner Core)
+	var mesh_inner = MeshInstance3D.new()
+	mesh_inner.name = "InnerWhiteCore"
+	var sphere_inner = SphereMesh.new()
+	sphere_inner.radius = projectile_radius * 0.65
+	sphere_inner.height = projectile_radius * 1.30
+	sphere_inner.radial_segments = 16
+	sphere_inner.rings = 8
+	mesh_inner.mesh = sphere_inner
+	var mat_inner = StandardMaterial3D.new()
+	mat_inner.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
+	mat_inner.albedo_color = Color(1.0, 1.0, 1.0, 1.0)
+	mesh_inner.material_override = mat_inner
+	projectile.add_child(mesh_inner)
+
+	# 1.2 Malla de corona exterior de plasma
+	var mesh_corona = MeshInstance3D.new()
+	mesh_corona.name = "CoronaMesh"
+	var sphere_corona = SphereMesh.new()
+	sphere_corona.radius = projectile_radius * 1.25
+	sphere_corona.height = projectile_radius * 2.50
+	sphere_corona.radial_segments = 20
+	sphere_corona.rings = 10
+	mesh_corona.mesh = sphere_corona
+	var mat_corona = ShaderMaterial.new()
+	mat_corona.shader = KiCoronaShader
+	mat_corona.set_shader_parameter("base_color", Color(energy_color.r, energy_color.g, energy_color.b, 0.85))
+	mat_corona.set_shader_parameter("vertex_displacement", 0.08 if is_big_bang else 0.04)
+	mesh_corona.material_override = mat_corona
+	projectile.add_child(mesh_corona)
+
+	# 2. Luz dinámica interna
 	var light = OmniLight3D.new()
 	light.name = "ProjectileLight"
 	light.light_color = energy_color
-	light.light_energy = 2.8
-	light.omni_range = projectile_radius * 4.5
+	light.light_energy = 4.5 if is_big_bang else 2.8
+	light.omni_range = projectile_radius * 6.0
 	projectile.add_child(light)
 	
 	# 3. Vincular el script de proyectil de Ki
@@ -1574,43 +1742,39 @@ func _spawn_special_projectile(power: Resource) -> void:
 	projectile.set("speed_velocity", velocity_dir * speed)
 	projectile.set("p_radius", projectile_radius)
 	projectile.set("p_color", energy_color)
-	var is_ult = power.is_finisher or power.power_name.contains("Super") or power.power_name == "Genkidama"
-	projectile.set("tier", 4 if is_ult else 3)
-	
-	var player = _get_player_instance()
-	var base_dmg = power.base_damage_np
-	if power.is_finisher and not (player and player.is_in_zenkai_state):
-		base_dmg = 4500.0
+	projectile.set("tier", tier_val)
+	if player and is_instance_valid(player) and player.has_method("get_dramatic_modifier"):
+		base_dmg *= player.get_dramatic_modifier("damage_mult", 1.0) * player.get_dramatic_modifier("super_damage_mult", 1.0)
 	projectile.set("base_damage", base_dmg)
-	projectile.set("explosion_radius", 8.5 if is_ult else 4.8)
+	projectile.set("explosion_radius", 7.5 if is_big_bang else (8.5 if is_ult_tech else 4.8))
+	projectile.set("shooter_node", player)
+	projectile.set("was_launched_in_zenkai", bool(player and is_instance_valid(player) and player.get("is_in_zenkai_state")))
 	
 	# Almacenar referencia al recurso del poder y tiempo de carga
 	projectile.set_meta("power_ref", power)
 	projectile.set_meta("charge_time", charge_time)
-	
-	if player and is_instance_valid(player) and player.get("is_comeback_zenkai"):
-		projectile.set_meta("is_comeback_shot", true)
+	if player and is_instance_valid(player):
+		projectile.set_meta("attacker", player)
+		if player.get("is_comeback_zenkai"):
+			projectile.set_meta("is_comeback_shot", true)
 		
 	var exclude_rids: Array[RID] = []
-	var current_scene = get_tree().current_scene
-	if current_scene:
-		var stack = [current_scene]
-		while stack.size() > 0:
-			var node = stack.pop_back()
-			if node is CollisionObject3D:
-				if node.name.begins_with("KiCombatFist"):
-					exclude_rids.append(node.get_rid())
-			for child in node.get_children():
-				stack.push_back(child)
-		if player:
+	if player:
+		if player.has_method("get_projectile_exclude_rids"):
+			exclude_rids = player.get_projectile_exclude_rids().duplicate()
+		else:
 			for child in player.get_children():
 				if child is CollisionObject3D:
 					exclude_rids.append(child.get_rid())
-			var origin = player.get_parent()
-			if origin:
-				for child in origin.get_children():
-					if child is CollisionObject3D:
-						exclude_rids.append(child.get_rid())
+		var origin = player.get_parent()
+		if origin:
+			for child in origin.get_children():
+				if child is CollisionObject3D:
+					exclude_rids.append(child.get_rid())
+				elif child.name in ["LeftHand", "RightHand"]:
+					for sub in child.get_children():
+						if sub is CollisionObject3D and sub.name.begins_with("KiCombatFist"):
+							exclude_rids.append(sub.get_rid())
 	projectile.set("ray_query_exclude", exclude_rids)
 	
 	var special_target_parent: Node = get_parent() if (get_parent() and get_parent() is Node3D) else (get_tree().current_scene if get_tree() else null)
@@ -1755,71 +1919,64 @@ func _setup_sound_players() -> void:
 	aura_loop_player.volume_db = -9.0
 	add_child(aura_loop_player)
 	
-	# 3. Reproductor para el efecto de carga del Ki Blast
+	# 3. Reproductor para el efecto de carga del Ki Blast y Super Poderes
 	ki_blast_charge_player = AudioStreamPlayer.new()
 	ki_blast_charge_player.name = "KiBlastChargePlayer"
-	var charge_stream = load("res://assets/sfx/Charged_KI_Blast_1.mp3")
-	if charge_stream:
-		charge_stream.loop = false
-		ki_blast_charge_player.stream = charge_stream
+	_default_charge_stream = load("res://assets/sfx/Charged_KI_Blast_1.mp3")
+	if _default_charge_stream:
+		_default_charge_stream.loop = false
+		ki_blast_charge_player.stream = _default_charge_stream
 	ki_blast_charge_player.volume_db = -6.0
 	add_child(ki_blast_charge_player)
+
+	# 4. Reproductor dedicado para disparos de Ki Blast, golpes al aire y esferas especiales
+	ki_blast_fire_player = AudioStreamPlayer.new()
+	ki_blast_fire_player.name = "KiBlastFirePlayer"
+	_default_blast_fire_stream = load("res://assets/sfx/Basic_KI_Blast_1.mp3") if ResourceLoader.exists("res://assets/sfx/Basic_KI_Blast_1.mp3") else _default_charge_stream
+	ki_blast_fire_player.volume_db = -4.5
+	add_child(ki_blast_fire_player)
+
+	# 5. Reproductor dedicado para voces de esfuerzo y carga del jugador
+	voice_player = AudioStreamPlayer.new()
+	voice_player.name = "PlayerVoiceActionPlayer"
+	voice_player.volume_db = -3.0
+	add_child(voice_player)
 	
 	print("[GesturePhaseTree] Reproductores de audio inicializados con éxito.")
+
+
+func _play_charge_audio_for_node(node_key: String) -> void:
+	if not ki_blast_charge_player:
+		return
+	var act_id: String = ""
+	match node_key:
+		"KAMEHAMEHA_CHARGE":
+			act_id = "goku.kamehameha_charge"
+		"GENKIDAMA_CHARGE":
+			act_id = "goku.genkidama_charge"
+		"GALICK_HO_CHARGE":
+			act_id = "vegeta.galick_gun_charge"
+		"FINAL_FLASH_CHARGE":
+			act_id = "vegeta.final_flash_charge"
+		"BIG_BANG_CHARGE":
+			act_id = "vegeta.big_bang_charge"
+		"ARM_STRETCHED_OPEN_LEFT", "ARM_STRETCHED_OPEN_RIGHT":
+			act_id = "common.ki_blast_charge"
+	if act_id.is_empty():
+		return
+	if act_id != "common.ki_blast_charge" and not AudioActionManager.has_action_sounds(act_id):
+		act_id = "common.ki_blast_charge"
+	ki_blast_charge_player.pitch_scale = randf_range(0.92, 1.08)
+	AudioActionManager.play_action(act_id, ki_blast_charge_player, _default_charge_stream)
+
 
 # --- Gestión del Aura Visual 3D del Jugador ---
 
 func _show_visual_aura(show: bool) -> void:
-	if show:
-		if visual_aura != null and is_instance_valid(visual_aura):
-			return
-			
-		var camera = get_viewport().get_camera_3d()
-		if not camera:
-			return
-			
-		# Contenedor del Aura
-		visual_aura = Node3D.new()
-		visual_aura.name = "PlayerKiAura"
-		
-		# 1. Crear cilindro procedural
-		var mesh_inst = MeshInstance3D.new()
-		mesh_inst.name = "AuraMesh"
-		var cylinder = CylinderMesh.new()
-		cylinder.top_radius = 0.85
-		cylinder.bottom_radius = 0.95
-		cylinder.height = 2.4
-		cylinder.radial_segments = 24
-		cylinder.rings = 4
-		cylinder.cap_top = false
-		cylinder.cap_bottom = false
-		mesh_inst.mesh = cylinder
-		
-		var mat = ShaderMaterial.new()
-		mat.shader = KiCoronaShader
-		mat.set_shader_parameter("base_color", Color(1.0, 0.85, 0.1, 0.85)) # Oro brillante
-		mat.set_shader_parameter("vertex_displacement", 0.07)
-		mat.set_shader_parameter("speed", 4.5)
-		mat.set_shader_parameter("scale", 5.0)
-		mesh_inst.material_override = mat
-		visual_aura.add_child(mesh_inst)
-		
-		# 2. Luz dinámica omnidireccional
-		var light = OmniLight3D.new()
-		light.name = "AuraLight"
-		light.light_color = Color(1.0, 0.8, 0.2)
-		light.light_energy = 8.0
-		light.omni_range = 4.0
-		light.position = Vector3(0, 0.5, 0)
-		visual_aura.add_child(light)
-		
-		var root_node = get_tree().current_scene if get_tree().current_scene else get_tree().root
-		root_node.add_child(visual_aura)
-		var feet_pos = Vector3(camera.global_position.x, 0.5, camera.global_position.z)
-		visual_aura.global_position = feet_pos + Vector3(0, 1.2, 0)
-	else:
-		if visual_aura != null and is_instance_valid(visual_aura):
-			visual_aura.queue_free()
+	# PlayerCharacterInstance ya posee CharacterKiAura en 3D que sigue la altura real (incluso en vuelo)
+	# y respeta el color de la transformación activa, evitando doble cilindro transparente en VR.
+	if not show and visual_aura != null and is_instance_valid(visual_aura):
+		visual_aura.queue_free()
 		visual_aura = null
 
 
@@ -2302,43 +2459,119 @@ func _ensure_aim_reticle() -> void:
 		add_child(aim_reticle_node)
 
 
-func _update_aim_reticle(origin_pos: Vector3, aim_dir: Vector3, color: Color) -> void:
+func _update_aim_reticle(origin_pos: Vector3, aim_dir: Vector3, color: Color, is_super_reticle: bool = true) -> void:
 	_ensure_aim_reticle()
 	if not aim_reticle_node or not is_instance_valid(aim_reticle_node):
 		return
-	
+
 	aim_reticle_node.visible = true
-	
-	var camera = get_viewport().get_camera_3d() if get_viewport() else null
-	var cam_pos = camera.global_position if camera else origin_pos
-	
-	var opp = _get_opponent_instance()
-	var hit_pos = origin_pos + aim_dir * 12.0
-	var is_locked = false
-	
-	if opp and is_instance_valid(opp):
-		var opp_chest = opp.global_position + Vector3(0, 1.2, 0)
-		var to_opp = (opp_chest - origin_pos).normalized()
-		# Si la línea de tiro apunta dentro de un cono de ~35 grados hacia el oponente: Lock-On directo
-		if aim_dir.dot(to_opp) > 0.80:
-			hit_pos = opp_chest
-			is_locked = true
-			
+
+	var camera: Camera3D = get_viewport().get_camera_3d() if get_viewport() else null
+	var cam_pos: Vector3 = camera.global_position if camera else origin_pos
+
+	var assisted_dir: Vector3 = apply_soft_aim_assist(origin_pos, aim_dir, is_super_reticle)
+	var zone: int = get_aim_assist_zone(origin_pos, aim_dir, is_super_reticle)
+
+	var opp: Node3D = _get_opponent_instance() as Node3D
+	var target_dist: float = 12.0
+	if opp != null and is_instance_valid(opp):
+		var opp_chest: Vector3 = opp.global_position + Vector3(0.0, 1.2, 0.0)
+		target_dist = clampf(origin_pos.distance_to(opp_chest), 2.5, 40.0)
+
+	var hit_pos: Vector3 = origin_pos + assisted_dir * target_dist
+	var is_locked: bool = (zone == 2)
+
 	current_aim_target = hit_pos
 	current_aim_locked = is_locked
 	aim_reticle_node.global_position = hit_pos
-	
-	# Retícula roja brillante cuando está bloqueada sobre el enemigo; si no, color de la técnica
+
+	# Zona 2: rojo lock-on; Zona 1: ámbar asistencia parcial; Zona 0: color tenue de la técnica
 	if aim_reticle_mat:
-		aim_reticle_mat.albedo_color = Color(1.0, 0.25, 0.2, 1.0) if is_locked else color
-	
+		if zone == 2:
+			aim_reticle_mat.albedo_color = Color(1.0, 0.25, 0.2, 1.0)
+		elif zone == 1:
+			aim_reticle_mat.albedo_color = Color(1.0, 0.72, 0.15, 0.95)
+		else:
+			aim_reticle_mat.albedo_color = Color(color.r, color.g, color.b, 0.65)
+
 	# Escala dinámica adaptada a la distancia para que siempre se vea de tamaño ideal en el visor
-	var dist = (hit_pos - cam_pos).length()
-	var pulse = 1.0 + sin(Time.get_ticks_msec() * 0.02) * (0.12 if is_locked else 0.05)
-	var scale_val = clamp(dist * 0.085, 0.5, 2.5) * pulse
+	var dist: float = (hit_pos - cam_pos).length()
+	var pulse: float = 1.0 + sin(Time.get_ticks_msec() * 0.02) * (0.12 if is_locked else 0.05)
+	var scale_val: float = clampf(dist * 0.085, 0.5, 2.5) * pulse
 	aim_reticle_mesh.scale = Vector3(scale_val, scale_val, scale_val)
 
 
 func _hide_aim_reticle() -> void:
 	if aim_reticle_node and is_instance_valid(aim_reticle_node):
 		aim_reticle_node.visible = false
+
+
+func sync_controller_gesture_state(node_key: String) -> void:
+	if node_key == "IDLE" or node_key.is_empty():
+		current_node = gesture_tree
+		gesture_timer = 0.0
+		if ki_blast_charge_player and ki_blast_charge_player.playing:
+			ki_blast_charge_player.stop()
+	elif gesture_tree.has(node_key):
+		var prev_node: Dictionary = current_node
+		current_node = gesture_tree[node_key]
+		gesture_timer = 0.0
+		if current_node != prev_node:
+			_play_charge_audio_for_node(node_key)
+
+
+func get_aim_assist_zone(origin_pos: Vector3, raw_aim_dir: Vector3, is_super: bool = true) -> int:
+	var dir_len_sq: float = raw_aim_dir.length_squared()
+	if dir_len_sq < 0.0001:
+		return 0
+	var opp: Node3D = _get_opponent_instance() as Node3D
+	if opp == null or not is_instance_valid(opp):
+		return 0
+	var opp_chest: Vector3 = opp.global_position + Vector3(0.0, 1.2, 0.0)
+	var to_opp_vec: Vector3 = opp_chest - origin_pos
+	if to_opp_vec.length_squared() < 0.0001:
+		return 2
+	var aim_n: Vector3 = raw_aim_dir / sqrt(dir_len_sq)
+	var to_opp: Vector3 = to_opp_vec.normalized()
+	var d: float = aim_n.dot(to_opp)
+	var lock_dot: float = 0.966 if is_super else 0.982
+	if d >= lock_dot:
+		return 2
+	var outer_dot: float = 0.866 if is_super else 0.940
+	if d >= outer_dot:
+		return 1
+	return 0
+
+
+func apply_soft_aim_assist(origin_pos: Vector3, raw_aim_dir: Vector3, is_super: bool = true) -> Vector3:
+	var dir_len_sq: float = raw_aim_dir.length_squared()
+	if dir_len_sq < 0.0001:
+		return Vector3.FORWARD
+	var aim_n: Vector3 = raw_aim_dir / sqrt(dir_len_sq)
+	var opp: Node3D = _get_opponent_instance() as Node3D
+	if opp == null or not is_instance_valid(opp):
+		return aim_n
+	var opp_chest: Vector3 = opp.global_position + Vector3(0.0, 1.2, 0.0)
+	var to_opp_vec: Vector3 = opp_chest - origin_pos
+	if to_opp_vec.length_squared() < 0.0001:
+		return aim_n
+	var to_opp: Vector3 = to_opp_vec.normalized()
+	var d: float = aim_n.dot(to_opp)
+	var assist_weight: float = 0.0
+	if is_super:
+		if d >= 0.966:
+			assist_weight = 0.90
+		elif d >= 0.866:
+			var u: float = clampf((d - 0.866) / (0.966 - 0.866), 0.0, 1.0)
+			assist_weight = 0.65 * (u * u * (3.0 - 2.0 * u))
+		else:
+			return aim_n
+	else:
+		if d >= 0.982:
+			assist_weight = 0.68
+		elif d >= 0.940:
+			var u: float = clampf((d - 0.940) / (0.982 - 0.940), 0.0, 1.0)
+			assist_weight = 0.48 * (u * u * (3.0 - 2.0 * u))
+		else:
+			return aim_n
+	return aim_n.slerp(to_opp, assist_weight).normalized()

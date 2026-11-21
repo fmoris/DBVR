@@ -2,18 +2,25 @@ class_name ProceduralCombatAnimator
 extends RefCounted
 
 ## ProceduralCombatAnimator (Godot 4.3+ VR)
-## Controla la animación procedural orgánica de los luchadores en DBVR:
-## - Guardia marcial viva (Idle de combate)
-## - Respiración rítmica del tórax y columna
-## - Mirada fija interactiva hacia el visor VR del jugador (Head & Neck Look-At)
-## - Levitación flotante armónica en el aire
-## - Tensión muscular y temblor de Ki durante la recarga de energía
-## - Flinch reactivo elástico al recibir golpes e impactos
-## - Postura de bloqueo defensivo
+## Controla las 18 animaciones procedurales canónicas de cuerpo completo para DBVR:
+## 1. Guardia marcial diferenciada (Goku vs Vegeta) con stance de cadera y piernas
+## 2. Levitación aérea y Dash de vuelo inclinado
+## 3. Recarga de Ki en 2 fases (hombros -> cintura con postura de caballo y tensión)
+## 4. Transformación (contracción y estallido/grito SSJ/Kaioken)
+## 5. Guardia Cruzada en "X" y estado de Guardia Rota
+## 6. Hit Flinch direccional multi-eje y jadeo por Ki bajo
+## 7. Ráfaga de Ki Blasts alternados izq/der
+## 8. Combo Melee completo (Jab, Cross, Gancho, Patada Circular, Martillazo 2 manos)
+## 9-13. Poses Fase 1 y Fase 2 para Kamehameha, Galick Ho, Final Flash, Big Bang y Genkidama
+## 14. Salir volando por los aires en "C" con giro en espiral
+## 15. Suspendido aturdido en Follow-Up Bullet-Time
+## 16. Estampado contra muralla/risco (Wall-Stick previo al desplome Ragdoll)
+## 18. Reincorporación (Kip-Up) tras Ragdoll en suelo/pilares
 
 var skeleton: Skeleton3D = null
 var character_instance: Node3D = null
 var enabled: bool = true
+var is_vegeta_char: bool = false
 
 # Diccionario de huesos cacheados con sus transformaciones originales de reposo
 var bone_indices: Dictionary = {}
@@ -28,11 +35,63 @@ var hit_flinch_timer: float = 0.0
 var hit_flinch_intensity: float = 0.0
 var hit_flinch_direction: Vector3 = Vector3.BACK
 
-# Memoria de rotación de mirada para suavizado (Slerp)
-var current_head_look_quat: Quaternion = Quaternion.IDENTITY
-var current_neck_look_quat: Quaternion = Quaternion.IDENTITY
+# Estados de acción y combate (cero alocaciones por frame)
+var active_super_tech: String = ""
+var active_super_phase: int = 0
+var super_fire_hold_timer: float = 0.0
+var ki_recharge_phase: int = 0
+var transform_roar_timer: float = 0.0
+var ki_blast_anim_timer: float = 0.0
+var ki_blast_hand: int = 0
+var melee_anim_timer: float = 0.0
+var melee_anim_duration: float = 0.24
+var melee_anim_type: int = 0
+var melee_combo_counter: int = 0
+var getup_recovery_timer: float = 0.0
+var getup_recovery_duration: float = 0.45
+var airborne_roll_angle: float = 0.0
 
-# Lista de nombres de huesos canónicos a buscar
+# Memoria de rotación de mirada y poses para suavizado (Slerp / Lerp sin allocs)
+var current_head_euler: Vector3 = Vector3.ZERO
+var current_neck_euler: Vector3 = Vector3.ZERO
+var current_hips_euler: Vector3 = Vector3.ZERO
+var current_spine_euler: Vector3 = Vector3.ZERO
+var current_chest_euler: Vector3 = Vector3.ZERO
+var current_upper_chest_euler: Vector3 = Vector3.ZERO
+var current_l_upleg_euler: Vector3 = Vector3.ZERO
+var current_l_leg_euler: Vector3 = Vector3.ZERO
+var current_r_upleg_euler: Vector3 = Vector3.ZERO
+var current_r_leg_euler: Vector3 = Vector3.ZERO
+var _cur_left_hand_pos: Vector3 = Vector3(-0.02, -0.02, 0.36)
+var _cur_right_hand_pos: Vector3 = Vector3(0.04, -0.12, 0.24)
+var _cur_left_hand_basis: Basis = Basis.IDENTITY
+var _cur_right_hand_basis: Basis = Basis.IDENTITY
+var _arm_bases_initialized: bool = false
+
+# Estados cacheados de frame
+var _st_is_wall_stuck: bool = false
+var _st_wall_stick_ratio: float = 0.0
+var _st_is_launching_air: bool = false
+var _st_air_speed: float = 0.0
+var _st_is_airborne_stunned: bool = false
+var _st_is_transforming: bool = false
+var _st_transform_u: float = 0.0
+var _st_is_guard_broken: bool = false
+var _st_is_melee_active: bool = false
+var _st_melee_u: float = 0.0
+var _st_super_tech: String = ""
+var _st_super_phase: int = 0
+var _st_is_blocking: bool = false
+var _st_ki_phase: int = 0
+var _st_is_ki_blast: bool = false
+var _st_ki_blast_u: float = 0.0
+var _st_is_flying: bool = false
+var _st_is_getup: bool = false
+var _st_getup_u: float = 0.0
+var _st_is_exhausted: bool = false
+var _st_flinch_factor: float = 0.0
+var _st_flinch_local_dir: Vector3 = Vector3.BACK
+
 const TARGET_BONES: Array[String] = [
 	"Spine", "Chest", "UpperChest", "Neck", "Head",
 	"LeftShoulder", "LeftArm", "LeftForeArm", "LeftHand",
@@ -40,24 +99,29 @@ const TARGET_BONES: Array[String] = [
 	"LeftUpLeg", "LeftLeg", "RightUpLeg", "RightLeg", "Hips"
 ]
 
+
 func setup(p_skeleton: Skeleton3D, p_character: Node3D) -> void:
 	skeleton = p_skeleton
 	character_instance = p_character
 	bone_indices.clear()
 	bone_rest_rotations.clear()
+	is_vegeta_char = false
+
+	if character_instance and character_instance.get("character_data") != null:
+		var cdata: Resource = character_instance.get("character_data")
+		if cdata and "character_name" in cdata:
+			is_vegeta_char = "VEGETA" in String(cdata.character_name).to_upper()
 
 	if not skeleton:
 		return
 
-	# Identificar índices de cada hueso en el esqueleto
 	for target in TARGET_BONES:
-		var idx = skeleton.find_bone(target)
+		var idx: int = skeleton.find_bone(target)
 		if idx == -1:
 			idx = skeleton.find_bone(target.to_lower())
 		if idx == -1:
-			# Búsqueda aproximada en caso de prefijos
 			for b in range(skeleton.get_bone_count()):
-				var b_name = skeleton.get_bone_name(b)
+				var b_name: String = skeleton.get_bone_name(b)
 				if b_name.nocasecmp_to(target) == 0:
 					idx = b
 					break
@@ -71,9 +135,71 @@ func setup(p_skeleton: Skeleton3D, p_character: Node3D) -> void:
 
 
 func trigger_hit_flinch(intensity: float, hit_dir: Vector3) -> void:
-	hit_flinch_intensity = clampf(intensity, 0.2, 1.2)
+	hit_flinch_intensity = clampf(intensity, 0.2, 1.4)
 	hit_flinch_direction = hit_dir.normalized() if hit_dir.length_squared() > 0.01 else Vector3.BACK
-	hit_flinch_timer = 0.35 # Duración del retroceso visual en segundos
+	hit_flinch_timer = 0.35
+
+
+func set_super_pose(tech_name: String, phase: int) -> void:
+	var t_low: String = tech_name.to_lower()
+	if phase <= 0 or t_low.is_empty():
+		active_super_tech = ""
+		active_super_phase = 0
+		super_fire_hold_timer = 0.0
+		return
+
+	if "kamehameha" in t_low:
+		active_super_tech = "kamehameha"
+	elif "galick" in t_low:
+		active_super_tech = "galick_ho"
+	elif "final" in t_low:
+		active_super_tech = "final_flash"
+	elif "big" in t_low:
+		active_super_tech = "big_bang"
+	elif "genki" in t_low:
+		active_super_tech = "genkidama"
+	else:
+		active_super_tech = "kamehameha"
+
+	active_super_phase = phase
+	if phase == 2:
+		super_fire_hold_timer = 1.35
+
+
+func set_ki_recharge_phase(phase: int) -> void:
+	ki_recharge_phase = clampi(phase, 0, 2)
+
+
+func trigger_transformation_roar() -> void:
+	transform_roar_timer = 0.85
+
+
+func trigger_ki_blast_shot(hand_side: int) -> void:
+	ki_blast_hand = hand_side % 2
+	ki_blast_anim_timer = 0.22
+
+
+func trigger_melee_strike(strike_type: int = -1) -> void:
+	if strike_type < 0:
+		melee_anim_type = melee_combo_counter % 4
+		melee_combo_counter += 1
+	else:
+		melee_anim_type = clampi(strike_type, 0, 4)
+	melee_anim_duration = 0.34 if melee_anim_type == 4 else 0.24
+	melee_anim_timer = melee_anim_duration
+
+
+var melee_block_timer: float = 0.0
+var melee_block_type: int = 0
+
+func trigger_melee_block(block_type: int = 0) -> void:
+	melee_block_type = clampi(block_type, 0, 3)
+	melee_block_timer = 0.28
+
+
+func trigger_getup_recovery(duration: float = 0.45) -> void:
+	getup_recovery_duration = maxf(duration, 0.15)
+	getup_recovery_timer = getup_recovery_duration
 
 
 func update(delta: float, target_look_pos: Vector3, is_charging_ki: bool, is_blocking: bool, is_flying: bool) -> void:
@@ -83,170 +209,771 @@ func update(delta: float, target_look_pos: Vector3, is_charging_ki: bool, is_blo
 	anim_time += delta
 	breath_time += delta * (2.8 if is_charging_ki else 1.4)
 
-	# 1. Recuperación elástica de impacto
+	# 1. Actualizar temporizadores de acciones discretas
 	if hit_flinch_timer > 0.0:
-		hit_flinch_timer -= delta
-		if hit_flinch_timer < 0.0:
-			hit_flinch_timer = 0.0
+		hit_flinch_timer = maxf(hit_flinch_timer - delta, 0.0)
+	if transform_roar_timer > 0.0:
+		transform_roar_timer = maxf(transform_roar_timer - delta, 0.0)
+	if ki_blast_anim_timer > 0.0:
+		ki_blast_anim_timer = maxf(ki_blast_anim_timer - delta, 0.0)
+	if melee_anim_timer > 0.0:
+		melee_anim_timer = maxf(melee_anim_timer - delta, 0.0)
+	if melee_block_timer > 0.0:
+		melee_block_timer = maxf(melee_block_timer - delta, 0.0)
+	if getup_recovery_timer > 0.0:
+		getup_recovery_timer = maxf(getup_recovery_timer - delta, 0.0)
+	if active_super_phase == 2 and super_fire_hold_timer > 0.0:
+		super_fire_hold_timer = maxf(super_fire_hold_timer - delta, 0.0)
+		if super_fire_hold_timer <= 0.0 and not bool(character_instance.get("is_firing_beam")):
+			active_super_phase = 0
+			active_super_tech = ""
 
-	var flinch_factor: float = 0.0
+	# 2. Resolver estado físico en tiempo real sin alocar memoria
+	_resolve_frame_states(delta, is_charging_ki, is_blocking, is_flying)
+
+	# 3. Aplicar animación corporal completa sobre los 18 huesos
+	_apply_body_hover_and_trajectory(delta)
+	_apply_hips_spine_and_chest(delta)
+	_apply_legs_pose(delta)
+	_apply_look_at(delta, target_look_pos)
+	_apply_arms_pose(delta)
+
+
+func _resolve_frame_states(delta: float, is_charging_ki: bool, is_blocking: bool, is_flying: bool) -> void:
+	_st_flinch_factor = 0.0
 	if hit_flinch_timer > 0.0:
-		# Curva elástica de impacto: retroceso rápido y retorno suave
 		var progress: float = 1.0 - (hit_flinch_timer / 0.35)
-		flinch_factor = sin(progress * PI) * hit_flinch_intensity
+		_st_flinch_factor = sin(progress * PI) * hit_flinch_intensity
+		if character_instance and is_instance_valid(character_instance):
+			_st_flinch_local_dir = (character_instance.global_transform.basis.inverse() * hit_flinch_direction).normalized()
+		else:
+			_st_flinch_local_dir = Vector3.BACK
 
-	# 2. Levitación e inclinación corporal si está en el aire
-	_apply_body_hover(delta, is_flying, flinch_factor)
+	var wall_stick: float = 0.0
+	var vel: Vector3 = Vector3.ZERO
+	var is_knocked_back: bool = false
+	var is_guard_broken: bool = false
+	var is_firing_beam_prop: bool = false
+	var cur_ki: float = 100.0
+	var is_flying_prop: bool = is_flying
+	var is_airborne_stunned: bool = false
 
-	# 3. Respiración y flexión del tórax
-	_apply_breathing_and_spine(is_charging_ki, flinch_factor)
+	if character_instance and is_instance_valid(character_instance):
+		var ws_val: Variant = character_instance.get("wall_stick_timer")
+		if ws_val != null:
+			wall_stick = float(ws_val)
+		var vel_val: Variant = character_instance.get("velocity")
+		if vel_val != null:
+			vel = vel_val
+		is_knocked_back = bool(character_instance.get("is_knocked_back"))
+		is_guard_broken = bool(character_instance.get("is_guard_broken")) or bool(character_instance.get("is_staggered"))
+		is_firing_beam_prop = bool(character_instance.get("is_firing_beam"))
+		var ki_val: Variant = character_instance.get("current_ki")
+		if ki_val != null:
+			cur_ki = float(ki_val)
+		if bool(character_instance.get("is_flying_to_opponent")):
+			is_flying_prop = true
+		if character_instance.has_method("_get_opponent"):
+			var opp: Node3D = character_instance._get_opponent() as Node3D
+			if opp and is_instance_valid(opp):
+				is_airborne_stunned = bool(opp.get("is_in_followup_bullet_time")) and opp.get("opponent_airborne_target") == character_instance
 
-	# 4. Mirada interactiva (Head & Neck Look-At al jugador)
-	_apply_look_at(delta, target_look_pos, is_charging_ki, flinch_factor)
+	_st_air_speed = vel.length()
+	_st_is_wall_stuck = wall_stick > 0.0
+	_st_wall_stick_ratio = clampf(1.0 - (wall_stick / 1.25), 0.0, 1.0) if _st_is_wall_stuck else 0.0
+	_st_is_launching_air = (not _st_is_wall_stuck) and is_knocked_back and _st_air_speed > 6.5
+	if _st_is_launching_air and _st_air_speed > 26.0:
+		airborne_roll_angle = fmod(airborne_roll_angle + delta * 14.0, TAU)
+	else:
+		airborne_roll_angle = 0.0
 
-	# 5. Brazos en Guardia de Combate o Bloqueo
-	_apply_arms_guard(delta, is_charging_ki, is_blocking, flinch_factor)
+	_st_is_airborne_stunned = (not _st_is_wall_stuck) and (not _st_is_launching_air) and is_airborne_stunned
+	_st_is_transforming = transform_roar_timer > 0.0
+	_st_transform_u = clampf(1.0 - (transform_roar_timer / 0.85), 0.0, 1.0) if _st_is_transforming else 0.0
+	_st_is_guard_broken = is_guard_broken
+	_st_is_melee_active = melee_anim_timer > 0.0
+	_st_melee_u = clampf(1.0 - (melee_anim_timer / maxf(melee_anim_duration, 0.01)), 0.0, 1.0) if _st_is_melee_active else 0.0
+
+	_st_super_tech = active_super_tech
+	_st_super_phase = active_super_phase
+	if is_firing_beam_prop:
+		_st_super_phase = 2
+		if _st_super_tech.is_empty():
+			var bname: Variant = character_instance.get("beam_tech_name")
+			if bname != null and not String(bname).is_empty():
+				set_super_pose(String(bname), 2)
+				_st_super_tech = active_super_tech
+			else:
+				_st_super_tech = "kamehameha"
+
+	_st_is_blocking = is_blocking and not is_guard_broken
+	_st_ki_phase = ki_recharge_phase if ki_recharge_phase > 0 else (2 if is_charging_ki else 0)
+	_st_is_ki_blast = ki_blast_anim_timer > 0.0
+	_st_ki_blast_u = clampf(1.0 - (ki_blast_anim_timer / 0.22), 0.0, 1.0) if _st_is_ki_blast else 0.0
+	_st_is_flying = is_flying_prop
+	_st_is_getup = getup_recovery_timer > 0.0
+	_st_getup_u = clampf(1.0 - (getup_recovery_timer / maxf(getup_recovery_duration, 0.01)), 0.0, 1.0) if _st_is_getup else 1.0
+	_st_is_exhausted = cur_ki < 20.0 and _st_ki_phase == 0 and _st_super_phase == 0
 
 
-func _apply_body_hover(delta: float, is_flying: bool, flinch_factor: float) -> void:
+func _apply_body_hover_and_trajectory(delta: float) -> void:
 	if not character_instance or not is_instance_valid(character_instance):
 		return
+	var mesh_node: Node3D = character_instance.get("body_mesh_instance") as Node3D
+	if not mesh_node or not is_instance_valid(mesh_node):
+		return
 
-	# Si está en el cuadrilátero pero no suspendido, aplicar una ligera vibración rítmica
-	var cur_pos = character_instance.position
-	# La altura base normal de suelo es ~0.501
-	if cur_pos.y > 0.6:
-		# Suspendido en el aire (vuelo): vaivén senoidal antigravedad de 6cm
-		var hover_offset = sin(anim_time * 2.5) * 0.06
-		var pitch_tilt = sin(anim_time * 1.8) * 0.03
-		character_instance.body_mesh_instance.position.y = hover_offset if character_instance.body_mesh_instance else 0.0
-		if character_instance.body_mesh_instance:
-			character_instance.body_mesh_instance.rotation.x = pitch_tilt
+	var target_pos_y: float = 0.0
+	var target_rot_x: float = 0.0
+	var target_rot_z: float = 0.0
+
+	if _st_is_wall_stuck:
+		target_pos_y = -0.12 * _st_wall_stick_ratio
+	elif _st_is_launching_air:
+		target_rot_x = deg_to_rad(-28.0)
+		target_rot_z = airborne_roll_angle if _st_air_speed > 26.0 else 0.0
+	elif _st_is_getup:
+		target_pos_y = lerpf(-0.36, 0.0, _st_getup_u)
+		target_rot_x = lerpf(deg_to_rad(18.0), 0.0, _st_getup_u)
+	elif _st_is_flying:
+		target_rot_x = deg_to_rad(28.0)
 	else:
-		if character_instance.body_mesh_instance:
-			# En el suelo: micro-ondulación de peso entre pies
-			character_instance.body_mesh_instance.position.y = sin(anim_time * 1.8) * 0.008
-			character_instance.body_mesh_instance.rotation.x = 0.0
+		var cur_pos: Vector3 = character_instance.position
+		if cur_pos.y > 0.6:
+			target_pos_y = sin(anim_time * 2.5) * 0.06
+			target_rot_x = sin(anim_time * 1.8) * 0.03
+		else:
+			target_pos_y = sin(anim_time * 1.8) * 0.008
+
+	var blend: float = clampf(16.0 * delta, 0.0, 1.0)
+	mesh_node.position.y = lerpf(mesh_node.position.y, target_pos_y, blend)
+	mesh_node.rotation.x = lerp_angle(mesh_node.rotation.x, target_rot_x, blend)
+	mesh_node.rotation.z = lerp_angle(mesh_node.rotation.z, target_rot_z, blend)
 
 
-func _apply_breathing_and_spine(is_charging_ki: bool, flinch_factor: float) -> void:
-	var breath_angle = sin(breath_time) * (0.045 if is_charging_ki else 0.02)
-	
-	# Arqueo por impacto hacia atrás
-	var flinch_angle = -0.35 * flinch_factor
+func _apply_hips_spine_and_chest(delta: float) -> void:
+	var hips_target: Vector3 = Vector3.ZERO
+	var spine_target: Vector3 = Vector3.ZERO
+	var chest_target: Vector3 = Vector3.ZERO
+	var upper_target: Vector3 = Vector3.ZERO
 
-	# Inclinación hacia adelante por carga de Ki
-	var charge_tilt = 0.12 if is_charging_ki else 0.0
+	var breath_x: float = sin(breath_time) * (0.045 if _st_ki_phase > 0 else 0.02)
 
-	var spine_rot_offset = Quaternion.from_euler(Vector3(breath_angle + flinch_angle + charge_tilt, 0.0, 0.0))
-	_set_bone_rot_relative("Spine", spine_rot_offset)
+	if _st_is_wall_stuck:
+		hips_target = Vector3(deg_to_rad(-10.0), 0.0, 0.0)
+		spine_target = Vector3(deg_to_rad(12.0), 0.0, deg_to_rad(4.0))
+		chest_target = Vector3(deg_to_rad(16.0), 0.0, 0.0)
+	elif _st_is_launching_air:
+		hips_target = Vector3(deg_to_rad(-25.0), 0.0, 0.0)
+		spine_target = Vector3(deg_to_rad(20.0), 0.0, 0.0)
+		chest_target = Vector3(deg_to_rad(25.0), 0.0, 0.0)
+	elif _st_is_airborne_stunned:
+		var sway_z: float = sin(anim_time * 2.2) * deg_to_rad(6.0)
+		spine_target = Vector3(deg_to_rad(-10.0), 0.0, sway_z)
+		chest_target = Vector3(deg_to_rad(-14.0), 0.0, -sway_z * 0.5)
+	elif _st_is_transforming:
+		if _st_transform_u < 0.35:
+			spine_target = Vector3(deg_to_rad(14.0), 0.0, 0.0)
+			chest_target = Vector3(deg_to_rad(16.0), 0.0, 0.0)
+		else:
+			var roar_jit: float = sin(anim_time * 55.0) * 0.03
+			spine_target = Vector3(deg_to_rad(-14.0) + roar_jit, 0.0, 0.0)
+			chest_target = Vector3(deg_to_rad(-18.0) - roar_jit, 0.0, 0.0)
+	elif _st_is_guard_broken:
+		spine_target = Vector3(deg_to_rad(-14.0), 0.0, 0.0)
+		chest_target = Vector3(deg_to_rad(-18.0), 0.0, 0.0)
+	elif _st_is_melee_active:
+		var punch_snap: float = sin(minf(_st_melee_u * 1.35, 1.0) * PI)
+		match melee_anim_type:
+			0:
+				hips_target = Vector3(0.0, deg_to_rad(-18.0 * punch_snap), 0.0)
+				chest_target = Vector3(deg_to_rad(10.0 * punch_snap), deg_to_rad(-26.0 * punch_snap), 0.0)
+			1:
+				hips_target = Vector3(0.0, deg_to_rad(22.0 * punch_snap), 0.0)
+				chest_target = Vector3(deg_to_rad(12.0 * punch_snap), deg_to_rad(32.0 * punch_snap), 0.0)
+			2:
+				hips_target = Vector3(0.0, deg_to_rad(-20.0 * punch_snap), 0.0)
+				chest_target = Vector3(deg_to_rad(-8.0 * punch_snap), deg_to_rad(-30.0 * punch_snap), deg_to_rad(12.0 * punch_snap))
+			3:
+				hips_target = Vector3(deg_to_rad(-12.0 * punch_snap), deg_to_rad(38.0 * punch_snap), deg_to_rad(-18.0 * punch_snap))
+				chest_target = Vector3(deg_to_rad(10.0 * punch_snap), deg_to_rad(-14.0 * punch_snap), deg_to_rad(16.0 * punch_snap))
+			4:
+				if _st_melee_u < 0.35:
+					var w: float = _st_melee_u / 0.35
+					spine_target = Vector3(deg_to_rad(-20.0 * w), 0.0, 0.0)
+					chest_target = Vector3(deg_to_rad(-14.0 * w), 0.0, 0.0)
+				else:
+					var s: float = minf((_st_melee_u - 0.35) / 0.35, 1.0)
+					spine_target = Vector3(deg_to_rad(24.0 * s), 0.0, 0.0)
+					chest_target = Vector3(deg_to_rad(18.0 * s), 0.0, 0.0)
+	elif _st_super_phase == 2:
+		var beam_vib: float = sin(anim_time * 58.0) * 0.02
+		match _st_super_tech:
+			"final_flash":
+				spine_target = Vector3(deg_to_rad(8.0) + beam_vib, 0.0, 0.0)
+				chest_target = Vector3(deg_to_rad(10.0) - beam_vib, 0.0, 0.0)
+			"big_bang":
+				chest_target = Vector3(deg_to_rad(4.0), deg_to_rad(20.0), 0.0)
+			"genkidama":
+				spine_target = Vector3(deg_to_rad(16.0), 0.0, 0.0)
+				chest_target = Vector3(deg_to_rad(14.0), 0.0, 0.0)
+			_:
+				spine_target = Vector3(deg_to_rad(8.0) + beam_vib, 0.0, 0.0)
+				chest_target = Vector3(deg_to_rad(10.0) - beam_vib, 0.0, 0.0)
+	elif _st_super_phase == 1:
+		var sup_vib: float = sin(anim_time * 48.0) * 0.015
+		match _st_super_tech:
+			"kamehameha":
+				hips_target = Vector3(deg_to_rad(8.0), deg_to_rad(-28.0), 0.0)
+				spine_target = Vector3(deg_to_rad(8.0) + sup_vib, deg_to_rad(-18.0), 0.0)
+				chest_target = Vector3(deg_to_rad(6.0), deg_to_rad(-22.0), 0.0)
+			"galick_ho":
+				hips_target = Vector3(deg_to_rad(8.0), deg_to_rad(-26.0), 0.0)
+				spine_target = Vector3(deg_to_rad(8.0) + sup_vib, deg_to_rad(-20.0), 0.0)
+				chest_target = Vector3(deg_to_rad(8.0), deg_to_rad(-24.0), 0.0)
+			"final_flash":
+				spine_target = Vector3(deg_to_rad(-6.0) + sup_vib, 0.0, 0.0)
+				chest_target = Vector3(deg_to_rad(-10.0), 0.0, 0.0)
+			"big_bang":
+				chest_target = Vector3(deg_to_rad(4.0), deg_to_rad(18.0), 0.0)
+			"genkidama":
+				spine_target = Vector3(deg_to_rad(-8.0), 0.0, 0.0)
+				chest_target = Vector3(deg_to_rad(-12.0), 0.0, 0.0)
+	elif melee_block_timer > 0.0:
+		match melee_block_type:
+			0:
+				spine_target = Vector3(deg_to_rad(-6.0), deg_to_rad(-10.0), 0.0)
+				chest_target = Vector3(deg_to_rad(4.0), deg_to_rad(-12.0), 0.0)
+			1:
+				spine_target = Vector3(deg_to_rad(10.0), 0.0, 0.0)
+				chest_target = Vector3(deg_to_rad(8.0), 0.0, 0.0)
+			2:
+				hips_target = Vector3(0.0, deg_to_rad(14.0), 0.0)
+				spine_target = Vector3(deg_to_rad(10.0), deg_to_rad(10.0), 0.0)
+			3:
+				hips_target = Vector3(0.0, deg_to_rad(-16.0), 0.0)
+				chest_target = Vector3(0.0, deg_to_rad(-16.0), 0.0)
+	elif _st_is_blocking:
+		spine_target = Vector3(deg_to_rad(8.0) + breath_x, 0.0, 0.0)
+		chest_target = Vector3(deg_to_rad(6.0), 0.0, 0.0)
+	elif _st_ki_phase > 0:
+		var ki_vib: float = sin(anim_time * 52.0) * (0.025 if _st_ki_phase == 2 else 0.01)
+		spine_target = Vector3(deg_to_rad(12.0) + breath_x + ki_vib, 0.0, 0.0)
+		chest_target = Vector3(deg_to_rad(6.0) - ki_vib, 0.0, 0.0)
+	elif _st_is_ki_blast:
+		var blast_snap: float = sin(_st_ki_blast_u * PI)
+		var yaw_sign: float = -1.0 if ki_blast_hand == 0 else 1.0
+		chest_target = Vector3(deg_to_rad(6.0 * blast_snap), deg_to_rad(24.0 * yaw_sign * blast_snap), 0.0)
+	elif _st_is_flying:
+		spine_target = Vector3(deg_to_rad(16.0), 0.0, 0.0)
+		chest_target = Vector3(deg_to_rad(10.0), 0.0, 0.0)
+	elif _st_is_getup:
+		var crouch: float = 1.0 - _st_getup_u
+		spine_target = Vector3(deg_to_rad(36.0 * crouch), 0.0, 0.0)
+		chest_target = Vector3(deg_to_rad(14.0 * crouch), 0.0, 0.0)
+	elif _st_is_exhausted:
+		var pant_x: float = sin(anim_time * 5.2) * deg_to_rad(4.0)
+		spine_target = Vector3(deg_to_rad(14.0) + pant_x, 0.0, 0.0)
+		chest_target = Vector3(deg_to_rad(10.0) + pant_x, 0.0, 0.0)
+	else:
+		# Guardia marcial DBZ frontal (ligerísimo ángulo -4° para no verse de costado)
+		var martial_yaw: float = deg_to_rad(-4.0)
+		hips_target = Vector3(0.0, martial_yaw * 0.4, 0.0)
+		spine_target = Vector3(breath_x + deg_to_rad(4.0), martial_yaw * 0.3, 0.0)
+		chest_target = Vector3(breath_x * 0.8 + deg_to_rad(3.0), martial_yaw * 0.3, 0.0)
 
-	var chest_rot_offset = Quaternion.from_euler(Vector3(breath_angle * 0.8 + flinch_angle * 0.5, 0.0, 0.0))
-	_set_bone_rot_relative("Chest", chest_rot_offset)
+	# Superposición elástica direccional por impacto físico recibido (Hit Flinch)
+	if _st_flinch_factor > 0.001:
+		var flinch_pitch: float = -0.32 * _st_flinch_factor * clampf(-_st_flinch_local_dir.z, -1.0, 1.0)
+		if absf(flinch_pitch) < 0.08:
+			flinch_pitch = -0.28 * _st_flinch_factor
+		var flinch_yaw: float = 0.28 * _st_flinch_factor * _st_flinch_local_dir.x
+		var flinch_roll: float = -0.18 * _st_flinch_factor * _st_flinch_local_dir.x
+		spine_target += Vector3(flinch_pitch, flinch_yaw * 0.4, flinch_roll * 0.5)
+		chest_target += Vector3(flinch_pitch * 0.6, flinch_yaw * 0.6, flinch_roll * 0.5)
+
+	var blend: float = clampf(16.0 * delta, 0.0, 1.0)
+	current_hips_euler = current_hips_euler.lerp(hips_target, blend)
+	current_spine_euler = current_spine_euler.lerp(spine_target, blend)
+	current_chest_euler = current_chest_euler.lerp(chest_target, blend)
+	current_upper_chest_euler = current_upper_chest_euler.lerp(upper_target, blend)
+
+	_set_bone_rot_relative("Hips", current_hips_euler)
+	_set_bone_rot_relative("Spine", current_spine_euler)
+	_set_bone_rot_relative("Chest", current_chest_euler)
+	_set_bone_rot_relative("UpperChest", current_upper_chest_euler)
 
 
-func _apply_look_at(delta: float, target_pos: Vector3, is_charging_ki: bool, flinch_factor: float) -> void:
+func _apply_legs_pose(delta: float) -> void:
+	# En espacio de personaje (+X=Izq, +Y=Arriba, +Z=Frente):
+	# Muslo adelante = -X, Muslo atrás = +X, Rodilla doblada atrás = +X
+	# Separar pierna Izq (+X) = +Z, Separar pierna Der (-X) = -Z
+	var l_up: Vector3 = Vector3.ZERO
+	var l_knee: Vector3 = Vector3.ZERO
+	var r_up: Vector3 = Vector3.ZERO
+	var r_knee: Vector3 = Vector3.ZERO
+
+	if _st_is_wall_stuck:
+		l_up = Vector3(deg_to_rad(-20.0), 0.0, deg_to_rad(20.0))
+		l_knee = Vector3(deg_to_rad(40.0), 0.0, 0.0)
+		r_up = Vector3(deg_to_rad(-16.0), 0.0, deg_to_rad(-20.0))
+		r_knee = Vector3(deg_to_rad(36.0), 0.0, 0.0)
+	elif _st_is_launching_air:
+		l_up = Vector3(deg_to_rad(-42.0), 0.0, deg_to_rad(12.0))
+		l_knee = Vector3(deg_to_rad(36.0), 0.0, 0.0)
+		r_up = Vector3(deg_to_rad(-36.0), 0.0, deg_to_rad(-12.0))
+		r_knee = Vector3(deg_to_rad(32.0), 0.0, 0.0)
+	elif _st_is_airborne_stunned:
+		l_up = Vector3(deg_to_rad(-26.0), 0.0, deg_to_rad(10.0))
+		l_knee = Vector3(deg_to_rad(42.0), 0.0, 0.0)
+		r_up = Vector3(deg_to_rad(8.0), 0.0, deg_to_rad(-10.0))
+		r_knee = Vector3(deg_to_rad(22.0), 0.0, 0.0)
+	elif _st_is_transforming:
+		if _st_transform_u < 0.35:
+			l_up = Vector3(deg_to_rad(-32.0), 0.0, deg_to_rad(15.0))
+			l_knee = Vector3(deg_to_rad(52.0), 0.0, 0.0)
+			r_up = Vector3(deg_to_rad(-32.0), 0.0, deg_to_rad(-15.0))
+			r_knee = Vector3(deg_to_rad(52.0), 0.0, 0.0)
+		else:
+			l_up = Vector3(deg_to_rad(-12.0), 0.0, deg_to_rad(18.0))
+			l_knee = Vector3(deg_to_rad(18.0), 0.0, 0.0)
+			r_up = Vector3(deg_to_rad(-12.0), 0.0, deg_to_rad(-18.0))
+			r_knee = Vector3(deg_to_rad(18.0), 0.0, 0.0)
+	elif _st_is_guard_broken:
+		l_up = Vector3(deg_to_rad(-26.0), 0.0, deg_to_rad(14.0))
+		l_knee = Vector3(deg_to_rad(42.0), 0.0, 0.0)
+		r_up = Vector3(deg_to_rad(-18.0), 0.0, deg_to_rad(-14.0))
+		r_knee = Vector3(deg_to_rad(38.0), 0.0, 0.0)
+	elif _st_is_melee_active and melee_anim_type == 3:
+		var kick_snap: float = sin(minf(_st_melee_u * 1.25, 1.0) * PI)
+		l_up = Vector3(deg_to_rad(-14.0), 0.0, deg_to_rad(8.0))
+		l_knee = Vector3(deg_to_rad(20.0), 0.0, 0.0)
+		r_up = Vector3(deg_to_rad(-76.0 * kick_snap), deg_to_rad(-20.0 * kick_snap), deg_to_rad(-28.0 * kick_snap))
+		r_knee = Vector3(deg_to_rad(12.0 * kick_snap), 0.0, 0.0)
+	elif _st_super_phase == 2:
+		match _st_super_tech:
+			"final_flash", "genkidama":
+				l_up = Vector3(deg_to_rad(-24.0), 0.0, deg_to_rad(16.0))
+				l_knee = Vector3(deg_to_rad(36.0), 0.0, 0.0)
+				r_up = Vector3(deg_to_rad(-24.0), 0.0, deg_to_rad(-16.0))
+				r_knee = Vector3(deg_to_rad(36.0), 0.0, 0.0)
+			"big_bang":
+				l_up = Vector3(deg_to_rad(-10.0), 0.0, deg_to_rad(10.0))
+				l_knee = Vector3(deg_to_rad(14.0), 0.0, 0.0)
+				r_up = Vector3(deg_to_rad(10.0), 0.0, deg_to_rad(-10.0))
+				r_knee = Vector3(deg_to_rad(14.0), 0.0, 0.0)
+			_:
+				l_up = Vector3(deg_to_rad(-36.0), 0.0, deg_to_rad(12.0))
+				l_knee = Vector3(deg_to_rad(46.0), 0.0, 0.0)
+				r_up = Vector3(deg_to_rad(18.0), 0.0, deg_to_rad(-12.0))
+				r_knee = Vector3(deg_to_rad(20.0), 0.0, 0.0)
+	elif _st_super_phase == 1:
+		match _st_super_tech:
+			"kamehameha", "galick_ho":
+				l_up = Vector3(deg_to_rad(-18.0), 0.0, deg_to_rad(12.0))
+				l_knee = Vector3(deg_to_rad(28.0), 0.0, 0.0)
+				r_up = Vector3(deg_to_rad(-32.0), 0.0, deg_to_rad(-14.0))
+				r_knee = Vector3(deg_to_rad(46.0), 0.0, 0.0)
+			"big_bang":
+				l_up = Vector3(deg_to_rad(-12.0), 0.0, deg_to_rad(10.0))
+				l_knee = Vector3(deg_to_rad(16.0), 0.0, 0.0)
+				r_up = Vector3(deg_to_rad(10.0), 0.0, deg_to_rad(-10.0))
+				r_knee = Vector3(deg_to_rad(14.0), 0.0, 0.0)
+			_:
+				l_up = Vector3(deg_to_rad(-28.0), 0.0, deg_to_rad(16.0))
+				l_knee = Vector3(deg_to_rad(42.0), 0.0, 0.0)
+				r_up = Vector3(deg_to_rad(-28.0), 0.0, deg_to_rad(-16.0))
+				r_knee = Vector3(deg_to_rad(42.0), 0.0, 0.0)
+	elif _st_ki_phase > 0:
+		l_up = Vector3(deg_to_rad(-32.0), 0.0, deg_to_rad(15.0))
+		l_knee = Vector3(deg_to_rad(48.0), 0.0, 0.0)
+		r_up = Vector3(deg_to_rad(-32.0), 0.0, deg_to_rad(-15.0))
+		r_knee = Vector3(deg_to_rad(48.0), 0.0, 0.0)
+	elif _st_is_flying:
+		l_up = Vector3(deg_to_rad(-44.0), 0.0, deg_to_rad(6.0))
+		l_knee = Vector3(deg_to_rad(66.0), 0.0, 0.0)
+		r_up = Vector3(deg_to_rad(22.0), 0.0, deg_to_rad(-6.0))
+		r_knee = Vector3(deg_to_rad(18.0), 0.0, 0.0)
+	elif _st_is_getup:
+		var k: float = 1.0 - _st_getup_u
+		l_up = Vector3(lerpf(deg_to_rad(-55.0), deg_to_rad(-18.0), _st_getup_u), 0.0, deg_to_rad(10.0))
+		l_knee = Vector3(lerpf(deg_to_rad(72.0), deg_to_rad(24.0), _st_getup_u), 0.0, 0.0)
+		r_up = Vector3(lerpf(deg_to_rad(-72.0), deg_to_rad(14.0), _st_getup_u), 0.0, deg_to_rad(-10.0 * k - 8.0))
+		r_knee = Vector3(lerpf(deg_to_rad(94.0), deg_to_rad(18.0), _st_getup_u), 0.0, 0.0)
+	else:
+		# Guardia marcial viva (pierna izquierda adelante, derecha atrás en apoyo)
+		var sway: float = sin(anim_time * 1.8) * 0.03
+		l_up = Vector3(deg_to_rad(-18.0) + sway, 0.0, deg_to_rad(10.0))
+		l_knee = Vector3(deg_to_rad(24.0) - sway * 0.6, 0.0, 0.0)
+		r_up = Vector3(deg_to_rad(14.0) - sway, 0.0, deg_to_rad(-10.0))
+		r_knee = Vector3(deg_to_rad(18.0) + sway * 0.6, 0.0, 0.0)
+
+	var blend: float = clampf(14.0 * delta, 0.0, 1.0)
+	current_l_upleg_euler = current_l_upleg_euler.lerp(l_up, blend)
+	current_l_leg_euler = current_l_leg_euler.lerp(l_knee, blend)
+	current_r_upleg_euler = current_r_upleg_euler.lerp(r_up, blend)
+	current_r_leg_euler = current_r_leg_euler.lerp(r_knee, blend)
+
+	_set_bone_rot_relative("LeftUpLeg", current_l_upleg_euler)
+	_set_bone_rot_relative("LeftLeg", current_l_leg_euler)
+	_set_bone_rot_relative("RightUpLeg", current_r_upleg_euler)
+	_set_bone_rot_relative("RightLeg", current_r_leg_euler)
+
+
+func _apply_look_at(delta: float, target_pos: Vector3) -> void:
 	if not bone_indices.has("Head") or not bone_indices.has("Neck"):
 		return
 
-	if flinch_factor > 0.4:
-		# Durante impacto violento, la cabeza reacciona hacia atrás
-		var head_flinch = Quaternion.from_euler(Vector3(-0.4 * flinch_factor, 0.0, 0.0))
-		_set_bone_rot_relative("Head", head_flinch)
-		_set_bone_rot_relative("Neck", head_flinch * 0.5)
+	var target_neck_euler: Vector3 = Vector3.ZERO
+	var target_head_euler: Vector3 = Vector3.ZERO
+
+	if _st_is_wall_stuck:
+		target_neck_euler = Vector3(deg_to_rad(22.0), deg_to_rad(8.0), 0.0)
+		target_head_euler = Vector3(deg_to_rad(40.0), deg_to_rad(14.0), 0.0)
+	elif _st_is_launching_air:
+		target_neck_euler = Vector3(deg_to_rad(12.0), 0.0, 0.0)
+		target_head_euler = Vector3(deg_to_rad(24.0), 0.0, 0.0)
+	elif _st_is_airborne_stunned:
+		target_neck_euler = Vector3(deg_to_rad(-10.0), 0.0, deg_to_rad(8.0))
+		target_head_euler = Vector3(deg_to_rad(-18.0), 0.0, deg_to_rad(16.0))
+	elif _st_is_transforming and _st_transform_u >= 0.35:
+		target_neck_euler = Vector3(deg_to_rad(-16.0), 0.0, 0.0)
+		target_head_euler = Vector3(deg_to_rad(-28.0), 0.0, 0.0)
+	elif _st_flinch_factor > 0.40:
+		target_neck_euler = Vector3(-0.22 * _st_flinch_factor, 0.0, 0.0)
+		target_head_euler = Vector3(-0.42 * _st_flinch_factor, 0.0, 0.0)
+	else:
+		var char_pos: Vector3 = character_instance.global_position
+		var char_basis: Basis = character_instance.global_transform.basis
+		var local_target: Vector3 = char_basis.inverse() * (target_pos - char_pos)
+
+		# Frente canónico del personaje es +Z; compensar giro del torso para mantener vista al jugador
+		var torso_yaw_offset: float = current_hips_euler.y + current_spine_euler.y + current_chest_euler.y
+		var yaw: float = clampf(atan2(local_target.x, local_target.z) - torso_yaw_offset * 0.75, deg_to_rad(-58.0), deg_to_rad(58.0))
+		var horizontal_dist: float = Vector2(local_target.x, local_target.z).length()
+		var pitch: float = clampf(-atan2(local_target.y, maxf(horizontal_dist, 0.1)), deg_to_rad(-35.0), deg_to_rad(35.0))
+		if _st_ki_phase > 0:
+			pitch += deg_to_rad(12.0)
+
+		target_neck_euler = Vector3(pitch * 0.45, yaw * 0.45, 0.0)
+		target_head_euler = Vector3(pitch * 0.55, yaw * 0.55, 0.0)
+
+	current_neck_euler = current_neck_euler.lerp(target_neck_euler, clampf(10.0 * delta, 0.0, 1.0))
+	current_head_euler = current_head_euler.lerp(target_head_euler, clampf(12.0 * delta, 0.0, 1.0))
+
+	_set_bone_rot_relative("Neck", current_neck_euler)
+	_set_bone_rot_relative("Head", current_head_euler)
+
+
+func _apply_arms_pose(delta: float) -> void:
+	if not character_instance or not character_instance.has_method("solve_character_arm_ik_basis"):
 		return
 
-	# Calcular vector relativo desde el personaje hacia el objetivo (visor VR del jugador)
-	var char_pos = character_instance.global_position
-	var char_basis = character_instance.global_transform.basis
+	# Bases estándar verificadas en espacio canónico de personaje (+X=Izq, +Y=Arriba, +Z=Frente)
+	var guard_basis_l: Basis = Basis.looking_at(Vector3(-0.20, 0.45, 0.87).normalized(), Vector3(0.25, 0.96, 0.0).normalized())
+	var guard_basis_r: Basis = Basis.looking_at(Vector3(0.20, 0.40, 0.89).normalized(), Vector3(-0.25, 0.96, 0.0).normalized())
+	var palm_fwd_l: Basis = Basis.looking_at(Vector3(0.0, 0.85, 0.52).normalized(), Vector3(-1.0, 0.0, 0.0))
+	var palm_fwd_r: Basis = Basis.looking_at(Vector3(0.0, 0.85, 0.52).normalized(), Vector3(1.0, 0.0, 0.0))
 
-	# Posición del jugador en el espacio local del rival
-	var local_target = char_basis.inverse() * (target_pos - char_pos)
-	
-	# En el modelo, mirar al frente es +Z
-	var yaw = atan2(local_target.x, local_target.z)
-	var horizontal_dist = Vector2(local_target.x, local_target.z).length()
-	var pitch = -atan2(local_target.y, max(horizontal_dist, 0.1))
+	var des_pos_l: Vector3 = Vector3(-0.02, -0.02, 0.36)
+	var des_pos_r: Vector3 = Vector3(0.04, -0.12, 0.24)
+	var des_basis_l: Basis = guard_basis_l
+	var des_basis_r: Basis = guard_basis_r
+	var grip_l: float = 0.72
+	var trig_l: float = 0.65
+	var grip_r: float = 0.72
+	var trig_r: float = 0.65
 
-	# Limitar rangos anatómicos realistas (máximo 50 grados horizontal, 35 grados vertical)
-	yaw = clampf(yaw, deg_to_rad(-50.0), deg_to_rad(50.0))
-	pitch = clampf(pitch, deg_to_rad(-35.0), deg_to_rad(35.0))
-
-	# Si está cargando Ki con furia, la cabeza se inclina un poco hacia abajo con mirada desafiante
-	if is_charging_ki:
-		pitch += deg_to_rad(12.0)
-
-	var target_neck_quat = Quaternion.from_euler(Vector3(pitch * 0.45, yaw * 0.45, 0.0))
-	var target_head_quat = Quaternion.from_euler(Vector3(pitch * 0.55, yaw * 0.55, 0.0))
-
-	# Interpolación esférica suave (Slerp)
-	current_neck_look_quat = current_neck_look_quat.slerp(target_neck_quat, clampf(9.0 * delta, 0.0, 1.0))
-	current_head_look_quat = current_head_look_quat.slerp(target_head_quat, clampf(11.0 * delta, 0.0, 1.0))
-
-	_set_bone_rot_relative("Neck", current_neck_look_quat)
-	_set_bone_rot_relative("Head", current_head_look_quat)
-
-
-func _apply_arms_guard(delta: float, is_charging_ki: bool, is_blocking: bool, flinch_factor: float) -> void:
-	# Micro-temblor de Ki de alta frecuencia (Jitter) durante la carga de poder
-	var ki_jitter_l = Vector3.ZERO
-	var ki_jitter_r = Vector3.ZERO
-	if is_charging_ki:
-		var j_scale = 0.04
-		ki_jitter_l = Vector3((randf() - 0.5) * j_scale, (randf() - 0.5) * j_scale, (randf() - 0.5) * j_scale)
-		ki_jitter_r = Vector3((randf() - 0.5) * j_scale, (randf() - 0.5) * j_scale, (randf() - 0.5) * j_scale)
-
-	if is_blocking:
-		# Postura de bloqueo: Ambos antebrazos se cruzan frente al pecho protegiendo rostro
-		var block_arm_l = Quaternion.from_euler(Vector3(deg_to_rad(45.0), deg_to_rad(20.0), deg_to_rad(30.0)))
-		var block_forearm_l = Quaternion.from_euler(Vector3(deg_to_rad(85.0), deg_to_rad(-25.0), deg_to_rad(10.0)))
-		var block_arm_r = Quaternion.from_euler(Vector3(deg_to_rad(45.0), deg_to_rad(-20.0), deg_to_rad(-30.0)))
-		var block_forearm_r = Quaternion.from_euler(Vector3(deg_to_rad(85.0), deg_to_rad(25.0), deg_to_rad(-10.0)))
-
-		_set_bone_rot_relative("LeftArm", block_arm_l)
-		_set_bone_rot_relative("LeftForeArm", block_forearm_l)
-		_set_bone_rot_relative("RightArm", block_arm_r)
-		_set_bone_rot_relative("RightForeArm", block_forearm_r)
-
-	elif is_charging_ki:
-		# Postura Fase 2: Puños apretados a la cintura, codos hacia atrás y cuerpo tenso
-		var charge_arm_l = Quaternion.from_euler(Vector3(deg_to_rad(-25.0), deg_to_rad(-10.0), deg_to_rad(20.0)) + ki_jitter_l)
-		var charge_forearm_l = Quaternion.from_euler(Vector3(deg_to_rad(105.0), deg_to_rad(-15.0), 0.0) + ki_jitter_l)
-		var charge_arm_r = Quaternion.from_euler(Vector3(deg_to_rad(-25.0), deg_to_rad(10.0), deg_to_rad(-20.0)) + ki_jitter_r)
-		var charge_forearm_r = Quaternion.from_euler(Vector3(deg_to_rad(105.0), deg_to_rad(15.0), 0.0) + ki_jitter_r)
-
-		_set_bone_rot_relative("LeftArm", charge_arm_l)
-		_set_bone_rot_relative("LeftForeArm", charge_forearm_l)
-		_set_bone_rot_relative("RightArm", charge_arm_r)
-		_set_bone_rot_relative("RightForeArm", charge_forearm_r)
-
+	if _st_is_wall_stuck:
+		des_pos_l = Vector3(0.28, 0.18, -0.08)
+		des_pos_r = Vector3(-0.28, 0.14, -0.08)
+		des_basis_l = palm_fwd_l
+		des_basis_r = palm_fwd_r
+		grip_l = 0.10
+		trig_l = 0.10
+		grip_r = 0.10
+		trig_r = 0.10
+	elif _st_is_launching_air:
+		var flutter: float = sin(anim_time * 32.0) * 0.03
+		des_pos_l = Vector3(0.20, 0.10 + flutter, 0.40)
+		des_pos_r = Vector3(-0.20, 0.08 - flutter, 0.40)
+		des_basis_l = guard_basis_l
+		des_basis_r = guard_basis_r
+		grip_l = 0.35
+		trig_l = 0.35
+		grip_r = 0.35
+		trig_r = 0.35
+	elif _st_is_airborne_stunned:
+		des_pos_l = Vector3(0.24, -0.10, 0.10)
+		des_pos_r = Vector3(-0.24, -0.12, 0.12)
+		grip_l = 0.20
+		trig_l = 0.20
+		grip_r = 0.20
+		trig_r = 0.20
+	elif _st_is_transforming:
+		if _st_transform_u < 0.35:
+			des_pos_l = Vector3(-0.04, -0.10, 0.22)
+			des_pos_r = Vector3(0.04, -0.10, 0.22)
+			grip_l = 1.0
+			trig_l = 1.0
+			grip_r = 1.0
+			trig_r = 1.0
+		else:
+			var roar_j: float = sin(anim_time * 54.0) * 0.02
+			des_pos_l = Vector3(0.24 + roar_j, -0.24, 0.05)
+			des_pos_r = Vector3(-0.24 - roar_j, -0.24, 0.05)
+			des_basis_l = Basis.looking_at(Vector3(0.35, -0.35, 0.87).normalized(), Vector3(0.3, 0.95, 0.0).normalized())
+			des_basis_r = Basis.looking_at(Vector3(-0.35, -0.35, 0.87).normalized(), Vector3(-0.3, 0.95, 0.0).normalized())
+			grip_l = 0.65
+			trig_l = 0.65
+			grip_r = 0.65
+			trig_r = 0.65
+	elif _st_is_guard_broken:
+		des_pos_l = Vector3(0.34, 0.05, 0.06)
+		des_pos_r = Vector3(-0.34, 0.05, 0.06)
+		des_basis_l = palm_fwd_l
+		des_basis_r = palm_fwd_r
+		grip_l = 0.20
+		trig_l = 0.20
+		grip_r = 0.20
+		trig_r = 0.20
+	elif _st_is_melee_active:
+		var punch_curve: float = sin(minf(_st_melee_u * 1.3, 1.0) * PI)
+		match melee_anim_type:
+			0: # Jab Izquierdo
+				des_pos_l = Vector3(0.0, 0.04, lerpf(0.18, 0.54, punch_curve))
+				des_pos_r = Vector3(0.02, 0.05, 0.22)
+			1: # Cross Derecho
+				des_pos_l = Vector3(-0.04, -0.10, 0.16)
+				des_pos_r = Vector3(0.0, 0.03, lerpf(0.18, 0.56, punch_curve))
+			2: # Gancho / Uppercut Izquierdo
+				des_pos_l = Vector3(lerpf(0.12, -0.10, punch_curve), lerpf(-0.18, 0.16, punch_curve), lerpf(0.20, 0.44, punch_curve))
+				des_pos_r = Vector3(0.02, 0.04, 0.22)
+			3: # Patada Circular (manos arriba en guardia de equilibrio)
+				des_pos_l = Vector3(0.04, 0.06, 0.26)
+				des_pos_r = Vector3(-0.12, -0.02, 0.18)
+			4: # Martillazo DBZ 2 Manos (arriba -> abajo)
+				if _st_melee_u < 0.35:
+					var w: float = _st_melee_u / 0.35
+					des_pos_l = Vector3(-0.06, lerpf(0.0, 0.42, w), 0.22)
+					des_pos_r = Vector3(0.06, lerpf(0.0, 0.42, w), 0.22)
+				else:
+					var s: float = minf((_st_melee_u - 0.35) / 0.35, 1.0)
+					des_pos_l = Vector3(-0.06, lerpf(0.42, -0.28, s), lerpf(0.22, 0.44, s))
+					des_pos_r = Vector3(0.06, lerpf(0.42, -0.28, s), lerpf(0.22, 0.44, s))
+		grip_l = 1.0
+		trig_l = 1.0
+		grip_r = 1.0
+		trig_r = 1.0
+	elif _st_super_phase == 2:
+		var bv_x: float = sin(anim_time * 59.0) * 0.014
+		var bv_y: float = cos(anim_time * 53.0) * 0.014
+		match _st_super_tech:
+			"big_bang":
+				des_pos_l = Vector3(0.02, -0.14, 0.18)
+				des_pos_r = Vector3(0.06 + bv_x, 0.04 + bv_y, 0.54)
+				des_basis_r = palm_fwd_r
+				grip_l = 0.85
+				trig_l = 0.85
+				grip_r = 0.05
+				trig_r = 0.05
+			"genkidama":
+				des_pos_l = Vector3(-0.06 + bv_x, -0.06 + bv_y, 0.48)
+				des_pos_r = Vector3(0.06 - bv_x, -0.06 - bv_y, 0.48)
+				des_basis_l = palm_fwd_l
+				des_basis_r = palm_fwd_r
+				grip_l = 0.10
+				trig_l = 0.10
+				grip_r = 0.10
+				trig_r = 0.10
+			_: # Kamehameha, Galick Ho, Final Flash Fase 2
+				des_pos_l = Vector3(-0.06 + bv_x, -0.04 + bv_y, 0.50)
+				des_pos_r = Vector3(0.06 - bv_x, -0.04 - bv_y, 0.50)
+				des_basis_l = palm_fwd_l
+				des_basis_r = palm_fwd_r
+				grip_l = 0.10
+				trig_l = 0.10
+				grip_r = 0.10
+				trig_r = 0.10
+	elif _st_super_phase == 1:
+		var sv: float = sin(anim_time * 47.0) * 0.010
+		match _st_super_tech:
+			"kamehameha":
+				des_pos_l = Vector3(-0.28, -0.22 + sv, 0.14)
+				des_pos_r = Vector3(-0.06, -0.22 - sv, 0.08)
+				des_basis_l = palm_fwd_l
+				des_basis_r = palm_fwd_r
+				grip_l = 0.30
+				trig_l = 0.30
+				grip_r = 0.30
+				trig_r = 0.30
+			"galick_ho":
+				des_pos_l = Vector3(-0.30, -0.04 + sv, 0.10)
+				des_pos_r = Vector3(-0.08, -0.02 - sv, 0.06)
+				des_basis_l = palm_fwd_l
+				des_basis_r = palm_fwd_r
+				grip_l = 0.25
+				trig_l = 0.25
+				grip_r = 0.25
+				trig_r = 0.25
+			"final_flash":
+				des_pos_l = Vector3(0.38, 0.02 + sv, 0.08)
+				des_pos_r = Vector3(-0.38, 0.02 - sv, 0.08)
+				des_basis_l = palm_fwd_l
+				des_basis_r = palm_fwd_r
+				grip_l = 0.20
+				trig_l = 0.20
+				grip_r = 0.20
+				trig_r = 0.20
+			"big_bang":
+				des_pos_l = Vector3(0.02, -0.14, 0.18)
+				des_pos_r = Vector3(0.06, 0.04 + sv, 0.54)
+				des_basis_r = palm_fwd_r
+				grip_l = 0.85
+				trig_l = 0.85
+				grip_r = 0.05
+				trig_r = 0.05
+			"genkidama":
+				des_pos_l = Vector3(0.12, 0.46 + sv, 0.06)
+				des_pos_r = Vector3(-0.12, 0.46 - sv, 0.06)
+				des_basis_l = palm_fwd_l
+				des_basis_r = palm_fwd_r
+				grip_l = 0.05
+				trig_l = 0.05
+				grip_r = 0.05
+				trig_r = 0.05
+	elif melee_block_timer > 0.0:
+		match melee_block_type:
+			0: # Bloqueo con una mano (brazo derecho arriba cubriendo rostro, palma abierta)
+				des_pos_l = Vector3(0.08, -0.04, 0.20)
+				des_pos_r = Vector3(0.02, 0.16, 0.36)
+				des_basis_r = palm_fwd_r
+				grip_l = 0.85; trig_l = 0.85; grip_r = 0.05; trig_r = 0.15
+			1: # Guardia Cruzada en X
+				des_pos_l = Vector3(-0.08, 0.10, 0.32)
+				des_pos_r = Vector3(0.08, 0.06, 0.30)
+				grip_l = 0.95; trig_l = 0.95; grip_r = 0.95; trig_r = 0.95
+			2: # Choque de Puños (puño derecho extendido al impacto)
+				des_pos_l = Vector3(-0.10, -0.06, 0.18)
+				des_pos_r = Vector3(0.0, 0.04, 0.52)
+				grip_l = 0.95; trig_l = 0.95; grip_r = 1.0; trig_r = 1.0
+			3: # Parry Perfecto (barrido lateral amplio)
+				des_pos_l = Vector3(0.26, 0.14, 0.34)
+				des_pos_r = Vector3(-0.22, 0.08, 0.30)
+				des_basis_l = palm_fwd_l; des_basis_r = palm_fwd_r
+				grip_l = 0.10; trig_l = 0.10; grip_r = 0.10; trig_r = 0.10
+	elif _st_is_blocking:
+		des_pos_l = Vector3(-0.08, 0.10, 0.30)
+		des_pos_r = Vector3(0.08, 0.06, 0.28)
+		des_basis_l = Basis.looking_at(Vector3(-0.35, 0.85, 0.38).normalized(), Vector3(0.0, 0.35, -0.94).normalized())
+		des_basis_r = Basis.looking_at(Vector3(0.35, 0.85, 0.38).normalized(), Vector3(0.0, 0.35, -0.94).normalized())
+		grip_l = 0.90
+		trig_l = 0.85
+		grip_r = 0.90
+		trig_r = 0.85
+	elif _st_ki_phase == 1:
+		des_pos_l = Vector3(-0.06, -0.02, 0.26)
+		des_pos_r = Vector3(0.06, -0.04, 0.24)
+		grip_l = 0.92
+		trig_l = 0.92
+		grip_r = 0.92
+		trig_r = 0.92
+	elif _st_ki_phase == 2:
+		var kj_x: float = sin(anim_time * 57.0) * 0.010
+		var kj_y: float = cos(anim_time * 61.0) * 0.010
+		des_pos_l = Vector3(0.06 + kj_x, -0.24 + kj_y, 0.12)
+		des_pos_r = Vector3(-0.06 - kj_x, -0.24 - kj_y, 0.12)
+		des_basis_l = Basis.looking_at(Vector3(-0.15, -0.15, 0.97).normalized(), Vector3(0.3, 0.95, 0.0).normalized())
+		des_basis_r = Basis.looking_at(Vector3(0.15, -0.15, 0.97).normalized(), Vector3(-0.3, 0.95, 0.0).normalized())
+		grip_l = 1.0
+		trig_l = 1.0
+		grip_r = 1.0
+		trig_r = 1.0
+	elif _st_is_ki_blast:
+		var recoil: float = sin(_st_ki_blast_u * PI) * 0.06
+		if ki_blast_hand == 0:
+			des_pos_l = Vector3(-0.02, 0.02, 0.50 - recoil)
+			des_basis_l = palm_fwd_l
+			grip_l = 0.08
+			trig_l = 0.08
+			des_pos_r = Vector3(0.04, -0.12, 0.24)
+		else:
+			des_pos_l = Vector3(-0.02, -0.02, 0.34)
+			des_pos_r = Vector3(0.02, 0.02, 0.50 - recoil)
+			des_basis_r = palm_fwd_r
+			grip_r = 0.08
+			trig_r = 0.08
+	elif _st_is_flying:
+		des_pos_l = Vector3(0.14, -0.22, -0.18)
+		des_pos_r = Vector3(-0.14, -0.22, -0.18)
+		grip_l = 1.0
+		trig_l = 1.0
+		grip_r = 1.0
+		trig_r = 1.0
+	elif _st_is_getup:
+		des_pos_l = Vector3(lerpf(0.08, -0.02, _st_getup_u), lerpf(-0.14, -0.02, _st_getup_u), lerpf(0.20, 0.36, _st_getup_u))
+		des_pos_r = Vector3(lerpf(0.04, 0.04, _st_getup_u), lerpf(-0.32, -0.12, _st_getup_u), lerpf(0.28, 0.24, _st_getup_u))
+		grip_l = 0.65
+		trig_l = 0.65
+		grip_r = lerpf(0.15, 0.85, _st_getup_u)
+		trig_r = grip_r
+	elif _st_is_exhausted:
+		var breath_arm: float = sin(anim_time * 5.2) * 0.015
+		des_pos_l = Vector3(0.04, -0.18 + breath_arm, 0.16)
+		des_pos_r = Vector3(-0.04, -0.22 + breath_arm, 0.12)
+		grip_l = 0.45
+		trig_l = 0.45
+		grip_r = 0.45
+		trig_r = 0.45
 	else:
-		# Si hay un AnimationPlayer reproduciendo una animación de combate (ej: fighting_idle / bouncing_fight_idle),
-		# respetar la pose del AnimationPlayer y no sobreescribir los brazos para evitar posturas rígidas
-		var anim_player: AnimationPlayer = character_instance.get("combat_anim_player") if character_instance else null
-		if anim_player and anim_player.is_playing():
-			return
+		# Guardia Marcial DBZ diferenciada (Goku vs Vegeta) + retroceso elástico de impacto
+		var idle_pulse: float = sin(anim_time * 1.6) * 0.018
+		var flinch_pull: Vector3 = Vector3(0.0, 0.06, -0.12) * _st_flinch_factor
+		if is_vegeta_char:
+			des_pos_l = Vector3(-0.04, 0.02 + idle_pulse, 0.34) + flinch_pull
+			des_pos_r = Vector3(0.04, -0.08 - idle_pulse, 0.26) + flinch_pull
+			grip_l = 0.95
+			trig_l = 0.95
+			grip_r = 0.95
+			trig_r = 0.95
+		else:
+			des_pos_l = Vector3(-0.02, -0.02 + idle_pulse, 0.36) + flinch_pull
+			des_pos_r = Vector3(0.04, -0.12 - idle_pulse, 0.24) + flinch_pull
+			grip_l = 0.42
+			trig_l = 0.38
+			grip_r = 0.92
+			trig_r = 0.85
 
-		# Guardia de Combate Marcial DBZ estándar (Idle vivo fallback):
-		var idle_pulse = sin(anim_time * 1.5) * 0.025
+	if not _arm_bases_initialized:
+		_cur_left_hand_pos = des_pos_l
+		_cur_right_hand_pos = des_pos_r
+		_cur_left_hand_basis = des_basis_l
+		_cur_right_hand_basis = des_basis_r
+		_arm_bases_initialized = true
+	else:
+		var snap_speed: float = 26.0 if (_st_is_melee_active or _st_is_ki_blast or _st_super_phase == 2) else 15.0
+		var blend: float = clampf(snap_speed * delta, 0.0, 1.0)
+		_cur_left_hand_pos = _cur_left_hand_pos.lerp(des_pos_l, blend)
+		_cur_right_hand_pos = _cur_right_hand_pos.lerp(des_pos_r, blend)
+		_cur_left_hand_basis = _cur_left_hand_basis.slerp(des_basis_l, blend).orthonormalized()
+		_cur_right_hand_basis = _cur_right_hand_basis.slerp(des_basis_r, blend).orthonormalized()
 
-		var guard_arm_l = Quaternion.from_euler(Vector3(deg_to_rad(35.0) + idle_pulse, deg_to_rad(12.0), deg_to_rad(15.0)))
-		var guard_forearm_l = Quaternion.from_euler(Vector3(deg_to_rad(75.0), deg_to_rad(-10.0), deg_to_rad(10.0)))
-
-		var guard_arm_r = Quaternion.from_euler(Vector3(deg_to_rad(25.0) - idle_pulse, deg_to_rad(-15.0), deg_to_rad(-15.0)))
-		var guard_forearm_r = Quaternion.from_euler(Vector3(deg_to_rad(80.0), deg_to_rad(10.0), deg_to_rad(-10.0)))
-
-		_set_bone_rot_relative("LeftArm", guard_arm_l)
-		_set_bone_rot_relative("LeftForeArm", guard_forearm_l)
-		_set_bone_rot_relative("RightArm", guard_arm_r)
-		_set_bone_rot_relative("RightForeArm", guard_forearm_r)
+	character_instance.solve_character_arm_ik_basis(true, _cur_left_hand_pos, _cur_left_hand_basis)
+	character_instance.solve_character_arm_ik_basis(false, _cur_right_hand_pos, _cur_right_hand_basis)
+	if character_instance.has_method("_apply_finger_curls_to_skeleton"):
+		character_instance._apply_finger_curls_to_skeleton(skeleton, "Left", trig_l, grip_l)
+		character_instance._apply_finger_curls_to_skeleton(skeleton, "Right", trig_r, grip_r)
 
 
-func _set_bone_rot_relative(bone_name: String, offset_quat: Quaternion) -> void:
+func _set_bone_rot_relative(bone_name: String, offset_euler_char: Vector3) -> void:
 	if not bone_indices.has(bone_name) or not bone_rest_rotations.has(bone_name):
 		return
 
 	var idx: int = bone_indices[bone_name]
+	if character_instance and character_instance.has_method("get_bone_rotation_char_space"):
+		skeleton.set_bone_pose_rotation(idx, character_instance.get_bone_rotation_char_space(idx, offset_euler_char))
+		return
+
 	var rest_quat: Quaternion = bone_rest_rotations[bone_name]
-	var final_rot: Quaternion = (rest_quat * offset_quat).normalized()
-	skeleton.set_bone_pose_rotation(idx, final_rot)
+	var offset_quat: Quaternion = Quaternion.from_euler(offset_euler_char)
+	skeleton.set_bone_pose_rotation(idx, (offset_quat * rest_quat).normalized())

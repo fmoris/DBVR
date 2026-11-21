@@ -1,0 +1,19 @@
+[remap]
+
+importer="oggvorbisstr"
+type="AudioStreamOggVorbis"
+uid="uid://duj1c6h00lwpo"
+path="res://.godot/imported/Goku (Z - End)_227.ogg-b38e06a10b2d1afff7a88f5959234401.oggvorbisstr"
+
+[deps]
+
+source_file="res://assets/audio/Goku (Z - End)/Goku (Z - End)_227.ogg"
+dest_files=["res://.godot/imported/Goku (Z - End)_227.ogg-b38e06a10b2d1afff7a88f5959234401.oggvorbisstr"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

@@ -4,6 +4,7 @@ extends XROrigin3D
 var xr_interface: XRInterface
 var left_hand_tracker: XRHandTracker
 var right_hand_tracker: XRHandTracker
+var _tracker_poll_timer: float = 0.0
 
 # --- Referencias de Nodos Dinámicos ---
 @onready var camera: XRCamera3D = $XRCamera3D
@@ -29,23 +30,53 @@ func _ready() -> void:
 		if "vrs_mode" in get_viewport():
 			get_viewport().vrs_mode = Viewport.VRS_XR
 			print("[OpenXR] VRS_XR dinámico activado con éxito en el Viewport.")
+		call_deferred("_align_player_to_opponent")
 	else:
 		print("Advertencia: OpenXR no detectado o no inicializado. Verifique la conexión del visor/simulador.")
 		_adjust_camera_height_non_vr()
+		call_deferred("_align_player_to_opponent")
 
-func _process(_delta: float) -> void:
-	# Descubrimiento dinámico de Hand Trackers en caso de conexión tardía o reconexión
-	# Solo realizamos la búsqueda si OpenXR está inicializado para evitar overhead de CPU innecesario en PC
+
+## Alinea automáticamente la vista del jugador exactamente de frente hacia el oponente al iniciar
+func _align_player_to_opponent() -> void:
+	# Esperar a que el tracking de OpenXR y la escena estén completamente sincronizados
+	if not is_inside_tree():
+		return
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	# Centrar orientación física del HMD en el punto de mira actual
+	XRServer.center_on_hmd(XRServer.RESET_BUT_KEEP_TILT, true)
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var opp = get_parent().find_child("EnemyCharacterInstance", true, false) if get_parent() else null
+	if opp and camera:
+		var cam_pos = camera.global_position
+		var opp_pos = opp.global_position
+		var dir_to_opp = opp_pos - cam_pos
+		dir_to_opp.y = 0.0
+
+		if dir_to_opp.length_squared() > 0.01:
+			var target_yaw = atan2(-dir_to_opp.x, -dir_to_opp.z)
+			rotation.y = target_yaw - camera.rotation.y
+			print("[XRSetup] 🎯 Jugador alineado frontalmente hacia el oponente (Yaw: %.2f rad)." % rotation.y)
+
+func _process(delta: float) -> void:
+	# Descubrimiento dinámico de Hand Trackers con intervalo de 1.0s (evita consultar XRServer a 90 Hz cuando se usan mandos)
 	if xr_interface and xr_interface.is_initialized():
 		if left_hand_tracker == null or right_hand_tracker == null:
-			var trackers = XRServer.get_trackers(XRServer.TRACKER_HAND)
-			for tracker_name in trackers:
-				var t = trackers[tracker_name]
-				if t is XRHandTracker:
-					if t.hand == XRHandTracker.TRACKER_HAND_LEFT:
-						left_hand_tracker = t
-					elif t.hand == XRHandTracker.TRACKER_HAND_RIGHT:
-						right_hand_tracker = t
+			_tracker_poll_timer -= delta
+			if _tracker_poll_timer <= 0.0:
+				_tracker_poll_timer = 1.0
+				var trackers = XRServer.get_trackers(XRServer.TRACKER_HAND)
+				for tracker_name in trackers:
+					var t = trackers[tracker_name]
+					if t is XRHandTracker:
+						if t.hand == XRHandTracker.TRACKER_HAND_LEFT:
+							left_hand_tracker = t
+						elif t.hand == XRHandTracker.TRACKER_HAND_RIGHT:
+							right_hand_tracker = t
 
 # --- APIs de Consulta Espacial Nativas para la Fase 3 (GesturePhaseTree) ---
 
