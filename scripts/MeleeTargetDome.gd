@@ -191,12 +191,12 @@ var sfx_hit_heavy: AudioStream = null
 var sfx_parry: AudioStream = null
 
 const ZONE_DEFINITIONS = [
-	{ "id": 0, "name": "Rostro / Cabeza", "offset": Vector3(0.0, 0.28, 0.0), "color": Color(1.0, 0.3, 0.2, 0.85) },
-	{ "id": 1, "name": "Plexo Solar", "offset": Vector3(0.0, -0.02, 0.0), "color": Color(0.2, 0.85, 1.0, 0.85) },
-	{ "id": 2, "name": "Hombro Izquierdo", "offset": Vector3(-0.30, 0.22, 0.0), "color": Color(0.2, 1.0, 0.4, 0.85) },
-	{ "id": 3, "name": "Hombro Derecho", "offset": Vector3(0.30, 0.22, 0.0), "color": Color(0.2, 1.0, 0.4, 0.85) },
-	{ "id": 4, "name": "Flanco Izquierdo", "offset": Vector3(-0.28, -0.22, 0.0), "color": Color(1.0, 0.8, 0.2, 0.85) },
-	{ "id": 5, "name": "Flanco Derecho", "offset": Vector3(0.28, -0.22, 0.0), "color": Color(1.0, 0.8, 0.2, 0.85) }
+	{ "id": 0, "name": "Rostro / Cabeza", "offset": Vector3(0.0, 0.20, 0.0), "color": Color(1.0, 0.3, 0.2, 0.85) },
+	{ "id": 1, "name": "Plexo Solar", "offset": Vector3(0.0, -0.01, 0.0), "color": Color(0.2, 0.85, 1.0, 0.85) },
+	{ "id": 2, "name": "Hombro Izquierdo", "offset": Vector3(-0.19, 0.17, 0.0), "color": Color(0.2, 1.0, 0.4, 0.85) },
+	{ "id": 3, "name": "Hombro Derecho", "offset": Vector3(0.19, 0.17, 0.0), "color": Color(0.2, 1.0, 0.4, 0.85) },
+	{ "id": 4, "name": "Flanco Izquierdo", "offset": Vector3(-0.19, -0.15, 0.0), "color": Color(1.0, 0.55, 0.15, 0.85) },
+	{ "id": 5, "name": "Flanco Derecho", "offset": Vector3(0.19, -0.15, 0.0), "color": Color(1.0, 0.55, 0.15, 0.85) }
 ]
 
 
@@ -879,9 +879,9 @@ func start_defense_phase() -> void:
 	for h in hits:
 		if def_is_ai:
 			var is_heavy_h: bool = bool(h.get("is_charged", false)) or bool(h.get("is_charged_v3", false)) or bool(h.get("is_hammer", false))
-			var ai_gap: float = 0.30 if is_heavy_h else 0.20
+			var ai_gap: float = 0.36 if is_heavy_h else 0.26
 			h["prewarn_sec"] = minf(_compute_note_prewarn_sec(h), ai_gap)
-			accum_time += (0.14 if accum_time == 0.0 else ai_gap)
+			accum_time += (0.16 if accum_time == 0.0 else ai_gap)
 		else:
 			var prewarn: float = _compute_note_prewarn_sec(h)
 			h["prewarn_sec"] = prewarn
@@ -2141,14 +2141,11 @@ func _build_visual_dome() -> void:
 
 func _build_target_boxes() -> void:
 	target_zones.clear()
-	var boxes_parent: Node3D = self
-	var cam: Camera3D = _get_player_camera()
-	if cam and is_instance_valid(cam):
-		melee_boxes_anchor = Node3D.new()
-		melee_boxes_anchor.name = "MeleeBoxesAnchor"
-		melee_boxes_anchor.position = Vector3(0.0, -0.10, -0.50)
-		cam.add_child(melee_boxes_anchor)
-		boxes_parent = melee_boxes_anchor
+	melee_boxes_anchor = Node3D.new()
+	melee_boxes_anchor.name = "MeleeBoxesAnchor"
+	melee_boxes_anchor.position = Vector3.ZERO
+	add_child(melee_boxes_anchor)
+	var boxes_parent: Node3D = melee_boxes_anchor
 
 	for def in ZONE_DEFINITIONS:
 		var zone_node := Node3D.new()
@@ -2706,12 +2703,13 @@ func perform_z_blink_relocation(target_pos: Vector3 = Vector3.INF) -> void:
 func _update_dome_transform() -> void:
 	var cam: Camera3D = _get_player_camera()
 	if cam and is_instance_valid(cam):
-		var cam_fwd_xz: Vector3 = -cam.global_transform.basis.z
-		cam_fwd_xz.y = 0.0
-		cam_fwd_xz = cam_fwd_xz.normalized() if cam_fwd_xz.length_squared() > 0.001 else Vector3.FORWARD
-		var chest_y: float = cam.global_position.y - 0.22
-		global_position = Vector3(cam.global_position.x, chest_y, cam.global_position.z) + cam_fwd_xz * 0.48
-		rotation.y = atan2(-cam_fwd_xz.x, -cam_fwd_xz.z)
+		# Anclar los círculos/cuadrados al eje fijo del duelo (_duel_axis), NO a la rotación de la cabeza
+		var duel_dir: Vector3 = _duel_axis
+		duel_dir.y = 0.0
+		duel_dir = duel_dir.normalized() if duel_dir.length_squared() > 0.001 else Vector3.FORWARD
+		var chest_y: float = cam.global_position.y - 0.16
+		global_position = Vector3(cam.global_position.x, chest_y, cam.global_position.z) + duel_dir * 0.44
+		rotation.y = atan2(-duel_dir.x, -duel_dir.z)
 		rotation.x = 0.0
 		return
 

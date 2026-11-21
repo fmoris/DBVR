@@ -125,10 +125,10 @@ var determination_hit_cooldown: float = 0.0
 # --- Movimiento por Casillas / Pasos (Yu Yu Hakusho / DB Legends / Ajedrez) ---
 const STEP_DISTANCE: float = 3.0 # Metros por paso/casilla
 const VERTICAL_STEP: float = 2.0 # Metros por salto o descenso en el aire
-const MIN_ALLOWED_DISTANCE: float = 9.5 # Distancia mínima táctica en Modo Libre ("turnos en tiempo real")
+const MIN_ALLOWED_DISTANCE: float = 11.5 # Distancia mínima táctica en Modo Libre ("turnos en tiempo real")
 const MAX_VERTICAL_HEIGHT: float = 9.0 # Límite superior de vuelo en metros
-const MELEE_APPROACH_RANGE: float = 13.5
-const MELEE_DECAY_RANGE: float = 14.5
+const MELEE_APPROACH_RANGE: float = 15.5
+const MELEE_DECAY_RANGE: float = 16.5
 var melee_approach_progress: float = 0.0
 var step_cooldown: float = 0.0
 var vertical_step_cooldown: float = 0.0

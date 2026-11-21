@@ -8,7 +8,7 @@ const BOULDER_MAX_HP: float = 350.0
 const BOULDER_BP_BONUS: float = 220.0
 const CANYON_MAX_HP: float = 1800.0
 const CANYON_BP_BONUS: float = 550.0
-const DEBRIS_POOL_SIZE: int = 16
+const DEBRIS_POOL_SIZE: int = 24
 
 var _boulder_mm: MultiMeshInstance3D = null
 var _boulder_body: StaticBody3D = null
@@ -155,11 +155,12 @@ func spawn_debris_burst(origin_pos: Vector3, count: int = 6, scale_mult: float =
 		_debris_timers[idx] = 1.75
 
 
-func spawn_dense_dbz_smoke(pos: Vector3, victim: Node3D, radius_scale: float = 2.4, obscure_sec: float = 2.2) -> void:
+func spawn_dense_dbz_smoke(pos: Vector3, victim: Node3D, radius_scale: float = 2.8, obscure_sec: float = 2.8) -> void:
 	if get_tree():
 		KiSmokeFX.spawn_smoke(get_tree(), pos + Vector3(0.0, 0.8, 0.0), radius_scale)
-		KiSmokeFX.spawn_smoke(get_tree(), pos + Vector3(1.1, 1.4, -0.8), radius_scale * 0.85)
-		KiSmokeFX.spawn_smoke(get_tree(), pos + Vector3(-1.1, 1.2, 0.9), radius_scale * 0.85)
+		KiSmokeFX.spawn_smoke(get_tree(), pos + Vector3(1.2, 1.4, -0.9), radius_scale * 0.90)
+		KiSmokeFX.spawn_smoke(get_tree(), pos + Vector3(-1.2, 1.2, 1.0), radius_scale * 0.90)
+		KiSmokeFX.spawn_smoke(get_tree(), pos + Vector3(0.0, 2.1, 0.4), radius_scale * 0.80)
 	if victim and is_instance_valid(victim) and victim.has_method("set"):
 		victim.set("smoke_obscures_active", true)
 		var prev_t: float = float(victim.get("smoke_obscured_timer")) if victim.get("smoke_obscured_timer") != null else 0.0
@@ -221,8 +222,11 @@ func apply_body_collision_impact(collider: Node, impact_pos: Vector3, victim: No
 			_canyon_hp[c_idx] -= dmg
 			if _canyon_hp[c_idx] <= 0.0:
 				_collapse_instance(_canyon_mm, _canyon_cols, c_idx)
-				spawn_debris_burst(impact_pos, 12, 1.75)
-				spawn_dense_dbz_smoke(impact_pos, victim, 3.6, 2.6)
+				spawn_debris_burst(impact_pos, 16, 1.85)
+				spawn_dense_dbz_smoke(impact_pos, victim, 4.0, 3.2)
+				var dd_m: DramaticDirector = DramaticDirector.get_active(get_tree())
+				if dd_m:
+					dd_m.spawn_persistent_crater(Vector3(impact_pos.x, 0.15, impact_pos.z), 2.4, true)
 				if victim and is_instance_valid(victim) and victim.has_method("take_hit"):
 					victim.take_hit(CANYON_BP_BONUS, Vector3.ZERO, false)
 				res["destroyed"] = true

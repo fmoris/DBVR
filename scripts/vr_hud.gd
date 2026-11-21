@@ -683,25 +683,25 @@ func _update_vignette_overlay(delta: float) -> void:
 		var pulse_01: float = (sin(_vignette_pulse_t) + 1.0) * 0.5
 
 		if _hit_vignette_timer > 0.0:
-			target_col = Color(1.0, 0.12, 0.10, 1.0)
-			target_intensity = 0.62 * clampf(_hit_vignette_timer / 0.28, 0.25, 1.0)
-			target_inner = 0.34
+			target_col = Color(1.0, 0.10, 0.08, 1.0)
+			target_intensity = 0.92 * clampf(_hit_vignette_timer / 0.32, 0.35, 1.0)
+			target_inner = 0.22
 		elif in_furia or (e_np_val > 100.0 and cur_np_val < e_np_val * 0.70):
-			target_col = Color(0.88, 0.08, 0.08, 1.0)
-			target_intensity = 0.32 + pulse_01 * 0.20
-			target_inner = 0.36 - pulse_01 * 0.03
+			target_col = Color(0.92, 0.06, 0.06, 1.0)
+			target_intensity = 0.60 + pulse_01 * 0.28
+			target_inner = 0.24 - pulse_01 * 0.04
 		elif cur_ki_val < 15.0:
-			target_col = Color(0.24, 0.38, 0.96, 1.0)
-			target_intensity = 0.28 + pulse_01 * 0.16
-			target_inner = 0.40
+			target_col = Color(0.20, 0.35, 0.98, 1.0)
+			target_intensity = 0.52 + pulse_01 * 0.24
+			target_inner = 0.28
 		elif in_zenkai or (e_np_val > 100.0 and cur_np_val > e_np_val * 1.35):
-			target_col = Color(1.0, 0.85, 0.20, 1.0)
-			target_intensity = 0.26 + pulse_01 * 0.14
-			target_inner = 0.42
+			target_col = Color(1.0, 0.85, 0.18, 1.0)
+			target_intensity = 0.48 + pulse_01 * 0.22
+			target_inner = 0.30
 		elif form_idx >= 0:
-			target_col = Color(1.0, 0.78, 0.18, 1.0)
-			target_intensity = 0.20
-			target_inner = 0.46
+			target_col = Color(1.0, 0.78, 0.15, 1.0)
+			target_intensity = 0.38
+			target_inner = 0.32
 
 	_vignette_mat.set_shader_parameter("vignette_color", target_col)
 	_vignette_mat.set_shader_parameter("intensity", target_intensity)
