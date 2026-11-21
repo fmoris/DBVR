@@ -14,7 +14,8 @@
 - **Flujo Git-Flow Estricto:**
   - `main`: **SOLO código probado y validado empíricamente en el visor VR**.
   - `develop`: Rama base para integración continua y desarrollo de nuevas funcionalidades.
-  - Ramas `feature/*`: Para tareas específicas (ej. nuevas mecánicas, poderes o shaders).
+  - Ramas `feature/*` o `fix/*`: **SIEMPRE** crear o trabajar sobre una rama `feature/*` / `fix/*` desde `develop` antes de editar archivos (nunca acumular cambios sin commitear en `develop` ni ejecutar `git checkout` / `git restore` sobre archivos sucios sin respaldo).
+  - **Commit, Push y PR obligatorios:** Al terminar y verificar cada tarea/ciclo, hacer **siempre** `git add` + `git commit` + `git push` a `origin` y abrir/actualizar el PR hacia `develop`.
   - Al terminar una tarea, se prueba y valida en APK antes de promocionar o mergear a `main`.
 - **Tipado Estático Estricto:** Siempre tipar variables y retornos en GDScript 2.0 (`func test() -> void:`).
 - **Delta en Física:** Multiplicar por delta en `_physics_process(delta)`.
