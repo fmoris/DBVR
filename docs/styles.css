@@ -308,3 +308,146 @@ footer {
   justify-content: space-between;
   gap: 0.75rem;
 }
+
+/* Selector Interactivo de Personajes */
+.char-selector-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-bottom: 1.15rem;
+}
+
+.char-btn {
+  cursor: pointer;
+  background: rgba(12, 19, 36, 0.9);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.65rem 1.15rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  transition: all 0.2s ease;
+}
+
+.char-btn:hover {
+  color: var(--text);
+  border-color: var(--ki);
+}
+
+.char-btn.active {
+  background: linear-gradient(135deg, rgba(0, 229, 255, 0.2), rgba(255, 212, 59, 0.16));
+  color: var(--gold);
+  border-color: var(--gold);
+  box-shadow: 0 4px 18px rgba(255, 212, 59, 0.2);
+}
+
+.char-sheet {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.char-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.stat-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.stat-pill {
+  background: rgba(0, 229, 255, 0.08);
+  border: 1px solid rgba(0, 229, 255, 0.25);
+  border-radius: 8px;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.86rem;
+}
+
+.transform-track {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(195px, 1fr));
+  gap: 0.75rem;
+}
+
+.transform-card {
+  background: rgba(5, 8, 17, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-top: 3px solid var(--gold);
+  border-radius: 10px;
+  padding: 0.75rem 0.9rem;
+  font-size: 0.88rem;
+}
+
+.power-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 0.75rem;
+}
+
+.power-card {
+  background: rgba(5, 8, 17, 0.65);
+  border: 1px solid rgba(0, 229, 255, 0.2);
+  border-radius: 10px;
+  padding: 0.8rem 0.95rem;
+  font-size: 0.88rem;
+}
+
+.power-card.finisher {
+  border-color: rgba(255, 71, 87, 0.55);
+  background: rgba(255, 71, 87, 0.08);
+}
+
+/* Diagrama de Secuencias Encadenadas */
+.chain-flow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.9rem;
+  margin-top: 1rem;
+}
+
+.chain-node {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--ki);
+  border-radius: 12px;
+  padding: 1rem;
+}
+
+.chain-node.gold { border-left-color: var(--gold); }
+.chain-node.orange { border-left-color: var(--orange); }
+.chain-node.violet { border-left-color: var(--violet); }
+.chain-node.crimson { border-left-color: var(--crimson); }
+
+/* Relato de Partida */
+.chronicle-timeline {
+  display: grid;
+  gap: 1rem;
+}
+
+.chronicle-act {
+  background: var(--bg-card);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-left: 4px solid var(--gold);
+  border-radius: 12px;
+  padding: 1.1rem 1.25rem;
+}
+
+.chronicle-act h3 {
+  margin: 0 0 0.45rem;
+  color: var(--gold);
+  font-size: 1.05rem;
+}
+
+.chronicle-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.65rem;
+}
