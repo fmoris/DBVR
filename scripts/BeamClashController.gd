@@ -28,6 +28,10 @@ var beam_mesh_atk: MeshInstance3D = null
 var beam_mesh_def: MeshInstance3D = null
 var beam_inner_atk: MeshInstance3D = null
 var beam_inner_def: MeshInstance3D = null
+var orb_mesh_atk: MeshInstance3D = null
+var orb_mesh_def: MeshInstance3D = null
+var is_orb_atk: bool = false
+var is_orb_def: bool = false
 var shockwave_mesh: MeshInstance3D = null
 var header_label: Label3D = null
 var clash_bar_root: Node3D = null
@@ -82,6 +86,10 @@ func setup(
 	defender = p_defender
 	tech_atk = p_tech_atk
 	tech_def = p_tech_def
+	var atk_low: String = tech_atk.to_lower()
+	var def_low: String = tech_def.to_lower()
+	is_orb_atk = ("big bang" in atk_low) or ("genkidama" in atk_low)
+	is_orb_def = ("big bang" in def_low) or ("genkidama" in def_low)
 	color_atk = p_color_atk
 	color_def = p_color_def
 	clash_duration = p_duration
@@ -337,17 +345,39 @@ func _update_beam_transforms() -> void:
 		else:
 			header_label.global_position = clash_pos + Vector3(0.0, 1.1, 0.0)
 
-	# 1. Haz exterior y núcleo blanco del Atacante (desde manos del atacante hasta clash_pos)
-	if beam_mesh_atk and is_instance_valid(beam_mesh_atk):
-		_position_beam(beam_mesh_atk, p_atk, clash_pos, 0.38)
-	if beam_inner_atk and is_instance_valid(beam_inner_atk):
-		_position_beam(beam_inner_atk, p_atk, clash_pos, 0.17)
+	# 1. Poder del Atacante: esfera original (Big Bang / Genkidama) o haz cilíndrico
+	if is_orb_atk:
+		if beam_mesh_atk and is_instance_valid(beam_mesh_atk):
+			beam_mesh_atk.visible = false
+		if beam_inner_atk and is_instance_valid(beam_inner_atk):
+			beam_inner_atk.visible = false
+		if orb_mesh_atk and is_instance_valid(orb_mesh_atk):
+			orb_mesh_atk.visible = true
+			var dir_a: Vector3 = (p_def - p_atk).normalized() if p_atk.distance_to(p_def) > 0.01 else Vector3.FORWARD
+			var orb_r_a: float = 1.45 if "genkidama" in tech_atk.to_lower() else 0.85
+			orb_mesh_atk.global_position = clash_pos - dir_a * (orb_r_a * 0.65)
+	else:
+		if beam_mesh_atk and is_instance_valid(beam_mesh_atk):
+			_position_beam(beam_mesh_atk, p_atk, clash_pos, 0.38)
+		if beam_inner_atk and is_instance_valid(beam_inner_atk):
+			_position_beam(beam_inner_atk, p_atk, clash_pos, 0.17)
 
-	# 2. Haz exterior y núcleo blanco del Defensor (desde manos del defensor hasta clash_pos)
-	if beam_mesh_def and is_instance_valid(beam_mesh_def):
-		_position_beam(beam_mesh_def, p_def, clash_pos, 0.38)
-	if beam_inner_def and is_instance_valid(beam_inner_def):
-		_position_beam(beam_inner_def, p_def, clash_pos, 0.17)
+	# 2. Poder del Defensor: esfera original (Big Bang / Genkidama) o haz cilíndrico
+	if is_orb_def:
+		if beam_mesh_def and is_instance_valid(beam_mesh_def):
+			beam_mesh_def.visible = false
+		if beam_inner_def and is_instance_valid(beam_inner_def):
+			beam_inner_def.visible = false
+		if orb_mesh_def and is_instance_valid(orb_mesh_def):
+			orb_mesh_def.visible = true
+			var dir_d: Vector3 = (p_atk - p_def).normalized() if p_def.distance_to(p_atk) > 0.01 else Vector3.BACK
+			var orb_r_d: float = 1.45 if "genkidama" in tech_def.to_lower() else 0.85
+			orb_mesh_def.global_position = clash_pos - dir_d * (orb_r_d * 0.65)
+	else:
+		if beam_mesh_def and is_instance_valid(beam_mesh_def):
+			_position_beam(beam_mesh_def, p_def, clash_pos, 0.38)
+		if beam_inner_def and is_instance_valid(beam_inner_def):
+			_position_beam(beam_inner_def, p_def, clash_pos, 0.17)
 
 
 func _position_beam(mesh_inst: MeshInstance3D, p_from: Vector3, p_to: Vector3, radius: float) -> void:
@@ -544,6 +574,18 @@ func _build_visuals() -> void:
 	beam_inner_def.material_override = mat_inner_white
 	add_child(beam_inner_def)
 
+	if is_orb_atk:
+		beam_mesh_atk.visible = false
+		beam_inner_atk.visible = false
+		orb_mesh_atk = _create_clash_orb_mesh("OrbAtk", color_atk, 1.45 if "genkidama" in tech_atk.to_lower() else 0.85)
+		add_child(orb_mesh_atk)
+
+	if is_orb_def:
+		beam_mesh_def.visible = false
+		beam_inner_def.visible = false
+		orb_mesh_def = _create_clash_orb_mesh("OrbDef", color_def, 1.45 if "genkidama" in tech_def.to_lower() else 0.85)
+		add_child(orb_mesh_def)
+
 	# 5. HUD 3D de balance (título + barra diegética de tira y afloja)
 	header_label = Label3D.new()
 	header_label.name = "ClashHUD"
@@ -557,6 +599,24 @@ func _build_visuals() -> void:
 	_build_clash_diegetic_bar()
 	_build_visuals_hud_attach()
 	_update_hud()
+
+
+func _create_clash_orb_mesh(p_name: String, p_color: Color, p_radius: float) -> MeshInstance3D:
+	var m := MeshInstance3D.new()
+	m.name = p_name
+	var sp := SphereMesh.new()
+	sp.radius = p_radius
+	sp.height = p_radius * 2.0
+	sp.radial_segments = 24
+	sp.rings = 16
+	m.mesh = sp
+	var mat := ShaderMaterial.new()
+	mat.shader = KiCoronaShader
+	mat.set_shader_parameter("base_color", p_color)
+	mat.set_shader_parameter("corona_color", Color(1.0, 1.0, 1.0))
+	mat.set_shader_parameter("glow_intensity", 3.4)
+	m.material_override = mat
+	return m
 
 
 func _build_clash_diegetic_bar() -> void:

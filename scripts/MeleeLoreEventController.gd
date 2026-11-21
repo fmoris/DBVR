@@ -267,6 +267,7 @@ func start_event(event_type: int, p_dome: Node3D, p_attacker: Node3D, p_defender
 				_hud_root.visible = true
 			if _event_orb:
 				_event_orb.visible = true
+				_event_orb.scale = Vector3.ONE * 1.25
 			if _event_orb_mat:
 				_event_orb_mat.albedo_color = Color(1.0, 0.88, 0.18, 0.92)
 			if _title_label:
@@ -274,7 +275,7 @@ func start_event(event_type: int, p_dome: Node3D, p_attacker: Node3D, p_defender
 				_title_label.modulate = Color(1.0, 0.88, 0.20)
 			if _prompt_label:
 				if bool(_attacker.get("is_player")):
-					_prompt_label.text = "¡Golpea el Orbe Dorado! (1/3 · -6 Ki/salto | Stick ↓=Guardar Ki)"
+					_prompt_label.text = "⚡ ¡BONO SÓNICO! (1/3)\n👊 ¡GOLPEA EL ORBE = +240 DAÑO y +140 BP!\n(Stick ↓ = Guardar Ki)"
 				else:
 					_prompt_label.text = "⚠️ ¡EL RIVAL TE PERSIGUE A VELOCIDAD SÓNICA!"
 			if _dome and _dome.has_method("perform_z_blink_relocation"):
@@ -595,7 +596,7 @@ func _process_sonic_z_burst(delta: float, l_ctrl: XRController3D, r_ctrl: XRCont
 			if _dome and _dome.has_method("perform_z_blink_relocation"):
 				_dome.perform_z_blink_relocation()
 			if _prompt_label and atk_is_player:
-				_prompt_label.text = "¡Golpea el Orbe Dorado! (%d/3 · -6 Ki/salto | Stick ↓=Guardar Ki)" % (_substep + 1)
+				_prompt_label.text = "⚡ ¡BONO SÓNICO! (%d/3)\n👊 ¡GOLPEA EL ORBE = +240 DAÑO y +140 BP!\n(Stick ↓ = Guardar Ki)" % (_substep + 1)
 			return
 
 	if _burst_hop_timer <= 0.0 or _event_timer <= 0.0:
