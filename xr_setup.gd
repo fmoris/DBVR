@@ -34,7 +34,30 @@ func _ready() -> void:
 	else:
 		print("Advertencia: OpenXR no detectado o no inicializado. Verifique la conexión del visor/simulador.")
 		_adjust_camera_height_non_vr()
-		call_deferred("_align_player_to_opponent")
+		call_deferred("_align_and_start_desktop_sim")
+
+
+func _align_and_start_desktop_sim() -> void:
+	await _align_player_to_opponent()
+	if OS.has_feature("android"):
+		return
+	var auto_suite: String = ""
+	for arg: String in OS.get_cmdline_user_args():
+		if arg.begins_with("--auto-test="):
+			auto_suite = arg.substr("--auto-test=".length())
+		elif arg == "--auto-test":
+			auto_suite = "all"
+
+	var sim: DesktopXRSimulator = DesktopXRSimulator.new()
+	sim.name = "DesktopXRSimulator"
+	add_child(sim)
+	sim.setup(self, camera, not auto_suite.is_empty())
+
+	if not auto_suite.is_empty():
+		var runner: CombatSequenceRunner = CombatSequenceRunner.new()
+		runner.name = "CombatSequenceRunner"
+		add_child(runner)
+		runner.start_from_cmdline(sim, auto_suite)
 
 
 ## Alinea automáticamente la vista del jugador exactamente de frente hacia el oponente al iniciar

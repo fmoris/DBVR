@@ -54,11 +54,11 @@ var is_stepping: bool = false
 # Parámetros de combate por casillas / pasos
 const AI_STEP_DISTANCE: float = 2.0
 const VERTICAL_STEP: float = 1.4
-const MIN_ALLOWED_DISTANCE: float = 6.0
-const OPTIMAL_DIST_MIN: float = 7.0
-const OPTIMAL_DIST_MAX: float = 11.0
-const LONG_CHASE_TRIGGER_DIST: float = 22.0
-const LONG_CHASE_TARGET_DIST: float = 10.5
+const MIN_ALLOWED_DISTANCE: float = 9.5
+const OPTIMAL_DIST_MIN: float = 10.5
+const OPTIMAL_DIST_MAX: float = 15.0
+const LONG_CHASE_TRIGGER_DIST: float = 9999.0
+const LONG_CHASE_TARGET_DIST: float = 12.0
 
 # Ráfaga de Ki Blasts
 var blast_volley_count: int = 0
@@ -176,13 +176,7 @@ func _process_state_idle_spacing(delta: float) -> void:
 	var dist = diff.length()
 	var fwd = diff.normalized() if dist > 0.01 else -host.global_transform.basis.z
 
-	# Persecución rápida Z-Dash si los luchadores quedaron muy lejos (> 22m) tras choque/muralla
-	if dist > LONG_CHASE_TRIGGER_DIST and not is_stepping and long_chase_cooldown <= 0.0:
-		var player_braking: bool = bool(player.get("is_air_brake_active"))
-		if not player_braking and execute_long_range_chase():
-			return
-
-	# Pasos de reposicionamiento cada 0.75s - 1.35s
+	# Pasos de reposicionamiento cada 0.75s - 1.35s (sin persecución Z-Dash automática a larga distancia)
 	spacing_step_timer += delta
 	if spacing_step_timer >= next_spacing_interval and not is_stepping:
 		spacing_step_timer = 0.0

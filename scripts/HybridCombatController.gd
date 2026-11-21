@@ -15,6 +15,7 @@ var xr_origin: XROrigin3D = null
 var camera: XRCamera3D = null
 var left_controller: XRController3D = null
 var right_controller: XRController3D = null
+var desktop_sim: Node = null
 
 # Estado de conectividad
 var controllers_active: bool = false
@@ -124,8 +125,11 @@ var determination_hit_cooldown: float = 0.0
 # --- Movimiento por Casillas / Pasos (Yu Yu Hakusho / DB Legends / Ajedrez) ---
 const STEP_DISTANCE: float = 3.0 # Metros por paso/casilla
 const VERTICAL_STEP: float = 2.0 # Metros por salto o descenso en el aire
-const MIN_ALLOWED_DISTANCE: float = 6.0 # Distancia mínima táctica en Modo Libre ("turnos en tiempo real")
+const MIN_ALLOWED_DISTANCE: float = 9.5 # Distancia mínima táctica en Modo Libre ("turnos en tiempo real")
 const MAX_VERTICAL_HEIGHT: float = 9.0 # Límite superior de vuelo en metros
+const MELEE_APPROACH_RANGE: float = 13.5
+const MELEE_DECAY_RANGE: float = 14.5
+var melee_approach_progress: float = 0.0
 var step_cooldown: float = 0.0
 var vertical_step_cooldown: float = 0.0
 var right_stick_flicked: bool = false
@@ -262,12 +266,12 @@ func _process(delta: float) -> void:
 		var dd_pause: DramaticDirector = DramaticDirector.get_active(get_tree())
 		if dd_pause and dd_pause.is_in_intro:
 			var skip_pressed: bool = (
-				left_controller.is_button_pressed("ax_button")
-				or left_controller.is_button_pressed("by_button")
-				or right_controller.is_button_pressed("ax_button")
-				or right_controller.is_button_pressed("by_button")
-				or left_controller.is_button_pressed("trigger_click")
-				or right_controller.is_button_pressed("trigger_click")
+				_ctrl_pressed(left_controller, &"ax_button")
+				or _ctrl_pressed(left_controller, &"by_button")
+				or _ctrl_pressed(right_controller, &"ax_button")
+				or _ctrl_pressed(right_controller, &"by_button")
+				or _ctrl_pressed(left_controller, &"trigger_click")
+				or _ctrl_pressed(right_controller, &"trigger_click")
 			)
 			if skip_pressed:
 				dd_pause.skip_dramatic_intro()
@@ -353,6 +357,28 @@ func _process(delta: float) -> void:
 	# Fix 2: Procesar Frenado Aéreo mientras el jugador vuela lanzado por impacto
 	_process_air_brake(delta, player)
 
+	# Bloqueo mutuo estricto: durante Choque de Poderes o Secuencia de Super Haz se bloquean otras acciones
+	if _is_exclusive_combat_sequence_active(player):
+		_reset_super_state()
+		if left_is_charging or right_is_charging:
+			if gesture_tree:
+				gesture_tree._cleanup_ki_blast_charge_sphere(0)
+				gesture_tree._cleanup_ki_blast_charge_sphere(1)
+			left_charge_time = 0.0
+			right_charge_time = 0.0
+			left_is_charging = false
+			right_is_charging = false
+		if is_charging_ki or ki_prep_phase:
+			is_charging_ki = false
+			ki_prep_phase = false
+			if gesture_tree:
+				gesture_tree._cancel_action("Secuencia exclusiva en curso")
+				gesture_tree._reset_to_idle()
+		left_punch_cocked = false
+		right_punch_cocked = false
+		_process_hud_toggle(delta)
+		return
+
 	# Mientras el jugador sale volando / ragdoll / incrustado, no puede realizar acciones de combate
 	if player and player.has_method("is_airborne_incapacitated") and player.is_airborne_incapacitated():
 		_reset_super_state()
@@ -371,6 +397,7 @@ func _process(delta: float) -> void:
 		return
 
 	# 4. Procesar las acciones híbridas en combate libre
+	_process_melee_approach_bar(delta, player)
 	_process_determination(delta)
 	_process_ki_recharge(delta)
 	_process_melee_punches()
@@ -386,6 +413,55 @@ func _process(delta: float) -> void:
 
 
 # --- 1. RECARGA DE KI (2 FASES: Gatillos a Hombros -> Descenso a Cintura/Cadera) ---
+func _is_exclusive_combat_sequence_active(player: Node) -> bool:
+	if DramaticDirector.is_dramatic_pause_active:
+		return true
+	if player and is_instance_valid(player):
+		if bool(player.get("is_in_beam_clash")) or bool(player.get("is_in_beam_sequence")):
+			return true
+		if bool(player.get("is_in_bullet_time")) or bool(player.get("is_flying_to_melee")) or bool(player.get("is_flying_to_opponent")):
+			return true
+	return false
+
+
+func _process_melee_approach_bar(delta: float, player: Node) -> void:
+	if not player or not is_instance_valid(player) or bool(player.get("is_match_over")):
+		melee_approach_progress = maxf(melee_approach_progress - delta * 0.35, 0.0)
+		if player and is_instance_valid(player):
+			player.set("melee_approach_progress", melee_approach_progress)
+		return
+
+	var opp: Node3D = player._get_opponent() if player.has_method("_get_opponent") else null
+	if not opp or not is_instance_valid(opp) or bool(opp.get("is_in_bullet_time")) or (opp.has_method("is_airborne_incapacitated") and opp.is_airborne_incapacitated()):
+		melee_approach_progress = maxf(melee_approach_progress - delta * 0.25, 0.0)
+		player.set("melee_approach_progress", melee_approach_progress)
+		return
+
+	var p_xz := Vector2(player.global_position.x, player.global_position.z)
+	var o_xz := Vector2(opp.global_position.x, opp.global_position.z)
+	var dist_xz: float = p_xz.distance_to(o_xz)
+
+	if dist_xz <= MELEE_APPROACH_RANGE:
+		var closeness: float = clampf((MELEE_APPROACH_RANGE - dist_xz) / 4.0, 0.0, 1.0)
+		var fill_rate: float = lerpf(0.14, 0.34, closeness)
+		melee_approach_progress = minf(melee_approach_progress + fill_rate * delta, 1.0)
+	elif dist_xz > MELEE_DECAY_RANGE:
+		melee_approach_progress = maxf(melee_approach_progress - delta * 0.18, 0.0)
+
+	player.set("melee_approach_progress", melee_approach_progress)
+	if melee_approach_progress >= 1.0 and melee_cooldown <= 0.0:
+		melee_approach_progress = 0.0
+		player.set("melee_approach_progress", 0.0)
+		var bp_p: float = maxf(float(player.get("current_np")) if player.get("current_np") != null else 10000.0, 100.0)
+		var bp_e: float = maxf(float(opp.get("current_np")) if opp.get("current_np") != null else 10000.0, 100.0)
+		var p_atk_prob: float = clampf(bp_p / (bp_p + bp_e), 0.30, 0.70)
+		var player_attacks: bool = randf() < p_atk_prob
+		if player_attacks and player.has_method("_start_melee_bullet_time"):
+			player._start_melee_bullet_time(opp)
+		elif not player_attacks and opp.has_method("_start_melee_bullet_time"):
+			opp._start_melee_bullet_time(player)
+
+
 func _update_body_space_metrics(player: Node) -> void:
 	if not left_controller or not right_controller or (not xr_origin and not camera):
 		return
@@ -440,8 +516,8 @@ func _update_body_space_metrics(player: Node) -> void:
 
 
 func _process_ki_recharge(delta: float) -> void:
-	var l_trig: bool = left_controller.get_float("trigger") > 0.45 or left_controller.is_button_pressed("trigger_click")
-	var r_trig: bool = right_controller.get_float("trigger") > 0.45 or right_controller.is_button_pressed("trigger_click")
+	var l_trig: bool = _ctrl_float(left_controller, &"trigger") > 0.45 or _ctrl_pressed(left_controller, &"trigger_click")
+	var r_trig: bool = _ctrl_float(right_controller, &"trigger") > 0.45 or _ctrl_pressed(right_controller, &"trigger_click")
 	var triggers_held: bool = l_trig and r_trig
 
 	# Si ambos gatillos están sostenidos y no hay super poder en curso
@@ -606,8 +682,8 @@ func _process_ki_blasts(delta: float) -> void:
 		right_is_charging = false
 		return
 
-	var l_trig: bool = left_controller.get_float("trigger") > 0.35 or left_controller.is_button_pressed("trigger_click")
-	var r_trig: bool = right_controller.get_float("trigger") > 0.35 or right_controller.is_button_pressed("trigger_click")
+	var l_trig: bool = _ctrl_float(left_controller, &"trigger") > 0.35 or _ctrl_pressed(left_controller, &"trigger_click")
+	var r_trig: bool = _ctrl_float(right_controller, &"trigger") > 0.35 or _ctrl_pressed(right_controller, &"trigger_click")
 
 	# Si ambos gatillos están presionados en pose de recarga (pecho/cintura sin palmas extendidas), ceder a Recarga de Ki;
 	# si las palmas están extendidas adelante, permitir fuego bimanual alternado/simultáneo fluido
@@ -617,8 +693,8 @@ func _process_ki_blasts(delta: float) -> void:
 		return
 
 	# Si ambos mandos tienen Grip presionado y no hay Ki Blast cargando, es Super Poder o Guardia
-	var l_grip: bool = left_controller.get_float("grip") > 0.50 or left_controller.is_button_pressed("grip_click")
-	var r_grip: bool = right_controller.get_float("grip") > 0.50 or right_controller.is_button_pressed("grip_click")
+	var l_grip: bool = _ctrl_float(left_controller, &"grip") > 0.50 or _ctrl_pressed(left_controller, &"grip_click")
+	var r_grip: bool = _ctrl_float(right_controller, &"grip") > 0.50 or _ctrl_pressed(right_controller, &"grip_click")
 	if l_grip and r_grip and not left_is_charging and not right_is_charging:
 		return
 
@@ -634,9 +710,9 @@ func _process_ki_blasts(delta: float) -> void:
 
 
 func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta: float) -> void:
-	var trig_val = controller.get_float("trigger")
-	var trig_pressed = trig_val > 0.65 or controller.is_button_pressed("trigger_click")
-	var grip_pressed: bool = controller.get_float("grip") > 0.40 or controller.is_button_pressed("grip_click")
+	var trig_val = _ctrl_float(controller, &"trigger")
+	var trig_pressed = trig_val > 0.65 or _ctrl_pressed(controller, &"trigger_click")
+	var grip_pressed: bool = _ctrl_float(controller, &"grip") > 0.40 or _ctrl_pressed(controller, &"grip_click")
 	var is_left = (hand_side == 0)
 
 	# Si la mano cierra Grip (puño para Melee o Big Bang), NUNCA iniciar ni disparar Ki Blast accidentalmente
@@ -1051,15 +1127,15 @@ func _process_super_powers(delta: float) -> void:
 		return
 
 	if must_release_super_buttons:
-		var l_g: bool = left_controller.get_float("grip") > 0.65 or left_controller.is_button_pressed("grip_click")
-		var r_g: bool = right_controller.get_float("grip") > 0.65 or right_controller.is_button_pressed("grip_click")
+		var l_g: bool = _ctrl_float(left_controller, &"grip") > 0.65 or _ctrl_pressed(left_controller, &"grip_click")
+		var r_g: bool = _ctrl_float(right_controller, &"grip") > 0.65 or _ctrl_pressed(right_controller, &"grip_click")
 		if not l_g and not r_g:
 			must_release_super_buttons = false
 		else:
 			return
 
-	var l_trig: bool = left_controller.get_float("trigger") > 0.65 or left_controller.is_button_pressed("trigger_click")
-	var r_trig: bool = right_controller.get_float("trigger") > 0.65 or right_controller.is_button_pressed("trigger_click")
+	var l_trig: bool = _ctrl_float(left_controller, &"trigger") > 0.65 or _ctrl_pressed(left_controller, &"trigger_click")
+	var r_trig: bool = _ctrl_float(right_controller, &"trigger") > 0.65 or _ctrl_pressed(right_controller, &"trigger_click")
 
 	# Si se está recargando Ki, cancelar o bloquear entrada; no cancelar CHARGING activo por rozar ambos gatillos
 	var block_super_entry: bool = is_charging_ki or (current_super_state == SuperPowerState.IDLE and (ki_prep_phase or (l_trig and r_trig)))
@@ -1070,8 +1146,8 @@ func _process_super_powers(delta: float) -> void:
 		candidate_hold_timer = 0.0
 		return
 
-	var l_grip: bool = left_controller.get_float("grip") > 0.65 or left_controller.is_button_pressed("grip_click")
-	var r_grip: bool = right_controller.get_float("grip") > 0.65 or right_controller.is_button_pressed("grip_click")
+	var l_grip: bool = _ctrl_float(left_controller, &"grip") > 0.65 or _ctrl_pressed(left_controller, &"grip_click")
+	var r_grip: bool = _ctrl_float(right_controller, &"grip") > 0.65 or _ctrl_pressed(right_controller, &"grip_click")
 
 	var l_local_x: float = l_torso_pos.x
 	var r_local_x: float = r_torso_pos.x
@@ -1462,6 +1538,9 @@ func _execute_super_fire(tech_name: String) -> void:
 
 	var raw_launch_dir: Vector3 = _compute_super_raw_aim_dir(tech_name, true)
 	if gesture_tree:
+		var chg_pl: Node = gesture_tree.get("ki_blast_charge_player")
+		if chg_pl and is_instance_valid(chg_pl) and chg_pl.has_method("stop"):
+			chg_pl.stop()
 		gesture_tree._hide_aim_reticle()
 		gesture_tree.set("last_super_launch_dir", raw_launch_dir)
 		gesture_tree.set("_ki_already_consumed_by_hybrid", true)
@@ -1509,6 +1588,9 @@ func _reset_super_state() -> void:
 	if player and player.has_method("stop_charging_super"):
 		player.stop_charging_super()
 	if gesture_tree:
+		var chg_pl: Node = gesture_tree.get("ki_blast_charge_player")
+		if chg_pl and is_instance_valid(chg_pl) and chg_pl.has_method("stop"):
+			chg_pl.stop()
 		gesture_tree._hide_aim_reticle()
 		gesture_tree.sync_controller_gesture_state("IDLE")
 		gesture_tree.set("is_charging_kamehameha", false)
@@ -1554,12 +1636,12 @@ func cancel_ki_recharge_from_hit() -> void:
 
 # --- 4. TRANSFORMACIONES (Botones A / X y B / Y con Edge-Trigger y Progresión Estricta) ---
 func _process_transformations() -> void:
-	var right_ax = right_controller.is_button_pressed("ax_button") if right_controller else false
-	var left_ax = left_controller.is_button_pressed("ax_button") if left_controller else false
+	var right_ax = _ctrl_pressed(right_controller, &"ax_button") if right_controller else false
+	var left_ax = _ctrl_pressed(left_controller, &"ax_button") if left_controller else false
 	var ax_pressed = right_ax or left_ax
 
-	var right_by = right_controller.is_button_pressed("by_button") if right_controller else false
-	var left_by = left_controller.is_button_pressed("by_button") if left_controller else false
+	var right_by = _ctrl_pressed(right_controller, &"by_button") if right_controller else false
+	var left_by = _ctrl_pressed(left_controller, &"by_button") if left_controller else false
 	var by_pressed = right_by or left_by
 
 	# Edge detection: solo disparar en el instante en que el botón pasa de NO presionado a PRESIONADO
@@ -1641,10 +1723,10 @@ func _process_transformations() -> void:
 			return
 
 	# Gesto Canónico de Transformación en VR (Puños a la cintura durante 1.2s)
-	var l_trig = left_controller.get_float("trigger") > 0.45 or left_controller.is_button_pressed("trigger_click") if left_controller else false
-	var r_trig = right_controller.get_float("trigger") > 0.45 or right_controller.is_button_pressed("trigger_click") if right_controller else false
-	var l_grip = left_controller.get_float("grip") > 0.45 or left_controller.is_button_pressed("grip_click") if left_controller else false
-	var r_grip = right_controller.get_float("grip") > 0.45 or right_controller.is_button_pressed("grip_click") if right_controller else false
+	var l_trig = _ctrl_float(left_controller, &"trigger") > 0.45 or _ctrl_pressed(left_controller, &"trigger_click") if left_controller else false
+	var r_trig = _ctrl_float(right_controller, &"trigger") > 0.45 or _ctrl_pressed(right_controller, &"trigger_click") if right_controller else false
+	var l_grip = _ctrl_float(left_controller, &"grip") > 0.45 or _ctrl_pressed(left_controller, &"grip_click") if left_controller else false
+	var r_grip = _ctrl_float(right_controller, &"grip") > 0.45 or _ctrl_pressed(right_controller, &"grip_click") if right_controller else false
 
 	if l_trig and r_trig and l_grip and r_grip and camera and left_controller and right_controller:
 		var is_at_waist = (l_cam_rel_y < -0.22) and (r_cam_rel_y < -0.22)
@@ -1707,13 +1789,13 @@ func _process_melee_punches() -> void:
 		right_punch_cocked = false
 		return
 
-	var l_grip: bool = left_controller.get_float("grip") > 0.40 or left_controller.is_button_pressed("grip_click")
-	var l_trig: bool = left_controller.get_float("trigger") > 0.40 or left_controller.is_button_pressed("trigger_click")
+	var l_grip: bool = _ctrl_float(left_controller, &"grip") > 0.40 or _ctrl_pressed(left_controller, &"grip_click")
+	var l_trig: bool = _ctrl_float(left_controller, &"trigger") > 0.40 or _ctrl_pressed(left_controller, &"trigger_click")
 	# REQUISITO CANÓNICO: Puño cerrado simulado con Grab + Gatillo (ambos botones presionados)
 	var l_fist: bool = l_grip and l_trig
 
-	var r_grip: bool = right_controller.get_float("grip") > 0.40 or right_controller.is_button_pressed("grip_click")
-	var r_trig: bool = right_controller.get_float("trigger") > 0.40 or right_controller.is_button_pressed("trigger_click")
+	var r_grip: bool = _ctrl_float(right_controller, &"grip") > 0.40 or _ctrl_pressed(right_controller, &"grip_click")
+	var r_trig: bool = _ctrl_float(right_controller, &"trigger") > 0.40 or _ctrl_pressed(right_controller, &"trigger_click")
 	# REQUISITO CANÓNICO: Puño cerrado simulado con Grab + Gatillo (ambos botones presionados)
 	var r_fist: bool = r_grip and r_trig
 
@@ -1841,7 +1923,7 @@ func _process_hud_toggle(delta: float) -> void:
 	# Botón de menú (tres barras / Option) del mando izquierdo: Menú In-Game
 	if menu_toggle_cooldown > 0.0:
 		menu_toggle_cooldown -= delta
-	elif left_controller.is_button_pressed("menu_button"):
+	elif _ctrl_pressed(left_controller, &"menu_button"):
 		menu_toggle_cooldown = 0.45
 		if not in_game_menu or not is_instance_valid(in_game_menu):
 			_find_xr_nodes()
@@ -1873,8 +1955,8 @@ func _process_grid_step_movement(delta: float) -> void:
 		return
 
 	# A. ELEVACIÓN VERTICAL POR CLIC DE STICK
-	var r_click: bool = right_controller and (right_controller.is_button_pressed("primary_click") or right_controller.is_button_pressed("secondary_click"))
-	var l_click: bool = left_controller and (left_controller.is_button_pressed("primary_click") or left_controller.is_button_pressed("secondary_click"))
+	var r_click: bool = right_controller and (_ctrl_pressed(right_controller, &"primary_click") or _ctrl_pressed(right_controller, &"secondary_click"))
+	var l_click: bool = left_controller and (_ctrl_pressed(left_controller, &"primary_click") or _ctrl_pressed(left_controller, &"secondary_click"))
 
 	# Clic stick derecho: SUBIR un espacio vertical
 	if r_click and vertical_step_cooldown <= 0.0 and not is_step_moving:
@@ -1902,9 +1984,9 @@ func _process_grid_step_movement(delta: float) -> void:
 			_pulse_haptic(left_controller, 90.0, 0.4, 0.12) # Límite inferior (suelo) alcanzado
 
 	# B. DESPLAZAMIENTO HORIZONTAL POR CASILLAS (STICK DERECHO O IZQUIERDO)
-	var stick: Vector2 = right_controller.get_vector2("primary") if right_controller else Vector2.ZERO
+	var stick: Vector2 = _ctrl_vec2(right_controller, &"primary") if right_controller else Vector2.ZERO
 	if stick.length() < 0.25 and left_controller:
-		stick = left_controller.get_vector2("primary")
+		stick = _ctrl_vec2(left_controller, &"primary")
 	var stick_len: float = stick.length()
 
 	if stick_len < 0.25:
@@ -2191,10 +2273,10 @@ func _process_determination(delta: float) -> void:
 				dd.update_determination_vfx(player, 0.0, false)
 		return
 
-	var l_grip: bool = left_controller.get_float("grip") > 0.45 or left_controller.is_button_pressed("grip_click")
-	var r_grip: bool = right_controller.get_float("grip") > 0.45 or right_controller.is_button_pressed("grip_click")
-	var l_trig: bool = left_controller.get_float("trigger") > 0.45 or left_controller.is_button_pressed("trigger_click")
-	var r_trig: bool = right_controller.get_float("trigger") > 0.45 or right_controller.is_button_pressed("trigger_click")
+	var l_grip: bool = _ctrl_float(left_controller, &"grip") > 0.45 or _ctrl_pressed(left_controller, &"grip_click")
+	var r_grip: bool = _ctrl_float(right_controller, &"grip") > 0.45 or _ctrl_pressed(right_controller, &"grip_click")
+	var l_trig: bool = _ctrl_float(left_controller, &"trigger") > 0.45 or _ctrl_pressed(left_controller, &"trigger_click")
+	var r_trig: bool = _ctrl_float(right_controller, &"trigger") > 0.45 or _ctrl_pressed(right_controller, &"trigger_click")
 	var pose_ok: bool = pose_chest_guard and l_grip and r_grip and not l_trig and not r_trig
 
 	if pose_ok:
@@ -2228,10 +2310,10 @@ func _process_guard() -> void:
 		_set_player_blocking(false)
 		return
 
-	var l_grip: bool = left_controller.get_float("grip") > 0.45 or left_controller.is_button_pressed("grip_click")
-	var r_grip: bool = right_controller.get_float("grip") > 0.45 or right_controller.is_button_pressed("grip_click")
-	var l_trig: bool = left_controller.get_float("trigger") > 0.45 or left_controller.is_button_pressed("trigger_click")
-	var r_trig: bool = right_controller.get_float("trigger") > 0.45 or right_controller.is_button_pressed("trigger_click")
+	var l_grip: bool = _ctrl_float(left_controller, &"grip") > 0.45 or _ctrl_pressed(left_controller, &"grip_click")
+	var r_grip: bool = _ctrl_float(right_controller, &"grip") > 0.45 or _ctrl_pressed(right_controller, &"grip_click")
+	var l_trig: bool = _ctrl_float(left_controller, &"trigger") > 0.45 or _ctrl_pressed(left_controller, &"trigger_click")
+	var r_trig: bool = _ctrl_float(right_controller, &"trigger") > 0.45 or _ctrl_pressed(right_controller, &"trigger_click")
 
 	# Guardia Cruzada en 'X': Ambos puños cerrados (Grip + Gatillo en ambas manos) frente al pecho
 	if l_grip and l_trig and r_grip and r_trig and pose_chest_guard:
@@ -2307,7 +2389,31 @@ func _process_bio_haptics(delta: float) -> void:
 
 
 func _pulse_haptic(controller: XRController3D, freq: float, amp: float, duration: float) -> void:
-	if not haptics_enabled or not controller:
+	if not haptics_enabled or not controller or (desktop_sim and desktop_sim.get("sim_active")):
 		return
 	if controller.has_method("trigger_haptic_pulse"):
 		controller.trigger_haptic_pulse("haptic", freq, amp, duration, 0.0)
+
+
+func _ctrl_pressed(ctrl: XRController3D, action: StringName) -> bool:
+	if not ctrl:
+		return false
+	if desktop_sim and desktop_sim.get("sim_active"):
+		return desktop_sim.call("get_button_pressed", ctrl == left_controller, action)
+	return ctrl.is_button_pressed(action)
+
+
+func _ctrl_float(ctrl: XRController3D, action: StringName) -> float:
+	if not ctrl:
+		return 0.0
+	if desktop_sim and desktop_sim.get("sim_active"):
+		return desktop_sim.call("get_float", ctrl == left_controller, action)
+	return ctrl.get_float(action)
+
+
+func _ctrl_vec2(ctrl: XRController3D, action: StringName) -> Vector2:
+	if not ctrl:
+		return Vector2.ZERO
+	if desktop_sim and desktop_sim.get("sim_active"):
+		return desktop_sim.call("get_vector2", ctrl == left_controller, action)
+	return ctrl.get_vector2(action)
