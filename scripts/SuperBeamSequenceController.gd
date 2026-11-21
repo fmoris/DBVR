@@ -1007,8 +1007,8 @@ func _ensure_super_action_card() -> void:
 
 	super_action_card_anchor = Node3D.new()
 	super_action_card_anchor.name = "SuperActionGuideCardAnchor"
-	super_action_card_anchor.position = Vector3(0.0, -0.19, -1.06)
-	super_action_card_anchor.rotation_degrees = Vector3.ZERO
+	super_action_card_anchor.position = Vector3(0.0, -0.34, -1.10)
+	super_action_card_anchor.rotation_degrees = Vector3(10.0, 0.0, 0.0)
 	cam.add_child(super_action_card_anchor)
 
 	var border := MeshInstance3D.new()

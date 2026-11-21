@@ -384,8 +384,8 @@ func _ensure_action_card() -> void:
 
 	action_card_anchor = Node3D.new()
 	action_card_anchor.name = "MeleeActionGuideCardAnchor"
-	action_card_anchor.position = Vector3(0.0, -0.19, -1.06)
-	action_card_anchor.rotation_degrees = Vector3.ZERO
+	action_card_anchor.position = Vector3(0.0, -0.36, -1.10)
+	action_card_anchor.rotation_degrees = Vector3(10.0, 0.0, 0.0)
 	cam.add_child(action_card_anchor)
 
 	var border := MeshInstance3D.new()
@@ -396,8 +396,8 @@ func _ensure_action_card() -> void:
 	_action_card_border_mat = StandardMaterial3D.new()
 	_action_card_border_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_action_card_border_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_action_card_border_mat.no_depth_test = true
-	_action_card_border_mat.render_priority = 122
+	_action_card_border_mat.no_depth_test = false
+	_action_card_border_mat.render_priority = 10
 	_action_card_border_mat.albedo_color = Color(1.0, 0.55, 0.15, 0.90)
 	border.material_override = _action_card_border_mat
 	action_card_anchor.add_child(border)
@@ -411,8 +411,8 @@ func _ensure_action_card() -> void:
 	var bg_mat := StandardMaterial3D.new()
 	bg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	bg_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	bg_mat.no_depth_test = true
-	bg_mat.render_priority = 123
+	bg_mat.no_depth_test = false
+	bg_mat.render_priority = 11
 	bg_mat.albedo_color = Color(0.03, 0.06, 0.11, 0.88)
 	bg.material_override = bg_mat
 	action_card_anchor.add_child(bg)
@@ -421,8 +421,8 @@ func _ensure_action_card() -> void:
 	_action_card_label.name = "MeleeCardText"
 	_action_card_label.font_size = 21
 	_action_card_label.pixel_size = 0.00125
-	_action_card_label.no_depth_test = true
-	_action_card_label.render_priority = 124
+	_action_card_label.no_depth_test = false
+	_action_card_label.render_priority = 12
 	_action_card_label.outline_size = 6
 	_action_card_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.95)
 	_action_card_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
@@ -520,8 +520,11 @@ func _spawn_impact_popup(_world_pos: Vector3, txt: String, col: Color, force_cam
 func _begin_phase_transition(mode: String, wait_sec: float, msg: String, col: Color) -> void:
 	phase = DomePhase.PHASE_TRANSITION
 	transition_on_complete_mode = mode
-	# Pausa mínima de 0.45s entre roles para mantener ritmo ágil sin perder legibilidad
-	transition_timer = maxf(wait_sec, 0.45) if mode in ["start_defense", "restart_attacker", "continue_offense"] else wait_sec
+	var ai_defending: bool = (mode == "start_defense") and defender != null and is_instance_valid(defender) and not bool(defender.get("is_player"))
+	var min_wait: float = 0.16 if ai_defending else 0.45
+	var actual_wait: float = minf(wait_sec, 0.18) if ai_defending else wait_sec
+	# Pausa mínima de 0.45s para jugador (legibilidad) y 0.16s-0.18s cuando defiende la IA (agilidad)
+	transition_timer = maxf(actual_wait, min_wait) if mode in ["start_defense", "restart_attacker", "continue_offense"] else wait_sec
 	transition_message = msg
 	transition_color = col
 	_reset_all_timing_rings()
@@ -871,13 +874,20 @@ func start_defense_phase() -> void:
 	_apply_role_dome_tint(not bool(defender and is_instance_valid(defender) and defender.get("is_player")))
 	_refresh_melee_ki_bar()
 
+	var def_is_ai: bool = defender != null and is_instance_valid(defender) and not bool(defender.get("is_player"))
 	var accum_time: float = 0.0
 	for h in hits:
-		var prewarn: float = _compute_note_prewarn_sec(h)
-		h["prewarn_sec"] = prewarn
-		accum_time += prewarn + 0.16
+		if def_is_ai:
+			var is_heavy_h: bool = bool(h.get("is_charged", false)) or bool(h.get("is_charged_v3", false)) or bool(h.get("is_hammer", false))
+			var ai_gap: float = 0.30 if is_heavy_h else 0.20
+			h["prewarn_sec"] = minf(_compute_note_prewarn_sec(h), ai_gap)
+			accum_time += (0.14 if accum_time == 0.0 else ai_gap)
+		else:
+			var prewarn: float = _compute_note_prewarn_sec(h)
+			h["prewarn_sec"] = prewarn
+			accum_time += prewarn + 0.16
 		h["time_offset"] = accum_time
-	defense_total_duration = accum_time + 0.90
+	defense_total_duration = accum_time + (0.28 if def_is_ai else 0.90)
 
 	if dome_mesh and is_instance_valid(dome_mesh):
 		var mat := dome_mesh.material_override as StandardMaterial3D
@@ -1090,7 +1100,7 @@ func _resolve_perfect_parry(note: Dictionary, zone: Dictionary) -> void:
 	_pulse_defender_both_hands(250.0, 1.0, 0.25)
 	if defender and is_instance_valid(defender) and defender.get("procedural_animator"):
 		defender.procedural_animator.trigger_melee_block(3)
-	perform_z_blink_relocation()
+	perform_z_blink_relocation(_pick_aggressive_melee_spot(1.85, true))
 
 	last_action_feedback = "⚡ ¡PARRY PERFECTO! (+%d Ki)" % int(parry_ki)
 	pip_results.append("blocked")
@@ -1160,7 +1170,7 @@ func _resolve_fist_clash(note: Dictionary, zone: Dictionary, hand_idx: int) -> v
 		if defender and is_instance_valid(defender) and defender.get("procedural_animator"):
 			defender.procedural_animator.trigger_melee_block(2)
 		var lat_c: Vector3 = _duel_axis.cross(Vector3.UP).normalized() * (1.0 if hand_idx == 1 else -1.0)
-		_apply_melee_arena_surge(lat_c * 6.0 + Vector3.UP * 1.8, 0.24)
+		_trigger_dynamic_melee_mobility(float(note.get("power", 1.35)), bool(note.get("is_charged", false)), bool(note.get("is_charged_v3", false)), false, defender, attacker, lat_c * 7.5 + Vector3.UP * 2.4, 0.22, true)
 		_trigger_hit_stop(0.08)
 
 		last_action_feedback = "⚡ ¡CHOQUE DE PUÑOS! +%d Ki (-1 golpe)" % int(def_ki_gain)
@@ -1179,7 +1189,7 @@ func _resolve_fist_clash(note: Dictionary, zone: Dictionary, hand_idx: int) -> v
 		_spawn_hit_spark(zone_pos)
 		_pulse_defender_hand(hand_idx, 160.0, 0.75, 0.14)
 		var lat_cl: Vector3 = _duel_axis.cross(Vector3.UP).normalized() * (1.0 if hand_idx == 1 else -1.0)
-		_apply_melee_arena_surge(-_duel_axis * 5.0 + lat_cl * 1.8, 0.22)
+		_trigger_dynamic_melee_mobility(float(note.get("power", 1.2)), bool(note.get("is_charged", false)), bool(note.get("is_charged_v3", false)), false, attacker, defender, -_duel_axis * 6.5 + lat_cl * 2.4 + Vector3.UP * 1.4, 0.22, false)
 
 		last_action_feedback = "💥 ¡SUPERADO EN CHOQUE! (-%d BP)" % int(partial_dmg)
 		pip_results.append("hit")
@@ -1322,7 +1332,7 @@ func _resolve_hand_block(note: Dictionary, zone: Dictionary, hand_idx: int) -> v
 		defender.procedural_animator.trigger_melee_block(0)
 	var lat_b: Vector3 = _duel_axis.cross(Vector3.UP).normalized() * (1.0 if hand_idx == 1 else -1.0)
 	var back_dist: float = 5.5 if is_v3 else (4.4 if is_charged else 3.4)
-	_apply_melee_arena_surge(-_duel_axis * back_dist + lat_b * 1.8 + Vector3.UP * 0.75, 0.22)
+	_trigger_dynamic_melee_mobility(float(note.get("power", 1.0)), is_charged, is_v3, false, defender, attacker, -_duel_axis * back_dist + lat_b * 2.2 + Vector3.UP * 1.1, 0.20, is_v3)
 
 	_pulse_defender_hand(hand_idx, 180.0, 0.85, 0.10)
 	note["defense_score"] = score
@@ -1449,7 +1459,7 @@ func _resolve_unblocked_hit(note: Dictionary, zone: Dictionary) -> void:
 	var def_is_player_h: bool = bool(defender.get("is_player")) if (defender and is_instance_valid(defender)) else false
 	var hit_fwd: Vector3 = (-_duel_axis if def_is_player_h else _duel_axis) * (8.2 if (is_charged or is_v3 or is_hammer) else 5.5)
 	var hit_vert: Vector3 = Vector3.UP * (2.8 if (is_v3 and String(note.get("v3_launch_mode", "")) == "UP") else (-1.8 if is_hammer else 0.9))
-	_apply_melee_arena_surge(hit_fwd + lat_h + hit_vert, 0.24)
+	_trigger_dynamic_melee_mobility(note_power, is_charged, is_v3, is_hammer, attacker, defender, hit_fwd + lat_h + hit_vert, 0.22, is_v3 and String(note.get("v3_launch_mode", "")) == "UP")
 
 	if defender and is_instance_valid(defender):
 		if defender.has_method("take_hit"):
@@ -2555,7 +2565,7 @@ func _apply_melee_arena_surge(step_vec: Vector3, duration_sec: float = 0.20) -> 
 	var ground_h: float = 0.15
 	if p_node.has_method("get_ground_elevation"):
 		ground_h = float(p_node.get_ground_elevation(p_dest))
-	p_dest.y = clampf(p_dest.y, maxf(ground_h, 0.15), 22.0)
+	p_dest.y = clampf(p_dest.y, maxf(ground_h, 0.15), 28.0)
 
 	var actual_step: Vector3 = p_dest - cur_pos
 	var ai_dest: Vector3 = ai_node.global_position + actual_step
@@ -2571,6 +2581,70 @@ func _apply_melee_arena_surge(step_vec: Vector3, duration_sec: float = 0.20) -> 
 	_surge_tween = create_tween().set_parallel(true)
 	_surge_tween.tween_property(p_target, "global_position", p_dest, duration_sec).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	_surge_tween.tween_property(ai_node, "global_position", ai_dest, duration_sec).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+
+func _compute_melee_mobility_intensity(power_val: float, is_charged: bool, is_v3: bool, is_hammer: bool, mover: Node3D, opponent: Node3D) -> float:
+	var base_i: float = clampf(power_val * 0.55, 0.55, 1.85)
+	if is_hammer:
+		base_i = maxf(base_i, 2.0)
+	elif is_v3:
+		base_i = maxf(base_i, 1.78)
+	elif is_charged:
+		base_i = maxf(base_i, 1.35)
+
+	var bp_m: float = maxf(float(mover.get("current_np")) if (mover and is_instance_valid(mover) and mover.get("current_np") != null) else 10000.0, 100.0)
+	var bp_o: float = maxf(float(opponent.get("current_np")) if (opponent and is_instance_valid(opponent) and opponent.get("current_np") != null) else 10000.0, 100.0)
+	var r_bp: float = bp_m / bp_o
+	if r_bp >= 1.35:
+		base_i += 0.45
+	elif r_bp >= 1.15:
+		base_i += 0.25
+
+	if mover and is_instance_valid(mover) and (bool(mover.get("is_in_zenkai_state")) or bool(mover.get("is_in_furia"))):
+		base_i += 0.40
+
+	return clampf(base_i, 0.50, 2.50)
+
+
+func _pick_aggressive_melee_spot(intensity: float, prefer_aerial: bool = false) -> Vector3:
+	var pair: Array[Node3D] = _get_player_and_ai()
+	var p_node: Node3D = pair[0]
+	var cur_pos: Vector3 = Vector3.ZERO
+	if p_node:
+		var p_orig: Node3D = p_node.get_parent() as Node3D if p_node.get_parent() is Node3D else null
+		cur_pos = (p_orig if p_orig else p_node).global_position
+
+	var r_min: float = 28.0 if intensity >= 1.75 else (18.0 if intensity >= 1.15 else 12.0)
+	var r_max: float = 58.0 if intensity >= 1.75 else (38.0 if intensity >= 1.15 else 24.0)
+	var r: float = randf_range(r_min, r_max)
+	var ang: float = randf_range(0.0, TAU)
+	var cx: float = clampf(cos(ang) * r, -64.0, 64.0)
+	var cz: float = clampf(sin(ang) * r, -64.0, 64.0)
+	if Vector2(cx - cur_pos.x, cz - cur_pos.z).length() < 16.0:
+		cx = clampf(-cx, -64.0, 64.0)
+		cz = clampf(-cz, -64.0, 64.0)
+
+	var go_high: bool = prefer_aerial or intensity >= 1.75 or (intensity >= 1.15 and randf() < 0.60)
+	var cy: float = randf_range(14.0, 26.0) if go_high else randf_range(2.5, 11.5)
+	return Vector3(cx, cy, cz)
+
+
+func _trigger_dynamic_melee_mobility(power_val: float, is_charged: bool, is_v3: bool, is_hammer: bool, mover: Node3D, opponent: Node3D, surge_vec: Vector3, surge_dur: float, prefer_aerial: bool = false) -> void:
+	var intensity: float = _compute_melee_mobility_intensity(power_val, is_charged, is_v3, is_hammer, mover, opponent)
+	var vanish_prob: float = 0.0
+	if intensity >= 1.75:
+		vanish_prob = 1.0
+	elif intensity >= 1.15:
+		vanish_prob = 0.62
+	elif intensity >= 0.90:
+		vanish_prob = 0.18
+
+	if randf() < vanish_prob:
+		var dest: Vector3 = _pick_aggressive_melee_spot(intensity, prefer_aerial or is_v3 or is_hammer)
+		perform_z_blink_relocation(dest)
+	else:
+		var mult: float = 1.85 if intensity >= 1.15 else 1.45
+		_apply_melee_arena_surge(surge_vec * mult, surge_dur)
 
 
 ## Teletransporte instantáneo (Z-Blink) por puntos panorámicos de la arena SIN rotar XRCamera3D
@@ -2603,7 +2677,7 @@ func perform_z_blink_relocation(target_pos: Vector3 = Vector3.INF) -> void:
 	var gy: float = 0.15
 	if p_node.has_method("get_ground_elevation"):
 		gy = float(p_node.get_ground_elevation(dest))
-	dest.y = clampf(dest.y, maxf(gy, 0.20), 20.0)
+	dest.y = clampf(dest.y, maxf(gy, 0.20), 28.0)
 
 	var cam: Camera3D = _get_player_camera()
 	var cam_off_xz := Vector3.ZERO
@@ -2818,14 +2892,15 @@ func _register_hit(zone: Dictionary, ctrl_node: XRController3D, hand_name: Strin
 
 	var atk_lat_dir: float = 1.0 if (hits.size() % 2 == 0) else -1.0
 	var atk_lat: Vector3 = _duel_axis.cross(Vector3.UP).normalized() * atk_lat_dir
-	if is_v3:
-		_apply_melee_arena_surge(_duel_axis * 7.5 + atk_lat * 2.8 + Vector3.UP * (2.6 if v3_mode == "UP" else 0.9), 0.24)
-	elif is_charged:
-		_apply_melee_arena_surge(_duel_axis * 6.0 + atk_lat * 2.2 + Vector3.UP * 1.2, 0.22)
-	elif tier_name == "SONICO":
-		_apply_melee_arena_surge(_duel_axis * 5.5 + atk_lat * 2.0 + Vector3.UP * 0.8, 0.20)
-	else:
-		_apply_melee_arena_surge(_duel_axis * 3.5 + atk_lat * 1.5 + Vector3.UP * randf_range(-0.6, 0.9), 0.18)
+	var base_surge: Vector3 = _duel_axis * 7.5 + atk_lat * 2.8 + Vector3.UP * (2.6 if v3_mode == "UP" else 0.9)
+	if not is_v3:
+		if is_charged:
+			base_surge = _duel_axis * 6.0 + atk_lat * 2.2 + Vector3.UP * 1.2
+		elif tier_name == "SONICO":
+			base_surge = _duel_axis * 5.5 + atk_lat * 2.0 + Vector3.UP * 0.8
+		else:
+			base_surge = _duel_axis * 3.5 + atk_lat * 1.5 + Vector3.UP * randf_range(-0.6, 0.9)
+	_trigger_dynamic_melee_mobility(punch_power, is_charged, is_v3, false, attacker, defender, base_surge, 0.18 if is_v3 else 0.16, is_v3 and v3_mode == "UP")
 
 	var orig_col: Color = zone["color"] as Color
 	var flash_col: Color = Color(1.0, 0.2, 0.1) if is_v3 else (Color(1.0, 0.45, 0.1) if is_charged else Color(1.0, 1.0, 0.4))
@@ -2943,7 +3018,7 @@ func _check_hammer_finisher() -> bool:
 		attack_step_cooldown = 0.16
 		var hammer_pos: Vector3 = target_zones[1]["node"].global_position
 		_spawn_parry_shockwave(hammer_pos)
-		_apply_melee_arena_surge(_duel_axis * 4.2 + Vector3.UP * 2.4, 0.22)
+		_trigger_dynamic_melee_mobility(4.5, true, false, true, attacker, defender, _duel_axis * 6.5 + Vector3.UP * 3.2, 0.20, true)
 		_spawn_impact_popup(hammer_pos, "🔨 ¡MARTILLAZO REGISTRADO!", Color(0.95, 0.35, 1.0))
 		if current_attack_step >= max_allowed_hits:
 			_begin_phase_transition("start_defense", 0.50, "🔨 ¡MARTILLAZO DBZ LANZADO!", Color(0.95, 0.35, 1.0))
