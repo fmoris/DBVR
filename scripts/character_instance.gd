@@ -797,10 +797,16 @@ func _process(delta: float) -> void:
 			current_ki = 0.0
 			if not busy_with_super_or_zenkai:
 				revert_to_base()
+				is_staggered = true
+				stagger_timer = maxf(stagger_timer, 1.2)
+				_log_combat_event("💨 ¡Sin Ki! Destransformación por agotamiento (1.2s fatiga)", "warning")
 
 	# Reversión canónica a estado base si el Ki se agota por cualquier causa (Punto 13)
 	if current_transformation and current_ki <= 0.0 and not busy_with_super_or_zenkai:
 		revert_to_base()
+		is_staggered = true
+		stagger_timer = maxf(stagger_timer, 1.2)
+		_log_combat_event("💨 ¡Sin Ki! Destransformación por agotamiento (1.2s fatiga)", "warning")
 
 	# Alinear el aura con la cámara para el jugador en primera persona
 	if is_player and aura_node and is_instance_valid(aura_node):
@@ -1736,6 +1742,16 @@ func trigger_comeback_zenkai() -> void:
 func _tick_dramatic_buffs(delta: float) -> void:
 	if active_dramatic_buffs.is_empty():
 		return
+	if active_dramatic_buffs.has("ki_drain_per_sec"):
+		var k_drain: float = float(active_dramatic_buffs["ki_drain_per_sec"].get("value", 0.0)) * delta
+		if k_drain > 0.0:
+			if current_ki > k_drain:
+				current_ki -= k_drain
+				_notify_stats()
+			else:
+				current_ki = 0.0
+				current_np = maxf(100.0, current_np - 120.0 * delta)
+				_notify_stats()
 	_expired_buff_keys.clear()
 	for k in active_dramatic_buffs.keys():
 		var entry: Dictionary = active_dramatic_buffs[k]
@@ -1935,12 +1951,12 @@ func notify_attack_failed() -> void:
 	# 1. NP cae a la mitad (o un valor mínimo).
 	# 2. Ki cae a 0.
 	# 3. Estado de penalización por 8 segundos.
-	current_np = max(current_np * 0.4, 100.0)
-	current_ki = 0.0
+	current_np = max(current_np * 0.65, 100.0)
+	current_ki = maxf(current_ki, 15.0)
 	is_penalized = true
-	penalty_timer = 8.0
+	penalty_timer = 4.5
 	_notify_stats()
-	print("[CharacterInstance] %s: ¡FALLO DE REMATE! Penalizado: Ki a 0, NP reducido a la mitad y recarga mermada." % character_data.character_name)
+	print("[CharacterInstance] %s: ¡FALLO DE REMATE! Penalizado (4.5s): BP al 65%% y Ki mínimo 15." % character_data.character_name)
 
 func unlock_transformation(form_name: String) -> void:
 	if not unlocked_transformations.has(form_name):
@@ -2031,14 +2047,6 @@ func _check_transformation_unlocks() -> void:
 		if not is_transformation_unlocked(form_3):
 			if is_in_zenkai_state:
 				unlock_transformation(form_3)
-
-	# Desbloqueo Fase 4 (Cúspide x8.0: Ultra Instinto / Ultra Ego):
-	# Se activa tras transformar en Fase 3+ con Estado Zenkai o umbral irreversible >= 75%
-	if character_data.transformations.size() > 3:
-		var form_4: String = character_data.transformations[3].form_name
-		if not is_transformation_unlocked(form_4):
-			if current_transformation_index >= 2 and (is_in_zenkai_state or secured_np_threshold_ratio >= 0.75):
-				unlock_transformation(form_4)
 
 	# Desbloqueo Fase 4 (Cúspide x8.0: Ultra Instinto / Ultra Ego):
 	# Se activa tras transformar en Fase 3+ con Estado Zenkai o umbral irreversible >= 75%
@@ -4450,6 +4458,37 @@ func trigger_explosive_wave_chain_break() -> bool:
 			opp.apply_knockback(push_dir, 18.0)
 
 	_log_combat_event("💥 ¡ONDA EXPANSIVA! Cadena enemiga cortada (-%d Ki)" % int(cfg.melee_explosive_wave_cost), "warning")
+	return true
+
+
+func execute_shunkan_ido_flank() -> bool:
+	if is_match_over or is_in_bullet_time or is_in_beam_sequence or is_in_beam_clash or is_flying_to_opponent:
+		return false
+	var cfg: KiEconomyConfig = KiEconomyConfig.get_default()
+	if current_ki < cfg.melee_vanish_cost:
+		return false
+	var opp: Node3D = _get_opponent()
+	if not opp or not is_instance_valid(opp):
+		return false
+	consume_ki(cfg.melee_vanish_cost)
+	var opp_pos: Vector3 = opp.global_position
+	var side_sign: float = -1.0 if randf() < 0.5 else 1.0
+	var to_me: Vector3 = (global_position - opp_pos)
+	to_me.y = 0.0
+	var base_dir: Vector3 = to_me.normalized() if to_me.length_squared() > 0.01 else Vector3.BACK
+	var flank_dir: Vector3 = base_dir.rotated(Vector3.UP, side_sign * deg_to_rad(135.0))
+	var dest: Vector3 = opp_pos + flank_dir * 11.5
+	dest.y = get_ground_elevation(dest)
+	if is_player and get_parent() is Node3D:
+		var orig: Node3D = get_parent() as Node3D
+		orig.global_position = Vector3(dest.x, maxf(orig.global_position.y, dest.y), dest.z)
+		_clamp_to_arena(orig)
+	else:
+		global_position = Vector3(dest.x, maxf(global_position.y, dest.y), dest.z)
+		_clamp_to_arena(self)
+	_spawn_melee_shockwave(dest + Vector3.UP * 1.0)
+	play_character_action_audio("common.dodge_vanish", false)
+	_log_combat_event("⚡ ¡SHUNKAN IDŌ! Teletransporte táctico (-%d Ki)" % int(cfg.melee_vanish_cost), "info")
 	return true
 
 

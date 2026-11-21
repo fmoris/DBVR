@@ -808,6 +808,35 @@ func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta:
 		if held_time >= 0.025:
 			var is_charged = held_time >= 0.45
 			var action_name = "ki_blast_left" if is_left else "ki_blast_right"
+			var p_ref: Node = gesture_tree._get_player_instance() if gesture_tree else null
+			var in_fu_renzoku: bool = (not is_charged) and p_ref != null and is_instance_valid(p_ref) and bool(p_ref.get("is_in_followup_bullet_time"))
+			if in_fu_renzoku and gesture_tree:
+				var cfg_r: KiEconomyConfig = KiEconomyConfig.get_default()
+				var renzoku_cost: float = cfg_r.ki_blast_cost * 2.5
+				if float(p_ref.get("current_ki")) >= renzoku_cost:
+					p_ref.consume_ki(renzoku_cost)
+					gesture_tree._trigger_action(action_name, false)
+					get_tree().create_timer(0.08).timeout.connect(func():
+						if is_instance_valid(gesture_tree):
+							gesture_tree._trigger_action(action_name, false)
+					)
+					get_tree().create_timer(0.16).timeout.connect(func():
+						if is_instance_valid(gesture_tree):
+							gesture_tree._trigger_action(action_name, false)
+					)
+					if gesture_tree.has_signal("gesture_logged"):
+						gesture_tree.emit_signal("gesture_logged", "💥 ¡RENZOKU ENERGY DAN! Ráfaga x3 en seguimiento", "success")
+					if is_left:
+						left_charge_time = 0.0
+						left_is_charging = false
+						left_blast_locked_haptic = false
+						left_blast_cooldown = 0.25
+					else:
+						right_charge_time = 0.0
+						right_is_charging = false
+						right_blast_locked_haptic = false
+						right_blast_cooldown = 0.25
+					return
 			var player_cd: Node = gesture_tree._get_player_instance() if gesture_tree else null
 			var c_data_cd = player_cd.get("character_data") if (player_cd and is_instance_valid(player_cd)) else null
 			var is_veg_cd: bool = c_data_cd != null and "VEGETA" in String(c_data_cd.character_name).to_upper()
@@ -2009,6 +2038,16 @@ func _process_grid_step_movement(delta: float) -> void:
 	elif stick_len >= 0.55 and not right_stick_flicked and step_cooldown <= 0.0 and not is_step_moving:
 		right_stick_flicked = true
 		step_cooldown = 0.16
+
+		# Shunkan Idō (Teletransportación táctica en Fase Libre): Grip sostenido (sin gatillo) + flick fuerte de stick
+		var l_g_tp: bool = left_controller != null and (_ctrl_float(left_controller, &"grip") > 0.55 or _ctrl_pressed(left_controller, &"grip_click")) and not (_ctrl_float(left_controller, &"trigger") > 0.45)
+		var r_g_tp: bool = right_controller != null and (_ctrl_float(right_controller, &"grip") > 0.55 or _ctrl_pressed(right_controller, &"grip_click")) and not (_ctrl_float(right_controller, &"trigger") > 0.45)
+		if (l_g_tp or r_g_tp) and stick_len >= 0.78 and player and player.has_method("execute_shunkan_ido_flank"):
+			if player.execute_shunkan_ido_flank():
+				step_cooldown = 0.45
+				_pulse_haptic(left_controller, 180.0, 0.85, 0.14)
+				_pulse_haptic(right_controller, 180.0, 0.85, 0.14)
+				return
 
 		var cam_basis = camera.global_transform.basis if camera else xr_origin.global_transform.basis
 		var cam_fwd = -cam_basis.z

@@ -29,7 +29,17 @@ ki_cost = 45.0
 base_damage_np = 6000.0
 projectile_speed = 10.0
 energy_color = Color(0.6, 0.9, 1, 0.95)
-forbidden_transformations = Array[String](["Kaioken", "SSJ", "SSJ2", "SSJ3", "SSJ4", "SSB", "Ultra Instinto"])
+forbidden_transformations = Array[String](["Kaioken", "SSJ2", "SSJ3", "SSJ4", "SSB", "Ultra Instinto"])
+
+[sub_resource type="Resource" id="Resource_kame_inst"]
+script = ExtResource("1_ansdh")
+power_name = "Kamehameha Instantáneo"
+gesture_trigger = "kamehameha"
+ki_cost = 35.0
+base_damage_np = 3100.0
+projectile_speed = 46.0
+energy_color = Color(0.25, 0.85, 1, 1)
+unlock_requirement_transformation = "SSJ"
 
 [sub_resource type="Resource" id="Resource_biqls"]
 script = ExtResource("1_ansdh")
@@ -98,5 +108,5 @@ canonical_max_ki_text = "90 Septillion"
 description = "El protagonista de la serie, conocido por su gran poder y personalidad amigable. Originalmente enviado a la Tierra como un infante volador con la misión de conquistarla. Sin embargo, el caer por un barranco le proporcionó un brutal golpe que si bien casi lo mata, este alteró su memoria y anuló todos los instintos violentos de su especie, lo que lo hizo crecer con un corazón puro y bondadoso, pero conservando todos los poderes de su raza. No obstante, en la nueva continuidad de Dragon Ball se establece que él fue enviado por sus padres a la Tierra con el objetivo de sobrevivir a toda costa a la destrucción de su planeta por parte de Freeza. Más tarde, Kakarot, ahora conocido como Son Goku, se convertiría en el príncipe consorte del monte Fry-pan y líder de los Guerreros Z, así como el mayor defensor de la Tierra y del Universo 7, logrando mantenerlos a salvo de la destrucción en innumerables ocasiones, a pesar de no considerarse a sí mismo como un héroe o salvador."
 origin_planet_name = "Tierra"
 origin_planet_description = "La Tierra también llamado Mundo del Dragón (Dragon World), es el planeta principal donde se desarrolla la serie de Dragon Ball. Se encuentra en el Sistema Solar de la Vía Láctea de las Galaxias del Norte del Universo 7, lugar que supervisa el Kaio del Norte, y tiene su equivalente en el Universo 6. El hogar de los terrícolas y los Guerreros Z. Ha sido atacado en varias ocasiones por enemigos poderosos."
-powers = Array[Resource]([SubResource("Resource_gy1yg"), SubResource("Resource_x82nt"), SubResource("Resource_012ef"), SubResource("Resource_biqls")])
+powers = Array[Resource]([SubResource("Resource_gy1yg"), SubResource("Resource_x82nt"), SubResource("Resource_012ef"), SubResource("Resource_kame_inst"), SubResource("Resource_biqls")])
 transformations = Array[Resource]([SubResource("Resource_i1tb2"), SubResource("Resource_hmayj"), SubResource("Resource_luo4d"), SubResource("Resource_ui_goku")])
