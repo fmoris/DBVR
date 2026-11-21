@@ -384,14 +384,14 @@ func _ensure_action_card() -> void:
 
 	action_card_anchor = Node3D.new()
 	action_card_anchor.name = "MeleeActionGuideCardAnchor"
-	action_card_anchor.position = Vector3(-0.42, -0.20, -1.12)
-	action_card_anchor.rotation_degrees = Vector3(0.0, 14.0, 0.0)
+	action_card_anchor.position = Vector3(0.0, -0.19, -1.06)
+	action_card_anchor.rotation_degrees = Vector3.ZERO
 	cam.add_child(action_card_anchor)
 
 	var border := MeshInstance3D.new()
 	border.name = "CardBorder"
 	var b_q := QuadMesh.new()
-	b_q.size = Vector2(0.435, 0.255)
+	b_q.size = Vector2(0.58, 0.25)
 	border.mesh = b_q
 	_action_card_border_mat = StandardMaterial3D.new()
 	_action_card_border_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
@@ -405,7 +405,7 @@ func _ensure_action_card() -> void:
 	var bg := MeshInstance3D.new()
 	bg.name = "CardBg"
 	var bg_q := QuadMesh.new()
-	bg_q.size = Vector2(0.42, 0.24)
+	bg_q.size = Vector2(0.565, 0.235)
 	bg.mesh = bg_q
 	bg.position = Vector3(0.0, 0.0, 0.001)
 	var bg_mat := StandardMaterial3D.new()
@@ -419,15 +419,15 @@ func _ensure_action_card() -> void:
 
 	_action_card_label = Label3D.new()
 	_action_card_label.name = "MeleeCardText"
-	_action_card_label.font_size = 18
-	_action_card_label.pixel_size = 0.00115
+	_action_card_label.font_size = 21
+	_action_card_label.pixel_size = 0.00125
 	_action_card_label.no_depth_test = true
 	_action_card_label.render_priority = 124
 	_action_card_label.outline_size = 6
 	_action_card_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.95)
 	_action_card_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	_action_card_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_action_card_label.position = Vector3(-0.195, 0.0, 0.002)
+	_action_card_label.position = Vector3(-0.26, 0.0, 0.002)
 	action_card_anchor.add_child(_action_card_label)
 
 

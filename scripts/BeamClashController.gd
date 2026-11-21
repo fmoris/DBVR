@@ -55,6 +55,10 @@ var _physical_push_cd: float = 0.0
 var _is_burning_bp_in_clash: bool = false
 var _in_phase2_pose: bool = true
 var clash_hud_anchor: Node3D = null
+var clash_action_card_anchor: Node3D = null
+var _clash_card_label: Label3D = null
+var _clash_card_border_mat: StandardMaterial3D = null
+var _last_clash_card_key: String = ""
 
 const KiCoronaShader = preload("res://shaders/ki_corona.gdshader")
 const KiBeamShader = preload("res://shaders/ki_beam.gdshader")
@@ -68,7 +72,7 @@ func setup(
 	p_color_atk: Color,
 	p_tech_def: String,
 	p_color_def: Color,
-	p_duration: float = 3.5,
+	p_duration: float = 5.5,
 	p_atk_damage: float = 1800.0,
 	p_def_damage: float = 1800.0,
 	p_atk_charge: float = 1.0,
@@ -93,7 +97,7 @@ func setup(
 	is_active = true
 
 	# Ralentizar levemente el tiempo para enfatizar la escala del choque
-	Engine.time_scale = 0.50
+	Engine.time_scale = 0.42
 
 	_build_visuals()
 	_build_audio()
@@ -403,6 +407,7 @@ func _update_hud() -> void:
 	var pct_p: int = int(roundf(p_prog * 100.0))
 	header_label.text = "⚡ CHOQUE DE PODER: TÚ %d%% vs %d%% RIVAL ⚡\n%s" % [pct_p, 100 - pct_p, status_text]
 	header_label.modulate = col
+	_refresh_clash_action_card()
 
 
 func _resolve_clash(winner: Node3D, loser: Node3D, winning_tech: String) -> void:
@@ -641,11 +646,90 @@ func _exit_tree() -> void:
 	if clash_hud_anchor and is_instance_valid(clash_hud_anchor):
 		clash_hud_anchor.queue_free()
 		clash_hud_anchor = null
+	if clash_action_card_anchor and is_instance_valid(clash_action_card_anchor):
+		clash_action_card_anchor.queue_free()
+		clash_action_card_anchor = null
+
+
+func _ensure_clash_action_card() -> void:
+	var cam: Camera3D = _get_active_camera()
+	if not cam or not is_instance_valid(cam):
+		return
+	if clash_action_card_anchor and is_instance_valid(clash_action_card_anchor):
+		return
+
+	clash_action_card_anchor = Node3D.new()
+	clash_action_card_anchor.name = "ClashActionGuideCardAnchor"
+	clash_action_card_anchor.position = Vector3(0.0, -0.19, -1.08)
+	clash_action_card_anchor.rotation_degrees = Vector3.ZERO
+	cam.add_child(clash_action_card_anchor)
+
+	var border := MeshInstance3D.new()
+	border.name = "CardBorder"
+	var b_q := QuadMesh.new()
+	b_q.size = Vector2(0.58, 0.22)
+	border.mesh = b_q
+	_clash_card_border_mat = StandardMaterial3D.new()
+	_clash_card_border_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_clash_card_border_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_clash_card_border_mat.no_depth_test = true
+	_clash_card_border_mat.render_priority = 122
+	_clash_card_border_mat.albedo_color = Color(1.0, 0.80, 0.20, 0.92)
+	border.material_override = _clash_card_border_mat
+	clash_action_card_anchor.add_child(border)
+
+	var bg := MeshInstance3D.new()
+	bg.name = "CardBg"
+	var bg_q := QuadMesh.new()
+	bg_q.size = Vector2(0.565, 0.205)
+	bg.mesh = bg_q
+	bg.position = Vector3(0.0, 0.0, 0.001)
+	var bg_mat := StandardMaterial3D.new()
+	bg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	bg_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	bg_mat.no_depth_test = true
+	bg_mat.render_priority = 123
+	bg_mat.albedo_color = Color(0.03, 0.05, 0.10, 0.88)
+	bg.material_override = bg_mat
+	clash_action_card_anchor.add_child(bg)
+
+	_clash_card_label = Label3D.new()
+	_clash_card_label.name = "ClashCardText"
+	_clash_card_label.font_size = 22
+	_clash_card_label.pixel_size = 0.00130
+	_clash_card_label.no_depth_test = true
+	_clash_card_label.render_priority = 124
+	_clash_card_label.outline_size = 6
+	_clash_card_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.95)
+	_clash_card_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_clash_card_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_clash_card_label.position = Vector3(-0.26, 0.0, 0.002)
+	clash_action_card_anchor.add_child(_clash_card_label)
+	_last_clash_card_key = ""
+	_refresh_clash_action_card()
+
+
+func _refresh_clash_action_card() -> void:
+	if not _clash_card_label or not is_instance_valid(_clash_card_label):
+		return
+	var state_key: String = "C:%d:%d" % [1 if _in_phase2_pose else 0, 1 if _is_burning_bp_in_clash else 0]
+	if state_key == _last_clash_card_key:
+		return
+	_last_clash_card_key = state_key
+	if _clash_card_border_mat:
+		_clash_card_border_mat.albedo_color = Color(0.25, 0.95, 0.55, 0.92) if _in_phase2_pose else Color(1.0, 0.25, 0.25, 0.95)
+	_clash_card_label.modulate = Color(0.95, 0.98, 1.0) if _in_phase2_pose else Color(1.0, 0.85, 0.85)
+	var line1: String = "[✅] 1. Manos al frente + 2 GRIPS" if _in_phase2_pose else "[⚠️] 1. ¡EXTIENDE MANOS + 2 GRIPS!"
+	var line3: String = "[🔥] 3. Pulsa GATILLOS sin parar"
+	if _is_burning_bp_in_clash:
+		line3 = "[⚠️] 3. ¡SIN KI! Quemando BP"
+	_clash_card_label.text = "⚡ CONTROLES DEL CHOQUE ⚡\n%s\n[⚡] 2. Agita ambos mandos rápido\n%s" % [line1, line3]
 
 
 func _build_visuals_hud_attach() -> void:
 	var cam: Camera3D = _get_active_camera()
 	if cam and is_instance_valid(cam):
+		_ensure_clash_action_card()
 		clash_hud_anchor = Node3D.new()
 		clash_hud_anchor.name = "ClashHUDAnchor"
 		clash_hud_anchor.position = Vector3(0.0, 0.24, -1.20)
