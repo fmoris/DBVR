@@ -95,6 +95,10 @@ func setup(
 	var advantage: float = clampf((power_def - power_atk) / maxf(power_atk + power_def, 1.0), -0.25, 0.25)
 	clash_ratio = 0.5 + advantage
 	is_active = true
+	if attacker and is_instance_valid(attacker) and attacker.has_method("set"):
+		attacker.set("is_in_beam_clash", true)
+	if defender and is_instance_valid(defender) and defender.has_method("set"):
+		defender.set("is_in_beam_clash", true)
 
 	# Ralentizar levemente el tiempo para enfatizar la escala del choque
 	Engine.time_scale = 0.42
@@ -414,6 +418,10 @@ func _resolve_clash(winner: Node3D, loser: Node3D, winning_tech: String) -> void
 	if not is_active:
 		return
 	is_active = false
+	if attacker and is_instance_valid(attacker) and attacker.has_method("set"):
+		attacker.set("is_in_beam_clash", false)
+	if defender and is_instance_valid(defender) and defender.has_method("set"):
+		defender.set("is_in_beam_clash", false)
 	Engine.time_scale = 1.0
 
 	print("[BeamClash] 💥 ¡CHOQUE RESUELTO! Vencedor: %s con %s" % [
@@ -637,6 +645,10 @@ func _build_clash_diegetic_bar() -> void:
 
 
 func _exit_tree() -> void:
+	if attacker and is_instance_valid(attacker) and attacker.has_method("set"):
+		attacker.set("is_in_beam_clash", false)
+	if defender and is_instance_valid(defender) and defender.has_method("set"):
+		defender.set("is_in_beam_clash", false)
 	if is_active:
 		var dd_ex: DramaticDirector = DramaticDirector.get_active(get_tree())
 		if dd_ex:

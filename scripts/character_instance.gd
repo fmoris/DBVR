@@ -160,6 +160,8 @@ var opponent_airborne_target: Node3D = null
 # Estado y control de Secuencia de Super Haz (Bullet-Time para técnicas supremas)
 var is_in_beam_sequence: bool = false
 var active_beam_sequence: Node3D = null
+var is_in_beam_clash: bool = false
+var melee_approach_progress: float = 0.0
 
 # Variables de vuelo hacia el contrincante
 var is_flying_to_opponent: bool = false
@@ -3159,12 +3161,14 @@ func apply_knockback(dir: Vector3, force: float, air_drag_override: float = 2.6)
 	var horiz_dir = Vector3(dir.x, 0.0, dir.z).normalized()
 	if horiz_dir.length_squared() < 0.01:
 		horiz_dir = -global_transform.basis.z
-	var controlled_force = clampf(force, 1.5, 28.0)
+	var controlled_force = clampf(force, 1.5, 42.0)
 	# Ligera sustentación en impactos fuertes (>= 9 m/s) para deslizarse por el aire y activar Air Brake
-	var vert_comp = clampf(dir.y, -1.0, 1.0) if abs(dir.y) > 0.35 else (0.12 if controlled_force >= 9.0 else 0.0)
+	var vert_comp = clampf(dir.y, -1.0, 1.0) if abs(dir.y) > 0.35 else (0.14 if controlled_force >= 9.0 else 0.0)
 	var impulse = (horiz_dir + Vector3.UP * vert_comp).normalized() * controlled_force
 	velocity = impulse
 	is_knocked_back = true
+	if controlled_force >= 8.5:
+		knockback_drag = minf(knockback_drag, air_drag_override)
 	if is_player and controlled_force >= 8.5 and not is_in_bullet_time:
 		begin_air_brake(controlled_force, _last_hit_damage_np, _last_hit_attacker_bp, air_drag_override)
 	print("[Physics] %s empujado con fuerza controlada %.1f m/s en dirección %s." % [character_data.character_name if character_data else name, controlled_force, horiz_dir])
@@ -3261,29 +3265,38 @@ func _clamp_to_arena(node: Node3D, is_melee_dash: bool = false) -> void:
 			if col and col.collider:
 				var collider = col.collider
 				if collider.is_in_group("mountains") or collider.has_meta("is_mountain") or "Mountain" in collider.name or "Canyon" in collider.name or "Boulder" in collider.name:
-					hit_rock = true
-					var n_xz: Vector3 = Vector3(col.normal.x, 0.0, col.normal.z)
-					if n_xz.length_squared() < 0.01:
-						n_xz = Vector3(-pos.x, 0.0, -pos.z)
-					n_xz = n_xz.normalized() if n_xz.length_squared() > 0.001 else Vector3.FORWARD
-					last_wall_crash_normal = n_xz
-					# Separación segura de 1.80m en XZ conservando altura orig_y (cero teletransporte vertical)
-					pos.x = col.position.x + n_xz.x * 1.80
-					pos.z = col.position.z + n_xz.z * 1.80
-					pos.y = orig_y
-					if _wall_crash_immunity_timer <= 0.0:
-						_on_boundary_crash_impact(horiz_speed)
-						if horiz_speed > 3.2:
-							wall_stick_timer = 0.65 if is_player else 1.25
-							_wall_crash_immunity_timer = 1.50
-							_spawn_ground_crash_vfx(col.position, false)
-							_log_combat_event("💥 ¡Estrellamiento contra el risco! Incrustado en la roca (Wall-Stick).", "warning")
-							print("[Physics] %s se incrustó en el risco de la montaña por %.2fs (Wall-Stick anime)." % [character_data.character_name if character_data else name, wall_stick_timer])
-					velocity = Vector3.ZERO
-					is_knocked_back = false
-					is_air_brake_active = false
-					air_brake_progress = 0.0
-					knockback_drag = 24.0
+					var adm: ArenaDestructionManager = ArenaDestructionManager.get_active(get_tree())
+					var d_res: Dictionary = adm.apply_body_collision_impact(collider, col.position, self, _get_opponent(), horiz_speed) if adm else {"destroyed": false}
+					if bool(d_res.get("destroyed", false)):
+						var d_kind: String = String(d_res.get("kind", "boulder"))
+						var d_bp: int = int(d_res.get("bonus_bp", 0.0))
+						_log_combat_event("💥 ¡%s DESTRUIDA CON TU CUERPO! (-%d BP extra)" % ["MONTAÑA" if d_kind == "mountain" else "ROCA", d_bp], "warning")
+						velocity *= 0.45
+						_wall_crash_immunity_timer = 0.25
+					else:
+						hit_rock = true
+						var n_xz: Vector3 = Vector3(col.normal.x, 0.0, col.normal.z)
+						if n_xz.length_squared() < 0.01:
+							n_xz = Vector3(-pos.x, 0.0, -pos.z)
+						n_xz = n_xz.normalized() if n_xz.length_squared() > 0.001 else Vector3.FORWARD
+						last_wall_crash_normal = n_xz
+						# Separación segura de 1.80m en XZ conservando altura orig_y (cero teletransporte vertical)
+						pos.x = col.position.x + n_xz.x * 1.80
+						pos.z = col.position.z + n_xz.z * 1.80
+						pos.y = orig_y
+						if _wall_crash_immunity_timer <= 0.0:
+							_on_boundary_crash_impact(horiz_speed)
+							if horiz_speed > 3.2:
+								wall_stick_timer = 0.65 if is_player else 1.25
+								_wall_crash_immunity_timer = 1.50
+								_spawn_ground_crash_vfx(col.position, false)
+								_log_combat_event("💥 ¡Estrellamiento contra el risco! Incrustado en la roca (Wall-Stick).", "warning")
+								print("[Physics] %s se incrustó en el risco de la montaña por %.2fs (Wall-Stick anime)." % [character_data.character_name if character_data else name, wall_stick_timer])
+						velocity = Vector3.ZERO
+						is_knocked_back = false
+						is_air_brake_active = false
+						air_brake_progress = 0.0
+						knockback_drag = 24.0
 
 	# 2. Bounding box perimetral exterior
 	var peri_normal := Vector3.ZERO
@@ -3369,6 +3382,9 @@ func _on_ground_crash_impact(fall_speed: float, crash_pos: Vector3, ground_h: fl
 
 	# VFX de cráter / escombros de choque terrestre
 	_spawn_ground_crash_vfx(Vector3(crash_pos.x, ground_h + 0.05, crash_pos.z), ground_h > 0.2)
+	var adm_g: ArenaDestructionManager = ArenaDestructionManager.get_active(get_tree())
+	if adm_g:
+		adm_g.apply_floor_seismic_impact(Vector3(crash_pos.x, ground_h + 0.1, crash_pos.z), self, _get_opponent(), fall_speed)
 	var dd_crater: DramaticDirector = DramaticDirector.get_active(get_tree())
 	if dd_crater:
 		dd_crater.spawn_persistent_crater(Vector3(crash_pos.x, ground_h + 0.05, crash_pos.z), 1.0, true)

@@ -35,7 +35,7 @@ var reaction_duration: float = 2.2
 var time_left: float = 2.2
 var beam_progress: float = 0.0 # 0.0 en atacante, 1.0 en defensor
 var impact_sustain_timer: float = 0.0
-const IMPACT_SUSTAIN_DURATION: float = 0.70
+const IMPACT_SUSTAIN_DURATION: float = 1.00
 
 # Posiciones clave
 var start_pos: Vector3 = Vector3.ZERO
@@ -253,17 +253,15 @@ func _process(delta: float) -> void:
 			target_pos = def_now.lerp(aimed_pt, 0.30)
 		beam_dir = (target_pos - start_pos).normalized()
 
-		# Desacoplar avance visual (arranque explosivo al 65% + cámara súper lenta decisiva + impacto final)
+		# Avance continuo desde que sale de las manos del atacante (0% -> 88% en Bullet-Time, 88% -> 100% impacto)
 		prev_head_pos = current_head_pos
 		var norm_t: float = clampf(1.0 - (time_left / maxf(reaction_duration, 0.01)), 0.0, 1.0)
 		if is_aimed_miss:
 			beam_progress = norm_t
-		elif norm_t < 0.18:
-			beam_progress = 0.65 * (1.0 - pow(1.0 - (norm_t / 0.18), 2.2))
-		elif norm_t < 0.92:
-			beam_progress = lerpf(0.65, 0.92, (norm_t - 0.18) / 0.74)
+		elif norm_t < 0.90:
+			beam_progress = lerpf(0.0, 0.88, norm_t / 0.90)
 		else:
-			beam_progress = lerpf(0.92, 1.0, (norm_t - 0.92) / 0.08)
+			beam_progress = lerpf(0.88, 1.0, (norm_t - 0.90) / 0.10)
 		current_head_pos = start_pos.lerp(target_pos, beam_progress)
 
 		_update_beam_geometry()
@@ -811,6 +809,10 @@ func _resolve_aimed_miss() -> void:
 
 	# Explosión AoE con onda expansiva (daño BP + empuje según BP ataque vs BP defensor)
 	_spawn_super_aoe_explosion(current_head_pos, true)
+	var adm_miss: ArenaDestructionManager = ArenaDestructionManager.get_active(get_tree())
+	if adm_miss:
+		var bp_atk_m: float = float(attacker.get("current_np")) if (attacker and is_instance_valid(attacker) and attacker.get("current_np") != null) else 10000.0
+		adm_miss.apply_power_aoe_destruction(current_head_pos, 16.0, base_damage, bp_atk_m)
 
 	if attacker and is_instance_valid(attacker) and attacker.has_method("_log_combat_event"):
 		attacker._log_combat_event("💥 ¡%s detonó cerca del objetivo! (Onda expansiva)" % power_name, "info")
@@ -838,9 +840,9 @@ func _resolve_direct_hit() -> void:
 		if defender.has_method("take_hit"):
 			defender.take_hit(final_damage, beam_dir, false)
 		if defender.has_method("apply_knockback"):
-			defender.apply_knockback(beam_dir, clampf(16.0 * bp_ratio, 12.0, 26.0), 2.4)
+			defender.apply_knockback(beam_dir, clampf(28.0 * bp_ratio, 22.0, 40.0), 1.6)
 		if defender.get("procedural_animator"):
-			defender.procedural_animator.trigger_hit_flinch(2.2, beam_dir)
+			defender.procedural_animator.trigger_hit_flinch(2.5, beam_dir)
 
 	# 2. Notificar al atacante para sostener la pose de empuje de energía
 	if attacker and is_instance_valid(attacker):
@@ -849,10 +851,16 @@ func _resolve_direct_hit() -> void:
 		attacker.set("is_firing_beam", true)
 		attacker.set("beam_tech_name", power_name)
 
-	# 3. Onda de choque, cráter de plasma y chispas masivas en el punto de impacto
+	# 3. Onda de choque doble, esfera de explosión volumétrica, humo denso DBZ y destrucción de entorno
 	_spawn_spark_at(current_head_pos, energy_color)
+	_spawn_spark_at(current_head_pos + Vector3.UP * 0.5, Color(1.0, 0.95, 0.75))
+	_spawn_super_impact_explosion_vfx(current_head_pos, energy_color, bp_ratio)
 	if current_head_pos.y <= 3.0:
-		_spawn_plasma_crater(Vector3(current_head_pos.x, 0.12, current_head_pos.z), 2.4, energy_color)
+		_spawn_plasma_crater(Vector3(current_head_pos.x, 0.12, current_head_pos.z), 2.8 * clampf(bp_ratio, 0.8, 1.5), energy_color)
+	var adm_hit: ArenaDestructionManager = ArenaDestructionManager.get_active(get_tree())
+	if adm_hit:
+		adm_hit.apply_power_aoe_destruction(current_head_pos, 18.0 * clampf(bp_ratio, 0.8, 1.6), final_damage, bp_atk)
+		adm_hit.spawn_dense_dbz_smoke(current_head_pos, defender, 3.0 * clampf(bp_ratio, 0.85, 1.5), 2.2)
 	_pulse_impact_haptics()
 
 	print("[SuperBeamSequence] 💥 ¡IMPACTO DIRECTO DE SUPER HAZ! %s colisionó con el defensor (Daño: %.0f NP)." % [power_name, final_damage])
@@ -870,6 +878,9 @@ func _cleanup_and_finish(result: String, dmg: float) -> void:
 			attacker.set("is_in_beam_sequence", false)
 	if defender and is_instance_valid(defender) and defender.has_method("set"):
 		defender.set("is_in_beam_sequence", false)
+
+	if audio_player and is_instance_valid(audio_player):
+		audio_player.stop()
 
 	emit_signal("sequence_completed", result, dmg)
 
@@ -1321,6 +1332,37 @@ func _spawn_spark_at(pos: Vector3, col: Color) -> void:
 	tw.tween_property(sw, "scale", Vector3.ONE * 3.5, 0.40).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	tw.parallel().tween_property(mat, "shader_parameter/ring_color:a", 0.0, 0.40)
 	tw.tween_callback(sw.queue_free)
+
+
+func _spawn_super_impact_explosion_vfx(pos: Vector3, col: Color, bp_ratio: float) -> void:
+	if not is_inside_tree() or not get_tree():
+		return
+	var target_parent: Node = get_tree().current_scene if get_tree().current_scene else get_parent()
+	if not target_parent:
+		return
+	var dome := MeshInstance3D.new()
+	dome.name = "SuperImpactExplosionDome"
+	var sp := SphereMesh.new()
+	sp.radius = 0.85
+	sp.height = 1.70
+	dome.mesh = sp
+	var d_mat := StandardMaterial3D.new()
+	d_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	d_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	d_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+	d_mat.albedo_color = Color(col.r, col.g, col.b, 0.85)
+	d_mat.emission_enabled = true
+	d_mat.emission = Color(col.r, col.g, col.b)
+	d_mat.emission_energy_multiplier = 4.5
+	dome.material_override = d_mat
+	target_parent.add_child(dome)
+	dome.global_position = pos
+
+	var max_scale: float = clampf(6.5 * bp_ratio, 4.5, 11.5)
+	var tw := dome.create_tween()
+	tw.tween_property(dome, "scale", Vector3.ONE * max_scale, 0.48).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
+	tw.parallel().tween_property(d_mat, "albedo_color:a", 0.0, 0.55).set_delay(0.10)
+	tw.tween_callback(dome.queue_free)
 	KiSmokeFX.spawn_smoke(get_tree(), pos, 1.6)
 
 

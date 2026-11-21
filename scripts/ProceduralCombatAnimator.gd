@@ -282,10 +282,7 @@ func _resolve_frame_states(delta: float, is_charging_ki: bool, is_blocking: bool
 	_st_is_wall_stuck = wall_stick > 0.0
 	_st_wall_stick_ratio = clampf(1.0 - (wall_stick / 1.25), 0.0, 1.0) if _st_is_wall_stuck else 0.0
 	_st_is_launching_air = (not _st_is_wall_stuck) and is_knocked_back and _st_air_speed > 6.5
-	if _st_is_launching_air and _st_air_speed > 26.0:
-		airborne_roll_angle = fmod(airborne_roll_angle + delta * 14.0, TAU)
-	else:
-		airborne_roll_angle = 0.0
+	airborne_roll_angle = sin(anim_time * 10.0) * deg_to_rad(6.0) if _st_is_launching_air else 0.0
 
 	_st_is_airborne_stunned = (not _st_is_wall_stuck) and (not _st_is_launching_air) and is_airborne_stunned
 	_st_is_transforming = transform_roar_timer > 0.0
@@ -330,8 +327,8 @@ func _apply_body_hover_and_trajectory(delta: float) -> void:
 	if _st_is_wall_stuck:
 		target_pos_y = -0.12 * _st_wall_stick_ratio
 	elif _st_is_launching_air:
-		target_rot_x = deg_to_rad(-28.0)
-		target_rot_z = airborne_roll_angle if _st_air_speed > 26.0 else 0.0
+		target_rot_x = deg_to_rad(-48.0)
+		target_rot_z = airborne_roll_angle
 	elif _st_is_getup:
 		target_pos_y = lerpf(-0.36, 0.0, _st_getup_u)
 		target_rot_x = lerpf(deg_to_rad(18.0), 0.0, _st_getup_u)

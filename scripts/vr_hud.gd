@@ -49,6 +49,13 @@ var _status_override_timer: float = 0.0
 var _status_override_text: String = ""
 var _status_override_color: Color = Color(1.0, 0.92, 0.45)
 var _was_low_ki: bool = false
+var _vignette_mesh: MeshInstance3D = null
+var _vignette_mat: ShaderMaterial = null
+var _hit_vignette_timer: float = 0.0
+var _vignette_pulse_t: float = 0.0
+var _last_np_for_vignette: float = -1.0
+var _last_approach_pct: int = -1
+const VRVignetteShader = preload("res://shaders/vr_vignette.gdshader")
 
 # --- Historial de Depuración VR ---
 var debug_history: Array[String] = []
@@ -617,6 +624,88 @@ func _process(delta: float) -> void:
 
 	_update_combat_stats(delta)
 	_update_dbz_hud_elements(delta)
+	_update_vignette_overlay(delta)
+
+
+func _ensure_vignette_overlay() -> void:
+	if Engine.is_editor_hint() or not is_inside_tree():
+		return
+	if _vignette_mesh and is_instance_valid(_vignette_mesh):
+		return
+	var cam: Camera3D = get_viewport().get_camera_3d()
+	if not cam or not is_instance_valid(cam):
+		return
+	_vignette_mesh = MeshInstance3D.new()
+	_vignette_mesh.name = "VRVignetteOverlay"
+	var q := QuadMesh.new()
+	q.size = Vector2(1.55, 1.15)
+	_vignette_mesh.mesh = q
+	_vignette_mesh.position = Vector3(0.0, 0.0, -0.35)
+	_vignette_mat = ShaderMaterial.new()
+	_vignette_mat.shader = VRVignetteShader
+	_vignette_mat.set_shader_parameter("intensity", 0.0)
+	_vignette_mesh.material_override = _vignette_mat
+	_vignette_mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	cam.add_child(_vignette_mesh)
+
+
+func trigger_hit_vignette(duration_sec: float = 0.28) -> void:
+	_hit_vignette_timer = maxf(_hit_vignette_timer, duration_sec)
+
+
+func _update_vignette_overlay(delta: float) -> void:
+	if Engine.is_editor_hint():
+		return
+	_ensure_vignette_overlay()
+	if not _vignette_mat:
+		return
+
+	if _hit_vignette_timer > 0.0:
+		_hit_vignette_timer = maxf(_hit_vignette_timer - delta, 0.0)
+
+	var target_col := Color(0.0, 0.0, 0.0, 1.0)
+	var target_intensity: float = 0.0
+	var target_inner: float = 0.46
+
+	if player_instance and is_instance_valid(player_instance):
+		var cur_np_val: float = float(player_instance.current_np)
+		if _last_np_for_vignette >= 0.0 and (_last_np_for_vignette - cur_np_val) >= 50.0:
+			_hit_vignette_timer = 0.28
+		_last_np_for_vignette = cur_np_val
+
+		var e_np_val: float = float(enemy_instance.current_np) if (enemy_instance and is_instance_valid(enemy_instance)) else cur_np_val
+		var cur_ki_val: float = float(player_instance.current_ki)
+		var in_furia: bool = bool(player_instance.get("is_in_furia"))
+		var in_zenkai: bool = bool(player_instance.get("is_in_zenkai_state"))
+		var form_idx: int = int(player_instance.get("current_transformation_index")) if player_instance.get("current_transformation_index") != null else -1
+
+		_vignette_pulse_t += delta * 5.0
+		var pulse_01: float = (sin(_vignette_pulse_t) + 1.0) * 0.5
+
+		if _hit_vignette_timer > 0.0:
+			target_col = Color(1.0, 0.10, 0.08, 1.0)
+			target_intensity = 0.92 * clampf(_hit_vignette_timer / 0.32, 0.35, 1.0)
+			target_inner = 0.22
+		elif in_furia or (e_np_val > 100.0 and cur_np_val < e_np_val * 0.70):
+			target_col = Color(0.92, 0.06, 0.06, 1.0)
+			target_intensity = 0.60 + pulse_01 * 0.28
+			target_inner = 0.24 - pulse_01 * 0.04
+		elif cur_ki_val < 15.0:
+			target_col = Color(0.20, 0.35, 0.98, 1.0)
+			target_intensity = 0.52 + pulse_01 * 0.24
+			target_inner = 0.28
+		elif in_zenkai or (e_np_val > 100.0 and cur_np_val > e_np_val * 1.35):
+			target_col = Color(1.0, 0.85, 0.18, 1.0)
+			target_intensity = 0.48 + pulse_01 * 0.22
+			target_inner = 0.30
+		elif form_idx >= 0:
+			target_col = Color(1.0, 0.78, 0.15, 1.0)
+			target_intensity = 0.38
+			target_inner = 0.32
+
+	_vignette_mat.set_shader_parameter("vignette_color", target_col)
+	_vignette_mat.set_shader_parameter("intensity", target_intensity)
+	_vignette_mat.set_shader_parameter("inner_radius", target_inner)
 
 
 func _apply_pill_appearance(text_val: String, col: Color, border_col: Color) -> void:
@@ -672,6 +761,9 @@ func _update_dbz_hud_elements(delta: float) -> void:
 		var f_active: bool = bool(player_instance.get("is_in_furia"))
 		var buff_text: String = player_instance.get_active_buff_summary() if player_instance.has_method("get_active_buff_summary") else ""
 		var has_override: bool = _status_override_timer > 0.0 and _status_override_text != ""
+		var app_val: Variant = player_instance.get("melee_approach_progress")
+		var app_pct: int = int(roundf(clampf(float(app_val) if app_val != null else 0.0, 0.0, 1.0) * 100.0))
+		var show_approach: bool = app_pct >= 5
 
 		var state_changed: bool = (
 			g_state != _last_guard_state
@@ -680,6 +772,8 @@ func _update_dbz_hud_elements(delta: float) -> void:
 			or f_active != _last_furia_state
 			or buff_text != _last_buff_text
 			or has_override != _last_status_override_active
+			or (show_approach and app_pct != _last_approach_pct)
+			or (not show_approach and _last_approach_pct >= 5)
 		)
 		_last_guard_state = g_state
 		_last_zenkai_state = z_active
@@ -687,6 +781,7 @@ func _update_dbz_hud_elements(delta: float) -> void:
 		_last_furia_state = f_active
 		_last_buff_text = buff_text
 		_last_status_override_active = has_override
+		_last_approach_pct = app_pct if show_approach else -1
 
 		if g_state == 2:
 			_apply_pill_appearance("⚠ GUARDIA ROTA", Color(1.0, 0.25, 0.25), Color(1.0, 0.22, 0.22, 0.95))
@@ -722,6 +817,8 @@ func _update_dbz_hud_elements(delta: float) -> void:
 			_apply_pill_appearance("★ " + buff_text, buff_col, buff_col)
 		elif has_override:
 			_apply_pill_appearance(_status_override_text, _status_override_color, _status_override_color)
+		elif show_approach:
+			_apply_pill_appearance("⚔️ ACERCAMIENTO MELEE: %d%%" % app_pct, Color(1.0, 0.72, 0.22), Color(1.0, 0.65, 0.15, 0.92))
 		elif state_changed:
 			_apply_pill_appearance("", Color.WHITE, Color.WHITE)
 

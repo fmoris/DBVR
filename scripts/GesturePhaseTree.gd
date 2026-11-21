@@ -254,6 +254,10 @@ func _process(delta: float) -> void:
 				_cancel_action("Tiempo límite de gesto expirado (2.5s)")
 		return
 
+	var p_chk: Node = _get_player_instance()
+	if p_chk and is_instance_valid(p_chk) and (bool(p_chk.get("is_in_beam_clash")) or bool(p_chk.get("is_in_beam_sequence")) or bool(p_chk.get("is_in_bullet_time"))):
+		return
+
 	# 1. Asegurar enlace continuo de trackers (solo en modo Hand Tracking óptico)
 	_ensure_trackers()
 		
