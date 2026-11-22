@@ -71,7 +71,12 @@ func setup(origin: XROrigin3D, cam: XRCamera3D, is_scripted: bool = false) -> vo
 
 	xr_origin = origin
 	camera = cam
-	mode = SimMode.SCRIPTED if is_scripted else SimMode.MANUAL
+	var has_test_suite: bool = false
+	for u_a: String in OS.get_cmdline_user_args():
+		if u_a.begins_with("--test-suite="):
+			has_test_suite = true
+			break
+	mode = SimMode.SCRIPTED if (is_scripted or has_test_suite) else SimMode.MANUAL
 	sim_active = true
 
 	if xr_origin:

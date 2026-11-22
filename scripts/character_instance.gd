@@ -3923,7 +3923,7 @@ func _on_bullet_time_finisher(finisher_name: String, swing_velocity: float, reco
 	active_target_dome = null
 
 	if finisher_name == "hammer_strike":
-		strike_atk._execute_hammer_strike_finisher(strike_def, swing_velocity, recorded_hits, launch_vector, hammer_paid)
+		strike_atk._execute_hammer_strike_finisher(strike_def, swing_velocity, recorded_hits, launch_vector)
 	elif finisher_name in ["charged_v3_up", "charged_v3_back", "ki_break_launch"]:
 		strike_atk._execute_charged_v3_or_ki_break_finisher(strike_def, finisher_name, swing_velocity, launch_vector)
 	else:

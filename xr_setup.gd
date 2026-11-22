@@ -45,6 +45,8 @@ func _align_and_start_desktop_sim() -> void:
 	for arg: String in OS.get_cmdline_user_args():
 		if arg.begins_with("--auto-test="):
 			auto_suite = arg.substr("--auto-test=".length())
+		elif arg.begins_with("--test-suite="):
+			auto_suite = arg.substr("--test-suite=".length())
 		elif arg == "--auto-test":
 			auto_suite = "all"
 

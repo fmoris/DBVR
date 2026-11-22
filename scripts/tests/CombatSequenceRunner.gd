@@ -134,13 +134,30 @@ func _wait_for_scene_ready() -> bool:
 	# Saltar intro dramática si está activa
 	var dd: DramaticDirector = DramaticDirector.get_active(get_tree())
 	if dd:
+		if dd.has_method("skip_dramatic_intro"):
+			dd.skip_dramatic_intro()
 		dd.set("is_dramatic_pause_active", false)
+	DramaticDirector.is_dramatic_pause_active = false
+	if hybrid:
+		hybrid.set("startup_cooldown", 0.0)
 
 	var cur_scene: Node = get_tree().current_scene
 	var startup_modal: Node = cur_scene.get_node_or_null("StartupChangelogModal") if cur_scene else null
 	if startup_modal and is_instance_valid(startup_modal) and startup_modal.has_method("_close_and_start"):
 		startup_modal._close_and_start()
 	get_tree().paused = false
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var active_sim: Variant = hybrid.get("desktop_sim") if hybrid else null
+	if active_sim and active_sim != simulator:
+		simulator = active_sim as DesktopXRSimulator
+	if simulator and xr_origin:
+		var cam_node: XRCamera3D = xr_origin.get_node_or_null("XRCamera3D") as XRCamera3D
+		simulator.setup(xr_origin, cam_node, true)
+		simulator.set("mode", 1)
+		simulator.set("sim_active", true)
+		if hybrid:
+			hybrid.set("desktop_sim", simulator)
 	if dd and dd.is_in_intro:
 		dd.skip_dramatic_intro()
 		await get_tree().process_frame
@@ -223,6 +240,11 @@ func _reset_between_tests() -> void:
 		hybrid.set("right_blast_cooldown", 0.0)
 		hybrid.set("must_release_super_buttons", false)
 		hybrid.set("transform_cooldown", 0.0)
+		hybrid.set("melee_approach_progress", 0.0)
+		player.set("melee_approach_progress", 0.0)
+		var opp_r: Node = player._get_opponent() if player.has_method("_get_opponent") else null
+		if opp_r and is_instance_valid(opp_r):
+			opp_r.set("is_in_bullet_time", false)
 
 	await _step_seconds(0.35)
 
@@ -288,15 +310,18 @@ func _seq_ki_blast() -> bool:
 		print("  -> Motivo: no se disparó Ki Blast rápido.")
 		return false
 
-	# 2) Ki Blast cargado (>1.0s)
+	# 2) Ki Blast cargado (>0.45s)
 	hybrid.set("right_blast_cooldown", 0.0)
+	simulator.set_scripted_hands(Vector3(-0.22, -0.18, 0.22), Vector3(0.18, 0.02, 0.52), false, true, true)
+	await _step_seconds(0.05)
 	simulator.v_right_trigger = 1.0
-	await _step_seconds(1.25)
+	await _step_seconds(0.95)
+	var dbg_rc: float = float(hybrid.get("right_charge_time"))
 	simulator.v_right_trigger = 0.0
-	await _step_seconds(0.25)
+	await _step_seconds(0.30)
 
 	if _sig_ki_blast_charged < 1:
-		print("  -> Motivo: no se disparó Ki Blast cargado.")
+		print("  -> Motivo: no se disparó Ki Blast cargado (right_charge_time=%.2f, quick=%d, ki=%.1f)." % [dbg_rc, _sig_ki_blast_quick, float(player.get("current_ki"))])
 		return false
 	return true
 
@@ -380,8 +405,8 @@ func _seq_guard_and_move() -> bool:
 	simulator.v_right_grip = 1.0
 	simulator.v_left_trigger = 1.0
 	simulator.v_right_trigger = 1.0
-	simulator.set_scripted_hands(Vector3(-0.08, 0.02, 0.24), Vector3(0.08, 0.02, 0.24), false, false, true)
-	await _step_seconds(0.15)
+	simulator.set_scripted_hands(Vector3(-0.08, 0.10, 0.24), Vector3(0.08, 0.10, 0.24), false, false, true)
+	await _step_seconds(0.25)
 
 	var blocking: bool = bool(player.get("is_blocking"))
 	simulator.clear_virtual_buttons()

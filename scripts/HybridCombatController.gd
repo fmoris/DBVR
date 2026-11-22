@@ -170,28 +170,6 @@ func _ready() -> void:
 	step_audio_player.name = "StepAudioPlayer"
 	add_child(step_audio_player)
 
-	for u_arg: String in OS.get_cmdline_user_args():
-		if u_arg.begins_with("--test-suite="):
-			var suite_val: String = u_arg.substr("--test-suite=".length())
-			_boot_desktop_test_suite.call_deferred(suite_val)
-			break
-
-
-func _boot_desktop_test_suite(suite_val: String) -> void:
-	var sim_script: Script = load("res://scripts/debug/DesktopXRSimulator.gd") as Script
-	var runner_script: Script = load("res://scripts/tests/CombatSequenceRunner.gd") as Script
-	if not sim_script or not runner_script or not get_tree() or not get_tree().current_scene:
-		return
-	var sim: Node = sim_script.new()
-	sim.name = "DesktopXRSimulator"
-	get_tree().current_scene.add_child(sim)
-	if sim.has_method("activate"):
-		sim.activate(xr_origin, camera, true)
-	var runner: Node = runner_script.new()
-	runner.name = "CombatSequenceRunner"
-	get_tree().current_scene.add_child(runner)
-	runner.start_from_cmdline(sim, suite_val)
-
 
 func _exit_tree() -> void:
 	if _air_brake_root and is_instance_valid(_air_brake_root):
@@ -837,14 +815,14 @@ func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta:
 				var renzoku_cost: float = cfg_r.ki_blast_cost * 2.5
 				if float(p_ref.get("current_ki")) >= renzoku_cost:
 					p_ref.consume_ki(renzoku_cost)
-					gesture_tree._trigger_action(action_name, false)
+					gesture_tree._trigger_action(action_name)
 					get_tree().create_timer(0.08).timeout.connect(func():
 						if is_instance_valid(gesture_tree):
-							gesture_tree._trigger_action(action_name, false)
+							gesture_tree._trigger_action(action_name)
 					)
 					get_tree().create_timer(0.16).timeout.connect(func():
 						if is_instance_valid(gesture_tree):
-							gesture_tree._trigger_action(action_name, false)
+							gesture_tree._trigger_action(action_name)
 					)
 					if gesture_tree.has_signal("gesture_logged"):
 						gesture_tree.emit_signal("gesture_logged", "💥 ¡RENZOKU ENERGY DAN! Ráfaga x3 en seguimiento", "success")
