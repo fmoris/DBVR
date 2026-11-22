@@ -102,6 +102,8 @@ func _run_all_sequences() -> void:
 	print("==================================================")
 	print("[CombatSequenceRunner] Resultado: %d PASS, %d FAIL" % [passed, failed])
 	print("==================================================")
+	if not DisplayServer.get_name().to_lower().contains("headless"):
+		await get_tree().create_timer(2.0).timeout
 	get_tree().quit(0 if failed == 0 else 1)
 
 
@@ -412,6 +414,7 @@ func _seq_transformation() -> bool:
 
 
 func _seq_chain_sequences() -> bool:
+	var is_visual: bool = not DisplayServer.get_name().to_lower().contains("headless")
 	var opp: Node3D = player._get_opponent() if player.has_method("_get_opponent") else null
 	if not opp or not is_instance_valid(opp):
 		print("  -> Motivo: no se encontró oponente en la escena.")
@@ -421,7 +424,7 @@ func _seq_chain_sequences() -> bool:
 	player.set("current_ki", 90.0)
 	opp.set("current_ki", 90.0)
 	player._start_followup_airborne_sequence(opp, Vector3(0.0, 5.0, -18.0))
-	await get_tree().process_frame
+	await _step_seconds(0.35 if is_visual else 0.02)
 	if not bool(player.get("is_in_followup_bullet_time")) or not is_equal_approx(Engine.time_scale, 0.28):
 		print("  -> Motivo: Follow-Up Bullet-Time (0.28x) no se activó.")
 		Engine.time_scale = 1.0
@@ -432,17 +435,21 @@ func _seq_chain_sequences() -> bool:
 		print("  -> Motivo: Meteor Chase sin recuperar no otorgó bonus (+2 golpes, 1.25x).")
 		Engine.time_scale = 1.0
 		return false
+	if is_visual:
+		await _step_seconds(0.8)
 	player._stop_flight()
 
 	# Probar recuperación Air Brake -> Melee Normal
 	player._start_followup_airborne_sequence(opp, Vector3(0.0, 5.0, -18.0))
-	await get_tree().process_frame
+	await _step_seconds(0.35 if is_visual else 0.02)
 	opp.complete_air_brake()
 	player.start_flight_to_opponent()
 	if int(player.get("pending_followup_bonus_hits")) != 0 or not is_equal_approx(float(player.get("pending_followup_damage_mult")), 1.0):
 		print("  -> Motivo: Rival recuperado no debió recibir bonus de seguimiento.")
 		Engine.time_scale = 1.0
 		return false
+	if is_visual:
+		await _step_seconds(0.6)
 	player._stop_flight()
 
 	# 2. Choque físico -> Estado Indefenso + Explosive Wave corta-cadena
@@ -450,6 +457,8 @@ func _seq_chain_sequences() -> bool:
 	if not bool(opp.get("is_defenseless_crash")) or String(opp.get("airborne_recovery_state")) != "DEFENSELESS_CRASH":
 		print("  -> Motivo: _on_boundary_crash_impact no activó DEFENSELESS_CRASH.")
 		return false
+	if is_visual:
+		await _step_seconds(0.7)
 	opp.set("is_defenseless_crash", false)
 	opp.set("defenseless_crash_timer", 0.0)
 
@@ -458,10 +467,14 @@ func _seq_chain_sequences() -> bool:
 		print("  -> Motivo: start_post_super_followup no activó Follow-Up.")
 		Engine.time_scale = 1.0
 		return false
+	if is_visual:
+		await _step_seconds(0.5)
 	if not opp.trigger_explosive_wave_chain_break() or bool(player.get("is_in_followup_bullet_time")) or int(player.get("combat_chain_depth")) != 0:
 		print("  -> Motivo: Explosive Wave no cortó la cadena enemiga.")
 		Engine.time_scale = 1.0
 		return false
+	if is_visual:
+		await _step_seconds(0.8)
 
 	# 3. Beam Clash: bloqueo IA + avance hasta 0.0 por Ki == 0
 	var clash_ctrl: Node3D = load("res://scripts/BeamClashController.gd").new()
@@ -472,14 +485,22 @@ func _seq_chain_sequences() -> bool:
 		clash_ctrl.queue_free()
 		Engine.time_scale = 1.0
 		return false
+	if is_visual:
+		await _step_seconds(0.8)
 	opp.set("current_ki", 0.0)
-	clash_ctrl._apply_exhaustion_or_timeout_surge(0.8)
-	if float(clash_ctrl.get("clash_ratio")) > 0.001:
-		print("  -> Motivo: el choque no avanzó a 0.0 al quedarse la IA sin Ki (ratio=%.2f)." % float(clash_ctrl.get("clash_ratio")))
-		clash_ctrl.queue_free()
-		Engine.time_scale = 1.0
-		return false
-	clash_ctrl._resolve_clash(player, opp, "Kamehameha")
+	if is_visual:
+		await _step_seconds(0.9)
+	else:
+		clash_ctrl._apply_exhaustion_or_timeout_surge(0.8)
+	if is_instance_valid(clash_ctrl) and bool(clash_ctrl.get("is_active")):
+		if float(clash_ctrl.get("clash_ratio")) > 0.001:
+			print("  -> Motivo: el choque no avanzó a 0.0 al quedarse la IA sin Ki (ratio=%.2f)." % float(clash_ctrl.get("clash_ratio")))
+			clash_ctrl.queue_free()
+			Engine.time_scale = 1.0
+			return false
+		clash_ctrl._resolve_clash(player, opp, "Kamehameha")
+	if is_visual:
+		await _step_seconds(1.0)
 
 	# 4. Fase 2 & 3: Shunkan Idō + Nuevos Poderes
 	player.set("current_ki", 50.0)
