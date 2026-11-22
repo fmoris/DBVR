@@ -3854,6 +3854,9 @@ func _on_bullet_time_completed(recorded_hits: Array, _launch_vector: Vector3, op
 	is_in_bullet_time = false
 	if opponent and is_instance_valid(opponent) and opponent.has_method("set"):
 		opponent.set("is_in_bullet_time", false)
+	if active_target_dome and is_instance_valid(active_target_dome) and bool(active_target_dome.get("is_active")):
+		active_target_dome.set("is_active", false)
+		active_target_dome.queue_free()
 	active_target_dome = null
 
 	velocity = Vector3.ZERO
@@ -3893,6 +3896,9 @@ func _on_bullet_time_finisher(finisher_name: String, swing_velocity: float, reco
 	is_in_bullet_time = false
 	if opponent and is_instance_valid(opponent) and opponent.has_method("set"):
 		opponent.set("is_in_bullet_time", false)
+	if active_target_dome and is_instance_valid(active_target_dome) and bool(active_target_dome.get("is_active")):
+		active_target_dome.set("is_active", false)
+		active_target_dome.queue_free()
 	active_target_dome = null
 
 	if finisher_name == "hammer_strike":

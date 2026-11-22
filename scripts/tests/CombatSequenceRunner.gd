@@ -436,22 +436,25 @@ func _seq_chain_sequences() -> bool:
 	if is_visual:
 		await _step_seconds(0.45)
 
-	# Conectar golpe lanzador v3 desde la cúpula Melee para que Vegeta lance a Goku por los aires
+	# Conectar golpe lanzador v3 desde la cúpula Melee para que Vegeta lance a Goku por los aires y se cierre el minijuego
 	var dome_0: Variant = player.get("active_target_dome")
 	if dome_0 and is_instance_valid(dome_0):
+		dome_0.set("is_active", false)
 		dome_0.emit_signal("finisher_triggered", "charged_v3_back", 3.2, [{ "zone_id": 0, "is_charged": true, "power": 1.35 }], Vector3(0.0, 5.0, -18.0))
+		if is_instance_valid(dome_0):
+			dome_0.queue_free()
 	else:
 		player._execute_charged_v3_or_ki_break_finisher(opp, "charged_v3_back", 3.2, Vector3(0.0, 5.0, -18.0))
 
-	await _step_seconds(0.50 if is_visual else 0.40)
+	await _step_seconds(0.55 if is_visual else 0.40)
 	if not bool(player.get("is_in_followup_bullet_time")) or not is_equal_approx(Engine.time_scale, 0.28):
 		print("  -> Motivo: el golpe Melee de Vegeta no disparó Follow-Up Bullet-Time (0.28x).")
 		Engine.time_scale = 1.0
 		return false
 
-	# 1. Follow-Up Bullet-Time -> Meteor Chase con Bonus (UNRECOVERED)
+	# 1. Follow-Up Bullet-Time -> dejar ver a Goku volando en 0.28x antes de lanzar Meteor Chase
 	if is_visual:
-		await _step_seconds(0.45)
+		await _step_seconds(0.85)
 	player.start_flight_to_opponent()
 	if int(player.get("pending_followup_bonus_hits")) != 2 or not is_equal_approx(float(player.get("pending_followup_damage_mult")), 1.25):
 		print("  -> Motivo: Meteor Chase sin recuperar no otorgó bonus (+2 golpes, 1.25x).")
