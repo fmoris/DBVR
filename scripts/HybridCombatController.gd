@@ -815,17 +815,29 @@ func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta:
 				var renzoku_cost: float = cfg_r.ki_blast_cost * 2.5
 				if float(p_ref.get("current_ki")) >= renzoku_cost:
 					p_ref.consume_ki(renzoku_cost)
-					gesture_tree._trigger_action(action_name)
-					get_tree().create_timer(0.08).timeout.connect(func():
-						if is_instance_valid(gesture_tree):
-							gesture_tree._trigger_action(action_name)
-					)
-					get_tree().create_timer(0.16).timeout.connect(func():
-						if is_instance_valid(gesture_tree):
-							gesture_tree._trigger_action(action_name)
-					)
+					Engine.time_scale = 1.0
+					if p_ref.has_method("_hide_followup_decision_banner"):
+						p_ref._hide_followup_decision_banner()
+					for r_i: int in range(5):
+						var r_act: String = "ki_blast_right" if (r_i % 2 == 0) else "ki_blast_left"
+						var r_hand: int = r_i % 2
+						var delay_s: float = float(r_i) * 0.08
+						if delay_s <= 0.001:
+							gesture_tree._trigger_action(r_act)
+							var pa0: Variant = p_ref.get("procedural_animator")
+							if pa0 and pa0.has_method("trigger_ki_blast_shot"):
+								pa0.trigger_ki_blast_shot(r_hand)
+						else:
+							get_tree().create_timer(delay_s, true, false, true).timeout.connect(func():
+								if is_instance_valid(gesture_tree):
+									gesture_tree._trigger_action(r_act)
+								if is_instance_valid(p_ref):
+									var pa_n: Variant = p_ref.get("procedural_animator")
+									if pa_n and pa_n.has_method("trigger_ki_blast_shot"):
+										pa_n.trigger_ki_blast_shot(r_hand)
+							)
 					if gesture_tree.has_signal("gesture_logged"):
-						gesture_tree.emit_signal("gesture_logged", "💥 ¡RENZOKU ENERGY DAN! Ráfaga x3 en seguimiento", "success")
+						gesture_tree.emit_signal("gesture_logged", "💥 ¡RENZOKU ENERGY DAN! Ráfaga x5 en seguimiento", "success")
 					if is_left:
 						left_charge_time = 0.0
 						left_is_charging = false

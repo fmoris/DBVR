@@ -518,16 +518,26 @@ func _seq_chain_sequences() -> bool:
 		print("  -> Motivo: _on_boundary_crash_impact no activó DEFENSELESS_CRASH.")
 		return false
 	if is_visual:
-		player.start_post_super_followup(opp)
-		for b_idx: int in range(3):
+		Engine.time_scale = 1.0
+		player.set("is_in_followup_bullet_time", false)
+		if player.has_method("_hide_followup_decision_banner"):
+			player._hide_followup_decision_banner()
+		_sig_ki_blast_quick = 0
+		for b_idx: int in range(6):
+			var b_act: String = "ki_blast_right" if (b_idx % 2 == 0) else "ki_blast_left"
 			if gesture_tree and gesture_tree.has_method("_trigger_action"):
-				gesture_tree._trigger_action("ki_blast_right" if (b_idx % 2 == 0) else "ki_blast_left")
-			await get_tree().create_timer(0.18, true, false, true).timeout
+				gesture_tree._trigger_action(b_act)
+			var p_anim: Variant = player.get("procedural_animator")
+			if p_anim and p_anim.has_method("trigger_ki_blast_shot"):
+				p_anim.trigger_ki_blast_shot(b_idx % 2)
+			await get_tree().create_timer(0.09, true, false, true).timeout
 		await get_tree().create_timer(1.1, true, false, true).timeout
-		player._end_followup_bullet_time(false)
 		opp.set("is_defenseless_crash", false)
 		opp.set("defenseless_crash_timer", 0.0)
 		Engine.time_scale = 1.0
+		if _sig_ki_blast_quick < 4:
+			print("  -> Motivo: Renzoku solo detectó %d Ki Blasts." % _sig_ki_blast_quick)
+			return false
 		return true
 	opp.set("is_defenseless_crash", false)
 	opp.set("defenseless_crash_timer", 0.0)
