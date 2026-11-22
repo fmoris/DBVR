@@ -10,6 +10,8 @@ signal match_finished(winner: Node3D, loser: Node3D, tech_name: String)
 signal zenkai_activated(source: String) # "brecha", "comeback"
 signal furia_changed(active: bool)
 signal dramatic_buffs_changed()
+signal combat_hit_received(damage_np: float, was_blocked: bool, apply_kb: bool, hit_direction: Vector3)
+signal wall_stick_triggered(duration_sec: float, impact_speed: float)
 
 @export var character_data: Resource
 
@@ -156,6 +158,13 @@ var is_target_locked: bool = false # Requisito canónico de fijación visual par
 var is_in_followup_bullet_time: bool = false
 var followup_bullet_time_timer: float = 0.0
 var opponent_airborne_target: Node3D = null
+var combat_chain_depth: int = 0
+var airborne_recovery_state: String = "NONE" # "NONE" | "UNRECOVERED" | "RECOVERED" | "DEFENSELESS_CRASH"
+var is_defenseless_crash: bool = false
+var defenseless_crash_timer: float = 0.0
+var pending_followup_bonus_hits: int = 0
+var pending_followup_damage_mult: float = 1.0
+var _followup_banner_node: Node3D = null
 
 # Estado y control de Secuencia de Super Haz (Bullet-Time para técnicas supremas)
 var is_in_beam_sequence: bool = false
@@ -569,11 +578,21 @@ func _physics_process(delta: float) -> void:
 
 	_tick_dramatic_buffs(delta)
 
-	# 0. Temporizador de Follow-Up Bullet-Time en el aire
+	# 0. Temporizador de Follow-Up Bullet-Time en el aire (tiempo real independiente de time_scale)
 	if is_in_followup_bullet_time:
-		followup_bullet_time_timer -= delta
+		var real_dt_fu: float = delta / maxf(Engine.time_scale, 0.01)
+		followup_bullet_time_timer -= real_dt_fu
 		if followup_bullet_time_timer <= 0.0:
 			_end_followup_bullet_time(true)
+
+	# 0b. Temporizador de estado indefenso tras choque físico (roca, cañón, muralla o suelo)
+	if defenseless_crash_timer > 0.0:
+		defenseless_crash_timer -= delta
+		if defenseless_crash_timer <= 0.0:
+			defenseless_crash_timer = 0.0
+			is_defenseless_crash = false
+			if airborne_recovery_state == "DEFENSELESS_CRASH":
+				airborne_recovery_state = "RECOVERED"
 
 	# 1. Movimiento de vuelo rápido hacia el oponente (Melee Dash con seguimiento 3D completo)
 	if is_flying_to_opponent:
@@ -632,7 +651,7 @@ func _physics_process(delta: float) -> void:
 			wall_stick_timer = 0.0
 			start_ragdoll(last_wall_crash_normal * 2.5 + Vector3.DOWN * 4.5)
 			ragdoll_recovery_timer = 1.65
-	elif velocity.length_squared() > 0.001:
+	elif velocity.length_squared() > 0.001 and not is_in_bullet_time:
 		var move_step = velocity * delta
 		if is_player:
 			var origin = get_parent()
@@ -781,10 +800,16 @@ func _process(delta: float) -> void:
 			current_ki = 0.0
 			if not busy_with_super_or_zenkai:
 				revert_to_base()
+				is_staggered = true
+				stagger_timer = maxf(stagger_timer, 1.2)
+				_log_combat_event("💨 ¡Sin Ki! Destransformación por agotamiento (1.2s fatiga)", "warning")
 
 	# Reversión canónica a estado base si el Ki se agota por cualquier causa (Punto 13)
 	if current_transformation and current_ki <= 0.0 and not busy_with_super_or_zenkai:
 		revert_to_base()
+		is_staggered = true
+		stagger_timer = maxf(stagger_timer, 1.2)
+		_log_combat_event("💨 ¡Sin Ki! Destransformación por agotamiento (1.2s fatiga)", "warning")
 
 	# Alinear el aura con la cámara para el jugador en primera persona
 	if is_player and aura_node and is_instance_valid(aura_node):
@@ -980,6 +1005,7 @@ func take_hit(amount_np: float, hit_direction: Vector3 = Vector3.ZERO, apply_kb:
 
 	# 1. Si está en postura de Guardia y no tiene la guardia rota, absorber con Bloqueo
 	if is_blocking and not is_guard_broken and amount_np >= 10.0:
+		combat_hit_received.emit(amount_np, true, apply_kb, hit_direction)
 		block_hit(amount_np, hit_direction)
 		return
 
@@ -1025,6 +1051,7 @@ func take_hit(amount_np: float, hit_direction: Vector3 = Vector3.ZERO, apply_kb:
 
 	var floor_limit: float = maxf(active_max * secured_np_threshold_ratio, 100.0)
 	current_np = maxf(current_np - amount_np, floor_limit)
+	combat_hit_received.emit(amount_np, false, apply_kb, hit_direction)
 	_regen_ki_from_damage(old_np - current_np)
 	_notify_stats()
 	_check_transformation_unlocks()
@@ -1720,6 +1747,16 @@ func trigger_comeback_zenkai() -> void:
 func _tick_dramatic_buffs(delta: float) -> void:
 	if active_dramatic_buffs.is_empty():
 		return
+	if active_dramatic_buffs.has("ki_drain_per_sec"):
+		var k_drain: float = float(active_dramatic_buffs["ki_drain_per_sec"].get("value", 0.0)) * delta
+		if k_drain > 0.0:
+			if current_ki > k_drain:
+				current_ki -= k_drain
+				_notify_stats()
+			else:
+				current_ki = 0.0
+				current_np = maxf(100.0, current_np - 120.0 * delta)
+				_notify_stats()
 	_expired_buff_keys.clear()
 	for k in active_dramatic_buffs.keys():
 		var entry: Dictionary = active_dramatic_buffs[k]
@@ -1919,12 +1956,12 @@ func notify_attack_failed() -> void:
 	# 1. NP cae a la mitad (o un valor mínimo).
 	# 2. Ki cae a 0.
 	# 3. Estado de penalización por 8 segundos.
-	current_np = max(current_np * 0.4, 100.0)
-	current_ki = 0.0
+	current_np = max(current_np * 0.65, 100.0)
+	current_ki = maxf(current_ki, 15.0)
 	is_penalized = true
-	penalty_timer = 8.0
+	penalty_timer = 4.5
 	_notify_stats()
-	print("[CharacterInstance] %s: ¡FALLO DE REMATE! Penalizado: Ki a 0, NP reducido a la mitad y recarga mermada." % character_data.character_name)
+	print("[CharacterInstance] %s: ¡FALLO DE REMATE! Penalizado (4.5s): BP al 65%% y Ki mínimo 15." % character_data.character_name)
 
 func unlock_transformation(form_name: String) -> void:
 	if not unlocked_transformations.has(form_name):
@@ -2015,14 +2052,6 @@ func _check_transformation_unlocks() -> void:
 		if not is_transformation_unlocked(form_3):
 			if is_in_zenkai_state:
 				unlock_transformation(form_3)
-
-	# Desbloqueo Fase 4 (Cúspide x8.0: Ultra Instinto / Ultra Ego):
-	# Se activa tras transformar en Fase 3+ con Estado Zenkai o umbral irreversible >= 75%
-	if character_data.transformations.size() > 3:
-		var form_4: String = character_data.transformations[3].form_name
-		if not is_transformation_unlocked(form_4):
-			if current_transformation_index >= 2 and (is_in_zenkai_state or secured_np_threshold_ratio >= 0.75):
-				unlock_transformation(form_4)
 
 	# Desbloqueo Fase 4 (Cúspide x8.0: Ultra Instinto / Ultra Ego):
 	# Se activa tras transformar en Fase 3+ con Estado Zenkai o umbral irreversible >= 75%
@@ -2392,8 +2421,12 @@ func _find_skeleton(node: Node) -> Skeleton3D:
 	return null
 
 func start_flight_to_opponent() -> void:
+	var was_followup_chase: bool = is_in_followup_bullet_time
 	if is_in_followup_bullet_time:
 		is_in_followup_bullet_time = false
+		Engine.time_scale = 1.0
+		_hide_followup_decision_banner()
+		combat_chain_depth += 1
 
 	if is_player and not is_target_locked:
 		var opp = _get_opponent()
@@ -2422,8 +2455,18 @@ func start_flight_to_opponent() -> void:
 	air_brake_progress = 0.0
 	wall_stick_timer = 0.0
 	pending_ambush_bonus_hits = 0
+	pending_followup_bonus_hits = 0
+	pending_followup_damage_mult = 1.0
 	is_ambush_dash = false
 	var ambush_speed_mult: float = 1.0
+	if was_followup_chase and opp_f and is_instance_valid(opp_f):
+		var rec_state: String = String(opp_f.get("airborne_recovery_state")) if opp_f.get("airborne_recovery_state") != null else "UNRECOVERED"
+		if rec_state == "UNRECOVERED" or rec_state == "DEFENSELESS_CRASH" or bool(opp_f.get("is_defenseless_crash")):
+			pending_followup_bonus_hits = 2
+			pending_followup_damage_mult = 1.25
+			_log_combat_event("⚡ ¡PERSECUCIÓN CON BONUS! Rival sin recuperar (+2 golpes, +25%% daño)", "success")
+		else:
+			_log_combat_event("⚔️ Rival recuperado a tiempo: Melee normal.", "info")
 	if opp_f and is_instance_valid(opp_f) and has_free_melee_opening_against(opp_f):
 		var opening_bonus: Dictionary = opp_f.consume_blast_opening_bonus() if opp_f.has_method("consume_blast_opening_bonus") else { "bonus_hits": 1, "speed_mult": 1.35 }
 		is_ambush_dash = true
@@ -2433,6 +2476,25 @@ func start_flight_to_opponent() -> void:
 	var base_dash_spd: float = clampf(34.0 + maxf(_dash_initial_dist - 15.0, 0.0) * 0.65, 34.0, 68.0)
 	flight_speed = clampf(base_dash_spd * sqrt(bp_atk_f / bp_def_f) * ambush_speed_mult, 26.0, 82.0) * get_dramatic_modifier("flight_speed_mult", 1.0)
 	_dash_speed_mult = 1.0
+	if was_followup_chase and opp_f and is_instance_valid(opp_f):
+		var takeoff_pos: Vector3 = get_parent().global_position if (is_player and get_parent()) else global_position
+		_spawn_melee_shockwave(takeoff_pos + Vector3.UP * 1.0)
+		var opp_pos_fu: Vector3 = opp_f.global_position
+		var to_opp_dir: Vector3 = (opp_pos_fu - takeoff_pos)
+		to_opp_dir.y = 0.0
+		to_opp_dir = to_opp_dir.normalized() if to_opp_dir.length_squared() > 0.01 else -global_transform.basis.z
+		# Z-Blink anime a 6.5m del rival en el aire para que el dash final (2.2x) sea claramente visible
+		var wait_pos: Vector3 = opp_pos_fu - to_opp_dir * 6.5
+		wait_pos.y = maxf(wait_pos.y, get_ground_elevation(wait_pos))
+		if is_player and get_parent() is Node3D:
+			var orig_fu: Node3D = get_parent() as Node3D
+			orig_fu.global_position = wait_pos
+			_clamp_to_arena(orig_fu)
+		else:
+			global_position = wait_pos
+			_clamp_to_arena(self)
+		_spawn_melee_shockwave(wait_pos + Vector3.UP * 1.0)
+		_dash_speed_mult = 2.2
 	_flight_elapsed = 0.0
 	_flight_best_dist = _dash_initial_dist
 	_flight_stall_timer = 0.0
@@ -3215,6 +3277,9 @@ func complete_air_brake() -> void:
 	_proximity_repulsion_cooldown = 0.45
 
 	var opp: Node3D = _get_opponent()
+	airborne_recovery_state = "RECOVERED"
+	is_defenseless_crash = false
+	defenseless_crash_timer = 0.0
 	if opp and is_instance_valid(opp) and bool(opp.get("is_in_followup_bullet_time")) and opp.has_method("_end_followup_bullet_time"):
 		opp._end_followup_bullet_time(false)
 
@@ -3289,6 +3354,7 @@ func _clamp_to_arena(node: Node3D, is_melee_dash: bool = false) -> void:
 							if horiz_speed > 3.2:
 								wall_stick_timer = 0.65 if is_player else 1.25
 								_wall_crash_immunity_timer = 1.50
+								wall_stick_triggered.emit(wall_stick_timer, horiz_speed)
 								_spawn_ground_crash_vfx(col.position, false)
 								_log_combat_event("💥 ¡Estrellamiento contra el risco! Incrustado en la roca (Wall-Stick).", "warning")
 								print("[Physics] %s se incrustó en el risco de la montaña por %.2fs (Wall-Stick anime)." % [character_data.character_name if character_data else name, wall_stick_timer])
@@ -3326,6 +3392,7 @@ func _clamp_to_arena(node: Node3D, is_melee_dash: bool = false) -> void:
 			if horiz_speed > 3.2:
 				wall_stick_timer = 0.65 if is_player else 1.25
 				_wall_crash_immunity_timer = 1.50
+				wall_stick_triggered.emit(wall_stick_timer, horiz_speed)
 				_spawn_ground_crash_vfx(pos + Vector3(0.0, 1.2, 0.0), false)
 				print("[Physics] %s se incrustó en el límite exterior por %.2fs (Wall-Stick anime)." % [character_data.character_name if character_data else name, wall_stick_timer])
 		velocity = Vector3.ZERO
@@ -3401,6 +3468,9 @@ func _on_ground_crash_impact(fall_speed: float, crash_pos: Vector3, ground_h: fl
 
 ## Daño secundario por choque contra los límites rocosos / montañas de la arena
 func _on_boundary_crash_impact(speed: float) -> void:
+	is_defenseless_crash = true
+	defenseless_crash_timer = 1.80
+	airborne_recovery_state = "DEFENSELESS_CRASH"
 	if speed > 10.0 and is_knocked_back:
 		var wall_damage = speed * 32.0
 		take_hit(wall_damage, Vector3.ZERO, false)
@@ -3715,8 +3785,11 @@ func _start_melee_bullet_time(opponent: Node3D) -> void:
 	is_in_bullet_time = true
 	if opponent.has_method("set"):
 		opponent.set("is_in_bullet_time", true)
-	var allowed_hits: int = calculate_melee_attack_count(self, opponent)
+	var allowed_hits: int = calculate_melee_attack_count(self, opponent) + pending_followup_bonus_hits
+	var fu_dmg_mult: float = pending_followup_damage_mult
 	pending_ambush_bonus_hits = 0
+	pending_followup_bonus_hits = 0
+	pending_followup_damage_mult = 1.0
 	is_ambush_dash = false
 	var duration: float = float(allowed_hits) * 1.35 + 0.80
 	print("[CharacterInstance] ¡Iniciando Melee Secuencial! Golpes permitidos: %d | Duración: %.2fs" % [allowed_hits, duration])
@@ -3724,9 +3797,17 @@ func _start_melee_bullet_time(opponent: Node3D) -> void:
 	# 0. Alinear milimétricamente a distancia cuerpo a cuerpo y frenar inercia
 	velocity = Vector3.ZERO
 	is_knocked_back = false
+	if is_ragdoll_active:
+		stop_ragdoll()
+	is_ragdoll_active = false
+	ragdoll_recovery_timer = 0.0
 	if opponent.has_method("set"):
 		opponent.set("velocity", Vector3.ZERO)
 		opponent.set("is_knocked_back", false)
+		if bool(opponent.get("is_ragdoll_active")) and opponent.has_method("stop_ragdoll"):
+			opponent.stop_ragdoll()
+		opponent.set("is_ragdoll_active", false)
+		opponent.set("ragdoll_recovery_timer", 0.0)
 
 	# Alinear frente a frente: colocar siempre a la IA directamente delante de la mirada del jugador (0.85m) y misma altura Y
 	var p_node: Node3D = self if is_player else opponent
@@ -3758,6 +3839,8 @@ func _start_melee_bullet_time(opponent: Node3D) -> void:
 		target_scene_dome = get_parent().get_parent() if (is_player and get_parent() and get_parent().get_parent()) else get_parent()
 	if target_scene_dome:
 		target_scene_dome.add_child(active_target_dome)
+	active_target_dome.set("attacker_damage_mult", fu_dmg_mult)
+	active_target_dome.set("defender_is_defenseless", bool(opponent.get("is_defenseless_crash")))
 	active_target_dome.setup(self, opponent, duration, allowed_hits)
 	active_target_dome.bullet_time_completed.connect(_on_bullet_time_completed.bind(opponent))
 	active_target_dome.finisher_triggered.connect(_on_bullet_time_finisher.bind(opponent))
@@ -3798,6 +3881,9 @@ func _on_bullet_time_completed(recorded_hits: Array, _launch_vector: Vector3, op
 	is_in_bullet_time = false
 	if opponent and is_instance_valid(opponent) and opponent.has_method("set"):
 		opponent.set("is_in_bullet_time", false)
+	if active_target_dome and is_instance_valid(active_target_dome) and bool(active_target_dome.get("is_active")):
+		active_target_dome.set("is_active", false)
+		active_target_dome.queue_free()
 	active_target_dome = null
 
 	velocity = Vector3.ZERO
@@ -3808,10 +3894,14 @@ func _on_bullet_time_completed(recorded_hits: Array, _launch_vector: Vector3, op
 
 	if recorded_hits.is_empty():
 		_log_combat_event("↩️ Secuencia melee cancelada o sin impactos. Retornando a distancia táctica.", "info")
+		_separate_fighters_to_canonical_distance(opponent, 8.0)
+	elif not is_match_over and current_ki >= 10.0 and opponent and is_instance_valid(opponent):
+		_log_combat_event("⚔️ Intercambio melee concluido (%d acciones). ¡Iniciando Bullet-Time de seguimiento!" % recorded_hits.size(), "success")
+		var fu_vec: Vector3 = _launch_vector if _launch_vector.length_squared() > 0.1 else (opponent.global_position - global_position).normalized() * 18.0 + Vector3.UP * 5.0
+		_start_followup_airborne_sequence(opponent, fu_vec)
 	else:
 		_log_combat_event("⚔️ Intercambio melee concluido (%d acciones resueltas). Separación táctica." % recorded_hits.size(), "info")
-
-	_separate_fighters_to_canonical_distance(opponent, 8.0)
+		_separate_fighters_to_canonical_distance(opponent, 8.0)
 	var dd_m1: DramaticDirector = DramaticDirector.get_active(get_tree())
 	if dd_m1 and dd_m1.mini_scene_controller:
 		dd_m1.mini_scene_controller.notify_melee_completed()
@@ -3833,10 +3923,13 @@ func _on_bullet_time_finisher(finisher_name: String, swing_velocity: float, reco
 	is_in_bullet_time = false
 	if opponent and is_instance_valid(opponent) and opponent.has_method("set"):
 		opponent.set("is_in_bullet_time", false)
+	if active_target_dome and is_instance_valid(active_target_dome) and bool(active_target_dome.get("is_active")):
+		active_target_dome.set("is_active", false)
+		active_target_dome.queue_free()
 	active_target_dome = null
 
 	if finisher_name == "hammer_strike":
-		strike_atk._execute_hammer_strike_finisher(strike_def, swing_velocity, recorded_hits, launch_vector, hammer_paid)
+		strike_atk._execute_hammer_strike_finisher(strike_def, swing_velocity, recorded_hits, launch_vector)
 	elif finisher_name in ["charged_v3_up", "charged_v3_back", "ki_break_launch"]:
 		strike_atk._execute_charged_v3_or_ki_break_finisher(strike_def, finisher_name, swing_velocity, launch_vector)
 	else:
@@ -4144,7 +4237,7 @@ func _execute_charged_v3_or_ki_break_finisher(opponent: Node3D, mode: String, sw
 	velocity = Vector3.ZERO
 	is_knocked_back = false
 
-	var base_speed: float = 32.0
+	var base_speed: float = 44.0
 	var final_speed: float = base_speed * ratio_bp * v_mult
 	var launch_dir: Vector3 = (fwd * 3.8 + Vector3.UP * 0.55).normalized()
 	var mode_tag: String = "HACIA ATRÁS"
@@ -4195,10 +4288,18 @@ func _execute_charged_v3_or_ki_break_finisher(opponent: Node3D, mode: String, sw
 	# Punto 1: Si el atacante estaba en Estado Zenkai, el remate conectado cierra el combate
 	if is_in_zenkai_state and not is_match_over:
 		trigger_zenkai_match_finish(self, opponent, "Remate Zenkai (%s)" % mode_tag)
-
-	# Punto 1: Si el atacante estaba en Estado Zenkai, el remate conectado cierra el combate
-	if is_in_zenkai_state and not is_match_over:
-		trigger_zenkai_match_finish(self, opponent, "Remate Zenkai (%s)" % mode_tag)
+	elif not is_match_over and current_ki >= 10.0:
+		opponent.set("airborne_recovery_state", "UNRECOVERED")
+		opponent_airborne_target = opponent
+		is_in_followup_bullet_time = true
+		followup_bullet_time_timer = 4.0
+		await get_tree().create_timer(0.32).timeout
+		if is_instance_valid(self) and is_in_followup_bullet_time and not is_match_over:
+			Engine.time_scale = 0.08
+			_show_followup_decision_banner()
+		_log_combat_event("⚡ ¡BULLET-TIME DE SEGUIMIENTO! (4.0s) Elige: Melee / Súper Rápido / Ki Blasts", "success")
+		if gss and gss.has_signal("phase_changed"):
+			gss.emit_signal("phase_changed", "⚡ ¡ELIGE SIGUIENTE SECUENCIA! (MELEE / SÚPER / BLASTS)")
 
 
 ## Separa a los combatientes garantizando la distancia canónica de combate (8.0m)
@@ -4311,37 +4412,20 @@ func _start_followup_airborne_sequence(opponent: Node3D, launch_vector: Vector3)
 	if bool(opponent.get("is_player")) and opponent.has_method("begin_air_brake"):
 		opponent.begin_air_brake(final_impulse.length(), 450.0, bp_atk, fu_drag)
 
-	# Esperar 1.0 segundo mientras el contrincante vuela por los aires
-	await get_tree().create_timer(1.0).timeout
-	if not opponent or not is_instance_valid(opponent):
-		return
-
-	# Si el jugador completó el Frenado Aéreo antes del follow-up, cancelar suspensión
-	if bool(opponent.get("is_player")) and not bool(opponent.get("is_knocked_back")) and not bool(opponent.get("is_air_brake_active")):
-		return
-	if bool(opponent.get("is_player")) and bool(opponent.get("is_air_brake_active")):
-		await get_tree().create_timer(0.8).timeout
-		if not opponent or not is_instance_valid(opponent):
-			return
-		if not bool(opponent.get("is_knocked_back")) and not bool(opponent.get("is_air_brake_active")):
-			return
-
-	# Restaurar fricción canónica
-	opponent.set("knockback_drag", 24.0)
-
-	# Si el combate sigue activo, encender el Follow-Up Bullet-Time
+	# Dejar volar al defensor 0.32s a velocidad normal para que se vea el impacto, y luego activar Bullet-Time (0.28x)
+	opponent.set("airborne_recovery_state", "UNRECOVERED")
 	is_in_followup_bullet_time = true
 	followup_bullet_time_timer = 4.0
 	opponent_airborne_target = opponent
+	await get_tree().create_timer(0.32).timeout
+	if is_instance_valid(self) and is_in_followup_bullet_time and not is_match_over:
+		Engine.time_scale = 0.08
+		_show_followup_decision_banner()
 
-	# Suspender al oponente en el aire en cámara lenta
-	opponent.set("velocity", Vector3.ZERO)
-	opponent.set("is_knocked_back", false)
-
-	_log_combat_event("⚡ ¡CADENA DE SEGUIMIENTO EN EL AIRE! (4.0s) Dispara Ki Blasts, Melee Dash o Super Poder", "success")
+	_log_combat_event("⚡ ¡BULLET-TIME DE SEGUIMIENTO! (4.0s) Elige: Melee / Súper Rápido / Ki Blasts", "success")
 	var gss = _get_gesture_tree()
 	if gss and gss.has_signal("phase_changed"):
-		gss.emit_signal("phase_changed", "¡CADENA EN EL AIRE! (FOLLOW-UP BULLET TIME)")
+		gss.emit_signal("phase_changed", "⚡ ¡ELIGE SIGUIENTE SECUENCIA! (MELEE / SÚPER / BLASTS)")
 
 
 ## Finaliza el Follow-Up Bullet-Time
@@ -4349,9 +4433,13 @@ func _end_followup_bullet_time(timed_out: bool = false) -> void:
 	if not is_in_followup_bullet_time:
 		return
 	is_in_followup_bullet_time = false
+	Engine.time_scale = 1.0
+	_hide_followup_decision_banner()
 
 	var target_opp = opponent_airborne_target
 	opponent_airborne_target = null
+	if timed_out:
+		combat_chain_depth = 0
 
 	if target_opp and is_instance_valid(target_opp):
 		# En cualquier finalización donde los combatientes queden cerca o tras expirar el tiempo, separarlos a 5.5m
@@ -4366,6 +4454,132 @@ func _end_followup_bullet_time(timed_out: bool = false) -> void:
 		else:
 			target_opp.set("velocity", Vector3.ZERO)
 			target_opp.set("is_knocked_back", false)
+
+
+func get_chain_ki_multiplier() -> float:
+	var step: float = KiEconomyConfig.get_default().chain_ki_cost_step
+	return 1.0 + float(combat_chain_depth) * step
+
+
+func start_post_super_followup(opponent: Node3D) -> void:
+	if is_match_over or not opponent or not is_instance_valid(opponent):
+		return
+	var cfg: KiEconomyConfig = KiEconomyConfig.get_default()
+	if current_ki < cfg.post_super_followup_min_ki:
+		combat_chain_depth = 0
+		return
+	combat_chain_depth += 1
+	is_in_followup_bullet_time = true
+	followup_bullet_time_timer = cfg.post_super_followup_duration
+	opponent_airborne_target = opponent
+	opponent.set("airborne_recovery_state", "UNRECOVERED")
+	Engine.time_scale = 0.08
+	_show_followup_decision_banner()
+	_log_combat_event("⚡ ¡PERSECUCIÓN POST-SUPER! (%.1fs) Lluvia de Ki Blasts o Meteor Chase" % cfg.post_super_followup_duration, "success")
+	var gss = _get_gesture_tree()
+	if gss and gss.has_signal("phase_changed"):
+		gss.emit_signal("phase_changed", "¡CADENA POST-SUPER! (KI BLASTS / METEOR CHASE)")
+
+
+func trigger_explosive_wave_chain_break() -> bool:
+	if is_match_over:
+		return false
+	var cfg: KiEconomyConfig = KiEconomyConfig.get_default()
+	if current_ki < cfg.melee_explosive_wave_cost:
+		return false
+	var opp: Node3D = _get_opponent()
+	var in_opp_chain: bool = opp != null and is_instance_valid(opp) and bool(opp.get("is_in_followup_bullet_time"))
+	if not in_opp_chain and not is_knocked_back and not is_air_brake_active:
+		return false
+
+	consume_ki(cfg.melee_explosive_wave_cost)
+	velocity = Vector3.ZERO
+	is_knocked_back = false
+	is_air_brake_active = false
+	combat_chain_depth = 0
+
+	var my_pos: Vector3 = get_parent().global_position if (is_player and get_parent()) else global_position
+	_spawn_melee_shockwave(my_pos + Vector3.UP * 1.0)
+	KiSmokeFX.spawn_smoke(get_tree(), my_pos, 1.3)
+	play_character_action_audio("common.ki_burst", false, "common.dodge_vanish")
+
+	if opp and is_instance_valid(opp):
+		if opp.has_method("_end_followup_bullet_time"):
+			opp._end_followup_bullet_time(false)
+		opp.set("combat_chain_depth", 0)
+		if opp.has_method("_stop_flight"):
+			opp._stop_flight()
+		var push_dir: Vector3 = (opp.global_position - my_pos)
+		push_dir.y = 0.0
+		push_dir = push_dir.normalized() if push_dir.length_squared() > 0.01 else -global_transform.basis.z
+		if opp.has_method("apply_knockback"):
+			opp.apply_knockback(push_dir, 18.0)
+
+	_log_combat_event("💥 ¡ONDA EXPANSIVA! Cadena enemiga cortada (-%d Ki)" % int(cfg.melee_explosive_wave_cost), "warning")
+	return true
+
+
+func execute_shunkan_ido_flank() -> bool:
+	if is_match_over or is_in_bullet_time or is_in_beam_sequence or is_in_beam_clash or is_flying_to_opponent:
+		return false
+	var cfg: KiEconomyConfig = KiEconomyConfig.get_default()
+	if current_ki < cfg.melee_vanish_cost:
+		return false
+	var opp: Node3D = _get_opponent()
+	if not opp or not is_instance_valid(opp):
+		return false
+	consume_ki(cfg.melee_vanish_cost)
+	var opp_pos: Vector3 = opp.global_position
+	var side_sign: float = -1.0 if randf() < 0.5 else 1.0
+	var to_me: Vector3 = (global_position - opp_pos)
+	to_me.y = 0.0
+	var base_dir: Vector3 = to_me.normalized() if to_me.length_squared() > 0.01 else Vector3.BACK
+	var flank_dir: Vector3 = base_dir.rotated(Vector3.UP, side_sign * deg_to_rad(135.0))
+	var dest: Vector3 = opp_pos + flank_dir * 11.5
+	dest.y = get_ground_elevation(dest)
+	if is_player and get_parent() is Node3D:
+		var orig: Node3D = get_parent() as Node3D
+		orig.global_position = Vector3(dest.x, maxf(orig.global_position.y, dest.y), dest.z)
+		_clamp_to_arena(orig)
+	else:
+		global_position = Vector3(dest.x, maxf(global_position.y, dest.y), dest.z)
+		_clamp_to_arena(self)
+	_spawn_melee_shockwave(dest + Vector3.UP * 1.0)
+	play_character_action_audio("common.dodge_vanish", false)
+	_log_combat_event("⚡ ¡SHUNKAN IDŌ! Teletransporte táctico (-%d Ki)" % int(cfg.melee_vanish_cost), "info")
+	return true
+
+
+func _show_followup_decision_banner() -> void:
+	_hide_followup_decision_banner()
+	if not is_player or not is_inside_tree():
+		return
+	var orig: Node = get_parent()
+	var cam: Camera3D = orig.get_node_or_null("XRCamera3D") as Camera3D if orig else null
+	if not cam or not is_instance_valid(cam):
+		return
+	var anchor := Node3D.new()
+	anchor.name = "FollowUpDecisionBanner"
+	anchor.position = Vector3(0.0, 0.26, -1.20)
+	cam.add_child(anchor)
+
+	var lbl := Label3D.new()
+	lbl.text = "⚡ ¡BULLET-TIME DE SEGUIMIENTO! (4.0s)\nPuño al frente: Meteor Chase | Súper: Carga Rápida | Gatillo: Renzoku x3"
+	lbl.font_size = 24
+	lbl.pixel_size = 0.00125
+	lbl.no_depth_test = true
+	lbl.render_priority = 122
+	lbl.modulate = Color(1.0, 0.90, 0.25)
+	lbl.outline_size = 8
+	lbl.outline_modulate = Color(0.0, 0.0, 0.0, 0.95)
+	anchor.add_child(lbl)
+	_followup_banner_node = anchor
+
+
+func _hide_followup_decision_banner() -> void:
+	if _followup_banner_node and is_instance_valid(_followup_banner_node):
+		_followup_banner_node.queue_free()
+	_followup_banner_node = null
 
 
 ## Genera la onda de choque expansiva del impacto físico masivo (Melee Shockwave)
@@ -4485,5 +4699,3 @@ func play_character_action_audio(action_or_suffix: String, is_voice: bool = true
 		return
 	target_player.pitch_scale = randf_range(0.95, 1.05)
 	AudioActionManager.play_action(act_id, target_player)
-
-

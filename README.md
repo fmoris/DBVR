@@ -32,8 +32,19 @@ Experiencia de combate **1v1 en Realidad Virtual en tiempo real** inspirada en *
   * Combos de **4 a 7 golpes** (hasta **8** con emboscada), validación física (`>= 22 cm`, retracción `>= 20 cm`, `>= 1.55 / 1.35 m/s`) y 3 niveles de potencia (`~ Suave 0.60×`, `💥 ¡SÓLIDO! 1.00×`, `⚡ ¡SÓNICO! 1.35×` con reembolso `+1.5 Ki`).
   * **Semáforo Defensivo:** Aro Cian/Violeta (`Espera`) ➔ Verde (`¡YA!`) ➔ Dorado (`¡PARRY! +14 Ki`), Desvío con palma abierta o Trigger (`+5 Ki`), `Z-Vanish` defensivo (`-14 Ki`), Choque de Puños, Guardia Cruzada `X` y Onda Explosiva Kiai (`-22 Ki`).
   * **6 Eventos Dinámicos de Lore DBZ:** *Choque Frenético de Puños*, *Caída del Meteoro* (cráter `3.5 s` + `+35%` vel. Súper), *Guerra de Z-Vanish*, *Desgarre de Guardia*, *Onda Explosiva (Kiai)* e *Intercambio Sónico Z-Burst*.
-* **Súper Ataques, `Bullet-Time`, `Beam Clash` y `Air Brake`:** 5 respuestas defensivas en `Bullet-Time`, Choque de Poderes interactivo (agitación + gatillos), explosiones AoE y Frenado Aéreo antes de chocar con la muralla (`Wall-Stick 0.65 s`).
+* **Súper Ataques, `Bullet-Time`, `Beam Clash` y `Air Brake`:** 5 respuestas defensivas en `Bullet-Time`, Choque de Poderes interactivo (agitación + gatillos, IA bloqueada de lanzar Ki Blasts durante el choque, avance físico del haz hasta `0.0 / 1.0` e impacto inmediato si un luchador se queda sin `Ki` o desiste) y Frenado Aéreo antes de chocar con la muralla (`Wall-Stick 0.65 s`).
+* **Bucle de Secuencias Encadenadas por Ki (`Manga Chain Loop`):**
+  * **El Ki es la llave de toda cadena:** Cada eslabón consecutivo (`chain_depth`) escala su costo en `+35%` (`chain_ki_cost_step = 0.35`, ej. `x1.0 → x1.35 → x1.70`), obligando a gestionar cuándo extender la ofensiva o volver a Fase Libre.
+  * **Follow-Up Aéreo & `Meteor Chase` (`12 Ki × escala`):** Tras lanzar al rival por los aires en Melee, puedes encadenar ráfagas de Ki Blasts o ejecutar *Meteor Chase* para abrir una nueva `MeleeTargetDome` aérea.
+  * **Ventana `Post-Super Follow-Up` (`3.0 s` · mín. `15 Ki`):** Si un Súper Ataque impacta sin K.O., el atacante con Ki suficiente puede perseguir entre el humo con Ki Blasts o *Meteor Chase*.
+  * **Corte Defensivo (`Explosive Wave`, `22 Ki` con `B/Y`):** El defensor puede detonar una Onda Expansiva para cortar la cadena aérea/post-super del rival y reiniciar `chain_depth = 0`.
 * **7 Mini-Escenas Dramáticas Contextuales:** *Corazón Sereno*, *Pulso Kaioken*, *Orgullo del Príncipe*, *Precisión Real*, *Reflejos Z*, *Ruptura de Límites* y *Sobrecarga de Aura*.
+
+### 4. Relato breve de una partida real (Vegeta vs. Goku)
+1. **Fase Libre (Arena 32×32 m):** Vegeta (`10.000 BP`) presiona con *Ki Blasts* mientras Goku (`9.000 BP`) recarga en 2 fases hasta el techo del `60% BP` y desvía ráfagas (`+12 Ki`, `+150 BP`).
+2. **Cadena Melee → Follow-Up → Meteor Chase:** Vegeta conecta un Dash (`10 Ki`), remata con *Martillazo DBZ* (`-22 Ki`) lanzando a Goku por los aires y activa *Meteor Chase* (`12 Ki × 1.35`) para abrir una segunda `MeleeTargetDome` aérea. Goku responde con *Parry Perfecto* (`+14 Ki`), invierte el turno y activa *Corazón Sereno* (permanente: `+20% Recarga Ki`, `+18% Vel. Súper`).
+3. **Beam Clash y Post-Super Follow-Up:** Ambos alcanzan `SSJ (x2.0)`. Vegeta lanza *Galick Ho* (`28 Ki`) y Goku responde con *Kamehameha* (`28 Ki`) en *Bullet-Time*: en el *Beam Clash*, la IA no puede lanzar *Ki Blasts* externos y el haz de Goku avanza físicamente hasta `0.0` al quedarse Vegeta sin Ki, impactándolo de lleno y abriendo `3.0 s` de *Post-Super Follow-Up* (`>= 15 Ki`).
+4. **Furia, Zenkai y Desenlace:** En Furia, Vegeta desbloquea *Orgullo del Príncipe* (Furia permanente al `22%` y `+15%` daño Súpers) y sube a `Super Vegeta` → `SSB` → `Ultra Ego (x8.0)`. Goku responde con *Momento de Determinación* (`+45 Ki`, *Zenkai Comeback*), alcanza `Ultra Instinto (x8.0)` y sella el **K.O. Zenkai** con *Super Kamehameha* (`45 Ki`). *(El relato completo paso a paso y el selector interactivo de personajes están disponibles en [GitHub Pages](https://fmoris.github.io/DBVR/)).*
 
 ---
 

@@ -30,6 +30,26 @@ base_damage_np = 3200.0
 projectile_speed = 38.0
 energy_color = Color(1, 0.88, 0.15, 1)
 
+[sub_resource type="Resource" id="Resource_gamma_burst"]
+script = ExtResource("1_yu3w1")
+power_name = "Gamma Burst Flash"
+gesture_trigger = "final_flash"
+ki_cost = 38.0
+base_damage_np = 3800.0
+projectile_speed = 40.0
+energy_color = Color(1, 0.95, 0.35, 1)
+unlock_requirement_transformation = "SSB"
+
+[sub_resource type="Resource" id="Resource_final_exp"]
+script = ExtResource("1_yu3w1")
+power_name = "Final Explosion"
+gesture_trigger = "big_bang"
+ki_cost = 48.0
+base_damage_np = 5200.0
+projectile_speed = 28.0
+energy_color = Color(1, 0.72, 0.12, 1)
+unlock_requirement_transformation = "Super Vegeta"
+
 [sub_resource type="Resource" id="Resource_0cf60"]
 script = ExtResource("1_yu3w1")
 power_name = "Final Flash"
@@ -99,5 +119,5 @@ canonical_max_ki_text = "19.84 Septillion"
 description = "Príncipe de los Saiyans, inicialmente un villano, pero luego se une a los Z Fighters. A pesar de que a inicios de Dragon Ball Z, Vegeta cumple un papel antagónico, poco después decide rebelarse ante el Imperio de Freeza, volviéndose un aliado clave para los Guerreros Z. Con el paso del tiempo llegaría a cambiar su manera de ser, optando por permanecer y vivir en la Tierra para luchar a su lado contra las inminentes adversidades que superar. Junto con Piccolo, él es de los antiguos enemigos de Goku que ha evolucionando al pasar de ser un villano y antihéroe, a finalmente un héroe a lo largo del transcurso de la historia, convirtiéndose así en el deuteragonista de la serie."
 origin_planet_name = "Vegeta"
 origin_planet_description = "El planeta Vegeta, conocido como planeta Plant antes del fin de la Guerra Saiyan-tsufruiana en el año 730, es un planeta rocoso ficticio de la serie de manga y anime Dragon Ball y localizado en la Vía Láctea de las Galaxias del Norte del Universo 7 hasta su destrucción a manos de Freezer en los años 737-739. Planeta natal de los Saiyans, destruido por Freezer. Anteriormente conocido como Planeta Plant."
-powers = Array[Resource]([SubResource("Resource_s6f5x"), SubResource("Resource_l1rlh"), SubResource("Resource_bigbang"), SubResource("Resource_0cf60")])
+powers = Array[Resource]([SubResource("Resource_s6f5x"), SubResource("Resource_l1rlh"), SubResource("Resource_bigbang"), SubResource("Resource_gamma_burst"), SubResource("Resource_final_exp"), SubResource("Resource_0cf60")])
 transformations = Array[Resource]([SubResource("Resource_irx55"), SubResource("Resource_uhbuo"), SubResource("Resource_7skgi"), SubResource("Resource_ue_vegeta")])

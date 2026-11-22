@@ -43,6 +43,8 @@ var duration: float = 5.5
 var time_left: float = 5.5
 var is_active: bool = false
 var hits: Array = []
+var attacker_damage_mult: float = 1.0
+var defender_is_defenseless: bool = false
 
 # Transición legible entre turnos y estado de ronda
 var transition_timer: float = 0.0
@@ -384,20 +386,20 @@ func _ensure_action_card() -> void:
 
 	action_card_anchor = Node3D.new()
 	action_card_anchor.name = "MeleeActionGuideCardAnchor"
-	action_card_anchor.position = Vector3(0.0, -0.36, -1.10)
-	action_card_anchor.rotation_degrees = Vector3(10.0, 0.0, 0.0)
+	action_card_anchor.position = Vector3(-0.62, -0.34, -1.15)
+	action_card_anchor.rotation_degrees = Vector3(6.0, 18.0, 0.0)
 	cam.add_child(action_card_anchor)
 
 	var border := MeshInstance3D.new()
 	border.name = "CardBorder"
 	var b_q := QuadMesh.new()
-	b_q.size = Vector2(0.58, 0.25)
+	b_q.size = Vector2(0.50, 0.22)
 	border.mesh = b_q
 	_action_card_border_mat = StandardMaterial3D.new()
 	_action_card_border_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_action_card_border_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_action_card_border_mat.no_depth_test = false
-	_action_card_border_mat.render_priority = 10
+	_action_card_border_mat.no_depth_test = true
+	_action_card_border_mat.render_priority = 110
 	_action_card_border_mat.albedo_color = Color(1.0, 0.55, 0.15, 0.90)
 	border.material_override = _action_card_border_mat
 	action_card_anchor.add_child(border)
@@ -405,29 +407,29 @@ func _ensure_action_card() -> void:
 	var bg := MeshInstance3D.new()
 	bg.name = "CardBg"
 	var bg_q := QuadMesh.new()
-	bg_q.size = Vector2(0.565, 0.235)
+	bg_q.size = Vector2(0.485, 0.205)
 	bg.mesh = bg_q
 	bg.position = Vector3(0.0, 0.0, 0.001)
 	var bg_mat := StandardMaterial3D.new()
 	bg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	bg_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	bg_mat.no_depth_test = false
-	bg_mat.render_priority = 11
-	bg_mat.albedo_color = Color(0.03, 0.06, 0.11, 0.88)
+	bg_mat.no_depth_test = true
+	bg_mat.render_priority = 111
+	bg_mat.albedo_color = Color(0.03, 0.06, 0.11, 0.92)
 	bg.material_override = bg_mat
 	action_card_anchor.add_child(bg)
 
 	_action_card_label = Label3D.new()
 	_action_card_label.name = "MeleeCardText"
-	_action_card_label.font_size = 21
-	_action_card_label.pixel_size = 0.00125
-	_action_card_label.no_depth_test = false
-	_action_card_label.render_priority = 12
+	_action_card_label.font_size = 19
+	_action_card_label.pixel_size = 0.00118
+	_action_card_label.no_depth_test = true
+	_action_card_label.render_priority = 112
 	_action_card_label.outline_size = 6
 	_action_card_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.95)
 	_action_card_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	_action_card_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_action_card_label.position = Vector3(-0.26, 0.0, 0.002)
+	_action_card_label.position = Vector3(-0.225, 0.0, 0.002)
 	action_card_anchor.add_child(_action_card_label)
 
 
@@ -915,10 +917,11 @@ func _process_defense_rhythm(delta: float) -> void:
 			break
 
 	var all_resolved: bool = (first_unresolved_idx == -1)
-	var defender_is_player: bool = bool(defender.get("is_player")) if (defender and is_instance_valid(defender)) else false
+	var is_def_crashed: bool = defender_is_defenseless or (defender != null and is_instance_valid(defender) and bool(defender.get("is_defenseless_crash")))
+	var defender_is_player: bool = (not is_def_crashed) and bool(defender.get("is_player")) if (defender and is_instance_valid(defender)) else false
 
 	# Onda Explosiva (Kiai de Emergencia) al recibir >= 2 golpes sin bloquear en la ronda y tener >= 22 Ki
-	if defender_is_player and _round_unblocked_hits_taken >= 2 and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")):
+	if defender_is_player and not is_def_crashed and _round_unblocked_hits_taken >= 2 and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")):
 		var def_orig: XROrigin3D = defender.get_parent() as XROrigin3D
 		if def_orig:
 			var l_c: XRController3D = def_orig.get_node_or_null("LeftHand") as XRController3D
@@ -1363,8 +1366,9 @@ func _resolve_cross_arm_guard(note: Dictionary, zone: Dictionary) -> void:
 
 	_modify_fighter_ki(defender, -ki_cost)
 	_modify_fighter_ki(attacker, 2.0)
+	var final_dmg_scaled: float = final_dmg * attacker_damage_mult
 	if defender and defender.has_method("take_hit"):
-		defender.take_hit(final_dmg, Vector3.ZERO)
+		defender.take_hit(final_dmg_scaled, Vector3.ZERO)
 	if defender and defender.has_method("increase_np"):
 		defender.increase_np(20.0)
 
@@ -1462,8 +1466,9 @@ func _resolve_unblocked_hit(note: Dictionary, zone: Dictionary) -> void:
 	_trigger_dynamic_melee_mobility(note_power, is_charged, is_v3, is_hammer, attacker, defender, hit_fwd + lat_h + hit_vert, 0.22, is_v3 and String(note.get("v3_launch_mode", "")) == "UP")
 
 	if defender and is_instance_valid(defender):
+		var raw_dmg_scaled: float = raw_dmg * attacker_damage_mult
 		if defender.has_method("take_hit"):
-			defender.take_hit(raw_dmg, -global_transform.basis.z)
+			defender.take_hit(raw_dmg_scaled, -global_transform.basis.z)
 		if defender.get("procedural_animator"):
 			defender.procedural_animator.trigger_hit_flinch(0.75 if (is_hammer or is_v3) else 0.45, -global_transform.basis.z)
 
@@ -2315,7 +2320,7 @@ func _build_header_hud() -> void:
 	if cam and is_instance_valid(cam):
 		melee_hud_anchor = Node3D.new()
 		melee_hud_anchor.name = "MeleeHUDAnchor"
-		melee_hud_anchor.position = Vector3(0.0, 0.23, -1.15)
+		melee_hud_anchor.position = Vector3(0.0, 0.37, -1.18)
 		cam.add_child(melee_hud_anchor)
 		header_label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 		header_label.position = Vector3.ZERO

@@ -113,8 +113,8 @@ func _physics_process(delta: float) -> void:
 			host.is_blocking = true
 		return
 
-	# Si la IA está en secuencia de Super Haz de Ki, la resolución la gestiona SuperBeamSequenceController
-	if host.get("is_in_beam_sequence"):
+	# Si la IA está en secuencia de Super Haz de Ki o Choque de Haces, la resolución la gestionan esos controladores
+	if host.get("is_in_beam_sequence") or host.get("is_in_beam_clash") or host.get("is_firing_beam"):
 		return
 
 	# Si el personaje está en ragdoll, volando, noqueado o aturdido en cráter, pausar toma de decisiones

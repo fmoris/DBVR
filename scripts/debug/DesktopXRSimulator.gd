@@ -71,7 +71,12 @@ func setup(origin: XROrigin3D, cam: XRCamera3D, is_scripted: bool = false) -> vo
 
 	xr_origin = origin
 	camera = cam
-	mode = SimMode.SCRIPTED if is_scripted else SimMode.MANUAL
+	var has_test_suite: bool = false
+	for u_a: String in OS.get_cmdline_user_args():
+		if u_a.begins_with("--test-suite="):
+			has_test_suite = true
+			break
+	mode = SimMode.SCRIPTED if (is_scripted or has_test_suite) else SimMode.MANUAL
 	sim_active = true
 
 	if xr_origin:
@@ -366,7 +371,8 @@ func set_scripted_hands(
 	if instant:
 		_current_l_torso = l_torso
 		_current_r_torso = r_torso
-		_apply_hand_transforms(0.016)
+		if camera and is_instance_valid(camera):
+			_apply_hand_transforms(0.016)
 
 
 func _apply_hand_transforms(delta: float) -> void:
