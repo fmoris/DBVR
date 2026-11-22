@@ -2471,10 +2471,26 @@ func start_flight_to_opponent() -> void:
 		_log_combat_event("💨 ¡EMBOSCADA DESDE EL HUMO! Melee Dash 0 Ki (+%d golpe)" % pending_ambush_bonus_hits, "success")
 	var base_dash_spd: float = clampf(34.0 + maxf(_dash_initial_dist - 15.0, 0.0) * 0.65, 34.0, 68.0)
 	flight_speed = clampf(base_dash_spd * sqrt(bp_atk_f / bp_def_f) * ambush_speed_mult, 26.0, 82.0) * get_dramatic_modifier("flight_speed_mult", 1.0)
-	_dash_speed_mult = 3.2 if was_followup_chase else 1.0
-	if was_followup_chase:
+	_dash_speed_mult = 1.0
+	if was_followup_chase and opp_f and is_instance_valid(opp_f):
 		var takeoff_pos: Vector3 = get_parent().global_position if (is_player and get_parent()) else global_position
 		_spawn_melee_shockwave(takeoff_pos + Vector3.UP * 1.0)
+		var opp_pos_fu: Vector3 = opp_f.global_position
+		var to_opp_dir: Vector3 = (opp_pos_fu - takeoff_pos)
+		to_opp_dir.y = 0.0
+		to_opp_dir = to_opp_dir.normalized() if to_opp_dir.length_squared() > 0.01 else -global_transform.basis.z
+		# Z-Blink anime: aparece a 1.8m esperando al rival en el aire y conecta a 1x velocidad
+		var wait_pos: Vector3 = opp_pos_fu + to_opp_dir * 1.8
+		wait_pos.y = maxf(wait_pos.y, get_ground_elevation(wait_pos))
+		if is_player and get_parent() is Node3D:
+			var orig_fu: Node3D = get_parent() as Node3D
+			orig_fu.global_position = wait_pos
+			_clamp_to_arena(orig_fu)
+		else:
+			global_position = wait_pos
+			_clamp_to_arena(self)
+		_spawn_melee_shockwave(wait_pos + Vector3.UP * 1.0)
+		_dash_speed_mult = 1.5
 	_flight_elapsed = 0.0
 	_flight_best_dist = _dash_initial_dist
 	_flight_stall_timer = 0.0
@@ -4215,7 +4231,7 @@ func _execute_charged_v3_or_ki_break_finisher(opponent: Node3D, mode: String, sw
 	velocity = Vector3.ZERO
 	is_knocked_back = false
 
-	var base_speed: float = 32.0
+	var base_speed: float = 44.0
 	var final_speed: float = base_speed * ratio_bp * v_mult
 	var launch_dir: Vector3 = (fwd * 3.8 + Vector3.UP * 0.55).normalized()
 	var mode_tag: String = "HACIA ATRÁS"
