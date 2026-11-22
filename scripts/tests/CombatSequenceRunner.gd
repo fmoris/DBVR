@@ -401,12 +401,14 @@ func _seq_guard_and_move() -> bool:
 		return false
 
 	# Guardia Cruzada en 'X'
+	hybrid.set("ki_prep_phase", false)
+	hybrid.set("is_charging_ki", false)
 	simulator.v_left_grip = 1.0
 	simulator.v_right_grip = 1.0
 	simulator.v_left_trigger = 1.0
 	simulator.v_right_trigger = 1.0
 	simulator.set_scripted_hands(Vector3(-0.08, 0.10, 0.24), Vector3(0.08, 0.10, 0.24), false, false, true)
-	await _step_seconds(0.25)
+	await _step_seconds(0.35)
 
 	var blocking: bool = bool(player.get("is_blocking"))
 	simulator.clear_virtual_buttons()
