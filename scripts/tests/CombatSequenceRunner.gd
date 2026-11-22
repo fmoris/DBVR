@@ -813,7 +813,11 @@ func _seq_chain_sequences() -> bool:
 			if p_anim and p_anim.has_method("trigger_ki_blast_shot"):
 				p_anim.trigger_ki_blast_shot(b_idx % 2)
 			await get_tree().create_timer(0.09, true, false, true).timeout
-		await get_tree().create_timer(1.1, true, false, true).timeout
+		var wait_renzoku: float = 0.0
+		while wait_renzoku < 2.2 and (_opp_hits_unblocked - opp_hits_before_renzoku) < 4:
+			await get_tree().create_timer(0.05, true, false, true).timeout
+			wait_renzoku += 0.05
+		await get_tree().create_timer(0.25, true, false, true).timeout
 		var renzoku_impacts: int = _opp_hits_unblocked - opp_hits_before_renzoku
 		var opp_ki_after_renzoku: float = float(opp.get("current_ki"))
 		_trace("SEQ3", "RENZOKU_RESULT", "fired=%d spawned=%d aimed_ok=%d impacts_on_opp=%d opp_ki=%.1f->%.1f" % [
