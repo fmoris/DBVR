@@ -2479,8 +2479,8 @@ func start_flight_to_opponent() -> void:
 		var to_opp_dir: Vector3 = (opp_pos_fu - takeoff_pos)
 		to_opp_dir.y = 0.0
 		to_opp_dir = to_opp_dir.normalized() if to_opp_dir.length_squared() > 0.01 else -global_transform.basis.z
-		# Z-Blink anime: aparece a 1.8m esperando al rival en el aire y conecta a 1x velocidad
-		var wait_pos: Vector3 = opp_pos_fu + to_opp_dir * 1.8
+		# Z-Blink anime a 6.5m del rival en el aire para que el dash final (2.2x) sea claramente visible
+		var wait_pos: Vector3 = opp_pos_fu - to_opp_dir * 6.5
 		wait_pos.y = maxf(wait_pos.y, get_ground_elevation(wait_pos))
 		if is_player and get_parent() is Node3D:
 			var orig_fu: Node3D = get_parent() as Node3D
@@ -2490,7 +2490,7 @@ func start_flight_to_opponent() -> void:
 			global_position = wait_pos
 			_clamp_to_arena(self)
 		_spawn_melee_shockwave(wait_pos + Vector3.UP * 1.0)
-		_dash_speed_mult = 1.5
+		_dash_speed_mult = 2.2
 	_flight_elapsed = 0.0
 	_flight_best_dist = _dash_initial_dist
 	_flight_stall_timer = 0.0

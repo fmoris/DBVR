@@ -454,7 +454,7 @@ func _seq_chain_sequences() -> bool:
 
 	# 1. Follow-Up Bullet-Time -> dejar ver a Goku suspendido en 0.08x antes de lanzar Meteor Chase
 	if is_visual:
-		await get_tree().create_timer(0.95, true, false, true).timeout
+		await get_tree().create_timer(1.1, true, false, true).timeout
 	player.start_flight_to_opponent()
 	if int(player.get("pending_followup_bonus_hits")) != 2 or not is_equal_approx(float(player.get("pending_followup_damage_mult")), 1.25):
 		print("  -> Motivo: Meteor Chase sin recuperar no otorgó bonus (+2 golpes, 1.25x).")
@@ -463,15 +463,47 @@ func _seq_chain_sequences() -> bool:
 	if is_visual:
 		var wait_fu: float = 0.0
 		while bool(player.get("is_flying_to_opponent")) and wait_fu < 2.5:
-			await _step_seconds(0.05)
+			await get_tree().create_timer(0.05, true, false, true).timeout
 			wait_fu += 0.05
-		await _step_seconds(1.2)
-	player._stop_flight()
-	_cleanup_active_dome_for_test()
+		await get_tree().create_timer(0.9, true, false, true).timeout
+	else:
+		player._stop_flight()
+
+	# En el 2do Melee (con bonus), Vegeta envía a Goku contra el risco (Wall-Stick + DEFENSELESS_CRASH)
+	var dome_1: Variant = player.get("active_target_dome")
+	if dome_1 and is_instance_valid(dome_1):
+		dome_1.set("is_active", false)
+		dome_1.emit_signal("finisher_triggered", "charged_v3_back", 3.6, [{ "zone_id": 0, "is_charged": true, "power": 1.5 }], Vector3(0.0, 2.5, -24.0))
+		if is_instance_valid(dome_1):
+			dome_1.queue_free()
+	else:
+		_cleanup_active_dome_for_test()
+		player._execute_charged_v3_or_ki_break_finisher(opp, "charged_v3_back", 3.6, Vector3(0.0, 2.5, -24.0))
+
+	if is_visual:
+		await get_tree().create_timer(0.85, true, false, true).timeout
+	else:
+		await _step_seconds(0.40)
+
+	# 2. Choque físico contra el risco -> Estado Indefenso + 3ra secuencia: Ráfaga de Ki (Renzoku) sobre Goku indefenso
+	opp._on_boundary_crash_impact(18.0)
+	if not bool(opp.get("is_defenseless_crash")) or String(opp.get("airborne_recovery_state")) != "DEFENSELESS_CRASH":
+		print("  -> Motivo: _on_boundary_crash_impact no activó DEFENSELESS_CRASH.")
+		return false
+	if is_visual:
+		player.start_post_super_followup(opp)
+		for b_idx: int in range(3):
+			if gesture_tree and gesture_tree.has_method("_trigger_action"):
+				gesture_tree._trigger_action("ki_blast_right" if (b_idx % 2 == 0) else "ki_blast_left", false)
+			await get_tree().create_timer(0.18, true, false, true).timeout
+		await get_tree().create_timer(0.85, true, false, true).timeout
+		player._end_followup_bullet_time(false)
+	opp.set("is_defenseless_crash", false)
+	opp.set("defenseless_crash_timer", 0.0)
 
 	# Probar recuperación Air Brake -> Melee Normal
 	player._start_followup_airborne_sequence(opp, Vector3(0.0, 5.0, -18.0))
-	await _step_seconds(0.45 if is_visual else 0.40)
+	await get_tree().create_timer(0.45 if is_visual else 0.40, true, false, true).timeout
 	opp.complete_air_brake()
 	player.start_flight_to_opponent()
 	if int(player.get("pending_followup_bonus_hits")) != 0 or not is_equal_approx(float(player.get("pending_followup_damage_mult")), 1.0):
@@ -479,19 +511,9 @@ func _seq_chain_sequences() -> bool:
 		Engine.time_scale = 1.0
 		return false
 	if is_visual:
-		await _step_seconds(0.6)
+		await _step_seconds(0.4)
 	player._stop_flight()
 	_cleanup_active_dome_for_test()
-
-	# 2. Choque físico -> Estado Indefenso + Explosive Wave corta-cadena
-	opp._on_boundary_crash_impact(18.0)
-	if not bool(opp.get("is_defenseless_crash")) or String(opp.get("airborne_recovery_state")) != "DEFENSELESS_CRASH":
-		print("  -> Motivo: _on_boundary_crash_impact no activó DEFENSELESS_CRASH.")
-		return false
-	if is_visual:
-		await _step_seconds(0.7)
-	opp.set("is_defenseless_crash", false)
-	opp.set("defenseless_crash_timer", 0.0)
 
 	player.start_post_super_followup(opp)
 	if not bool(player.get("is_in_followup_bullet_time")):
@@ -499,13 +521,13 @@ func _seq_chain_sequences() -> bool:
 		Engine.time_scale = 1.0
 		return false
 	if is_visual:
-		await _step_seconds(0.5)
+		await get_tree().create_timer(0.5, true, false, true).timeout
 	if not opp.trigger_explosive_wave_chain_break() or bool(player.get("is_in_followup_bullet_time")) or int(player.get("combat_chain_depth")) != 0:
 		print("  -> Motivo: Explosive Wave no cortó la cadena enemiga.")
 		Engine.time_scale = 1.0
 		return false
 	if is_visual:
-		await _step_seconds(0.8)
+		await _step_seconds(0.6)
 
 	# 3. Beam Clash: bloqueo IA + avance hasta 0.0 por Ki == 0
 	simulator.v_left_grip = 1.0
