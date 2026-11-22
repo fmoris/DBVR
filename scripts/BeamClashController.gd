@@ -832,7 +832,7 @@ func _spawn_colossal_explosion() -> void:
 	quad.size = Vector2(8.0, 8.0)
 	sw.mesh = quad
 	sw.rotation.x = -PI * 0.5
-	sw.global_position = clash_sphere.global_position if clash_sphere else global_position
+	var exp_pos: Vector3 = clash_sphere.global_position if (clash_sphere and is_instance_valid(clash_sphere) and clash_sphere.is_inside_tree()) else global_position
 
 	var mat = ShaderMaterial.new()
 	mat.shader = ShockwaveShader
@@ -841,13 +841,13 @@ func _spawn_colossal_explosion() -> void:
 	var exp_parent: Node = get_tree().current_scene if (get_tree() and get_tree().current_scene) else get_parent()
 	if exp_parent:
 		exp_parent.add_child(sw)
+		sw.global_position = exp_pos
 
 	var tw = sw.create_tween()
 	tw.tween_property(sw, "scale", Vector3.ONE * 5.0, 0.65).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
 	tw.parallel().tween_property(mat, "shader_parameter/ring_color:a", 0.0, 0.65)
 	tw.tween_callback(sw.queue_free)
-	var smoke_pos: Vector3 = clash_sphere.global_position if clash_sphere else global_position
-	KiSmokeFX.spawn_smoke(get_tree(), smoke_pos, 2.4)
+	KiSmokeFX.spawn_smoke(get_tree(), exp_pos, 2.4)
 
 
 func _apply_continuous_clash_haptics() -> void:
