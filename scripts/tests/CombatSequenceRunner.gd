@@ -525,6 +525,10 @@ func _seq_chain_sequences() -> bool:
 		player.set("is_in_followup_bullet_time", false)
 		if player.has_method("_hide_followup_decision_banner"):
 			player._hide_followup_decision_banner()
+		simulator.set_scripted_hands(Vector3(-0.18, 0.04, 0.52), Vector3(0.18, 0.04, 0.52), true, true, true)
+		var cam_v: Camera3D = xr_origin.get_node_or_null("XRCamera3D") as Camera3D if xr_origin else null
+		if cam_v and is_instance_valid(cam_v):
+			cam_v.look_at(opp.global_position + Vector3(0.0, 1.05, 0.0), Vector3.UP)
 		_sig_ki_blast_quick = 0
 		for b_idx: int in range(6):
 			var b_act: String = "ki_blast_right" if (b_idx % 2 == 0) else "ki_blast_left"
@@ -534,6 +538,7 @@ func _seq_chain_sequences() -> bool:
 			if p_anim and p_anim.has_method("trigger_ki_blast_shot"):
 				p_anim.trigger_ki_blast_shot(b_idx % 2)
 			await get_tree().create_timer(0.09, true, false, true).timeout
+		print("[CombatSequenceRunner] 💥 ¡Renzoku Energy Dan ejecutado! Ki Blasts detectados: %d/6" % _sig_ki_blast_quick)
 		await get_tree().create_timer(1.1, true, false, true).timeout
 		opp.set("is_defenseless_crash", false)
 		opp.set("defenseless_crash_timer", 0.0)
