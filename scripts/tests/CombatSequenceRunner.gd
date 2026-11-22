@@ -494,7 +494,7 @@ func _seq_chain_sequences() -> bool:
 		player.start_post_super_followup(opp)
 		for b_idx: int in range(3):
 			if gesture_tree and gesture_tree.has_method("_trigger_action"):
-				gesture_tree._trigger_action("ki_blast_right" if (b_idx % 2 == 0) else "ki_blast_left", false)
+				gesture_tree._trigger_action("ki_blast_right" if (b_idx % 2 == 0) else "ki_blast_left")
 			await get_tree().create_timer(0.18, true, false, true).timeout
 		await get_tree().create_timer(0.85, true, false, true).timeout
 		player._end_followup_bullet_time(false)
