@@ -4270,7 +4270,7 @@ func _execute_charged_v3_or_ki_break_finisher(opponent: Node3D, mode: String, sw
 		followup_bullet_time_timer = 4.0
 		await get_tree().create_timer(0.32).timeout
 		if is_instance_valid(self) and is_in_followup_bullet_time and not is_match_over:
-			Engine.time_scale = 0.28
+			Engine.time_scale = 0.08
 			_show_followup_decision_banner()
 		_log_combat_event("⚡ ¡BULLET-TIME DE SEGUIMIENTO! (4.0s) Elige: Melee / Súper Rápido / Ki Blasts", "success")
 		if gss and gss.has_signal("phase_changed"):
@@ -4394,7 +4394,7 @@ func _start_followup_airborne_sequence(opponent: Node3D, launch_vector: Vector3)
 	opponent_airborne_target = opponent
 	await get_tree().create_timer(0.32).timeout
 	if is_instance_valid(self) and is_in_followup_bullet_time and not is_match_over:
-		Engine.time_scale = 0.28
+		Engine.time_scale = 0.08
 		_show_followup_decision_banner()
 
 	_log_combat_event("⚡ ¡BULLET-TIME DE SEGUIMIENTO! (4.0s) Elige: Melee / Súper Rápido / Ki Blasts", "success")
@@ -4448,7 +4448,7 @@ func start_post_super_followup(opponent: Node3D) -> void:
 	followup_bullet_time_timer = cfg.post_super_followup_duration
 	opponent_airborne_target = opponent
 	opponent.set("airborne_recovery_state", "UNRECOVERED")
-	Engine.time_scale = 0.28
+	Engine.time_scale = 0.08
 	_show_followup_decision_banner()
 	_log_combat_event("⚡ ¡PERSECUCIÓN POST-SUPER! (%.1fs) Lluvia de Ki Blasts o Meteor Chase" % cfg.post_super_followup_duration, "success")
 	var gss = _get_gesture_tree()
