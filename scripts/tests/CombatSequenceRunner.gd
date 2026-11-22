@@ -20,6 +20,23 @@ var _sig_ki_blast_quick: int = 0
 var _sig_ki_blast_charged: int = 0
 var _last_phase_name: String = ""
 
+# Telemetría causal anti-falsos-positivos (TRACE + AUDIT)
+var _seq_start_msec: int = 0
+var _active_seq_tag: String = "SETUP"
+var _audit_rows: Array[Dictionary] = []
+var _dome_hits: int = 0
+var _dome_defenses: int = 0
+var _dome_parries: int = 0
+var _dome_finishers: int = 0
+var _opp_hits_unblocked: int = 0
+var _opp_hits_blocked: int = 0
+var _opp_damage_total: float = 0.0
+var _opp_wall_stick_count: int = 0
+var _opp_wall_stick_msec: int = 0
+var _proj_spawned: int = 0
+var _proj_aimed_at_target: int = 0
+var _observed_opp: Node = null
+
 
 func start_from_cmdline(sim: DesktopXRSimulator, suite_arg: String = "all") -> void:
 	simulator = sim
@@ -75,6 +92,10 @@ func _run_all_sequences() -> void:
 
 	for test_name: String in selected:
 		await _reset_between_tests()
+		_seq_start_msec = Time.get_ticks_msec()
+		_active_seq_tag = test_name.to_upper()
+		_audit_rows.clear()
+		_trace(_active_seq_tag, "START", "Iniciando secuencia '%s'" % test_name)
 		var ok: bool = false
 		match test_name:
 			"ki_recharge":
@@ -91,6 +112,10 @@ func _run_all_sequences() -> void:
 				ok = await _seq_transformation()
 			"chain_sequences":
 				ok = await _seq_chain_sequences()
+
+		if not _audit_rows.is_empty():
+			var audit_ok: bool = _print_audit_summary(test_name)
+			ok = ok and audit_ok
 
 		if ok:
 			passed += 1
@@ -180,20 +205,189 @@ func _connect_observation_signals() -> void:
 		if gesture_tree.has_signal("phase_changed") and not gesture_tree.phase_changed.is_connected(_on_phase_changed):
 			gesture_tree.phase_changed.connect(_on_phase_changed)
 
+	var cur_scene: Node = get_tree().current_scene
+	if cur_scene and not cur_scene.child_entered_tree.is_connected(_on_scene_child_entered):
+		cur_scene.child_entered_tree.connect(_on_scene_child_entered)
+
+	var opp: Node = player._get_opponent() if (player and player.has_method("_get_opponent")) else null
+	if opp and is_instance_valid(opp):
+		_connect_opponent_signals(opp)
+
+
+func _connect_opponent_signals(opp: Node) -> void:
+	if not opp or not is_instance_valid(opp) or _observed_opp == opp:
+		return
+	_observed_opp = opp
+	if opp.has_signal("combat_hit_received") and not opp.combat_hit_received.is_connected(_on_opp_combat_hit_received):
+		opp.combat_hit_received.connect(_on_opp_combat_hit_received)
+	if opp.has_signal("wall_stick_triggered") and not opp.wall_stick_triggered.is_connected(_on_opp_wall_stick_triggered):
+		opp.wall_stick_triggered.connect(_on_opp_wall_stick_triggered)
+
+
+func _attach_dome_observers(dome: Variant) -> void:
+	if not dome or not is_instance_valid(dome):
+		return
+	var d_node: Node = dome as Node
+	if d_node.has_signal("target_hit") and not d_node.target_hit.is_connected(_on_dome_target_hit):
+		d_node.target_hit.connect(_on_dome_target_hit)
+	if d_node.has_signal("defense_action_resolved") and not d_node.defense_action_resolved.is_connected(_on_dome_defense_resolved):
+		d_node.defense_action_resolved.connect(_on_dome_defense_resolved)
+	if d_node.has_signal("perfect_parry_triggered") and not d_node.perfect_parry_triggered.is_connected(_on_dome_perfect_parry):
+		d_node.perfect_parry_triggered.connect(_on_dome_perfect_parry)
+	if d_node.has_signal("finisher_triggered") and not d_node.finisher_triggered.is_connected(_on_dome_finisher_triggered):
+		d_node.finisher_triggered.connect(_on_dome_finisher_triggered)
+
+
+func _trace(stage: String, event_name: String, details: String) -> void:
+	var elapsed_s: float = float(Time.get_ticks_msec() - _seq_start_msec) / 1000.0 if _seq_start_msec > 0 else 0.0
+	print("[TRACE t=+%.2fs][%s] %-14s %s" % [elapsed_s, stage, event_name, details])
+
+
+func _audit_add(step_label: String, passed: bool, detail: String) -> void:
+	_audit_rows.append({
+		"label": step_label,
+		"ok": passed,
+		"detail": detail
+	})
+
+
+func _print_audit_summary(seq_name: String) -> bool:
+	var all_ok: bool = true
+	print("[AUDIT][%s]" % seq_name)
+	for row: Dictionary in _audit_rows:
+		var ok_row: bool = bool(row.get("ok", false))
+		if not ok_row:
+			all_ok = false
+		var status_str: String = "OK" if ok_row else "FAIL"
+		print("  - %-24s %-4s (%s)" % [String(row.get("label", "")), status_str, String(row.get("detail", ""))])
+	return all_ok
+
+
+func _get_fighters_dist(opp: Node3D) -> float:
+	if not player or not is_instance_valid(player) or not opp or not is_instance_valid(opp):
+		return -1.0
+	var p_pos: Vector3 = xr_origin.global_position if (xr_origin and is_instance_valid(xr_origin)) else (player as Node3D).global_position
+	return p_pos.distance_to(opp.global_position)
+
 
 func _on_ki_recharge_started(_is_heavy: bool) -> void:
 	_sig_ki_recharge_started += 1
+	_trace(_active_seq_tag, "KI_RECHARGE", "started heavy=%s count=%d" % [str(_is_heavy), _sig_ki_recharge_started])
 
 
-func _on_ki_blast_fired(_hand_side: int, is_charged: bool) -> void:
+func _on_ki_blast_fired(hand_side: int, is_charged: bool) -> void:
 	if is_charged:
 		_sig_ki_blast_charged += 1
 	else:
 		_sig_ki_blast_quick += 1
+	_trace(_active_seq_tag, "KI_BLAST_FIRE", "hand=%s charged=%s quick_cnt=%d charged_cnt=%d" % [
+		"L" if hand_side == 0 else "R",
+		str(is_charged),
+		_sig_ki_blast_quick,
+		_sig_ki_blast_charged
+	])
 
 
 func _on_phase_changed(new_phase_name: String) -> void:
 	_last_phase_name = new_phase_name
+	_trace(_active_seq_tag, "PHASE", "new_phase=%s" % new_phase_name)
+
+
+func _on_opp_combat_hit_received(damage_np: float, was_blocked: bool, apply_kb: bool, _hit_dir: Vector3) -> void:
+	if was_blocked:
+		_opp_hits_blocked += 1
+	else:
+		_opp_hits_unblocked += 1
+		_opp_damage_total += damage_np
+	var opp_ki: float = float(_observed_opp.get("current_ki")) if (_observed_opp and is_instance_valid(_observed_opp)) else -1.0
+	var opp_np: float = float(_observed_opp.get("current_np")) if (_observed_opp and is_instance_valid(_observed_opp)) else -1.0
+	_trace(_active_seq_tag, "OPP_HIT", "dmg=%.1f blocked=%s kb=%s opp_ki=%.1f opp_np=%.0f unblocked_cnt=%d" % [
+		damage_np,
+		str(was_blocked),
+		str(apply_kb),
+		opp_ki,
+		opp_np,
+		_opp_hits_unblocked
+	])
+
+
+func _on_opp_wall_stick_triggered(duration_sec: float, impact_speed: float) -> void:
+	_opp_wall_stick_count += 1
+	_opp_wall_stick_msec = Time.get_ticks_msec()
+	var opp_state: String = String(_observed_opp.get("airborne_recovery_state")) if (_observed_opp and is_instance_valid(_observed_opp)) else ""
+	_trace(_active_seq_tag, "WALL_STICK", "duration=%.2fs impact_speed=%.1fm/s state=%s" % [duration_sec, impact_speed, opp_state])
+
+
+func _on_dome_target_hit(hit_count: int, zone_name: String, _hit_pos: Vector3, is_charged: bool, power: float) -> void:
+	_dome_hits += 1
+	_trace(_active_seq_tag, "MELEE_HIT", "hit#%d zone=%s charged=%s power=%.2f" % [hit_count, zone_name, str(is_charged), power])
+
+
+func _on_dome_defense_resolved(action_type: String, zone_id: int, was_successful: bool, reward_ki: float, _reward_bp: float) -> void:
+	_dome_defenses += 1
+	_trace(_active_seq_tag, "DEFENSE", "action=%s zone=%d ok=%s reward_ki=%.1f" % [action_type, zone_id, str(was_successful), reward_ki])
+
+
+func _on_dome_perfect_parry(_new_attacker: Node3D, _new_defender: Node3D) -> void:
+	_dome_parries += 1
+	_trace(_active_seq_tag, "PERFECT_PARRY", "cambio de turno activado")
+
+
+func _on_dome_finisher_triggered(finisher_name: String, swing_velocity: float, recorded_hits: Array, launch_vector: Vector3) -> void:
+	_dome_finishers += 1
+	_trace(_active_seq_tag, "FINISHER", "name=%s swing_vel=%.1f hits=%d launch_vec=%s (speed=%.1fm/s)" % [
+		finisher_name,
+		swing_velocity,
+		recorded_hits.size(),
+		str(launch_vector),
+		launch_vector.length()
+	])
+
+
+func _on_scene_child_entered(node: Node) -> void:
+	if not node or not is_instance_valid(node):
+		return
+	if not node.name.begins_with("ProceduralKiProjectile_"):
+		return
+	call_deferred("_inspect_spawned_projectile", node)
+
+
+func _inspect_spawned_projectile(node: Node) -> void:
+	if not node or not is_instance_valid(node) or not (node is Node3D):
+		return
+	var proj: Node3D = node as Node3D
+	var caster: Variant = proj.get("caster_node")
+	if caster == null:
+		caster = proj.get("owner_fighter")
+	if caster != null and caster != player:
+		return
+	_proj_spawned += 1
+	var opp: Node3D = _observed_opp as Node3D
+	if not opp or not is_instance_valid(opp):
+		return
+	var vel_v: Variant = proj.get("velocity")
+	var dir_v: Variant = proj.get("direction")
+	var fire_dir: Vector3 = Vector3.ZERO
+	if vel_v is Vector3 and (vel_v as Vector3).length_squared() > 0.01:
+		fire_dir = (vel_v as Vector3).normalized()
+	elif dir_v is Vector3 and (dir_v as Vector3).length_squared() > 0.01:
+		fire_dir = (dir_v as Vector3).normalized()
+	else:
+		fire_dir = -proj.global_transform.basis.z.normalized()
+
+	var target_pt: Vector3 = opp.global_position + Vector3(0.0, 1.0, 0.0)
+	var to_opp: Vector3 = (target_pt - proj.global_position).normalized()
+	var dot_val: float = clampf(fire_dir.dot(to_opp), -1.0, 1.0)
+	var angle_err_deg: float = rad_to_deg(acos(dot_val))
+	var aimed_ok: bool = angle_err_deg <= 18.0
+	if aimed_ok:
+		_proj_aimed_at_target += 1
+	_trace(_active_seq_tag, "PROJ_SPAWN", "name=%s angle_err=%.1fdeg aimed_ok=%s dist_opp=%.1fm" % [
+		proj.name,
+		angle_err_deg,
+		str(aimed_ok),
+		proj.global_position.distance_to(target_pt)
+	])
 
 
 func _freeze_enemy_ai(frozen: bool) -> void:
@@ -221,6 +415,17 @@ func _reset_between_tests() -> void:
 	_sig_ki_blast_quick = 0
 	_sig_ki_blast_charged = 0
 	_last_phase_name = ""
+	_dome_hits = 0
+	_dome_defenses = 0
+	_dome_parries = 0
+	_dome_finishers = 0
+	_opp_hits_unblocked = 0
+	_opp_hits_blocked = 0
+	_opp_damage_total = 0.0
+	_opp_wall_stick_count = 0
+	_opp_wall_stick_msec = 0
+	_proj_spawned = 0
+	_proj_aimed_at_target = 0
 
 	if player and is_instance_valid(player):
 		player.set("current_ki", 60.0)
@@ -231,6 +436,13 @@ func _reset_between_tests() -> void:
 		player.set("is_in_beam_clash", false)
 		player.set("is_flying_to_opponent", false)
 		player.set("is_flying_to_melee", false)
+		player.set("is_knocked_back", false)
+		player.set("velocity", Vector3.ZERO)
+		var cur_sc: Node = get_tree().current_scene
+		if cur_sc:
+			for c: Node in cur_sc.get_children():
+				if c.get_script() and str(c.get_script().resource_path).ends_with("BeamClashController.gd"):
+					c.queue_free()
 		var dome: Variant = player.get("active_target_dome")
 		if dome and is_instance_valid(dome):
 			dome.queue_free()
@@ -449,10 +661,14 @@ func _seq_chain_sequences() -> bool:
 	if not opp or not is_instance_valid(opp):
 		print("  -> Motivo: no se encontró oponente en la escena.")
 		return false
+	_connect_opponent_signals(opp)
 
-	# 0. Vegeta inicia con un Melee Dash real y conecta un golpe lanzador contra Goku
+	# 0. SEQ 1: Vegeta inicia con un Melee Dash real y conecta un golpe lanzador contra Goku
 	player.set("current_ki", 95.0)
 	opp.set("current_ki", 95.0)
+	var d1_start_dist: float = _get_fighters_dist(opp)
+	var d1_start_msec: int = Time.get_ticks_msec()
+	_trace("SEQ1", "DASH1_START", "dist=%.2fm opp_pos=%s" % [d1_start_dist, str(opp.global_position)])
 	player.start_flight_to_opponent()
 	if is_visual:
 		var wait_t: float = 0.0
@@ -463,12 +679,23 @@ func _seq_chain_sequences() -> bool:
 		player._stop_flight()
 		player._start_melee_bullet_time(opp)
 
+	var d1_end_dist: float = _get_fighters_dist(opp)
+	var d1_elapsed: float = float(Time.get_ticks_msec() - d1_start_msec) / 1000.0
+	_trace("SEQ1", "DASH1_END", "dist=%.2fm->%.2fm elapsed=%.2fs mode=%s" % [
+		d1_start_dist,
+		d1_end_dist,
+		d1_elapsed,
+		"NATURAL_PHYSICS" if is_visual else "HEADLESS_INJECTED"
+	])
+	_audit_add("SEQ1 Dash 1", (not is_visual) or d1_end_dist <= 4.5, "%.1fm -> %.1fm en %.2fs" % [d1_start_dist, d1_end_dist, d1_elapsed])
+
 	if is_visual:
 		await _step_seconds(0.45)
 
 	# Conectar golpe lanzador v3 desde la cúpula Melee para que Vegeta lance a Goku por los aires y se cierre el minijuego
 	var dome_0: Variant = player.get("active_target_dome")
 	if dome_0 and is_instance_valid(dome_0):
+		_attach_dome_observers(dome_0)
 		dome_0.set("is_active", false)
 		dome_0.emit_signal("finisher_triggered", "charged_v3_back", 3.2, [{ "zone_id": 0, "is_charged": true, "power": 1.35 }], Vector3(0.0, 5.0, -18.0))
 		if is_instance_valid(dome_0):
@@ -477,31 +704,69 @@ func _seq_chain_sequences() -> bool:
 		player._execute_charged_v3_or_ki_break_finisher(opp, "charged_v3_back", 3.2, Vector3(0.0, 5.0, -18.0))
 
 	await get_tree().create_timer(0.45 if is_visual else 0.38, true, false, true).timeout
-	if not bool(player.get("is_in_followup_bullet_time")) or not is_equal_approx(Engine.time_scale, 0.08):
+	var opp_vel_after_launch: float = (opp.get("velocity") as Vector3).length() if opp.get("velocity") is Vector3 else 0.0
+	var bt_ok: bool = bool(player.get("is_in_followup_bullet_time")) and is_equal_approx(Engine.time_scale, 0.08)
+	_trace("SEQ1", "LAUNCH_CHECK", "bt=%s scale=%.2fx opp_kb=%s opp_vel=%.1fm/s hits_unblocked=%d" % [
+		str(bt_ok),
+		Engine.time_scale,
+		str(opp.get("is_knocked_back")),
+		opp_vel_after_launch,
+		_opp_hits_unblocked
+	])
+	_audit_add("SEQ1 Launch + BT", bt_ok, "scale=%.2fx opp_kb=%s opp_vel=%.1fm/s" % [Engine.time_scale, str(opp.get("is_knocked_back")), opp_vel_after_launch])
+	if not bt_ok:
 		print("  -> Motivo: el golpe Melee de Vegeta no disparó Follow-Up Bullet-Time (0.08x).")
 		Engine.time_scale = 1.0
 		return false
 
-	# 1. Follow-Up Bullet-Time -> dejar ver a Goku suspendido en 0.08x antes de lanzar Meteor Chase
+	# 1. SEQ 2: Follow-Up Bullet-Time -> dejar ver a Goku suspendido en 0.08x antes de lanzar Meteor Chase
 	if is_visual:
 		await get_tree().create_timer(1.1, true, false, true).timeout
+	var d2_start_dist: float = _get_fighters_dist(opp)
+	var d2_start_msec: int = Time.get_ticks_msec()
 	player.start_flight_to_opponent()
-	if int(player.get("pending_followup_bonus_hits")) != 2 or not is_equal_approx(float(player.get("pending_followup_damage_mult")), 1.25):
+	var bonus_hits: int = int(player.get("pending_followup_bonus_hits"))
+	var bonus_mult: float = float(player.get("pending_followup_damage_mult"))
+	var bonus_ok: bool = (bonus_hits == 2 and is_equal_approx(bonus_mult, 1.25))
+	_trace("SEQ2", "DASH2_START", "dist=%.2fm bonus_hits=%d mult=%.2fx wall_stick=%.2fs" % [
+		d2_start_dist,
+		bonus_hits,
+		bonus_mult,
+		float(opp.get("wall_stick_timer"))
+	])
+	if not bonus_ok:
 		print("  -> Motivo: Meteor Chase sin recuperar no otorgó bonus (+2 golpes, 1.25x).")
+		_audit_add("SEQ2 Meteor Bonus", false, "hits=%d mult=%.2fx" % [bonus_hits, bonus_mult])
 		Engine.time_scale = 1.0
 		return false
+	_audit_add("SEQ2 Meteor Bonus", true, "+%d golpes, %.2fx" % [bonus_hits, bonus_mult])
+
 	if is_visual:
 		var wait_fu: float = 0.0
 		while bool(player.get("is_flying_to_opponent")) and wait_fu < 2.5:
 			await get_tree().create_timer(0.05, true, false, true).timeout
 			wait_fu += 0.05
+		var ws_at_arrival: float = float(opp.get("wall_stick_timer"))
+		var d2_end_dist: float = _get_fighters_dist(opp)
+		var d2_elapsed: float = float(Time.get_ticks_msec() - d2_start_msec) / 1000.0
+		var arrived_before_wall: bool = ws_at_arrival <= 0.0 and _opp_wall_stick_count == 0
+		_trace("SEQ2", "DASH2_END", "dist=%.2fm->%.2fm elapsed=%.2fs wall_stick_at_arrival=%.2fs arrived_before_wall=%s" % [
+			d2_start_dist,
+			d2_end_dist,
+			d2_elapsed,
+			ws_at_arrival,
+			str(arrived_before_wall)
+		])
+		_audit_add("SEQ2 Dash 2 timing", arrived_before_wall and d2_end_dist <= 4.5, "%.1fm->%.1fm en %.2fs, wall_stick=%.2fs" % [d2_start_dist, d2_end_dist, d2_elapsed, ws_at_arrival])
 		await get_tree().create_timer(0.9, true, false, true).timeout
 	else:
 		player._stop_flight()
+		_audit_add("SEQ2 Dash 2 timing", true, "HEADLESS_INJECTED")
 
 	# En el 2do Melee (con bonus), Vegeta envía a Goku contra el risco (Wall-Stick + DEFENSELESS_CRASH)
 	var dome_1: Variant = player.get("active_target_dome")
 	if dome_1 and is_instance_valid(dome_1):
+		_attach_dome_observers(dome_1)
 		dome_1.set("is_active", false)
 		dome_1.emit_signal("finisher_triggered", "charged_v3_back", 3.6, [{ "zone_id": 0, "is_charged": true, "power": 1.5 }], Vector3(0.0, 2.5, -24.0))
 		if is_instance_valid(dome_1):
@@ -511,13 +776,26 @@ func _seq_chain_sequences() -> bool:
 		player._execute_charged_v3_or_ki_break_finisher(opp, "charged_v3_back", 3.6, Vector3(0.0, 2.5, -24.0))
 
 	if is_visual:
-		await get_tree().create_timer(0.85, true, false, true).timeout
+		var ws_wait: float = 0.0
+		while ws_wait < 0.85 and not bool(opp.get("is_defenseless_crash")):
+			await get_tree().create_timer(0.05, true, false, true).timeout
+			ws_wait += 0.05
 	else:
 		await _step_seconds(0.40)
 
 	# 2. Choque físico contra el risco -> Estado Indefenso + 3ra secuencia: Ráfaga de Ki (Renzoku) sobre Goku indefenso
-	opp._on_boundary_crash_impact(18.0)
-	if not bool(opp.get("is_defenseless_crash")) or String(opp.get("airborne_recovery_state")) != "DEFENSELESS_CRASH":
+	var wall_source: String = "NATURAL_PHYSICS" if bool(opp.get("is_defenseless_crash")) else "FALLBACK_BOUNDARY"
+	if not bool(opp.get("is_defenseless_crash")):
+		opp._on_boundary_crash_impact(18.0)
+	var crash_ok: bool = bool(opp.get("is_defenseless_crash")) and String(opp.get("airborne_recovery_state")) == "DEFENSELESS_CRASH"
+	_trace("SEQ2", "CRASH_CHECK", "source=%s defenseless=%s state=%s wall_stick_cnt=%d" % [
+		wall_source,
+		str(opp.get("is_defenseless_crash")),
+		String(opp.get("airborne_recovery_state")),
+		_opp_wall_stick_count
+	])
+	_audit_add("SEQ2 Wall-Stick/Crash", crash_ok, "%s (%s)" % [String(opp.get("airborne_recovery_state")), wall_source])
+	if not crash_ok:
 		print("  -> Motivo: _on_boundary_crash_impact no activó DEFENSELESS_CRASH.")
 		return false
 	if is_visual:
@@ -530,6 +808,10 @@ func _seq_chain_sequences() -> bool:
 		if cam_v and is_instance_valid(cam_v):
 			cam_v.look_at(opp.global_position + Vector3(0.0, 1.05, 0.0), Vector3.UP)
 		_sig_ki_blast_quick = 0
+		_proj_spawned = 0
+		_proj_aimed_at_target = 0
+		var opp_hits_before_renzoku: int = _opp_hits_unblocked
+		var opp_ki_before_renzoku: float = float(opp.get("current_ki"))
 		for b_idx: int in range(6):
 			var b_act: String = "ki_blast_right" if (b_idx % 2 == 0) else "ki_blast_left"
 			if gesture_tree and gesture_tree.has_method("_trigger_action"):
@@ -538,13 +820,36 @@ func _seq_chain_sequences() -> bool:
 			if p_anim and p_anim.has_method("trigger_ki_blast_shot"):
 				p_anim.trigger_ki_blast_shot(b_idx % 2)
 			await get_tree().create_timer(0.09, true, false, true).timeout
-		print("[CombatSequenceRunner] 💥 ¡Renzoku Energy Dan ejecutado! Ki Blasts detectados: %d/6" % _sig_ki_blast_quick)
-		await get_tree().create_timer(1.1, true, false, true).timeout
+		var wait_renzoku: float = 0.0
+		while wait_renzoku < 2.2 and (_opp_hits_unblocked - opp_hits_before_renzoku) < 4:
+			await get_tree().create_timer(0.05, true, false, true).timeout
+			wait_renzoku += 0.05
+		await get_tree().create_timer(0.25, true, false, true).timeout
+		var renzoku_impacts: int = _opp_hits_unblocked - opp_hits_before_renzoku
+		var opp_ki_after_renzoku: float = float(opp.get("current_ki"))
+		_trace("SEQ3", "RENZOKU_RESULT", "fired=%d spawned=%d aimed_ok=%d impacts_on_opp=%d opp_ki=%.1f->%.1f" % [
+			_sig_ki_blast_quick,
+			_proj_spawned,
+			_proj_aimed_at_target,
+			renzoku_impacts,
+			opp_ki_before_renzoku,
+			opp_ki_after_renzoku
+		])
+		var renzoku_ok: bool = _sig_ki_blast_quick >= 4 and _proj_aimed_at_target >= 4 and renzoku_impacts >= 3
+		_audit_add("SEQ3 Renzoku", renzoku_ok, "%d disparados, %d alineados, %d impactos en Goku" % [
+			_sig_ki_blast_quick,
+			_proj_aimed_at_target,
+			renzoku_impacts
+		])
 		opp.set("is_defenseless_crash", false)
 		opp.set("defenseless_crash_timer", 0.0)
 		Engine.time_scale = 1.0
-		if _sig_ki_blast_quick < 4:
-			print("  -> Motivo: Renzoku solo detectó %d Ki Blasts." % _sig_ki_blast_quick)
+		if not renzoku_ok:
+			print("  -> Motivo: Renzoku no cumplió verificación causal (fired=%d, aimed=%d, impacts=%d)." % [
+				_sig_ki_blast_quick,
+				_proj_aimed_at_target,
+				renzoku_impacts
+			])
 			return false
 		return true
 	opp.set("is_defenseless_crash", false)
