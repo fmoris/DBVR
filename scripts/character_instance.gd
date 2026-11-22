@@ -3770,15 +3770,15 @@ func _start_melee_bullet_time(opponent: Node3D) -> void:
 	# 0. Alinear milimétricamente a distancia cuerpo a cuerpo y frenar inercia
 	velocity = Vector3.ZERO
 	is_knocked_back = false
-	if is_ragdoll_active and has_method("end_ragdoll"):
-		end_ragdoll()
+	if is_ragdoll_active:
+		stop_ragdoll()
 	is_ragdoll_active = false
 	ragdoll_recovery_timer = 0.0
 	if opponent.has_method("set"):
 		opponent.set("velocity", Vector3.ZERO)
 		opponent.set("is_knocked_back", false)
-		if bool(opponent.get("is_ragdoll_active")) and opponent.has_method("end_ragdoll"):
-			opponent.end_ragdoll()
+		if bool(opponent.get("is_ragdoll_active")) and opponent.has_method("stop_ragdoll"):
+			opponent.stop_ragdoll()
 		opponent.set("is_ragdoll_active", false)
 		opponent.set("ragdoll_recovery_timer", 0.0)
 
