@@ -1170,9 +1170,11 @@ func _is_valid_super_release_pose(tech_name: String, l_local_z: float, r_local_z
 
 func _process_super_powers(delta: float) -> void:
 	var player: Node = gesture_tree._get_player_instance() if gesture_tree else null
-	if player and is_instance_valid(player) and bool(player.get("is_match_over")):
+	if player and is_instance_valid(player) and (bool(player.get("is_match_over")) or bool(player.get("is_in_bullet_time")) or bool(player.get("is_in_beam_clash")) or bool(player.get("is_flying_to_opponent"))):
 		if current_super_state != SuperPowerState.IDLE:
 			_reset_super_state()
+		candidate_super_tech = ""
+		candidate_hold_timer = 0.0
 		return
 
 	# REQUISITO 4: Prevenir efecto metralleta con cooldown estricto y suelta obligatoria de Grips tras disparo automático

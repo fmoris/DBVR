@@ -648,7 +648,7 @@ func _physics_process(delta: float) -> void:
 			wall_stick_timer = 0.0
 			start_ragdoll(last_wall_crash_normal * 2.5 + Vector3.DOWN * 4.5)
 			ragdoll_recovery_timer = 1.65
-	elif velocity.length_squared() > 0.001:
+	elif velocity.length_squared() > 0.001 and not is_in_bullet_time:
 		var move_step = velocity * delta
 		if is_player:
 			var origin = get_parent()
@@ -3770,9 +3770,17 @@ func _start_melee_bullet_time(opponent: Node3D) -> void:
 	# 0. Alinear milimétricamente a distancia cuerpo a cuerpo y frenar inercia
 	velocity = Vector3.ZERO
 	is_knocked_back = false
+	if is_ragdoll_active and has_method("end_ragdoll"):
+		end_ragdoll()
+	is_ragdoll_active = false
+	ragdoll_recovery_timer = 0.0
 	if opponent.has_method("set"):
 		opponent.set("velocity", Vector3.ZERO)
 		opponent.set("is_knocked_back", false)
+		if bool(opponent.get("is_ragdoll_active")) and opponent.has_method("end_ragdoll"):
+			opponent.end_ragdoll()
+		opponent.set("is_ragdoll_active", false)
+		opponent.set("ragdoll_recovery_timer", 0.0)
 
 	# Alinear frente a frente: colocar siempre a la IA directamente delante de la mirada del jugador (0.85m) y misma altura Y
 	var p_node: Node3D = self if is_player else opponent

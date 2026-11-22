@@ -438,6 +438,7 @@ func _seq_chain_sequences() -> bool:
 	if is_visual:
 		await _step_seconds(0.8)
 	player._stop_flight()
+	_cleanup_active_dome_for_test()
 
 	# Probar recuperación Air Brake -> Melee Normal
 	player._start_followup_airborne_sequence(opp, Vector3(0.0, 5.0, -18.0))
@@ -451,6 +452,7 @@ func _seq_chain_sequences() -> bool:
 	if is_visual:
 		await _step_seconds(0.6)
 	player._stop_flight()
+	_cleanup_active_dome_for_test()
 
 	# 2. Choque físico -> Estado Indefenso + Explosive Wave corta-cadena
 	opp._on_boundary_crash_impact(18.0)
@@ -477,6 +479,9 @@ func _seq_chain_sequences() -> bool:
 		await _step_seconds(0.8)
 
 	# 3. Beam Clash: bloqueo IA + avance hasta 0.0 por Ki == 0
+	simulator.v_left_grip = 1.0
+	simulator.v_right_grip = 1.0
+	simulator.set_scripted_hands(Vector3(-0.18, 0.02, 0.36), Vector3(0.18, 0.02, 0.36), false, false, true)
 	var clash_ctrl: Node3D = load("res://scripts/BeamClashController.gd").new()
 	get_tree().current_scene.add_child(clash_ctrl)
 	clash_ctrl.setup(player, opp, "Kamehameha", Color(0.1, 0.7, 1.0), "Galick Ho", Color(0.8, 0.2, 1.0), 5.5, 1800.0, 1800.0, 1.0, 1.0)
@@ -499,6 +504,7 @@ func _seq_chain_sequences() -> bool:
 			Engine.time_scale = 1.0
 			return false
 		clash_ctrl._resolve_clash(player, opp, "Kamehameha")
+	simulator.clear_virtual_buttons()
 	if is_visual:
 		await _step_seconds(1.0)
 
@@ -528,3 +534,14 @@ func _seq_chain_sequences() -> bool:
 
 	Engine.time_scale = 1.0
 	return true
+
+
+func _cleanup_active_dome_for_test() -> void:
+	var opp: Node3D = player._get_opponent() if player.has_method("_get_opponent") else null
+	var dome: Variant = player.get("active_target_dome")
+	if dome and is_instance_valid(dome):
+		dome.queue_free()
+	player.set("active_target_dome", null)
+	player.set("is_in_bullet_time", false)
+	if opp and is_instance_valid(opp):
+		opp.set("is_in_bullet_time", false)
