@@ -386,20 +386,20 @@ func _ensure_action_card() -> void:
 
 	action_card_anchor = Node3D.new()
 	action_card_anchor.name = "MeleeActionGuideCardAnchor"
-	action_card_anchor.position = Vector3(0.0, -0.36, -1.10)
-	action_card_anchor.rotation_degrees = Vector3(10.0, 0.0, 0.0)
+	action_card_anchor.position = Vector3(-0.62, -0.34, -1.15)
+	action_card_anchor.rotation_degrees = Vector3(6.0, 18.0, 0.0)
 	cam.add_child(action_card_anchor)
 
 	var border := MeshInstance3D.new()
 	border.name = "CardBorder"
 	var b_q := QuadMesh.new()
-	b_q.size = Vector2(0.58, 0.25)
+	b_q.size = Vector2(0.50, 0.22)
 	border.mesh = b_q
 	_action_card_border_mat = StandardMaterial3D.new()
 	_action_card_border_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_action_card_border_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_action_card_border_mat.no_depth_test = false
-	_action_card_border_mat.render_priority = 10
+	_action_card_border_mat.no_depth_test = true
+	_action_card_border_mat.render_priority = 110
 	_action_card_border_mat.albedo_color = Color(1.0, 0.55, 0.15, 0.90)
 	border.material_override = _action_card_border_mat
 	action_card_anchor.add_child(border)
@@ -407,29 +407,29 @@ func _ensure_action_card() -> void:
 	var bg := MeshInstance3D.new()
 	bg.name = "CardBg"
 	var bg_q := QuadMesh.new()
-	bg_q.size = Vector2(0.565, 0.235)
+	bg_q.size = Vector2(0.485, 0.205)
 	bg.mesh = bg_q
 	bg.position = Vector3(0.0, 0.0, 0.001)
 	var bg_mat := StandardMaterial3D.new()
 	bg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	bg_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	bg_mat.no_depth_test = false
-	bg_mat.render_priority = 11
-	bg_mat.albedo_color = Color(0.03, 0.06, 0.11, 0.88)
+	bg_mat.no_depth_test = true
+	bg_mat.render_priority = 111
+	bg_mat.albedo_color = Color(0.03, 0.06, 0.11, 0.92)
 	bg.material_override = bg_mat
 	action_card_anchor.add_child(bg)
 
 	_action_card_label = Label3D.new()
 	_action_card_label.name = "MeleeCardText"
-	_action_card_label.font_size = 21
-	_action_card_label.pixel_size = 0.00125
-	_action_card_label.no_depth_test = false
-	_action_card_label.render_priority = 12
+	_action_card_label.font_size = 19
+	_action_card_label.pixel_size = 0.00118
+	_action_card_label.no_depth_test = true
+	_action_card_label.render_priority = 112
 	_action_card_label.outline_size = 6
 	_action_card_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.95)
 	_action_card_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	_action_card_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_action_card_label.position = Vector3(-0.26, 0.0, 0.002)
+	_action_card_label.position = Vector3(-0.225, 0.0, 0.002)
 	action_card_anchor.add_child(_action_card_label)
 
 
@@ -2320,7 +2320,7 @@ func _build_header_hud() -> void:
 	if cam and is_instance_valid(cam):
 		melee_hud_anchor = Node3D.new()
 		melee_hud_anchor.name = "MeleeHUDAnchor"
-		melee_hud_anchor.position = Vector3(0.0, 0.23, -1.15)
+		melee_hud_anchor.position = Vector3(0.0, 0.37, -1.18)
 		cam.add_child(melee_hud_anchor)
 		header_label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 		header_label.position = Vector3.ZERO

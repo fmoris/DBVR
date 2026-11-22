@@ -195,6 +195,14 @@ func _process(delta: float) -> void:
 		if not camera or not opponent_instance:
 			return
 
+	if player_instance and is_instance_valid(player_instance):
+		if bool(player_instance.get("is_in_bullet_time")) or bool(player_instance.get("is_in_beam_sequence")) or bool(player_instance.get("is_in_beam_clash")):
+			if lockon_reticle_root:
+				lockon_reticle_root.visible = false
+			if ki_pointer_root:
+				ki_pointer_root.visible = false
+			return
+
 	var cam_pos = camera.global_position
 	var opp_chest = opponent_instance.global_position + Vector3(0.0, 1.15, 0.0)
 	var to_opp = opp_chest - cam_pos
