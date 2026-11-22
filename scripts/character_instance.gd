@@ -10,6 +10,8 @@ signal match_finished(winner: Node3D, loser: Node3D, tech_name: String)
 signal zenkai_activated(source: String) # "brecha", "comeback"
 signal furia_changed(active: bool)
 signal dramatic_buffs_changed()
+signal combat_hit_received(damage_np: float, was_blocked: bool, apply_kb: bool, hit_direction: Vector3)
+signal wall_stick_triggered(duration_sec: float, impact_speed: float)
 
 @export var character_data: Resource
 
@@ -1003,6 +1005,7 @@ func take_hit(amount_np: float, hit_direction: Vector3 = Vector3.ZERO, apply_kb:
 
 	# 1. Si está en postura de Guardia y no tiene la guardia rota, absorber con Bloqueo
 	if is_blocking and not is_guard_broken and amount_np >= 10.0:
+		combat_hit_received.emit(amount_np, true, apply_kb, hit_direction)
 		block_hit(amount_np, hit_direction)
 		return
 
@@ -1048,6 +1051,7 @@ func take_hit(amount_np: float, hit_direction: Vector3 = Vector3.ZERO, apply_kb:
 
 	var floor_limit: float = maxf(active_max * secured_np_threshold_ratio, 100.0)
 	current_np = maxf(current_np - amount_np, floor_limit)
+	combat_hit_received.emit(amount_np, false, apply_kb, hit_direction)
 	_regen_ki_from_damage(old_np - current_np)
 	_notify_stats()
 	_check_transformation_unlocks()
@@ -3350,6 +3354,7 @@ func _clamp_to_arena(node: Node3D, is_melee_dash: bool = false) -> void:
 							if horiz_speed > 3.2:
 								wall_stick_timer = 0.65 if is_player else 1.25
 								_wall_crash_immunity_timer = 1.50
+								wall_stick_triggered.emit(wall_stick_timer, horiz_speed)
 								_spawn_ground_crash_vfx(col.position, false)
 								_log_combat_event("💥 ¡Estrellamiento contra el risco! Incrustado en la roca (Wall-Stick).", "warning")
 								print("[Physics] %s se incrustó en el risco de la montaña por %.2fs (Wall-Stick anime)." % [character_data.character_name if character_data else name, wall_stick_timer])
@@ -3387,6 +3392,7 @@ func _clamp_to_arena(node: Node3D, is_melee_dash: bool = false) -> void:
 			if horiz_speed > 3.2:
 				wall_stick_timer = 0.65 if is_player else 1.25
 				_wall_crash_immunity_timer = 1.50
+				wall_stick_triggered.emit(wall_stick_timer, horiz_speed)
 				_spawn_ground_crash_vfx(pos + Vector3(0.0, 1.2, 0.0), false)
 				print("[Physics] %s se incrustó en el límite exterior por %.2fs (Wall-Stick anime)." % [character_data.character_name if character_data else name, wall_stick_timer])
 		velocity = Vector3.ZERO
@@ -4693,5 +4699,3 @@ func play_character_action_audio(action_or_suffix: String, is_voice: bool = true
 		return
 	target_player.pitch_scale = randf_range(0.95, 1.05)
 	AudioActionManager.play_action(act_id, target_player)
-
-
