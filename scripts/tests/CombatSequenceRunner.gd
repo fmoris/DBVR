@@ -521,8 +521,12 @@ func _seq_chain_sequences() -> bool:
 			if gesture_tree and gesture_tree.has_method("_trigger_action"):
 				gesture_tree._trigger_action("ki_blast_right" if (b_idx % 2 == 0) else "ki_blast_left")
 			await get_tree().create_timer(0.18, true, false, true).timeout
-		await get_tree().create_timer(0.85, true, false, true).timeout
+		await get_tree().create_timer(1.1, true, false, true).timeout
 		player._end_followup_bullet_time(false)
+		opp.set("is_defenseless_crash", false)
+		opp.set("defenseless_crash_timer", 0.0)
+		Engine.time_scale = 1.0
+		return true
 	opp.set("is_defenseless_crash", false)
 	opp.set("defenseless_crash_timer", 0.0)
 
