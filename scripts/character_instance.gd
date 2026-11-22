@@ -2471,7 +2471,10 @@ func start_flight_to_opponent() -> void:
 		_log_combat_event("💨 ¡EMBOSCADA DESDE EL HUMO! Melee Dash 0 Ki (+%d golpe)" % pending_ambush_bonus_hits, "success")
 	var base_dash_spd: float = clampf(34.0 + maxf(_dash_initial_dist - 15.0, 0.0) * 0.65, 34.0, 68.0)
 	flight_speed = clampf(base_dash_spd * sqrt(bp_atk_f / bp_def_f) * ambush_speed_mult, 26.0, 82.0) * get_dramatic_modifier("flight_speed_mult", 1.0)
-	_dash_speed_mult = 1.85 if was_followup_chase else 1.0
+	_dash_speed_mult = 3.2 if was_followup_chase else 1.0
+	if was_followup_chase:
+		var takeoff_pos: Vector3 = get_parent().global_position if (is_player and get_parent()) else global_position
+		_spawn_melee_shockwave(takeoff_pos + Vector3.UP * 1.0)
 	_flight_elapsed = 0.0
 	_flight_best_dist = _dash_initial_dist
 	_flight_stall_timer = 0.0
