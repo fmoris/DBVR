@@ -162,6 +162,7 @@ var is_defenseless_crash: bool = false
 var defenseless_crash_timer: float = 0.0
 var pending_followup_bonus_hits: int = 0
 var pending_followup_damage_mult: float = 1.0
+var _followup_banner_node: Node3D = null
 
 # Estado y control de Secuencia de Super Haz (Bullet-Time para técnicas supremas)
 var is_in_beam_sequence: bool = false
@@ -2420,6 +2421,7 @@ func start_flight_to_opponent() -> void:
 	if is_in_followup_bullet_time:
 		is_in_followup_bullet_time = false
 		Engine.time_scale = 1.0
+		_hide_followup_decision_banner()
 		combat_chain_depth += 1
 
 	if is_player and not is_target_locked:
@@ -4269,6 +4271,7 @@ func _execute_charged_v3_or_ki_break_finisher(opponent: Node3D, mode: String, sw
 		await get_tree().create_timer(0.32).timeout
 		if is_instance_valid(self) and is_in_followup_bullet_time and not is_match_over:
 			Engine.time_scale = 0.28
+			_show_followup_decision_banner()
 		_log_combat_event("⚡ ¡BULLET-TIME DE SEGUIMIENTO! (4.0s) Elige: Melee / Súper Rápido / Ki Blasts", "success")
 		if gss and gss.has_signal("phase_changed"):
 			gss.emit_signal("phase_changed", "⚡ ¡ELIGE SIGUIENTE SECUENCIA! (MELEE / SÚPER / BLASTS)")
@@ -4392,6 +4395,7 @@ func _start_followup_airborne_sequence(opponent: Node3D, launch_vector: Vector3)
 	await get_tree().create_timer(0.32).timeout
 	if is_instance_valid(self) and is_in_followup_bullet_time and not is_match_over:
 		Engine.time_scale = 0.28
+		_show_followup_decision_banner()
 
 	_log_combat_event("⚡ ¡BULLET-TIME DE SEGUIMIENTO! (4.0s) Elige: Melee / Súper Rápido / Ki Blasts", "success")
 	var gss = _get_gesture_tree()
@@ -4405,6 +4409,7 @@ func _end_followup_bullet_time(timed_out: bool = false) -> void:
 		return
 	is_in_followup_bullet_time = false
 	Engine.time_scale = 1.0
+	_hide_followup_decision_banner()
 
 	var target_opp = opponent_airborne_target
 	opponent_airborne_target = null
@@ -4444,6 +4449,7 @@ func start_post_super_followup(opponent: Node3D) -> void:
 	opponent_airborne_target = opponent
 	opponent.set("airborne_recovery_state", "UNRECOVERED")
 	Engine.time_scale = 0.28
+	_show_followup_decision_banner()
 	_log_combat_event("⚡ ¡PERSECUCIÓN POST-SUPER! (%.1fs) Lluvia de Ki Blasts o Meteor Chase" % cfg.post_super_followup_duration, "success")
 	var gss = _get_gesture_tree()
 	if gss and gss.has_signal("phase_changed"):
@@ -4517,6 +4523,38 @@ func execute_shunkan_ido_flank() -> bool:
 	play_character_action_audio("common.dodge_vanish", false)
 	_log_combat_event("⚡ ¡SHUNKAN IDŌ! Teletransporte táctico (-%d Ki)" % int(cfg.melee_vanish_cost), "info")
 	return true
+
+
+func _show_followup_decision_banner() -> void:
+	_hide_followup_decision_banner()
+	if not is_player or not is_inside_tree():
+		return
+	var orig: Node = get_parent()
+	var cam: Camera3D = orig.get_node_or_null("XRCamera3D") as Camera3D if orig else null
+	if not cam or not is_instance_valid(cam):
+		return
+	var anchor := Node3D.new()
+	anchor.name = "FollowUpDecisionBanner"
+	anchor.position = Vector3(0.0, 0.26, -1.20)
+	cam.add_child(anchor)
+
+	var lbl := Label3D.new()
+	lbl.text = "⚡ ¡BULLET-TIME DE SEGUIMIENTO! (4.0s)\nPuño al frente: Meteor Chase | Súper: Carga Rápida | Gatillo: Renzoku x3"
+	lbl.font_size = 24
+	lbl.pixel_size = 0.00125
+	lbl.no_depth_test = true
+	lbl.render_priority = 122
+	lbl.modulate = Color(1.0, 0.90, 0.25)
+	lbl.outline_size = 8
+	lbl.outline_modulate = Color(0.0, 0.0, 0.0, 0.95)
+	anchor.add_child(lbl)
+	_followup_banner_node = anchor
+
+
+func _hide_followup_decision_banner() -> void:
+	if _followup_banner_node and is_instance_valid(_followup_banner_node):
+		_followup_banner_node.queue_free()
+	_followup_banner_node = null
 
 
 ## Genera la onda de choque expansiva del impacto físico masivo (Melee Shockwave)

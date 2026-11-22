@@ -461,7 +461,11 @@ func _seq_chain_sequences() -> bool:
 		Engine.time_scale = 1.0
 		return false
 	if is_visual:
-		await _step_seconds(0.8)
+		var wait_fu: float = 0.0
+		while bool(player.get("is_flying_to_opponent")) and wait_fu < 2.5:
+			await _step_seconds(0.05)
+			wait_fu += 0.05
+		await _step_seconds(1.2)
 	player._stop_flight()
 	_cleanup_active_dome_for_test()
 
