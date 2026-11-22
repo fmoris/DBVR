@@ -3,9 +3,11 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://1n5fkmq0j1s7"
-path="res://.godot/imported/21_goku1_body_COLORMAP-COLORMAP_5.png-d51116764699738663cfad5089a064bf.ctex"
+path.s3tc="res://.godot/imported/21_goku1_body_COLORMAP-COLORMAP_5.png-d51116764699738663cfad5089a064bf.s3tc.ctex"
+path.etc2="res://.godot/imported/21_goku1_body_COLORMAP-COLORMAP_5.png-d51116764699738663cfad5089a064bf.etc2.ctex"
 metadata={
-"vram_texture": false
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
+"vram_texture": true
 }
 generator_parameters={
 "md5": "f3b254950ae477af3c65bb67e2f1e020"
@@ -14,11 +16,11 @@ generator_parameters={
 [deps]
 
 source_file="res://assets/models/goku_zenkai/21_goku1_body_COLORMAP-COLORMAP_5.png"
-dest_files=["res://.godot/imported/21_goku1_body_COLORMAP-COLORMAP_5.png-d51116764699738663cfad5089a064bf.ctex"]
+dest_files=["res://.godot/imported/21_goku1_body_COLORMAP-COLORMAP_5.png-d51116764699738663cfad5089a064bf.s3tc.ctex", "res://.godot/imported/21_goku1_body_COLORMAP-COLORMAP_5.png-d51116764699738663cfad5089a064bf.etc2.ctex"]
 
 [params]
 
-compress/mode=0
+compress/mode=2
 compress/high_quality=false
 compress/high_quality_mode=0
 compress/lossy_quality=0.7
@@ -29,8 +31,6 @@ compress/normal_map=0
 compress/channel_pack=0
 mipmaps/generate=true
 mipmaps/limit=-1
-mipmaps/preserve_alpha_test_coverage=false
-mipmaps/alpha_test_threshold=0.5
 roughness/mode=0
 roughness/src_normal=""
 process/channel_remap/red=0
@@ -43,4 +43,4 @@ process/normal_map_invert_y=false
 process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
-detect_3d/compress_to=1
+detect_3d/compress_to=0

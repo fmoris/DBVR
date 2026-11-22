@@ -134,6 +134,7 @@ var right_hand_idx: int = -1
 
 # Calibración automática de rig agnóstica de personaje (Goku/Vegeta) y cachés O(1)
 var _rig_calibrated: bool = false
+var _current_body_model_path: String = ""
 var _skel_char_basis: Basis = Basis.IDENTITY
 var _left_hand_align_basis: Basis = Basis.IDENTITY
 var _right_hand_align_basis: Basis = Basis.IDENTITY
@@ -379,6 +380,8 @@ func setup_character() -> void:
 					if cached_ai_controller and is_instance_valid(cached_ai_controller):
 						cached_ai_controller.set("enabled", true)
 			_disable_frustum_culling_in_children(body_mesh_instance)
+			_current_body_model_path = character_data.body_model_path
+			_apply_model_variant_visibility(_current_body_model_path)
 			
 	# Instanciar el modelo de las manos en runtime (solo si ES el jugador, para ver nuestras manos en primera persona)
 	if is_player and character_data.hands_model_path != "":
@@ -392,6 +395,9 @@ func setup_character() -> void:
 
 func _swap_body_mesh_for_path(model_path: String) -> void:
 	if model_path == "" or not ResourceLoader.exists(model_path):
+		return
+	if model_path == _current_body_model_path and body_mesh_instance and is_instance_valid(body_mesh_instance):
+		_apply_model_variant_visibility(model_path)
 		return
 	var scene: PackedScene = load(model_path) as PackedScene
 	if not scene:
@@ -452,6 +458,43 @@ func _swap_body_mesh_for_path(model_path: String) -> void:
 				ragdoll_simulator.physical_bones_stop_simulation()
 
 	_disable_frustum_culling_in_children(body_mesh_instance)
+	_current_body_model_path = model_path
+	_apply_model_variant_visibility(model_path)
+
+
+func _apply_model_variant_visibility(model_path: String) -> void:
+	if not body_mesh_instance or not is_instance_valid(body_mesh_instance):
+		return
+	var model_file: String = model_path.get_file().to_lower()
+	if not ("goku" in model_file):
+		return
+	var is_transformed: bool = current_transformation != null
+	_apply_zenkai_visibility_recursive(body_mesh_instance, model_file, is_transformed)
+
+
+func _apply_zenkai_visibility_recursive(node: Node, model_file: String, is_transformed: bool) -> void:
+	if node is MeshInstance3D:
+		var mi: MeshInstance3D = node as MeshInstance3D
+		var n_lower: String = mi.name.to_lower()
+		var should_hide: bool = ("glasses" in n_lower) or ("potara" in n_lower) or ("senz" in n_lower) or ("nyoibo" in n_lower)
+		# Conservar G/H/I_mouth para animación facial; ocultar poses secundarias en reposo
+		if ("h_mouth" in n_lower) or ("i_mouth" in n_lower):
+			should_hide = true
+		if not should_hide:
+			if model_file == "21_goku1_body.glb":
+				var is_base_part: bool = ("nm_" in n_lower)
+				var is_ssj_part: bool = ("ss_" in n_lower) or (("ct2_goku" in n_lower) and not is_base_part)
+				if is_transformed and is_base_part:
+					should_hide = true
+				elif (not is_transformed) and is_ssj_part:
+					should_hide = true
+			elif model_file == "42_goku_3_body.glb":
+				if n_lower.begins_with("b_"):
+					should_hide = true
+		mi.visible = not should_hide
+
+	for child: Node in node.get_children():
+		_apply_zenkai_visibility_recursive(child, model_file, is_transformed)
 
 
 func swap_character_data(new_data: CharacterData) -> void:

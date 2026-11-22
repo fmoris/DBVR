@@ -5,7 +5,7 @@
 [ext_resource type="Shader" uid="uid://c6uhtjabdwdb1" path="res://shaders/distant_plain.gdshader" id="2_vmgen"]
 [ext_resource type="Shader" uid="uid://cpbblx5x8b26g" path="res://shaders/toriyama_mountain.gdshader" id="3_5t72e"]
 [ext_resource type="Script" uid="uid://djr8e542femn5" path="res://scripts/character_instance.gd" id="4_c7tww"]
-[ext_resource type="Resource" uid="uid://d5b5tf0728lr" path="res://resources/goku.tres" id="5_vmgen"]
+[ext_resource type="Resource" path="res://resources/goku_zenkai.tres" id="5_vmgen"]
 [ext_resource type="PackedScene" uid="uid://cggifip4tem77" path="res://vr_hud.tscn" id="5_vrhud"]
 [ext_resource type="Script" uid="uid://cp621txxly1yq" path="res://scripts/GesturePhaseTree.gd" id="6_gesturetree"]
 [ext_resource type="Texture2D" uid="uid://b52bt3156w8gw" path="res://assets/images/background.png" id="9_bgtexture"]
