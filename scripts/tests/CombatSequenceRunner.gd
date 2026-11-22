@@ -446,7 +446,7 @@ func _seq_chain_sequences() -> bool:
 	else:
 		player._execute_charged_v3_or_ki_break_finisher(opp, "charged_v3_back", 3.2, Vector3(0.0, 5.0, -18.0))
 
-	await _step_seconds(0.55 if is_visual else 0.40)
+	await get_tree().create_timer(0.45 if is_visual else 0.38, true, false, true).timeout
 	if not bool(player.get("is_in_followup_bullet_time")) or not is_equal_approx(Engine.time_scale, 0.08):
 		print("  -> Motivo: el golpe Melee de Vegeta no disparó Follow-Up Bullet-Time (0.08x).")
 		Engine.time_scale = 1.0
@@ -454,7 +454,7 @@ func _seq_chain_sequences() -> bool:
 
 	# 1. Follow-Up Bullet-Time -> dejar ver a Goku suspendido en 0.08x antes de lanzar Meteor Chase
 	if is_visual:
-		await get_tree().create_timer(1.4, true, false, true).timeout
+		await get_tree().create_timer(0.95, true, false, true).timeout
 	player.start_flight_to_opponent()
 	if int(player.get("pending_followup_bonus_hits")) != 2 or not is_equal_approx(float(player.get("pending_followup_damage_mult")), 1.25):
 		print("  -> Motivo: Meteor Chase sin recuperar no otorgó bonus (+2 golpes, 1.25x).")
