@@ -436,6 +436,13 @@ func _reset_between_tests() -> void:
 		player.set("is_in_beam_clash", false)
 		player.set("is_flying_to_opponent", false)
 		player.set("is_flying_to_melee", false)
+		player.set("is_knocked_back", false)
+		player.set("velocity", Vector3.ZERO)
+		var cur_sc: Node = get_tree().current_scene
+		if cur_sc:
+			for c: Node in cur_sc.get_children():
+				if c.get_script() and str(c.get_script().resource_path).ends_with("BeamClashController.gd"):
+					c.queue_free()
 		var dome: Variant = player.get("active_target_dome")
 		if dome and is_instance_valid(dome):
 			dome.queue_free()
