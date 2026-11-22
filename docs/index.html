@@ -11,7 +11,9 @@
     <div class="brand">🐉 DBZVR · DRAGON BALL VR</div>
     <nav class="nav-links">
       <a href="#resumen">Juego</a>
+      <a href="#secuencias">Secuencias Ki</a>
       <a href="#personajes">Personajes</a>
+      <a href="#relato">Relato de Partida</a>
       <a href="#manual">Manual por Fases</a>
       <a href="#eventos-lore">Eventos Lore</a>
       <a href="#miniescenas">Mini-Escenas</a>
@@ -67,26 +69,92 @@
       </div>
     </section>
 
-    <section id="personajes">
-      <h2 class="section-title">🥋 Luchadores, Transformaciones y Súper Poderes</h2>
-      <div class="grid-2">
-        <div class="card">
-          <h3>👑 Vegeta (Base 10.000 / Máx 20.000)</h3>
-          <p><strong>Transformaciones:</strong> <code>SSJ (x2.0 · 2.1 Ki/s)</code> ➔ <code>Super Vegeta (x3.5 · 3.2/s)</code> ➔ <code>SSB (x5.0 · 4.4/s)</code> ➔ <code>Ultra Ego (x8.0 · 5.5/s)</code></p>
-          <ul>
-            <li><strong>Galick Ho (28 Ki · 1.800 BP · min 0.45 s):</strong> Ambos Grips al costado/cadera ➔ empuja al frente.</li>
-            <li><strong>Big Bang Attack (35 Ki · 3.200 BP · min 0.55 s):</strong> 1 brazo extendido palma abierta + Grip <em>(sin Gatillo)</em>.</li>
-            <li><strong>Final Flash (45 Ki · Finisher · min 0.55 s · requiere SSJ/Zenkai):</strong> Brazos abiertos en cruz T-Pose con Grips ➔ junta al frente.</li>
-          </ul>
+    <section id="secuencias">
+      <h2 class="section-title">🔗 El Corazón del Juego: Secuencias Encadenadas por Ki</h2>
+      <div class="card">
+        <p>
+          La mayor parte del combate ocurre <strong>dentro de secuencias encadenadas</strong>. El <strong>Ki</strong> es la llave obligatoria para iniciar y extender cada eslabón: cada transición consecutiva (<code>chain_depth</code>) incrementa el costo en <strong>+35%</strong> (<code>x1.0 → x1.35 → x1.70</code>), obligando a decidir entre quemar todo tu Ki en una cadena devastadora o cortar a tiempo para recargar.
+        </p>
+        <div class="chain-flow">
+          <div class="chain-node">
+            <h4>1. Inicio desde Fase Libre</h4>
+            <p>Entra a secuencia gastando Ki: <strong>Melee Dash</strong> (<code>10 Ki</code>), <strong>Ki Blast Cargado</strong> (<code>9 Ki</code>) o <strong>Súper Poder</strong> (<code>28–45 Ki</code>).</p>
+          </div>
+          <div class="chain-node gold">
+            <h4>2. Follow-Up Aéreo + Meteor Chase</h4>
+            <p>Al lanzar al rival por los aires tras <code>MeleeTargetDome</code>, tienes <code>4.0 s</code> para lluvia de Ki Blasts, Súper en cadena o <strong>Meteor Chase</strong> (<code>12 Ki × escala</code>) y abrir <strong>otra Cúpula Melee aérea</strong>.</p>
+          </div>
+          <div class="chain-node orange">
+            <h4>3. Ventana Post-Super (3.0 s)</h4>
+            <p>Si un Súper Poder impacta sin K.O. y conservas <code>&gt;= 15 Ki</code>, el juego abre una persecución estilo manga para <strong>lluvia de Ki Blasts sobre el humo</strong> o <strong>Meteor Chase</strong>.</p>
+          </div>
+          <div class="chain-node crimson">
+            <h4>4. Corte Defensivo (Explosive Wave)</h4>
+            <p>El defensor puede frenar en el aire (<em>Air Brake</em>), hacer <em>Z-Vanish</em> o pulsar <strong>B / Y</strong> (<code>22 Ki</code>) para detonar una <strong>Onda Expansiva</strong> que corta la cadena y reinicia <code>chain_depth = 0</code>.</p>
+          </div>
         </div>
-        <div class="card">
-          <h3>🟠 Goku + variante Goku Zenkai (Base 9.000 / Máx 18.000)</h3>
-          <p><strong>Transformaciones:</strong> <code>SSJ (x2.0 · 1.8 Ki/s)</code> ➔ <code>SSJ2 (x3.5 · 2.8/s)</code> ➔ <code>SSB (x5.0 · 4.0/s)</code> ➔ <code>Ultra Instinto (x8.0 · 5.5/s)</code></p>
-          <ul>
-            <li><strong>Kamehameha (28 Ki · 1.800 BP · min 0.45 s):</strong> Ambos Grips recogidos en la cadera ➔ empuja al frente.</li>
-            <li><strong>Genkidama (45 Ki · 6.000 BP · min 0.65 s · solo Forma Base):</strong> Ambos brazos al cielo con Grips ➔ baja al frente.</li>
-            <li><strong>Super Kamehameha (45 Ki · Finisher · requiere SSJ/Zenkai):</strong> Mismo gesto que Kamehameha estando transformado.</li>
-          </ul>
+      </div>
+    </section>
+
+    <section id="personajes">
+      <h2 class="section-title">🥋 Selector de Personajes (Status, Transformaciones, Poderes y Zenkai)</h2>
+      <div class="char-selector-tabs" role="tablist">
+        <button class="char-btn active" data-char="vegeta">👑 Vegeta</button>
+        <button class="char-btn" data-char="goku">🟠 Goku</button>
+        <button class="char-btn" data-char="goku_zenkai">⚡ Goku (Zenkai)</button>
+      </div>
+      <div class="card char-sheet" id="characterSheet"></div>
+    </section>
+
+    <section id="relato">
+      <h2 class="section-title">📖 Relato de una Partida Real: Vegeta vs. Goku</h2>
+      <div class="chronicle-timeline">
+        <div class="chronicle-act">
+          <h3>Acto I · Fase Libre y Presión de Ki (Arena de Cell 32×32 m)</h3>
+          <p>
+            <strong>Vegeta</strong> arranca con <code>10.000 BP</code> frente a los <code>9.000 BP</code> de <strong>Goku</strong>. A <code>11.5 m</code> de distancia táctica, Vegeta presiona con <em>Ki Blasts Rápidos</em> (<code>2.5 Ki</code>) y destroza una roca Toriyama (<code>+220 BP</code>) levantando humo denso. Goku desvía una ráfaga con la palma (<code>+12 Ki · +150 BP</code>) y aprovecha el ángulo para recargar en 2 fases (<code>+24 Ki/s</code>) hasta el techo del <code>60% BP</code>.
+          </p>
+          <div class="chronicle-tags">
+            <span class="badge">Fase Libre</span>
+            <span class="badge gold">Desvío +12 Ki</span>
+            <span class="badge">Destrucción +220 BP</span>
+          </div>
+        </div>
+
+        <div class="chronicle-act">
+          <h3>Acto II · Cadena Melee → Follow-Up Aéreo → Meteor Chase</h3>
+          <p>
+            Vegeta entra en rango de <code>15.5 m</code>, gasta <code>10 Ki</code> en un <strong>Melee Dash</strong> y abre la <code>MeleeTargetDome</code>. Conecta un combo rematado con <strong>Martillazo DBZ</strong> (<code>-22 Ki</code>), estrellando a Goku contra el suelo (<code>+35%</code> vel. Súper en cráter) y lanzándolo por los aires. En la ventana <em>Follow-Up</em>, Vegeta gasta <code>12 Ki × 1.35</code> en <strong>Meteor Chase</strong> para abrir una <strong>segunda cúpula aérea</strong>, pero Goku clava un <strong>Parry Perfecto</strong> en aro dorado (<code>+14 Ki</code>), roba el turno y activa <strong>Corazón Sereno</strong> (permanente: <code>+20% Recarga Ki</code>, <code>+18% Vel. Súper</code>).
+          </p>
+          <div class="chronicle-tags">
+            <span class="badge gold">Meteor Chase</span>
+            <span class="badge">Parry Perfecto +14 Ki</span>
+            <span class="badge violet">Corazón Sereno</span>
+          </div>
+        </div>
+
+        <div class="chronicle-act">
+          <h3>Acto III · Beam Clash sin Ki Blasts y Persecución Post-Super</h3>
+          <p>
+            Ambos superan el <code>75% BP</code> y desbloquean <strong>SSJ (x2.0)</strong>. Vegeta dispara un <em>Galick Ho</em> (<code>28 Ki</code>); en <em>Bullet-Time</em>, Goku responde con <em>Kamehameha</em> (<code>28 Ki</code>) iniciando el <strong>Beam Clash</strong>. La IA queda totalmente bloqueada de lanzar <em>Ki Blasts</em> externos mientras ambos empujan. Vegeta agota su Ki a <code>0</code> y el haz de Goku acelera hasta <code>0.0</code>, impactándolo de lleno y disparando la ventana <strong>Post-Super Follow-Up (3.0 s)</strong> porque Goku aún conserva <code>&gt;= 15 Ki</code>. Goku lanza ráfagas sobre el humo hasta que Vegeta corta la cadena con <strong>Onda Expansiva</strong> (<code>22 Ki</code>, <code>B/Y</code>).
+          </p>
+          <div class="chronicle-tags">
+            <span class="badge">Beam Clash 0.0</span>
+            <span class="badge orange">Post-Super Follow-Up</span>
+            <span class="badge crimson">Explosive Wave -22 Ki</span>
+          </div>
+        </div>
+
+        <div class="chronicle-act">
+          <h3>Acto IV · Furia, Determinación, Cúspide x8.0 y K.O. Zenkai</h3>
+          <p>
+            Con más de <code>30%</code> de desventaja, Vegeta entra en <strong>Furia</strong> y supera <strong>Orgullo del Príncipe</strong> (Furia permanente al <code>22%</code> y <code>+15%</code> daño Súpers), escalando a <em>Super Vegeta</em> (<code>x3.5</code>) → <em>SSB</em> (<code>x5.0</code>) → <strong>Ultra Ego (x8.0)</strong> tras dominar con <em>Big Bang Attack</em> (<code>35 Ki</code>). Acorralado, Goku ejecuta su único <strong>Momento de Determinación</strong> (<code>+45 Ki</code>, <code>+25%</code> déficit BP, <strong>Zenkai Comeback</strong>), transforma hasta <strong>Ultra Instinto (x8.0)</strong> y sella la victoria con un <strong>Super Kamehameha</strong> (<code>45 Ki</code>) para el <strong>K.O. Zenkai</strong>.
+          </p>
+          <div class="chronicle-tags">
+            <span class="badge violet">Orgullo del Príncipe</span>
+            <span class="badge gold">Determinación · Comeback</span>
+            <span class="badge crimson">K.O. Zenkai</span>
+          </div>
         </div>
       </div>
     </section>
@@ -218,8 +286,8 @@
         <h3>Fase 5 — Choque de Poderes (Beam Clash)</h3>
         <ul>
           <li><strong>Postura obligatoria:</strong> Mantén <strong>ambos Grips sostenidos</strong> con manos proyectadas al frente.</li>
-          <li><strong>Empuje:</strong> Agita ambos mandos con energía y pulsa repetidamente ambos <strong>Gatillos</strong> para ganar terreno en la barra 3D.</li>
-          <li><strong>Multiplicador Zenkai:</strong> En Estado Zenkai tu empuje sube <strong>×1.45</strong>. Con <code>0 Ki</code> entras en <em>Último Aliento</em> quemando BP.</li>
+          <li><strong>Empuje dinámico hasta el impacto:</strong> Agita ambos mandos con energía y pulsa repetidamente ambos <strong>Gatillos</strong>; el haz y la esfera se desplazan físicamente hacia el perdedor hasta impactar en <code>0.0</code> o <code>1.0</code>.</li>
+          <li><strong>Bloqueo de IA y Colapso inmediato:</strong> La IA no puede lanzar <em>Ki Blasts</em> durante el choque. Si cualquiera llega a <code>0 Ki</code> o desiste de sostener la pose (<code>&gt;= 0.40 s</code>), el haz rival acelera e impacta al instante. En Estado Zenkai tu empuje sube <strong>×1.45</strong>.</li>
         </ul>
       </div>
 

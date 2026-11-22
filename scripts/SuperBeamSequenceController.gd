@@ -338,6 +338,9 @@ func _check_player_defense_options() -> void:
 	var r_ctrl = origin.get_node_or_null("RightHand") as XRController3D
 	var cam = origin.get_node_or_null("XRCamera3D") as Camera3D
 
+	if defender and is_instance_valid(defender) and bool(defender.get("is_defenseless_crash")):
+		return
+
 	var l_grip: bool = (l_ctrl.get_float("grip") > 0.55 or l_ctrl.is_button_pressed("grip_click")) if l_ctrl else false
 	var r_grip: bool = (r_ctrl.get_float("grip") > 0.55 or r_ctrl.is_button_pressed("grip_click")) if r_ctrl else false
 	var l_trig: bool = (l_ctrl.get_float("trigger") > 0.55 or l_ctrl.is_button_pressed("trigger_click")) if l_ctrl else false
@@ -883,6 +886,10 @@ func _cleanup_and_finish(result: String, dmg: float) -> void:
 		audio_player.stop()
 
 	emit_signal("sequence_completed", result, dmg)
+
+	if (result == "direct_hit" or result == "hit") and attacker and is_instance_valid(attacker) and not bool(attacker.get("is_match_over")):
+		if defender and is_instance_valid(defender) and attacker.has_method("start_post_super_followup"):
+			attacker.start_post_super_followup(defender)
 
 	var tw = create_tween()
 	tw.tween_property(self, "scale", Vector3.ZERO, 0.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)

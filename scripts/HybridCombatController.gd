@@ -153,6 +153,7 @@ var _air_brake_label: Label3D = null
 var status_pulse_timer: float = 0.0
 
 const VRInGameMenuClass = preload("res://scripts/vr_in_game_menu.gd")
+const StartupChangelogModalClass = preload("res://scripts/StartupChangelogModal.gd")
 var in_game_menu: VRInGameMenu = null
 var menu_toggle_cooldown: float = 0.0
 
@@ -201,6 +202,9 @@ func _find_xr_nodes() -> void:
 				in_game_menu.name = "VRInGameMenu"
 				xr_origin.add_child(in_game_menu)
 			in_game_menu.setup_references(xr_origin, camera, left_controller, right_controller)
+
+		if get_tree() and camera:
+			StartupChangelogModalClass.spawn_if_needed(get_tree(), camera, left_controller, right_controller)
 
 		if ki_lockon_system == null and get_tree() and get_tree().current_scene:
 			ki_lockon_system = KiSenseAndLockOnClass.new()
@@ -419,7 +423,7 @@ func _is_exclusive_combat_sequence_active(player: Node) -> bool:
 	if player and is_instance_valid(player):
 		if bool(player.get("is_in_beam_clash")) or bool(player.get("is_in_beam_sequence")):
 			return true
-		if bool(player.get("is_in_bullet_time")) or bool(player.get("is_flying_to_melee")) or bool(player.get("is_flying_to_opponent")):
+		if bool(player.get("is_in_bullet_time")) or bool(player.get("is_flying_to_opponent")):
 			return true
 	return false
 
@@ -804,6 +808,47 @@ func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta:
 		if held_time >= 0.025:
 			var is_charged = held_time >= 0.45
 			var action_name = "ki_blast_left" if is_left else "ki_blast_right"
+			var p_ref: Node = gesture_tree._get_player_instance() if gesture_tree else null
+			var in_fu_renzoku: bool = (not is_charged) and p_ref != null and is_instance_valid(p_ref) and bool(p_ref.get("is_in_followup_bullet_time"))
+			if in_fu_renzoku and gesture_tree:
+				var cfg_r: KiEconomyConfig = KiEconomyConfig.get_default()
+				var renzoku_cost: float = cfg_r.ki_blast_cost * 2.5
+				if float(p_ref.get("current_ki")) >= renzoku_cost:
+					p_ref.consume_ki(renzoku_cost)
+					Engine.time_scale = 1.0
+					if p_ref.has_method("_hide_followup_decision_banner"):
+						p_ref._hide_followup_decision_banner()
+					for r_i: int in range(5):
+						var r_act: String = "ki_blast_right" if (r_i % 2 == 0) else "ki_blast_left"
+						var r_hand: int = r_i % 2
+						var delay_s: float = float(r_i) * 0.08
+						if delay_s <= 0.001:
+							gesture_tree._trigger_action(r_act)
+							var pa0: Variant = p_ref.get("procedural_animator")
+							if pa0 and pa0.has_method("trigger_ki_blast_shot"):
+								pa0.trigger_ki_blast_shot(r_hand)
+						else:
+							get_tree().create_timer(delay_s, true, false, true).timeout.connect(func():
+								if is_instance_valid(gesture_tree):
+									gesture_tree._trigger_action(r_act)
+								if is_instance_valid(p_ref):
+									var pa_n: Variant = p_ref.get("procedural_animator")
+									if pa_n and pa_n.has_method("trigger_ki_blast_shot"):
+										pa_n.trigger_ki_blast_shot(r_hand)
+							)
+					if gesture_tree.has_signal("gesture_logged"):
+						gesture_tree.emit_signal("gesture_logged", "💥 ¡RENZOKU ENERGY DAN! Ráfaga x5 en seguimiento", "success")
+					if is_left:
+						left_charge_time = 0.0
+						left_is_charging = false
+						left_blast_locked_haptic = false
+						left_blast_cooldown = 0.25
+					else:
+						right_charge_time = 0.0
+						right_is_charging = false
+						right_blast_locked_haptic = false
+						right_blast_cooldown = 0.25
+					return
 			var player_cd: Node = gesture_tree._get_player_instance() if gesture_tree else null
 			var c_data_cd = player_cd.get("character_data") if (player_cd and is_instance_valid(player_cd)) else null
 			var is_veg_cd: bool = c_data_cd != null and "VEGETA" in String(c_data_cd.character_name).to_upper()
@@ -1115,9 +1160,11 @@ func _is_valid_super_release_pose(tech_name: String, l_local_z: float, r_local_z
 
 func _process_super_powers(delta: float) -> void:
 	var player: Node = gesture_tree._get_player_instance() if gesture_tree else null
-	if player and is_instance_valid(player) and bool(player.get("is_match_over")):
+	if player and is_instance_valid(player) and (bool(player.get("is_match_over")) or bool(player.get("is_in_bullet_time")) or bool(player.get("is_in_beam_clash")) or bool(player.get("is_flying_to_opponent"))):
 		if current_super_state != SuperPowerState.IDLE:
 			_reset_super_state()
+		candidate_super_tech = ""
+		candidate_hold_timer = 0.0
 		return
 
 	# REQUISITO 4: Prevenir efecto metralleta con cooldown estricto y suelta obligatoria de Grips tras disparo automático
@@ -1301,6 +1348,7 @@ func _process_super_powers(delta: float) -> void:
 
 		var super_spd_mult: float = player.get_dramatic_modifier("super_charge_speed_mult", 1.0) if (player and is_instance_valid(player) and player.has_method("get_dramatic_modifier")) else 1.0
 		var opp_sup: Node = player._get_opponent() if (player and is_instance_valid(player) and player.has_method("_get_opponent")) else null
+		var is_chain_fast_charge: bool = bool(player and is_instance_valid(player) and player.get("is_in_followup_bullet_time"))
 		if opp_sup and is_instance_valid(opp_sup):
 			var cfg_sup: KiEconomyConfig = KiEconomyConfig.get_default()
 			var sup_window_mult: float = 1.0
@@ -1310,8 +1358,13 @@ func _process_super_powers(delta: float) -> void:
 			var crater_t_val: Variant = opp_sup.get("ground_crater_stun_timer")
 			if crater_t_val != null and float(crater_t_val) > 0.0:
 				sup_window_mult = maxf(sup_window_mult, cfg_sup.melee_crater_super_charge_mult)
+			if bool(opp_sup.get("is_defenseless_crash")):
+				is_chain_fast_charge = true
 			super_spd_mult *= sup_window_mult
-		super_charge_timer += delta * super_spd_mult
+		var charge_dt: float = delta / maxf(Engine.time_scale, 0.01) if is_chain_fast_charge else delta
+		if is_chain_fast_charge:
+			super_spd_mult *= 2.2
+		super_charge_timer += charge_dt * super_spd_mult
 		_pulse_haptic(left_controller, 110.0, clamp(0.25 + super_charge_timer * 0.35, 0.25, 0.95), delta)
 		_pulse_haptic(right_controller, 110.0, clamp(0.25 + super_charge_timer * 0.35, 0.25, 0.95), delta)
 
@@ -1784,7 +1837,8 @@ func _process_melee_punches() -> void:
 		right_punch_cocked = false
 		return
 
-	if melee_cooldown > 0.0 or is_charging_ki or startup_cooldown > 0.0:
+	var is_followup_active: bool = player != null and is_instance_valid(player) and bool(player.get("is_in_followup_bullet_time"))
+	if (melee_cooldown > 0.0 and not is_followup_active) or is_charging_ki or startup_cooldown > 0.0:
 		left_punch_cocked = false
 		right_punch_cocked = false
 		return
@@ -1872,11 +1926,15 @@ func _execute_melee_punch(controller: XRController3D) -> void:
 
 	if player and is_instance_valid(player):
 		var curr_ki: float = float(player.get("current_ki")) if player.get("current_ki") != null else 0.0
-		var dash_cost: float = KiEconomyConfig.get_default().melee_dash_cost
+		var cfg_m: KiEconomyConfig = KiEconomyConfig.get_default()
+		var is_followup_chase: bool = bool(player.get("is_in_followup_bullet_time"))
+		var base_dash_cost: float = cfg_m.melee_meteor_chase_cost if is_followup_chase else cfg_m.melee_dash_cost
+		var chain_mult: float = player.get_chain_ki_multiplier() if (is_followup_chase and player.has_method("get_chain_ki_multiplier")) else 1.0
+		var dash_cost: float = base_dash_cost * chain_mult
 		var opp_m: Node = player._get_opponent() if player.has_method("_get_opponent") else null
 		if not opp_m and get_tree() and get_tree().current_scene:
 			opp_m = get_tree().current_scene.find_child("EnemyCharacterInstance", true, false)
-		var free_opening: bool = opp_m != null and is_instance_valid(opp_m) and player.has_method("has_free_melee_opening_against") and player.has_free_melee_opening_against(opp_m)
+		var free_opening: bool = (not is_followup_chase) and opp_m != null and is_instance_valid(opp_m) and player.has_method("has_free_melee_opening_against") and player.has_free_melee_opening_against(opp_m)
 		if free_opening:
 			dash_cost = 0.0
 		if curr_ki < dash_cost:
@@ -1994,6 +2052,16 @@ func _process_grid_step_movement(delta: float) -> void:
 	elif stick_len >= 0.55 and not right_stick_flicked and step_cooldown <= 0.0 and not is_step_moving:
 		right_stick_flicked = true
 		step_cooldown = 0.16
+
+		# Shunkan Idō (Teletransportación táctica en Fase Libre): Grip sostenido (sin gatillo) + flick fuerte de stick
+		var l_g_tp: bool = left_controller != null and (_ctrl_float(left_controller, &"grip") > 0.55 or _ctrl_pressed(left_controller, &"grip_click")) and not (_ctrl_float(left_controller, &"trigger") > 0.45)
+		var r_g_tp: bool = right_controller != null and (_ctrl_float(right_controller, &"grip") > 0.55 or _ctrl_pressed(right_controller, &"grip_click")) and not (_ctrl_float(right_controller, &"trigger") > 0.45)
+		if (l_g_tp or r_g_tp) and stick_len >= 0.78 and player and player.has_method("execute_shunkan_ido_flank"):
+			if player.execute_shunkan_ido_flank():
+				step_cooldown = 0.45
+				_pulse_haptic(left_controller, 180.0, 0.85, 0.14)
+				_pulse_haptic(right_controller, 180.0, 0.85, 0.14)
+				return
 
 		var cam_basis = camera.global_transform.basis if camera else xr_origin.global_transform.basis
 		var cam_fwd = -cam_basis.z
@@ -2314,6 +2382,15 @@ func _process_guard() -> void:
 	var r_grip: bool = _ctrl_float(right_controller, &"grip") > 0.45 or _ctrl_pressed(right_controller, &"grip_click")
 	var l_trig: bool = _ctrl_float(left_controller, &"trigger") > 0.45 or _ctrl_pressed(left_controller, &"trigger_click")
 	var r_trig: bool = _ctrl_float(right_controller, &"trigger") > 0.45 or _ctrl_pressed(right_controller, &"trigger_click")
+
+	# Onda Expansiva para cortar cadena enemiga (B/Y durante knockback o seguimiento aéreo rival)
+	var by_burst: bool = _ctrl_pressed(left_controller, &"by_button") or _ctrl_pressed(right_controller, &"by_button")
+	if by_burst and player.has_method("trigger_explosive_wave_chain_break"):
+		if player.trigger_explosive_wave_chain_break():
+			_pulse_haptic(left_controller, 200.0, 1.0, 0.18)
+			_pulse_haptic(right_controller, 200.0, 1.0, 0.18)
+			_set_player_blocking(false)
+			return
 
 	# Guardia Cruzada en 'X': Ambos puños cerrados (Grip + Gatillo en ambas manos) frente al pecho
 	if l_grip and l_trig and r_grip and r_trig and pose_chest_guard:

@@ -61,6 +61,11 @@ static var _cached: KiEconomyConfig = null
 ## Al alcanzar el 100% el piso asegurado queda en este ratio (no 1.0) para que el BP siga oscilando.
 @export_range(0.5, 1.0) var secured_floor_at_full: float = 0.90
 
+@export_group("Secuencias Encadenadas (Manga Chain Loop)")
+@export var chain_ki_cost_step: float = 0.35
+@export var post_super_followup_min_ki: float = 15.0
+@export var post_super_followup_duration: float = 3.0
+
 
 static func get_default() -> KiEconomyConfig:
 	if _cached == null:

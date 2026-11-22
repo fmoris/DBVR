@@ -1496,6 +1496,11 @@ func _spawn_ki_blast_projectile(hand_side: int, is_charged: bool) -> void:
 	var atk_bp_kb: float = float(player.get("current_np")) if (player and is_instance_valid(player) and player.get("current_np") != null) else 10000.0
 	var def_bp_kb: float = float(opp_kb.get("current_np")) if (opp_kb and is_instance_valid(opp_kb) and opp_kb.get("current_np") != null) else 10000.0
 	var atk_furia_kb: bool = bool(player and is_instance_valid(player) and player.get("is_in_furia"))
+	if opp_kb and is_instance_valid(opp_kb) and (bool(opp_kb.get("is_defenseless_crash")) or (player and is_instance_valid(player) and bool(player.get("is_in_followup_bullet_time")))):
+		var target_aim: Vector3 = opp_kb.global_position + Vector3(randf_range(-0.18, 0.18), 1.05 + randf_range(-0.12, 0.15), randf_range(-0.18, 0.18))
+		var aim_vec: Vector3 = target_aim - spawn_pos
+		if aim_vec.length_squared() > 0.01:
+			velocity_dir = aim_vec.normalized()
 	var kb_profile: Dictionary = CharacterInstance.compute_ki_blast_bp_profile(atk_bp_kb, def_bp_kb, is_charged, atk_furia_kb)
 	var is_veg_p: bool = player != null and is_instance_valid(player) and player.get("character_data") != null and "VEGETA" in String(player.character_data.character_name).to_upper()
 	var projectile_radius: float = 0.18 if is_charged else 0.05
