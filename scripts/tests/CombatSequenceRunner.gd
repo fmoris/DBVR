@@ -443,13 +443,15 @@ func _seq_chain_sequences() -> bool:
 	else:
 		player._execute_charged_v3_or_ki_break_finisher(opp, "charged_v3_back", 3.2, Vector3(0.0, 5.0, -18.0))
 
-	await _step_seconds(0.35 if is_visual else 0.02)
+	await _step_seconds(0.50 if is_visual else 0.40)
 	if not bool(player.get("is_in_followup_bullet_time")) or not is_equal_approx(Engine.time_scale, 0.28):
 		print("  -> Motivo: el golpe Melee de Vegeta no disparó Follow-Up Bullet-Time (0.28x).")
 		Engine.time_scale = 1.0
 		return false
 
 	# 1. Follow-Up Bullet-Time -> Meteor Chase con Bonus (UNRECOVERED)
+	if is_visual:
+		await _step_seconds(0.45)
 	player.start_flight_to_opponent()
 	if int(player.get("pending_followup_bonus_hits")) != 2 or not is_equal_approx(float(player.get("pending_followup_damage_mult")), 1.25):
 		print("  -> Motivo: Meteor Chase sin recuperar no otorgó bonus (+2 golpes, 1.25x).")
@@ -462,7 +464,7 @@ func _seq_chain_sequences() -> bool:
 
 	# Probar recuperación Air Brake -> Melee Normal
 	player._start_followup_airborne_sequence(opp, Vector3(0.0, 5.0, -18.0))
-	await _step_seconds(0.35 if is_visual else 0.02)
+	await _step_seconds(0.45 if is_visual else 0.40)
 	opp.complete_air_brake()
 	player.start_flight_to_opponent()
 	if int(player.get("pending_followup_bonus_hits")) != 0 or not is_equal_approx(float(player.get("pending_followup_damage_mult")), 1.0):

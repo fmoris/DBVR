@@ -4257,10 +4257,12 @@ func _execute_charged_v3_or_ki_break_finisher(opponent: Node3D, mode: String, sw
 		trigger_zenkai_match_finish(self, opponent, "Remate Zenkai (%s)" % mode_tag)
 	elif not is_match_over and current_ki >= 10.0:
 		opponent.set("airborne_recovery_state", "UNRECOVERED")
+		opponent_airborne_target = opponent
 		is_in_followup_bullet_time = true
 		followup_bullet_time_timer = 4.0
-		opponent_airborne_target = opponent
-		Engine.time_scale = 0.28
+		await get_tree().create_timer(0.32).timeout
+		if is_instance_valid(self) and is_in_followup_bullet_time and not is_match_over:
+			Engine.time_scale = 0.28
 		_log_combat_event("⚡ ¡BULLET-TIME DE SEGUIMIENTO! (4.0s) Elige: Melee / Súper Rápido / Ki Blasts", "success")
 		if gss and gss.has_signal("phase_changed"):
 			gss.emit_signal("phase_changed", "⚡ ¡ELIGE SIGUIENTE SECUENCIA! (MELEE / SÚPER / BLASTS)")
@@ -4376,12 +4378,14 @@ func _start_followup_airborne_sequence(opponent: Node3D, launch_vector: Vector3)
 	if bool(opponent.get("is_player")) and opponent.has_method("begin_air_brake"):
 		opponent.begin_air_brake(final_impulse.length(), 450.0, bp_atk, fu_drag)
 
-	# Activar Bullet-Time de Seguimiento de inmediato (0.28x) para decidir la siguiente secuencia mientras el defensor intenta recuperarse
+	# Dejar volar al defensor 0.32s a velocidad normal para que se vea el impacto, y luego activar Bullet-Time (0.28x)
 	opponent.set("airborne_recovery_state", "UNRECOVERED")
 	is_in_followup_bullet_time = true
 	followup_bullet_time_timer = 4.0
 	opponent_airborne_target = opponent
-	Engine.time_scale = 0.28
+	await get_tree().create_timer(0.32).timeout
+	if is_instance_valid(self) and is_in_followup_bullet_time and not is_match_over:
+		Engine.time_scale = 0.28
 
 	_log_combat_event("⚡ ¡BULLET-TIME DE SEGUIMIENTO! (4.0s) Elige: Melee / Súper Rápido / Ki Blasts", "success")
 	var gss = _get_gesture_tree()
