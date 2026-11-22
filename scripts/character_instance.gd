@@ -3856,10 +3856,14 @@ func _on_bullet_time_completed(recorded_hits: Array, _launch_vector: Vector3, op
 
 	if recorded_hits.is_empty():
 		_log_combat_event("↩️ Secuencia melee cancelada o sin impactos. Retornando a distancia táctica.", "info")
+		_separate_fighters_to_canonical_distance(opponent, 8.0)
+	elif not is_match_over and current_ki >= 10.0 and opponent and is_instance_valid(opponent):
+		_log_combat_event("⚔️ Intercambio melee concluido (%d acciones). ¡Iniciando Bullet-Time de seguimiento!" % recorded_hits.size(), "success")
+		var fu_vec: Vector3 = _launch_vector if _launch_vector.length_squared() > 0.1 else (opponent.global_position - global_position).normalized() * 18.0 + Vector3.UP * 5.0
+		_start_followup_airborne_sequence(opponent, fu_vec)
 	else:
 		_log_combat_event("⚔️ Intercambio melee concluido (%d acciones resueltas). Separación táctica." % recorded_hits.size(), "info")
-
-	_separate_fighters_to_canonical_distance(opponent, 8.0)
+		_separate_fighters_to_canonical_distance(opponent, 8.0)
 	var dd_m1: DramaticDirector = DramaticDirector.get_active(get_tree())
 	if dd_m1 and dd_m1.mini_scene_controller:
 		dd_m1.mini_scene_controller.notify_melee_completed()
@@ -4243,10 +4247,15 @@ func _execute_charged_v3_or_ki_break_finisher(opponent: Node3D, mode: String, sw
 	# Punto 1: Si el atacante estaba en Estado Zenkai, el remate conectado cierra el combate
 	if is_in_zenkai_state and not is_match_over:
 		trigger_zenkai_match_finish(self, opponent, "Remate Zenkai (%s)" % mode_tag)
-
-	# Punto 1: Si el atacante estaba en Estado Zenkai, el remate conectado cierra el combate
-	if is_in_zenkai_state and not is_match_over:
-		trigger_zenkai_match_finish(self, opponent, "Remate Zenkai (%s)" % mode_tag)
+	elif not is_match_over and current_ki >= 10.0:
+		opponent.set("airborne_recovery_state", "UNRECOVERED")
+		is_in_followup_bullet_time = true
+		followup_bullet_time_timer = 4.0
+		opponent_airborne_target = opponent
+		Engine.time_scale = 0.28
+		_log_combat_event("⚡ ¡BULLET-TIME DE SEGUIMIENTO! (4.0s) Elige: Melee / Súper Rápido / Ki Blasts", "success")
+		if gss and gss.has_signal("phase_changed"):
+			gss.emit_signal("phase_changed", "⚡ ¡ELIGE SIGUIENTE SECUENCIA! (MELEE / SÚPER / BLASTS)")
 
 
 ## Separa a los combatientes garantizando la distancia canónica de combate (8.0m)
