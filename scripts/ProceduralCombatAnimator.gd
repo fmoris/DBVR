@@ -99,6 +99,27 @@ const TARGET_BONES: Array[String] = [
 	"LeftUpLeg", "LeftLeg", "RightUpLeg", "RightLeg", "Hips"
 ]
 
+const BONE_ALIASES: Dictionary = {
+	"Hips": ["Hips", "WAIST"],
+	"Spine": ["Spine", "SPINE1"],
+	"Chest": ["Chest", "SPINE2"],
+	"UpperChest": ["UpperChest", "SPINE3"],
+	"Neck": ["Neck", "NECK"],
+	"Head": ["Head", "HEAD"],
+	"LeftShoulder": ["LeftShoulder", "CLAVICLE_L"],
+	"LeftArm": ["LeftArm", "SHOULDER_L"],
+	"LeftForeArm": ["LeftForeArm", "ELBOW_L"],
+	"LeftHand": ["LeftHand", "WRIST_L"],
+	"RightShoulder": ["RightShoulder", "CLAVICLE_R"],
+	"RightArm": ["RightArm", "SHOULDER_R"],
+	"RightForeArm": ["RightForeArm", "ELBOW_R"],
+	"RightHand": ["RightHand", "WRIST_R"],
+	"LeftUpLeg": ["LeftUpLeg", "THIGH_L"],
+	"LeftLeg": ["LeftLeg", "CLANK_L"],
+	"RightUpLeg": ["RightUpLeg", "THIGH_R"],
+	"RightLeg": ["RightLeg", "CLANK_R"],
+}
+
 
 func setup(p_skeleton: Skeleton3D, p_character: Node3D) -> void:
 	skeleton = p_skeleton
@@ -116,15 +137,7 @@ func setup(p_skeleton: Skeleton3D, p_character: Node3D) -> void:
 		return
 
 	for target in TARGET_BONES:
-		var idx: int = skeleton.find_bone(target)
-		if idx == -1:
-			idx = skeleton.find_bone(target.to_lower())
-		if idx == -1:
-			for b in range(skeleton.get_bone_count()):
-				var b_name: String = skeleton.get_bone_name(b)
-				if b_name.nocasecmp_to(target) == 0:
-					idx = b
-					break
+		var idx: int = _find_bone_with_aliases(target)
 		if idx != -1:
 			bone_indices[target] = idx
 			bone_rest_rotations[target] = skeleton.get_bone_rest(idx).basis.get_rotation_quaternion()
@@ -132,6 +145,22 @@ func setup(p_skeleton: Skeleton3D, p_character: Node3D) -> void:
 	print("[ProceduralCombatAnimator] Configurado para %s. Huesos mapeados: %d/%d" % [
 		character_instance.name, bone_indices.size(), TARGET_BONES.size()
 	])
+
+
+func _find_bone_with_aliases(target: String) -> int:
+	var candidates: Array = BONE_ALIASES.get(target, [target])
+	for cand in candidates:
+		var cand_str: String = String(cand)
+		var idx: int = skeleton.find_bone(cand_str)
+		if idx != -1:
+			return idx
+		idx = skeleton.find_bone(cand_str.to_lower())
+		if idx != -1:
+			return idx
+		for b in range(skeleton.get_bone_count()):
+			if skeleton.get_bone_name(b).nocasecmp_to(cand_str) == 0:
+				return b
+	return -1
 
 
 func trigger_hit_flinch(intensity: float, hit_dir: Vector3) -> void:

@@ -135,6 +135,9 @@ var right_hand_idx: int = -1
 # Calibración automática de rig agnóstica de personaje (Goku/Vegeta) y cachés O(1)
 var _rig_calibrated: bool = false
 var _current_body_model_path: String = ""
+var _mouth_pose_meshes: Array[Array] = [[], [], []]
+var _active_mouth_level: int = -1
+var _mouth_voice_timer: float = 0.0
 var _skel_char_basis: Basis = Basis.IDENTITY
 var _left_hand_align_basis: Basis = Basis.IDENTITY
 var _right_hand_align_basis: Basis = Basis.IDENTITY
@@ -291,17 +294,13 @@ func setup_character() -> void:
 			skeleton = _find_skeleton(body_mesh_instance)
 			if skeleton:
 				skeleton.name = "Skeleton3D" # Asegura resolución exacta de tracks para AnimationPlayer y Ragdoll
-				neck_bone_idx = skeleton.find_bone("Neck")
-				if neck_bone_idx == -1:
-					neck_bone_idx = skeleton.find_bone("neck")
-
-				left_arm_idx = skeleton.find_bone("LeftArm")
-				left_forearm_idx = skeleton.find_bone("LeftForeArm")
-				left_hand_idx = skeleton.find_bone("LeftHand")
-
-				right_arm_idx = skeleton.find_bone("RightArm")
-				right_forearm_idx = skeleton.find_bone("RightForeArm")
-				right_hand_idx = skeleton.find_bone("RightHand")
+				neck_bone_idx = _find_bone_any(["Neck", "neck", "NECK"])
+				left_arm_idx = _find_bone_any(["LeftArm", "SHOULDER_L"])
+				left_forearm_idx = _find_bone_any(["LeftForeArm", "ELBOW_L"])
+				left_hand_idx = _find_bone_any(["LeftHand", "WRIST_L"])
+				right_arm_idx = _find_bone_any(["RightArm", "SHOULDER_R"])
+				right_forearm_idx = _find_bone_any(["RightForeArm", "ELBOW_R"])
+				right_hand_idx = _find_bone_any(["RightHand", "WRIST_R"])
 
 				_calibrate_skeleton_rig()
 
@@ -421,15 +420,13 @@ func _swap_body_mesh_for_path(model_path: String) -> void:
 	skeleton = _find_skeleton(body_mesh_instance)
 	if skeleton:
 		skeleton.name = "Skeleton3D"
-		neck_bone_idx = skeleton.find_bone("Neck")
-		if neck_bone_idx == -1:
-			neck_bone_idx = skeleton.find_bone("neck")
-		left_arm_idx = skeleton.find_bone("LeftArm")
-		left_forearm_idx = skeleton.find_bone("LeftForeArm")
-		left_hand_idx = skeleton.find_bone("LeftHand")
-		right_arm_idx = skeleton.find_bone("RightArm")
-		right_forearm_idx = skeleton.find_bone("RightForeArm")
-		right_hand_idx = skeleton.find_bone("RightHand")
+		neck_bone_idx = _find_bone_any(["Neck", "neck", "NECK"])
+		left_arm_idx = _find_bone_any(["LeftArm", "SHOULDER_L"])
+		left_forearm_idx = _find_bone_any(["LeftForeArm", "ELBOW_L"])
+		left_hand_idx = _find_bone_any(["LeftHand", "WRIST_L"])
+		right_arm_idx = _find_bone_any(["RightArm", "SHOULDER_R"])
+		right_forearm_idx = _find_bone_any(["RightForeArm", "ELBOW_R"])
+		right_hand_idx = _find_bone_any(["RightHand", "WRIST_R"])
 
 		_calibrate_skeleton_rig()
 
@@ -463,6 +460,10 @@ func _swap_body_mesh_for_path(model_path: String) -> void:
 
 
 func _apply_model_variant_visibility(model_path: String) -> void:
+	_mouth_pose_meshes[0].clear()
+	_mouth_pose_meshes[1].clear()
+	_mouth_pose_meshes[2].clear()
+	_active_mouth_level = -1
 	if not body_mesh_instance or not is_instance_valid(body_mesh_instance):
 		return
 	var model_file: String = model_path.get_file().to_lower()
@@ -470,6 +471,7 @@ func _apply_model_variant_visibility(model_path: String) -> void:
 		return
 	var is_transformed: bool = current_transformation != null
 	_apply_zenkai_visibility_recursive(body_mesh_instance, model_file, is_transformed)
+	set_mouth_expression(0)
 
 
 func _apply_zenkai_visibility_recursive(node: Node, model_file: String, is_transformed: bool) -> void:
@@ -477,24 +479,79 @@ func _apply_zenkai_visibility_recursive(node: Node, model_file: String, is_trans
 		var mi: MeshInstance3D = node as MeshInstance3D
 		var n_lower: String = mi.name.to_lower()
 		var should_hide: bool = ("glasses" in n_lower) or ("potara" in n_lower) or ("senz" in n_lower) or ("nyoibo" in n_lower)
-		# Conservar G/H/I_mouth para animación facial; ocultar poses secundarias en reposo
-		if ("h_mouth" in n_lower) or ("i_mouth" in n_lower):
-			should_hide = true
+		var form_hidden: bool = false
 		if not should_hide:
 			if model_file == "21_goku1_body.glb":
 				var is_base_part: bool = ("nm_" in n_lower)
 				var is_ssj_part: bool = ("ss_" in n_lower) or (("ct2_goku" in n_lower) and not is_base_part)
 				if is_transformed and is_base_part:
-					should_hide = true
+					form_hidden = true
 				elif (not is_transformed) and is_ssj_part:
-					should_hide = true
+					form_hidden = true
 			elif model_file == "42_goku_3_body.glb":
 				if n_lower.begins_with("b_"):
-					should_hide = true
-		mi.visible = not should_hide
+					form_hidden = true
+
+		if not should_hide and not form_hidden:
+			if "g_mouth" in n_lower:
+				_mouth_pose_meshes[0].append(mi)
+			elif "h_mouth" in n_lower:
+				_mouth_pose_meshes[1].append(mi)
+				should_hide = true
+			elif "i_mouth" in n_lower:
+				_mouth_pose_meshes[2].append(mi)
+				should_hide = true
+
+		mi.visible = not (should_hide or form_hidden)
 
 	for child: Node in node.get_children():
 		_apply_zenkai_visibility_recursive(child, model_file, is_transformed)
+
+
+func set_mouth_expression(level: int) -> void:
+	var clamped: int = clampi(level, 0, 2)
+	if clamped == _active_mouth_level:
+		return
+	# Si el nivel pedido no tiene mallas en este modelo, caer a nivel 0
+	if _mouth_pose_meshes[clamped].is_empty():
+		clamped = 0
+		if clamped == _active_mouth_level:
+			return
+	_active_mouth_level = clamped
+	for lvl: int in range(3):
+		var show_lvl: bool = (lvl == clamped)
+		var arr: Array = _mouth_pose_meshes[lvl]
+		for mi_v: Variant in arr:
+			var mi: MeshInstance3D = mi_v as MeshInstance3D
+			if mi and is_instance_valid(mi):
+				mi.visible = show_lvl
+
+
+func _update_mouth_expression(delta: float) -> void:
+	if _mouth_voice_timer > 0.0:
+		_mouth_voice_timer = maxf(0.0, _mouth_voice_timer - delta)
+	if _mouth_pose_meshes[0].is_empty() and _mouth_pose_meshes[1].is_empty() and _mouth_pose_meshes[2].is_empty():
+		return
+	var target_level: int = 0
+	if procedural_animator and (procedural_animator.transform_roar_timer > 0.0 or procedural_animator.super_fire_hold_timer > 0.0 or procedural_animator.hit_flinch_timer > 0.1):
+		target_level = 2
+	elif _mouth_voice_timer > 0.0 or is_charging_ki or is_charging_super:
+		target_level = 1
+	set_mouth_expression(target_level)
+
+
+func _find_bone_any(candidates: Array) -> int:
+	if not skeleton:
+		return -1
+	for cand in candidates:
+		var cand_str: String = String(cand)
+		var idx: int = skeleton.find_bone(cand_str)
+		if idx != -1:
+			return idx
+		idx = skeleton.find_bone(cand_str.to_lower())
+		if idx != -1:
+			return idx
+	return -1
 
 
 func swap_character_data(new_data: CharacterData) -> void:
@@ -930,6 +987,7 @@ func _process(delta: float) -> void:
 				# Altura de los ojos del jugador estimada a 1.45m o posición del visor
 				var eye_target = opp_pos + Vector3(0.0, 1.45, 0.0)
 				procedural_animator.update(delta, eye_target, is_charging_ki, is_blocking, is_flying_to_opponent)
+			_update_mouth_expression(delta)
 
 
 	# Regeneración pasiva de Ki en Fase Libre y actualización visual del aura
@@ -2771,10 +2829,8 @@ func _calibrate_skeleton_rig() -> void:
 	if not skeleton:
 		return
 
-	var spine_idx: int = skeleton.find_bone("Spine")
-	if spine_idx == -1:
-		spine_idx = skeleton.find_bone("Hips")
-	var neck_idx: int = neck_bone_idx if neck_bone_idx != -1 else skeleton.find_bone("Head")
+	var spine_idx: int = _find_bone_any(["Spine", "SPINE1", "Hips", "WAIST"])
+	var neck_idx: int = neck_bone_idx if neck_bone_idx != -1 else _find_bone_any(["Head", "HEAD"])
 
 	if spine_idx != -1 and neck_idx != -1 and left_arm_idx != -1 and right_arm_idx != -1:
 		var spine_p: Vector3 = skeleton.get_bone_global_rest(spine_idx).origin
@@ -2820,12 +2876,10 @@ func _compute_hand_align_basis(prefix: String, hand_idx: int) -> Basis:
 	var hand_rot_inv: Basis = hand_grest.basis.orthonormalized().inverse()
 	var skel_up: Vector3 = _skel_char_basis.y
 
-	var idx1: int = skeleton.find_bone(prefix + "Index1")
-	if idx1 == -1: idx1 = skeleton.find_bone(prefix + "IndexProximal")
-	var mid1: int = skeleton.find_bone(prefix + "Middle1")
-	if mid1 == -1: mid1 = skeleton.find_bone(prefix + "MiddleProximal")
-	var pnk1: int = skeleton.find_bone(prefix + "Pinky1")
-	if pnk1 == -1: pnk1 = skeleton.find_bone(prefix + "PinkyProximal")
+	var side_suffix: String = "_L" if is_left else "_R"
+	var idx1: int = _find_bone_any([prefix + "Index1", prefix + "IndexProximal", "F_FORE1" + side_suffix])
+	var mid1: int = _find_bone_any([prefix + "Middle1", prefix + "MiddleProximal", "F_MIDDLE1" + side_suffix])
+	var pnk1: int = _find_bone_any([prefix + "Pinky1", prefix + "PinkyProximal", "F_LITTLE1" + side_suffix])
 
 	if idx1 == -1 or mid1 == -1 or pnk1 == -1:
 		if is_left:
@@ -2849,9 +2903,10 @@ func _compute_hand_align_basis(prefix: String, hand_idx: int) -> Basis:
 func _build_finger_curl_cache(prefix: String) -> void:
 	if not skeleton:
 		return
-	var hand_idx: int = skeleton.find_bone(prefix + "Hand")
-	var idx1: int = skeleton.find_bone(prefix + "Index1")
-	var pnk1: int = skeleton.find_bone(prefix + "Pinky1")
+	var side_suffix: String = "_L" if prefix == "Left" else "_R"
+	var hand_idx: int = _find_bone_any([prefix + "Hand", "WRIST" + side_suffix])
+	var idx1: int = _find_bone_any([prefix + "Index1", prefix + "IndexProximal", "F_FORE1" + side_suffix])
+	var pnk1: int = _find_bone_any([prefix + "Pinky1", prefix + "PinkyProximal", "F_LITTLE1" + side_suffix])
 	var skel_up: Vector3 = _skel_char_basis.y
 	var n_palm_skel: Vector3 = -skel_up
 	if hand_idx != -1 and idx1 != -1 and pnk1 != -1:
@@ -2865,13 +2920,18 @@ func _build_finger_curl_cache(prefix: String) -> void:
 
 	var finger_data: Dictionary = {}
 	var finger_names: Array[String] = ["Index", "Middle", "Ring", "Pinky", "Thumb"]
+	var zenkai_finger_map: Dictionary = {
+		"Index": "F_FORE",
+		"Middle": "F_MIDDLE",
+		"Ring": "F_MEDICINAL",
+		"Pinky": "F_LITTLE",
+		"Thumb": "F_THUMB",
+	}
 	for fname in finger_names:
-		var b1: int = skeleton.find_bone(prefix + fname + "1")
-		var b2: int = skeleton.find_bone(prefix + fname + "2")
-		var b3: int = skeleton.find_bone(prefix + fname + "3")
-		if b1 == -1: b1 = skeleton.find_bone(prefix + fname + "Proximal")
-		if b2 == -1: b2 = skeleton.find_bone(prefix + fname + "Intermediate")
-		if b3 == -1: b3 = skeleton.find_bone(prefix + fname + "Distal")
+		var z_prefix: String = zenkai_finger_map[fname]
+		var b1: int = _find_bone_any([prefix + fname + "1", prefix + fname + "Proximal", z_prefix + "1" + side_suffix])
+		var b2: int = _find_bone_any([prefix + fname + "2", prefix + fname + "Intermediate", z_prefix + "2" + side_suffix])
+		var b3: int = _find_bone_any([prefix + fname + "3", prefix + fname + "Distal", z_prefix + "3" + side_suffix])
 
 		var curl_local: Vector3 = Vector3(0.0, 0.0, -1.0 if prefix == "Left" else 1.0)
 		var opp_local: Vector3 = Vector3(0.0, 1.0 if prefix == "Left" else -1.0, 0.0)
@@ -4742,3 +4802,5 @@ func play_character_action_audio(action_or_suffix: String, is_voice: bool = true
 		return
 	target_player.pitch_scale = randf_range(0.95, 1.05)
 	AudioActionManager.play_action(act_id, target_player)
+	if is_voice:
+		_mouth_voice_timer = 0.45
