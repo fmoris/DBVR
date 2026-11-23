@@ -2904,10 +2904,10 @@ func _compute_hand_align_basis(prefix: String, hand_idx: int) -> Basis:
 		palm_in_skel = -palm_in_skel
 
 	var f_loc: Vector3 = (hand_rot_inv * finger_dir_skel).normalized()
-	var p_loc: Vector3 = (hand_rot_inv * palm_in_skel).normalized()
-	var x_loc: Vector3 = p_loc if is_left else -p_loc
+	var y_loc: Vector3 = (hand_rot_inv * thumb_skel).normalized()
 	var z_loc: Vector3 = -f_loc
-	var y_loc: Vector3 = z_loc.cross(x_loc).normalized()
+	var x_loc: Vector3 = y_loc.cross(z_loc).normalized()
+	y_loc = z_loc.cross(x_loc).normalized()
 	return Basis(x_loc, y_loc, z_loc).orthonormalized().inverse()
 
 
@@ -3083,7 +3083,12 @@ func _solve_arm_ik_skel(
 
 	# Pole vector continuo en espacio de personaje -> Skeleton3D (codos afuera/abajo/atrás, sin saltos)
 	var v_char: Vector3 = _skel_char_basis.inverse() * v_dir
+	var other_s_idx: int = right_arm_idx if is_left else left_arm_idx
 	var side_sign: float = 1.0 if is_left else -1.0
+	if other_s_idx != -1:
+		var arm_span_char_x: float = (_skel_char_basis.inverse() * (s_rest - skeleton.get_bone_global_rest(other_s_idx).origin)).x
+		if absf(arm_span_char_x) > 0.01:
+			side_sign = 1.0 if arm_span_char_x > 0.0 else -1.0
 	var pole_char: Vector3 = Vector3(
 		side_sign * 0.65,
 		-0.60 - clampf(v_char.y, -0.4, 0.6) * 0.15,
