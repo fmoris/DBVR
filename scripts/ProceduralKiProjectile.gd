@@ -5,8 +5,6 @@ extends Node3D
 ## Optimizado para Meta Quest 3 en Godot 4.3+/4.8.
 
 const ShockwaveShader = preload("res://shaders/shockwave.gdshader")
-static var _shared_spark_mesh: SphereMesh = null
-static var _shared_spark_mat: StandardMaterial3D = null
 static var _cached_hybrid_ctrl: Node = null
 static var _cached_gss: Node = null
 static var _cached_player_char: Node = null
@@ -456,26 +454,8 @@ func _check_projectile_clash() -> void:
 
 ## Detonación de choque de energías en el aire
 func _trigger_air_clash_explosion(pos: Vector3) -> void:
-	var vfx_parent: Node = _get_vfx_parent()
-	if vfx_parent:
-		var flash = MeshInstance3D.new()
-		var sphere_mesh = SphereMesh.new()
-		sphere_mesh.radius = p_radius * 3.0
-		sphere_mesh.height = p_radius * 6.0
-		flash.mesh = sphere_mesh
-
-		var mat = StandardMaterial3D.new()
-		mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
-		mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
-		mat.albedo_color = Color(1.0, 0.95, 0.7, 1.0)
-		flash.material_override = mat
-		vfx_parent.add_child(flash)
-		flash.global_position = pos
-
-		var tween = get_tree().create_tween().set_parallel(true)
-		tween.tween_property(flash, "scale", Vector3.ONE * 5.0, 0.25).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-		tween.tween_property(mat, "albedo_color", Color(1.0, 0.8, 0.2, 0.0), 0.25)
-		tween.chain().tween_callback(flash.queue_free)
+	ZenkaiVFXManager.spawn_zenkai_impact_flash(get_tree(), pos, p_color, clampf(p_radius * 5.0, 1.0, 2.5))
+	ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), pos, 2, p_color, false)
 
 	var gss = _get_gss()
 	if gss and gss.has_signal("gesture_logged"):
@@ -751,42 +731,7 @@ func _spawn_visual_explosion(pos: Vector3) -> void:
 			has_lightning = true
 
 	ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), pos, exp_tier, p_color, has_lightning)
-
-	# --- 3. EXPULSIÓN GPU/CPU LIGERA DE CHISPAS KI (Zero RigidBody3D en Meta Quest) ---
-	if _shared_spark_mesh == null:
-		_shared_spark_mesh = SphereMesh.new()
-		_shared_spark_mesh.radius = 0.04
-		_shared_spark_mesh.height = 0.08
-		_shared_spark_mesh.radial_segments = 8
-		_shared_spark_mesh.rings = 4
-	if _shared_spark_mat == null:
-		_shared_spark_mat = StandardMaterial3D.new()
-		_shared_spark_mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
-		_shared_spark_mat.vertex_color_use_as_albedo = true
-		_shared_spark_mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
-	_shared_spark_mesh.material = _shared_spark_mat
-
-	var sparks := CPUParticles3D.new()
-	sparks.mesh = _shared_spark_mesh
-	sparks.amount = 14 if tier >= 3 else (9 if tier == 2 else 6)
-	sparks.one_shot = true
-	sparks.explosiveness = 1.0
-	sparks.lifetime = 0.55
-	sparks.direction = Vector3.UP
-	sparks.spread = 180.0
-	sparks.initial_velocity_min = 3.0 * (1.5 if tier >= 3 else 1.0)
-	sparks.initial_velocity_max = 6.5 * (1.5 if tier >= 3 else 1.0)
-	sparks.gravity = Vector3(0.0, -4.5, 0.0)
-	sparks.damping_min = 1.5
-	sparks.damping_max = 2.5
-	var s_scale: float = clampf(p_radius * 6.0, 0.4, 2.5)
-	sparks.scale_amount_min = s_scale * 0.6
-	sparks.scale_amount_max = s_scale * 1.2
-	sparks.color = Color(p_color.r, p_color.g, p_color.b, 0.95)
-	vfx_parent.add_child(sparks)
-	sparks.global_position = pos
-	sparks.emitting = true
-	sparks.finished.connect(sparks.queue_free)
+	ZenkaiVFXManager.spawn_zenkai_impact_flash(get_tree(), pos, p_color, clampf(p_radius * 5.5, 0.9, 2.8))
 
 	if AudioActionManager.has_action_sounds("common.ki_blast_impact"):
 		var imp_sfx := AudioStreamPlayer3D.new()
@@ -811,32 +756,9 @@ func _spawn_visual_explosion(pos: Vector3) -> void:
 
 
 func _spawn_plasma_crater(pos: Vector3, radius: float, col: Color) -> void:
-	var vfx_parent: Node = _get_vfx_parent()
-	if not vfx_parent or not is_inside_tree() or not get_tree():
+	if not is_inside_tree() or not get_tree():
 		return
-	var disc := MeshInstance3D.new()
-	disc.name = "PlasmaCraterDisc"
-	var cyl := CylinderMesh.new()
-	cyl.top_radius = radius
-	cyl.bottom_radius = radius * 1.15
-	cyl.height = 0.02
-	cyl.radial_segments = 16
-	disc.mesh = cyl
-
-	var mat := StandardMaterial3D.new()
-	mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
-	mat.blend_mode = StandardMaterial3D.BLEND_MODE_ADD
-	mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color(col.r, col.g, col.b, 0.72)
-	disc.material_override = mat
-
-	vfx_parent.add_child(disc)
-	disc.global_position = pos
-
-	var fade_tw := get_tree().create_tween()
-	if fade_tw:
-		fade_tw.tween_property(mat, "albedo_color", Color(col.r, col.g, col.b, 0.0), 4.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-		fade_tw.tween_callback(disc.queue_free)
+	ZenkaiVFXManager.spawn_zenkai_crater_decal(get_tree(), pos, radius, col)
 
 
 func _spawn_deflection_vfx(pos: Vector3) -> void:

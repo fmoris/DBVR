@@ -49,7 +49,7 @@ var miss_target_pos: Vector3 = Vector3.ZERO
 
 # Nodos visuales del haz
 var beam_core_mesh: MeshInstance3D = null
-var beam_head_mesh: MeshInstance3D = null
+var beam_head_mesh: Node3D = null
 var beam_light: OmniLight3D = null
 var reticle_mesh: MeshInstance3D = null
 var alert_label: Label3D = null
@@ -73,7 +73,6 @@ var prev_r_hand_pos: Vector3 = Vector3.ZERO
 var l_hand_vel: Vector3 = Vector3.ZERO
 var r_hand_vel: Vector3 = Vector3.ZERO
 
-const KiCoronaShader = preload("res://shaders/ki_corona.gdshader")
 const ZenkaiAuraShader = preload("res://shaders/zenkai_aura.gdshader")
 const KiBeamShader = preload("res://shaders/ki_beam.gdshader")
 const ShockwaveShader = preload("res://shaders/shockwave.gdshader")
@@ -1160,14 +1159,20 @@ func _build_visual_beam() -> void:
 
 	var mat_beam := ShaderMaterial.new()
 	mat_beam.shader = KiBeamShader
-	if ZenkaiVFXManager.get_band_tex():
+	var beam_core_tex: Texture2D = ZenkaiVFXManager.get_tex("beam_core")
+	var aura_streaks_tex: Texture2D = ZenkaiVFXManager.get_tex("aura_streaks")
+	if beam_core_tex:
+		mat_beam.set_shader_parameter("streak_tex", beam_core_tex)
+	elif ZenkaiVFXManager.get_band_tex():
 		mat_beam.set_shader_parameter("streak_tex", ZenkaiVFXManager.get_band_tex())
-	if ZenkaiVFXManager.get_flame_tex():
+	if aura_streaks_tex:
+		mat_beam.set_shader_parameter("flame_tex", aura_streaks_tex)
+	elif ZenkaiVFXManager.get_flame_tex():
 		mat_beam.set_shader_parameter("flame_tex", ZenkaiVFXManager.get_flame_tex())
 	mat_beam.set_shader_parameter("beam_color", energy_color)
 	mat_beam.set_shader_parameter("core_color", Color(1.0, 1.0, 1.0, 1.0))
 	mat_beam.set_shader_parameter("flow_speed", 16.0)
-	mat_beam.set_shader_parameter("core_intensity", 4.2)
+	mat_beam.set_shader_parameter("core_intensity", 4.6)
 	beam_core_mesh.material_override = mat_beam
 	beam_core_mesh.visible = not is_orb_super
 	add_child(beam_core_mesh)
@@ -1176,73 +1181,35 @@ func _build_visual_beam() -> void:
 	outer_sheath.name = "ZenkaiBeamOuterSheath"
 	var cyl_sheath := CylinderMesh.new()
 	cyl_sheath.radial_segments = 16
-	cyl_sheath.top_radius = radius * 1.45
-	cyl_sheath.bottom_radius = radius * 1.45
+	cyl_sheath.top_radius = radius * 1.48
+	cyl_sheath.bottom_radius = radius * 1.48
 	cyl_sheath.cap_top = false
 	cyl_sheath.cap_bottom = false
 	outer_sheath.mesh = cyl_sheath
 	var mat_sheath := ShaderMaterial.new()
 	mat_sheath.shader = ZenkaiAuraShader
-	if ZenkaiVFXManager.get_flame_tex():
-		mat_sheath.set_shader_parameter("flame_tex", ZenkaiVFXManager.get_flame_tex())
+	if aura_streaks_tex:
+		mat_sheath.set_shader_parameter("flame_tex", aura_streaks_tex)
 	if ZenkaiVFXManager.get_band_tex():
 		mat_sheath.set_shader_parameter("band_tex", ZenkaiVFXManager.get_band_tex())
 	mat_sheath.set_shader_parameter("base_color", Color(energy_color.r, energy_color.g, energy_color.b, 0.72))
-	mat_sheath.set_shader_parameter("speed", 11.0)
+	mat_sheath.set_shader_parameter("speed", 11.5)
 	mat_sheath.set_shader_parameter("has_bio_lightning", 1.0 if tier >= 4 else 0.0)
 	outer_sheath.material_override = mat_sheath
 	beam_core_mesh.add_child(outer_sheath)
 
-	# 1.1 Núcleo interior blanco incandescente (White-Hot Inner Core)
-	var mat_inner = StandardMaterial3D.new()
-	mat_inner.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
-	mat_inner.albedo_color = Color(1.0, 1.0, 1.0, 1.0)
-
-	var inner_core = MeshInstance3D.new()
-	inner_core.name = "InnerWhiteCore"
-	var cyl_inner = CylinderMesh.new()
-	cyl_inner.radial_segments = 12
-	cyl_inner.top_radius = radius * 0.60
-	cyl_inner.bottom_radius = radius * 0.60
-	inner_core.mesh = cyl_inner
-	inner_core.material_override = mat_inner
-	beam_core_mesh.add_child(inner_core)
-
-	# 2. Cabeza del haz o Esfera Masiva (Big Bang / Genkidama)
-	beam_head_mesh = MeshInstance3D.new()
+	var head_r: float = radius if is_orb_super else radius * 1.35
+	beam_head_mesh = ZenkaiVFXManager.build_zenkai_orb_visual(self, head_r, energy_color, true, true)
 	beam_head_mesh.name = "BeamHead"
-	var sph = SphereMesh.new()
-	var head_r: float = radius if is_orb_super else radius * 1.3
-	sph.radius = head_r
-	sph.height = head_r * 2.0
-	sph.radial_segments = 24
-	sph.rings = 12
-	beam_head_mesh.mesh = sph
-	if is_orb_super:
-		var mat_orb := ShaderMaterial.new()
-		mat_orb.shader = ZenkaiAuraShader
-		if ZenkaiVFXManager.get_flame_tex():
-			mat_orb.set_shader_parameter("flame_tex", ZenkaiVFXManager.get_flame_tex())
-		if ZenkaiVFXManager.get_band_tex():
-			mat_orb.set_shader_parameter("band_tex", ZenkaiVFXManager.get_band_tex())
-		mat_orb.set_shader_parameter("base_color", Color(energy_color.r, energy_color.g, energy_color.b, 0.94))
-		mat_orb.set_shader_parameter("speed", 6.5)
-		mat_orb.set_shader_parameter("vertex_displacement", 0.09)
-		mat_orb.set_shader_parameter("has_bio_lightning", 1.0)
-		beam_head_mesh.material_override = mat_orb
-	else:
-		beam_head_mesh.material_override = mat_beam
-	add_child(beam_head_mesh)
-
-	var inner_head = MeshInstance3D.new()
-	inner_head.name = "InnerHeadCore"
-	var sph_inner = SphereMesh.new()
-	var inner_r: float = head_r * (0.62 if is_orb_super else 0.62)
-	sph_inner.radius = inner_r
-	sph_inner.height = inner_r * 2.0
-	inner_head.mesh = sph_inner
-	inner_head.material_override = mat_inner
-	beam_head_mesh.add_child(inner_head)
+	if not is_orb_super:
+		var ring_mi := MeshInstance3D.new()
+		ring_mi.name = "ZenkaiBeamHeadRing"
+		var rquad := QuadMesh.new()
+		rquad.size = Vector2(2.6, 2.6)
+		ring_mi.mesh = rquad
+		ring_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		ring_mi.material_override = ZenkaiVFXManager._make_zenkai_sprite_mat("beam_ring_turb", Color(energy_color.r, energy_color.g, energy_color.b, 0.90))
+		beam_head_mesh.add_child(ring_mi)
 
 	# 3. Luz dinámica
 	beam_light = OmniLight3D.new()
@@ -1311,26 +1278,7 @@ func _build_audio() -> void:
 func _spawn_spark_at(pos: Vector3, col: Color) -> void:
 	if not is_inside_tree() or not get_tree():
 		return
-	var target_parent: Node = get_tree().current_scene if get_tree().current_scene else get_parent()
-	if not target_parent:
-		return
-	var sw = MeshInstance3D.new()
-	var quad = QuadMesh.new()
-	quad.size = Vector2(3.5, 3.5)
-	sw.mesh = quad
-	sw.rotation.x = -PI * 0.5
-
-	var mat = ShaderMaterial.new()
-	mat.shader = ShockwaveShader
-	mat.set_shader_parameter("ring_color", col)
-	sw.material_override = mat
-	target_parent.add_child(sw)
-	sw.global_position = pos
-
-	var tw = sw.create_tween()
-	tw.tween_property(sw, "scale", Vector3.ONE * 3.5, 0.40).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tw.parallel().tween_property(mat, "shader_parameter/ring_color:a", 0.0, 0.40)
-	tw.tween_callback(sw.queue_free)
+	ZenkaiVFXManager.spawn_zenkai_impact_flash(get_tree(), pos, col, 1.35)
 
 
 func _spawn_super_impact_explosion_vfx(pos: Vector3, col: Color, _bp_ratio: float) -> void:
@@ -1350,32 +1298,7 @@ func _spawn_super_impact_explosion_vfx(pos: Vector3, col: Color, _bp_ratio: floa
 func _spawn_plasma_crater(pos: Vector3, radius: float, col: Color) -> void:
 	if not is_inside_tree() or not get_tree():
 		return
-	var target_parent: Node = get_tree().current_scene if get_tree().current_scene else get_parent()
-	if not target_parent:
-		return
-	var disc := MeshInstance3D.new()
-	disc.name = "BeamPlasmaCrater"
-	var cyl := CylinderMesh.new()
-	cyl.top_radius = radius
-	cyl.bottom_radius = radius * 1.15
-	cyl.height = 0.02
-	cyl.radial_segments = 16
-	disc.mesh = cyl
-
-	var mat := StandardMaterial3D.new()
-	mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
-	mat.blend_mode = StandardMaterial3D.BLEND_MODE_ADD
-	mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color(col.r, col.g, col.b, 0.78)
-	disc.material_override = mat
-
-	target_parent.add_child(disc)
-	disc.global_position = pos
-
-	var fade_tw := get_tree().create_tween()
-	if fade_tw:
-		fade_tw.tween_property(mat, "albedo_color", Color(col.r, col.g, col.b, 0.0), 4.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-		fade_tw.tween_callback(disc.queue_free)
+	ZenkaiVFXManager.spawn_zenkai_crater_decal(get_tree(), pos, radius, col)
 
 
 func _get_active_camera() -> Camera3D:

@@ -13,8 +13,6 @@ extends Node
 ## - Despertar de transformaciones dinámicas (Kaioken / Super Saiyan) en combate
 
 const ProceduralKiProjectileScript = preload("res://scripts/ProceduralKiProjectile.gd")
-const KiSphereShader = preload("res://ki_sphere.gdshader")
-const KiCoronaShader = preload("res://shaders/ki_corona.gdshader")
 
 enum AIState {
 	IDLE_SPACING,
@@ -68,7 +66,7 @@ var blast_interval_timer: float = 0.0
 # Carga de Super Ataque
 const KAMEHAMEHA_CHARGE_DURATION: float = 1.25
 var kamehameha_charge_timer: float = 0.0
-var kamehameha_vfx_sphere: MeshInstance3D = null
+var kamehameha_vfx_sphere: Node3D = null
 var _queued_ai_super: Dictionary = {}
 
 # Audio 3D del rival
@@ -313,27 +311,14 @@ func _process_state_kamehameha_charge(delta: float) -> void:
 		sphere_offset = Vector3(0.0, 2.35, 0.0)
 
 	if not kamehameha_vfx_sphere or not is_instance_valid(kamehameha_vfx_sphere):
-		kamehameha_vfx_sphere = MeshInstance3D.new()
-		var sphere = SphereMesh.new()
-		sphere.radius = 0.12
-		sphere.height = 0.24
-		sphere.radial_segments = 16
-		sphere.rings = 8
-		kamehameha_vfx_sphere.mesh = sphere
-
-		var mat = ShaderMaterial.new()
-		mat.shader = KiSphereShader
-		mat.set_shader_parameter("base_color", Color(s_color.r, s_color.g, s_color.b, 0.95))
-		mat.set_shader_parameter("core_glow", 5.0)
-		kamehameha_vfx_sphere.material_override = mat
-
-		host.add_child(kamehameha_vfx_sphere)
+		kamehameha_vfx_sphere = ZenkaiVFXManager.build_zenkai_orb_visual(host, 0.14, Color(s_color.r, s_color.g, s_color.b, 0.95), true, true)
+		kamehameha_vfx_sphere.name = "AISuperChargeOrb"
 		kamehameha_vfx_sphere.position = sphere_offset
 		_play_ai_sfx("kamehameha_charge")
 	else:
 		var progress = clampf(kamehameha_charge_timer / KAMEHAMEHA_CHARGE_DURATION, 0.1, 1.0)
 		kamehameha_vfx_sphere.position = sphere_offset
-		kamehameha_vfx_sphere.scale = Vector3.ONE * (0.8 + progress * 1.5)
+		kamehameha_vfx_sphere.scale = Vector3.ONE * (0.14 + progress * 0.24)
 
 	if kamehameha_charge_timer >= KAMEHAMEHA_CHARGE_DURATION:
 		host.is_charging_ki = false
@@ -741,36 +726,7 @@ func _spawn_ki_blast(target_pos: Vector3, is_charged: bool = false, is_final: bo
 
 	var projectile = Node3D.new()
 	projectile.name = "EnemyKiProjectile_" + str(Time.get_ticks_msec())
-
-	var mesh_core = MeshInstance3D.new()
-	var sphere_core = SphereMesh.new()
-	sphere_core.radius = projectile_radius
-	sphere_core.height = projectile_radius * 2.0
-	sphere_core.radial_segments = 16
-	sphere_core.rings = 8
-	mesh_core.mesh = sphere_core
-
-	var mat_core = ShaderMaterial.new()
-	mat_core.shader = KiSphereShader
-	mat_core.set_shader_parameter("base_color", energy_color)
-	mat_core.set_shader_parameter("core_glow", 4.5)
-	mesh_core.material_override = mat_core
-	projectile.add_child(mesh_core)
-
-	var mesh_corona = MeshInstance3D.new()
-	var sphere_corona = SphereMesh.new()
-	sphere_corona.radius = projectile_radius * 1.15
-	sphere_corona.height = projectile_radius * 2.30
-	sphere_corona.radial_segments = 16
-	sphere_corona.rings = 8
-	mesh_corona.mesh = sphere_corona
-
-	var mat_corona = ShaderMaterial.new()
-	mat_corona.shader = KiCoronaShader
-	mat_corona.set_shader_parameter("base_color", Color(energy_color.r, energy_color.g, energy_color.b, 0.85))
-	mat_corona.set_shader_parameter("vertex_displacement", 0.04)
-	mesh_corona.material_override = mat_corona
-	projectile.add_child(mesh_corona)
+	ZenkaiVFXManager.build_zenkai_orb_visual(projectile, projectile_radius, energy_color, is_charged, is_charged)
 
 	var light = OmniLight3D.new()
 	light.light_color = energy_color
@@ -844,36 +800,7 @@ func _spawn_kamehameha_beam(target_pos: Vector3) -> void:
 
 	var projectile = Node3D.new()
 	projectile.name = "EnemySuper_" + s_name.replace(" ", "") + "_" + str(Time.get_ticks_msec())
-
-	var mesh_core = MeshInstance3D.new()
-	var sphere_core = SphereMesh.new()
-	sphere_core.radius = projectile_radius
-	sphere_core.height = projectile_radius * 2.8
-	sphere_core.radial_segments = 20
-	sphere_core.rings = 10
-	mesh_core.mesh = sphere_core
-
-	var mat_core = ShaderMaterial.new()
-	mat_core.shader = KiSphereShader
-	mat_core.set_shader_parameter("base_color", energy_color)
-	mat_core.set_shader_parameter("core_glow", 6.0)
-	mesh_core.material_override = mat_core
-	projectile.add_child(mesh_core)
-
-	var mesh_corona = MeshInstance3D.new()
-	var sphere_corona = SphereMesh.new()
-	sphere_corona.radius = projectile_radius * 1.30
-	sphere_corona.height = projectile_radius * 3.50
-	sphere_corona.radial_segments = 20
-	sphere_corona.rings = 10
-	mesh_corona.mesh = sphere_corona
-
-	var mat_corona = ShaderMaterial.new()
-	mat_corona.shader = KiCoronaShader
-	mat_corona.set_shader_parameter("base_color", Color(0.35, 0.85, 1.0, 0.85))
-	mat_corona.set_shader_parameter("vertex_displacement", 0.07)
-	mesh_corona.material_override = mat_corona
-	projectile.add_child(mesh_corona)
+	ZenkaiVFXManager.build_zenkai_orb_visual(projectile, projectile_radius, energy_color, true, true)
 
 	var light = OmniLight3D.new()
 	light.light_color = energy_color

@@ -22,7 +22,7 @@ var clash_duration: float = 3.5
 var is_active: bool = false
 
 # Nodos visuales del choque
-var clash_sphere: MeshInstance3D = null
+var clash_sphere: Node3D = null
 var clash_light: OmniLight3D = null
 var beam_mesh_atk: MeshInstance3D = null
 var beam_mesh_def: MeshInstance3D = null
@@ -61,7 +61,6 @@ var _clash_card_label: Label3D = null
 var _clash_card_border_mat: StandardMaterial3D = null
 var _last_clash_card_key: String = ""
 
-const KiCoronaShader = preload("res://shaders/ki_corona.gdshader")
 const KiBeamShader = preload("res://shaders/ki_beam.gdshader")
 const ShockwaveShader = preload("res://shaders/shockwave.gdshader")
 
@@ -494,23 +493,9 @@ func _resolve_clash(winner: Node3D, loser: Node3D, winning_tech: String) -> void
 
 
 func _build_visuals() -> void:
-	# 1. Esfera de colisión central
-	clash_sphere = MeshInstance3D.new()
+	clash_sphere = ZenkaiVFXManager.build_zenkai_orb_visual(self, 0.62, color_atk.lerp(color_def, 0.5), true, true)
 	clash_sphere.name = "ClashSphere"
-	var sph = SphereMesh.new()
-	sph.radius = 0.50
-	sph.height = 1.0
-	clash_sphere.mesh = sph
 
-	var mat_sph = ShaderMaterial.new()
-	mat_sph.shader = KiCoronaShader
-	mat_sph.set_shader_parameter("base_color", color_atk.lerp(color_def, 0.5))
-	mat_sph.set_shader_parameter("speed", 8.0)
-	mat_sph.set_shader_parameter("vertex_displacement", 0.12)
-	clash_sphere.material_override = mat_sph
-	add_child(clash_sphere)
-
-	# 2. Luz omnidireccional brillante
 	clash_light = OmniLight3D.new()
 	clash_light.name = "ClashLight"
 	clash_light.light_color = color_atk.lerp(color_def, 0.5)
@@ -518,7 +503,9 @@ func _build_visuals() -> void:
 	clash_light.omni_range = 8.0
 	add_child(clash_light)
 
-	# 3. Haz del Atacante + Núcleo blanco incandescente interno
+	var z_beam_tex: Texture2D = ZenkaiVFXManager.get_tex("beam_core")
+	var z_flame_tex: Texture2D = ZenkaiVFXManager.get_tex("aura_streaks")
+
 	beam_mesh_atk = MeshInstance3D.new()
 	beam_mesh_atk.name = "BeamAtk"
 	var cyl_atk = CylinderMesh.new()
@@ -527,26 +514,17 @@ func _build_visuals() -> void:
 
 	var mat_atk = ShaderMaterial.new()
 	mat_atk.shader = KiBeamShader
+	if z_beam_tex:
+		mat_atk.set_shader_parameter("streak_tex", z_beam_tex)
+	if z_flame_tex:
+		mat_atk.set_shader_parameter("flame_tex", z_flame_tex)
 	mat_atk.set_shader_parameter("beam_color", color_atk)
 	mat_atk.set_shader_parameter("core_color", Color(1.0, 1.0, 1.0, 1.0))
 	mat_atk.set_shader_parameter("flow_speed", 14.0)
-	mat_atk.set_shader_parameter("core_intensity", 3.8)
+	mat_atk.set_shader_parameter("core_intensity", 4.4)
 	beam_mesh_atk.material_override = mat_atk
 	add_child(beam_mesh_atk)
 
-	var mat_inner_white := StandardMaterial3D.new()
-	mat_inner_white.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
-	mat_inner_white.albedo_color = Color(1.0, 1.0, 1.0, 0.96)
-
-	beam_inner_atk = MeshInstance3D.new()
-	beam_inner_atk.name = "BeamInnerAtk"
-	var cyl_inner_atk = CylinderMesh.new()
-	cyl_inner_atk.radial_segments = 12
-	beam_inner_atk.mesh = cyl_inner_atk
-	beam_inner_atk.material_override = mat_inner_white
-	add_child(beam_inner_atk)
-
-	# 4. Haz del Defensor + Núcleo blanco incandescente interno
 	beam_mesh_def = MeshInstance3D.new()
 	beam_mesh_def.name = "BeamDef"
 	var cyl_def = CylinderMesh.new()
@@ -555,20 +533,16 @@ func _build_visuals() -> void:
 
 	var mat_def = ShaderMaterial.new()
 	mat_def.shader = KiBeamShader
+	if z_beam_tex:
+		mat_def.set_shader_parameter("streak_tex", z_beam_tex)
+	if z_flame_tex:
+		mat_def.set_shader_parameter("flame_tex", z_flame_tex)
 	mat_def.set_shader_parameter("beam_color", color_def)
 	mat_def.set_shader_parameter("core_color", Color(1.0, 1.0, 1.0, 1.0))
 	mat_def.set_shader_parameter("flow_speed", 14.0)
-	mat_def.set_shader_parameter("core_intensity", 3.8)
+	mat_def.set_shader_parameter("core_intensity", 4.4)
 	beam_mesh_def.material_override = mat_def
 	add_child(beam_mesh_def)
-
-	beam_inner_def = MeshInstance3D.new()
-	beam_inner_def.name = "BeamInnerDef"
-	var cyl_inner_def = CylinderMesh.new()
-	cyl_inner_def.radial_segments = 12
-	beam_inner_def.mesh = cyl_inner_def
-	beam_inner_def.material_override = mat_inner_white
-	add_child(beam_inner_def)
 
 	# 5. HUD 3D de balance (título + barra diegética de tira y afloja)
 	header_label = Label3D.new()

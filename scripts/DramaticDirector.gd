@@ -161,22 +161,24 @@ func _build_audio_players() -> void:
 
 func _build_pools() -> void:
 	# 1. Pool de 6 cráteres persistentes (anillo oscuro con relieve limpio para Quest 3)
-	var shared_crater_mesh := CylinderMesh.new()
-	shared_crater_mesh.top_radius = 2.6
-	shared_crater_mesh.bottom_radius = 1.9
-	shared_crater_mesh.height = 0.08
-	shared_crater_mesh.radial_segments = 16
+	var shared_crater_mesh := QuadMesh.new()
+	shared_crater_mesh.size = Vector2(5.2, 5.2)
 
 	var shared_crater_mat := StandardMaterial3D.new()
-	shared_crater_mat.albedo_color = Color(0.16, 0.13, 0.11, 0.92)
-	shared_crater_mat.roughness = 0.98
+	shared_crater_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	shared_crater_mat.albedo_color = Color(0.92, 0.84, 0.72, 0.92)
 	shared_crater_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	shared_crater_mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	var z_crater_tex: Texture2D = ZenkaiVFXManager.get_tex("crater_cracks")
+	if z_crater_tex != null:
+		shared_crater_mat.albedo_texture = z_crater_tex
 
 	_crater_pool.clear()
 	for i in range(MAX_CRATERS):
 		var cr := MeshInstance3D.new()
 		cr.name = "DramaticCrater_%d" % i
 		cr.mesh = shared_crater_mesh
+		cr.rotation_degrees.x = -90.0
 		cr.material_override = shared_crater_mat
 		cr.visible = false
 		add_child(cr)

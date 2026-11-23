@@ -22,7 +22,8 @@ var character_instance: Node3D = null
 var enabled: bool = true
 var is_vegeta_char: bool = false
 var zenkai_anim_loader: ZenkaiAnimationLoader = null
-var zenkai_overlay_weight: float = 0.65
+var zenkai_overlay_weight: float = 1.0
+var _zenkai_bone_quats: Dictionary = {}
 
 # Diccionario de huesos cacheados con sus transformaciones originales de reposo
 var bone_indices: Dictionary = {}
@@ -292,6 +293,12 @@ func update(delta: float, target_look_pos: Vector3, is_charging_ki: bool, is_blo
 
 	# 3. Aplicar animación corporal completa sobre los 18 huesos
 	_apply_body_hover_and_trajectory(delta)
+	var is_ai_char: bool = not (character_instance != null and is_instance_valid(character_instance) and bool(character_instance.get("is_player")))
+	if is_ai_char and zenkai_anim_loader != null and zenkai_overlay_weight >= 0.99:
+		var z_clip: String = _get_active_zenkai_clip_name()
+		if not z_clip.is_empty() and zenkai_anim_loader.has_clip(z_clip):
+			_apply_pure_zenkai_full_body(delta, z_clip, _get_active_zenkai_clip_u())
+			return
 	_apply_hips_spine_and_chest(delta)
 	_apply_legs_pose(delta)
 	_apply_look_at(delta, target_look_pos)
@@ -1080,9 +1087,27 @@ func _set_bone_rot_relative(bone_name: String, offset_euler_char: Vector3) -> vo
 	skeleton.set_bone_pose_rotation(idx, (offset_quat * rest_quat).normalized())
 
 
+func _apply_pure_zenkai_full_body(delta: float, clip_name: String, u: float) -> void:
+	var blend: float = clampf(18.0 * delta, 0.0, 1.0)
+	for bone_alias in TARGET_BONES:
+		var idx: int = int(bone_indices.get(bone_alias, -1))
+		if idx == -1:
+			continue
+		var rest_q: Quaternion = bone_rest_rotations.get(bone_alias, Quaternion.IDENTITY)
+		var target_q: Quaternion = zenkai_anim_loader.sample_clip_bone_rotation(clip_name, bone_alias, u, rest_q)
+		var cur_q: Quaternion = _zenkai_bone_quats.get(bone_alias, rest_q)
+		var next_q: Quaternion = cur_q.slerp(target_q, blend).normalized()
+		_zenkai_bone_quats[bone_alias] = next_q
+		skeleton.set_bone_pose_rotation(idx, next_q)
+
+
 func _get_active_zenkai_clip_name() -> String:
 	if _st_is_transforming:
 		return "aura_burst_loop"
+	if _st_is_guard_broken:
+		return "guard_break"
+	if _st_flinch_factor > 0.25:
+		return "damage_heavy" if hit_flinch_intensity >= 0.8 else "damage_light"
 	if _st_super_phase == 2:
 		if _st_super_tech == "big_bang" or _st_super_tech == "genkidama":
 			return "hissatsu2_fire"
@@ -1097,7 +1122,12 @@ func _get_active_zenkai_clip_name() -> String:
 			1: return "rush_2"
 			2: return "rush_3"
 			3: return "rush_4"
-			_: return "rush_5"
+			4: return "rush_5"
+			_: return "heavy_smash"
+	if _st_is_ki_blast:
+		return "ki_blast_left" if ki_blast_hand == 0 else "ki_blast_right"
+	if _st_is_blocking:
+		return "guard_active"
 	if _st_ki_phase > 0:
 		return "ki_charge_loop"
 	if _st_is_flying:
@@ -1114,6 +1144,12 @@ func _get_active_zenkai_clip_u() -> float:
 		return _st_transform_u
 	if _st_is_melee_active:
 		return _st_melee_u
+	if _st_is_ki_blast:
+		return _st_ki_blast_u
 	if _st_is_getup:
 		return _st_getup_u
-	return fmod(anim_time * 1.2, 1.0)
+	if _st_flinch_factor > 0.25:
+		return clampf(1.0 - (hit_flinch_timer / 0.35), 0.0, 1.0)
+	var clip: String = _get_active_zenkai_clip_name()
+	var dur: float = zenkai_anim_loader.get_clip_duration(clip, 0.85) if zenkai_anim_loader != null else 0.85
+	return fmod(anim_time / maxf(dur, 0.15), 1.0)
