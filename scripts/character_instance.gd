@@ -2846,6 +2846,16 @@ func _calibrate_skeleton_rig() -> void:
 		if skel_left.length_squared() < 0.001:
 			skel_left = Vector3.RIGHT
 		var skel_fwd: Vector3 = skel_left.cross(skel_up).normalized()
+		var rel_basis: Basis = Basis.IDENTITY
+		var cur_n: Node = skeleton
+		while cur_n and cur_n != self:
+			if cur_n is Node3D:
+				rel_basis = (cur_n as Node3D).transform.basis * rel_basis
+			cur_n = cur_n.get_parent()
+		var expected_fwd_skel: Vector3 = (rel_basis.inverse() * Vector3.BACK).normalized()
+		if expected_fwd_skel.length_squared() > 0.5 and skel_fwd.dot(expected_fwd_skel) < 0.0:
+			skel_fwd = -skel_fwd
+			skel_left = skel_up.cross(skel_fwd).normalized()
 		_skel_char_basis = Basis(skel_left, skel_up, skel_fwd).orthonormalized()
 	else:
 		_skel_char_basis = Basis.IDENTITY
