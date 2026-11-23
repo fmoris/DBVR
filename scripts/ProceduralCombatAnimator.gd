@@ -910,11 +910,11 @@ func _apply_arms_pose(delta: float) -> void:
 				des_pos_l = Vector3(-0.10, -0.06, 0.18)
 				des_pos_r = Vector3(0.0, 0.04, 0.52)
 				grip_l = 0.95; trig_l = 0.95; grip_r = 1.0; trig_r = 1.0
-			3: # Parry Perfecto (barrido lateral amplio)
-				des_pos_l = Vector3(0.26, 0.14, 0.34)
-				des_pos_r = Vector3(-0.22, 0.08, 0.30)
-				des_basis_l = palm_fwd_l; des_basis_r = palm_fwd_r
-				grip_l = 0.10; trig_l = 0.10; grip_r = 0.10; trig_r = 0.10
+			3: # Bloqueo Perfecto (parada/desvío firme con una mano al frente y la otra en guardia baja)
+				des_pos_l = Vector3(0.10, -0.10, 0.16)
+				des_pos_r = Vector3(-0.02, 0.18, 0.44)
+				des_basis_r = palm_fwd_r
+				grip_l = 0.90; trig_l = 0.90; grip_r = 0.05; trig_r = 0.10
 	elif _st_is_blocking:
 		des_pos_l = Vector3(-0.14, 0.12, 0.30)
 		des_pos_r = Vector3(0.14, 0.08, 0.26)
