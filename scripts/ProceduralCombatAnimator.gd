@@ -22,7 +22,7 @@ var character_instance: Node3D = null
 var enabled: bool = true
 var is_vegeta_char: bool = false
 var zenkai_anim_loader: ZenkaiAnimationLoader = null
-var zenkai_overlay_weight: float = 0.08
+var zenkai_overlay_weight: float = 0.65
 
 # Diccionario de huesos cacheados con sus transformaciones originales de reposo
 var bone_indices: Dictionary = {}
@@ -563,10 +563,14 @@ func _apply_hips_spine_and_chest(delta: float) -> void:
 		var z_clip: String = _get_active_zenkai_clip_name()
 		if not z_clip.is_empty() and zenkai_anim_loader.has_clip(z_clip):
 			var z_u: float = _get_active_zenkai_clip_u()
+			var d_hips: Vector3 = zenkai_anim_loader.sample_clip_bone_delta_euler(z_clip, "Hips", z_u)
 			var d_spine: Vector3 = zenkai_anim_loader.sample_clip_bone_delta_euler(z_clip, "Spine", z_u)
 			var d_chest: Vector3 = zenkai_anim_loader.sample_clip_bone_delta_euler(z_clip, "Chest", z_u)
+			var d_upper: Vector3 = zenkai_anim_loader.sample_clip_bone_delta_euler(z_clip, "UpperChest", z_u)
+			hips_target += d_hips * (zenkai_overlay_weight * 0.65)
 			spine_target += d_spine * zenkai_overlay_weight
 			chest_target += d_chest * zenkai_overlay_weight
+			upper_target += d_upper * (zenkai_overlay_weight * 0.75)
 
 	var blend: float = clampf(16.0 * delta, 0.0, 1.0)
 	current_hips_euler = current_hips_euler.lerp(hips_target, blend)
@@ -683,6 +687,16 @@ func _apply_legs_pose(delta: float) -> void:
 		l_knee = Vector3(deg_to_rad(24.0) - sway * 0.6, 0.0, 0.0)
 		r_up = Vector3(deg_to_rad(14.0) - sway, 0.0, deg_to_rad(-10.0))
 		r_knee = Vector3(deg_to_rad(18.0) + sway * 0.6, 0.0, 0.0)
+
+	if zenkai_anim_loader != null and zenkai_overlay_weight > 0.001:
+		var z_clip_legs: String = _get_active_zenkai_clip_name()
+		if not z_clip_legs.is_empty() and zenkai_anim_loader.has_clip(z_clip_legs):
+			var z_u_legs: float = _get_active_zenkai_clip_u()
+			var leg_w: float = zenkai_overlay_weight * 0.60
+			l_up += zenkai_anim_loader.sample_clip_bone_delta_euler(z_clip_legs, "LeftUpLeg", z_u_legs) * leg_w
+			l_knee += zenkai_anim_loader.sample_clip_bone_delta_euler(z_clip_legs, "LeftLeg", z_u_legs) * leg_w
+			r_up += zenkai_anim_loader.sample_clip_bone_delta_euler(z_clip_legs, "RightUpLeg", z_u_legs) * leg_w
+			r_knee += zenkai_anim_loader.sample_clip_bone_delta_euler(z_clip_legs, "RightLeg", z_u_legs) * leg_w
 
 	var blend: float = clampf(14.0 * delta, 0.0, 1.0)
 	current_l_upleg_euler = current_l_upleg_euler.lerp(l_up, blend)

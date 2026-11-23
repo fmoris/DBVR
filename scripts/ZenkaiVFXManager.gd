@@ -15,6 +15,23 @@ static var _shared_dome_mesh: SphereMesh = null
 static var _shared_ring_mesh: QuadMesh = null
 static var _shared_pillar_mesh: CylinderMesh = null
 static var _zenkai_ring_tex: Texture2D = null
+static var _zenkai_flame_tex: Texture2D = null
+static var _zenkai_band_tex: Texture2D = null
+
+
+static func get_flame_tex() -> Texture2D:
+	_ensure_shared_meshes()
+	return _zenkai_flame_tex
+
+
+static func get_band_tex() -> Texture2D:
+	_ensure_shared_meshes()
+	return _zenkai_band_tex
+
+
+static func get_ring_tex() -> Texture2D:
+	_ensure_shared_meshes()
+	return _zenkai_ring_tex
 
 
 static func _ensure_shared_meshes() -> void:
@@ -40,6 +57,10 @@ static func _ensure_shared_meshes() -> void:
 
 	if _zenkai_ring_tex == null and ResourceLoader.exists("res://assets/vfx_zenkai/common/zenkai_ring.png"):
 		_zenkai_ring_tex = load("res://assets/vfx_zenkai/common/zenkai_ring.png") as Texture2D
+	if _zenkai_flame_tex == null and ResourceLoader.exists("res://assets/vfx_zenkai/common/zenkai_skill_s_file18.png"):
+		_zenkai_flame_tex = load("res://assets/vfx_zenkai/common/zenkai_skill_s_file18.png") as Texture2D
+	if _zenkai_band_tex == null and ResourceLoader.exists("res://assets/vfx_zenkai/common/zenkai_skill_s_file2.png"):
+		_zenkai_band_tex = load("res://assets/vfx_zenkai/common/zenkai_skill_s_file2.png") as Texture2D
 
 
 static func _acquire_dome_node(scene_root: Node) -> Node3D:
@@ -58,6 +79,10 @@ static func _acquire_dome_node(scene_root: Node) -> Node3D:
 		dome_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var dome_mat := ShaderMaterial.new()
 		dome_mat.shader = ExplosionDomeShader
+		if _zenkai_flame_tex:
+			dome_mat.set_shader_parameter("plasma_tex", _zenkai_flame_tex)
+		if _zenkai_band_tex:
+			dome_mat.set_shader_parameter("streak_tex", _zenkai_band_tex)
 		dome_mi.material_override = dome_mat
 		root_node.add_child(dome_mi)
 

@@ -752,54 +752,6 @@ func _spawn_visual_explosion(pos: Vector3) -> void:
 
 	ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), pos, exp_tier, p_color, has_lightning)
 
-	var flash = MeshInstance3D.new()
-	var sphere_mesh = SphereMesh.new()
-	sphere_mesh.radius = p_radius * 0.6
-	sphere_mesh.height = p_radius * 1.2
-	flash.mesh = sphere_mesh
-
-	var mat = StandardMaterial3D.new()
-	mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
-	mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = p_color
-	flash.material_override = mat
-	vfx_parent.add_child(flash)
-	flash.global_position = pos
-
-	var tween = get_tree().create_tween().set_parallel(true)
-	tween.tween_property(flash, "scale", Vector3.ONE * 5.0, 0.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tween.tween_property(mat, "albedo_color", Color(p_color.r, p_color.g, p_color.b, 0.0), 0.2)
-	tween.chain().tween_callback(flash.queue_free)
-
-	var shockwave = MeshInstance3D.new()
-	shockwave.name = "KiShockwave_" + str(Time.get_ticks_msec())
-	var sphere_wave = SphereMesh.new()
-	sphere_wave.radius = p_radius
-	sphere_wave.height = p_radius * 2.0
-	sphere_wave.radial_segments = 16
-	sphere_wave.rings = 8
-	shockwave.mesh = sphere_wave
-
-	var mat_wave = ShaderMaterial.new()
-	mat_wave.shader = ShockwaveShader
-	mat_wave.set_shader_parameter("ring_color", p_color)
-	mat_wave.set_shader_parameter("use_uv_ring", 0.0)
-	mat_wave.set_shader_parameter("force", 0.15)
-	mat_wave.set_shader_parameter("progress", 0.0)
-	mat_wave.set_shader_parameter("thickness", 0.12)
-	shockwave.material_override = mat_wave
-	vfx_parent.add_child(shockwave)
-	shockwave.global_position = pos
-
-	var wave_tween = get_tree().create_tween().set_parallel(true)
-	var final_wave_scale = explosion_radius * 4.0
-	wave_tween.tween_property(shockwave, "scale", Vector3.ONE * final_wave_scale, 0.45).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	wave_tween.tween_method(
-		func(val: float): mat_wave.set_shader_parameter("progress", val),
-		0.0, 1.0, 0.45
-	)
-	wave_tween.chain().tween_callback(shockwave.queue_free)
-
 	# --- 3. EXPULSIÓN GPU/CPU LIGERA DE CHISPAS KI (Zero RigidBody3D en Meta Quest) ---
 	if _shared_spark_mesh == null:
 		_shared_spark_mesh = SphereMesh.new()
@@ -835,18 +787,6 @@ func _spawn_visual_explosion(pos: Vector3) -> void:
 	sparks.global_position = pos
 	sparks.emitting = true
 	sparks.finished.connect(sparks.queue_free)
-
-	# --- 4. FLASH DE LUZ OMNIDIRECCIONAL PUNTUAL (Solo ataques cargados/supers para cuidar 90 FPS en Quest 3) ---
-	if tier >= 2:
-		var exp_light = OmniLight3D.new()
-		exp_light.light_color = p_color
-		exp_light.light_energy = 8.0 if tier >= 3 else 4.0
-		exp_light.omni_range = explosion_radius * 2.5
-		vfx_parent.add_child(exp_light)
-		exp_light.global_position = pos
-		var light_tween = get_tree().create_tween()
-		light_tween.tween_property(exp_light, "light_energy", 0.0, 0.25).set_trans(Tween.TRANS_QUAD)
-		light_tween.chain().tween_callback(exp_light.queue_free)
 
 	if AudioActionManager.has_action_sounds("common.ki_blast_impact"):
 		var imp_sfx := AudioStreamPlayer3D.new()
@@ -904,21 +844,7 @@ func _spawn_deflection_vfx(pos: Vector3) -> void:
 	if not vfx_parent or not is_inside_tree() or not get_tree():
 		return
 	ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), pos, 1, Color(1.0, 0.92, 0.35, 1.0), false)
-	var spark = MeshInstance3D.new()
-	var sphere = SphereMesh.new()
-	sphere.radius = p_radius * 1.8
-	sphere.height = p_radius * 3.6
-	spark.mesh = sphere
 
-	var mat = StandardMaterial3D.new()
-	mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
-	mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color(1.0, 0.92, 0.35, 1.0)
-	spark.material_override = mat
-	vfx_parent.add_child(spark)
-	spark.global_position = pos
-
-	# Audio 3D metálico de ping de desvío anime
 	var sfx = AudioStreamPlayer3D.new()
 	sfx.name = "DeflectSfx"
 	var fallback_deflect: AudioStream = null
@@ -931,8 +857,3 @@ func _spawn_deflection_vfx(pos: Vector3) -> void:
 		sfx.finished.connect(sfx.queue_free)
 	else:
 		sfx.queue_free()
-
-	var tween = get_tree().create_tween().set_parallel(true)
-	tween.tween_property(spark, "scale", Vector3.ONE * 3.5, 0.15).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tween.tween_property(mat, "albedo_color", Color(1.0, 1.0, 1.0, 0.0), 0.15)
-	tween.chain().tween_callback(spark.queue_free)

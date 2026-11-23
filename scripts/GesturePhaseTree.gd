@@ -4,6 +4,7 @@ extends Node
 const ProceduralKiProjectileScript = preload("res://scripts/ProceduralKiProjectile.gd")
 const KiSphereShader = preload("res://ki_sphere.gdshader")
 const KiCoronaShader = preload("res://shaders/ki_corona.gdshader")
+const ZenkaiAuraShader = preload("res://shaders/zenkai_aura.gdshader")
 const HybridCombatControllerScript = preload("res://scripts/HybridCombatController.gd")
 
 # Flag de modo híbrido (Auto-switching con mandos Meta Quest 3)
@@ -1538,9 +1539,15 @@ func _spawn_ki_blast_projectile(hand_side: int, is_charged: bool) -> void:
 	mesh_corona.mesh = sphere_corona
 	
 	var mat_corona = ShaderMaterial.new()
-	mat_corona.shader = KiCoronaShader
-	mat_corona.set_shader_parameter("base_color", Color(energy_color.r, energy_color.g, energy_color.b, 0.85))
-	mat_corona.set_shader_parameter("vertex_displacement", 0.04)
+	mat_corona.shader = ZenkaiAuraShader
+	if ZenkaiVFXManager.get_flame_tex():
+		mat_corona.set_shader_parameter("flame_tex", ZenkaiVFXManager.get_flame_tex())
+	if ZenkaiVFXManager.get_band_tex():
+		mat_corona.set_shader_parameter("band_tex", ZenkaiVFXManager.get_band_tex())
+	mat_corona.set_shader_parameter("base_color", Color(energy_color.r, energy_color.g, energy_color.b, 0.90))
+	mat_corona.set_shader_parameter("vertex_displacement", 0.06 if is_charged else 0.03)
+	mat_corona.set_shader_parameter("speed", 8.0 if is_charged else 5.5)
+	mat_corona.set_shader_parameter("has_bio_lightning", 1.0 if is_charged else 0.0)
 	mesh_corona.material_override = mat_corona
 	projectile.add_child(mesh_corona)
 	
@@ -2326,10 +2333,15 @@ func _update_special_charge_sphere(delta: float) -> void:
 		special_charge_corona.mesh = corona_mesh
 		
 		var mat = ShaderMaterial.new()
-		mat.shader = KiCoronaShader
+		mat.shader = ZenkaiAuraShader
+		if ZenkaiVFXManager.get_flame_tex():
+			mat.set_shader_parameter("flame_tex", ZenkaiVFXManager.get_flame_tex())
+		if ZenkaiVFXManager.get_band_tex():
+			mat.set_shader_parameter("band_tex", ZenkaiVFXManager.get_band_tex())
 		mat.set_shader_parameter("base_color", energy_color)
-		mat.set_shader_parameter("speed", 5.0)
-		mat.set_shader_parameter("scale", 6.0)
+		mat.set_shader_parameter("speed", 7.5)
+		mat.set_shader_parameter("scale", 3.5)
+		mat.set_shader_parameter("has_bio_lightning", 1.0)
 		special_charge_corona.material_override = mat
 		get_tree().current_scene.add_child(special_charge_corona)
 		

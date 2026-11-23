@@ -3,53 +3,40 @@ render_mode blend_add, unshaded, cull_disabled, depth_draw_never;
 
 uniform vec4 outer_color : source_color = vec4(1.0, 0.55, 0.1, 0.95);
 uniform vec4 core_color : source_color = vec4(1.0, 0.98, 0.9, 1.0);
+uniform sampler2D plasma_tex : source_color, filter_linear_mipmap, repeat_enable;
+uniform sampler2D streak_tex : source_color, filter_linear_mipmap, repeat_enable;
 uniform float progress : hint_range(0.0, 1.0) = 0.0;
-uniform float intensity : hint_range(0.5, 8.0) = 3.2;
-uniform float noise_speed : hint_range(0.5, 15.0) = 6.0;
+uniform float intensity : hint_range(0.5, 8.0) = 3.6;
+uniform float noise_speed : hint_range(0.5, 15.0) = 6.5;
 uniform float has_bio_lightning : hint_range(0.0, 1.0) = 0.0;
 
-float hash21(vec2 p) {
-	p = fract(p * vec2(127.1, 311.7));
-	p += dot(p, p + 34.23);
-	return fract(p.x * p.y);
-}
-
-float val_noise(vec2 p) {
-	vec2 i = floor(p);
-	vec2 f = fract(p);
-	vec2 u = f * f * (3.0 - 2.0 * f);
-	return mix(
-		mix(hash21(i), hash21(i + vec2(1.0, 0.0)), u.x),
-		mix(hash21(i + vec2(0.0, 1.0)), hash21(i + vec2(1.0, 1.0)), u.x),
-		u.y
-	);
-}
-
 void vertex() {
-	float pulse = sin(TIME * 28.0 + VERTEX.y * 10.0) * 0.035 * (1.0 - progress);
+	float pulse = sin(TIME * 32.0 + VERTEX.y * 9.0 + VERTEX.x * 7.0) * 0.045 * (1.0 - progress);
 	VERTEX += NORMAL * pulse;
 }
 
 void fragment() {
 	float ndotv = clamp(abs(dot(NORMAL, VIEW)), 0.0, 1.0);
-	float fresnel = pow(1.0 - ndotv, 1.75);
-	float core = pow(ndotv, 2.2);
+	float fresnel = pow(1.0 - ndotv, 1.55);
+	float core = pow(ndotv, 1.9);
 
-	vec2 uv_flow = UV * 6.0 + vec2(TIME * noise_speed * 0.25, -TIME * noise_speed * 0.45);
-	float n1 = val_noise(uv_flow);
-	float n2 = val_noise(uv_flow * 2.3 - vec2(TIME * 1.8, 0.0));
-	float plasma = n1 * 0.65 + n2 * 0.35;
+	vec2 uv_flow = vec2(UV.x * 3.0 + TIME * noise_speed * 0.18, UV.y * 2.5 - TIME * noise_speed * 0.35);
+	float tex_p = texture(plasma_tex, uv_flow).r;
+	float tex_s = texture(streak_tex, vec2(UV.x * 4.0, UV.y * 2.0 + TIME * noise_speed * 0.45)).r;
+	float plasma = tex_p * 0.65 + tex_s * 0.35;
 
-	float dissolve_threshold = progress * 1.15;
-	float dissolve_mask = smoothstep(dissolve_threshold - 0.25, dissolve_threshold + 0.15, plasma + core * 0.45);
+	float dissolve_threshold = progress * 1.18;
+	float dissolve_mask = smoothstep(dissolve_threshold - 0.22, dissolve_threshold + 0.12, plasma + core * 0.50);
 
-	float arc = smoothstep(0.76, 0.95, 1.0 - abs(n2 * 2.0 - 1.0)) * has_bio_lightning;
+	float arc = smoothstep(0.72, 0.92, tex_p) * has_bio_lightning;
 
-	vec3 col = mix(outer_color.rgb, core_color.rgb, clamp(core * 1.15 + arc * 0.65, 0.0, 1.0));
-	col += outer_color.rgb * fresnel * 1.65;
-	col += vec3(0.45, 0.85, 1.0) * arc * 2.5;
+	// Crisp anime inner-core + cel-banded plasma edge
+	float cel_rim = smoothstep(0.35, 0.65, fresnel + tex_s * 0.35);
+	vec3 col = mix(outer_color.rgb * 1.6, core_color.rgb * 2.2, clamp(core * 1.2 + arc * 0.6, 0.0, 1.0));
+	col += outer_color.rgb * cel_rim * 2.1;
+	col += vec3(0.45, 0.88, 1.0) * arc * 3.2;
 
-	float fade = pow(1.0 - progress, 0.65);
+	float fade = pow(1.0 - progress, 0.58);
 	ALBEDO = col * intensity * fade;
-	ALPHA = clamp((core * 0.85 + fresnel * 0.90 + arc) * dissolve_mask * fade * outer_color.a, 0.0, 1.0);
+	ALPHA = clamp((core * 0.90 + cel_rim * 0.95 + arc) * dissolve_mask * fade * outer_color.a, 0.0, 1.0);
 }

@@ -74,6 +74,7 @@ var l_hand_vel: Vector3 = Vector3.ZERO
 var r_hand_vel: Vector3 = Vector3.ZERO
 
 const KiCoronaShader = preload("res://shaders/ki_corona.gdshader")
+const ZenkaiAuraShader = preload("res://shaders/zenkai_aura.gdshader")
 const KiBeamShader = preload("res://shaders/ki_beam.gdshader")
 const ShockwaveShader = preload("res://shaders/shockwave.gdshader")
 const BeamClashControllerClass = preload("res://scripts/BeamClashController.gd")
@@ -677,52 +678,8 @@ func _spawn_super_aoe_explosion(blast_pos: Vector3, apply_splash_to_defender: bo
 	var exp_parent: Node = (get_tree().current_scene if (is_inside_tree() and get_tree() and get_tree().current_scene) else get_parent())
 
 	if exp_parent and exp_parent.is_inside_tree():
-		# Cúpula esférica de explosión + onda expansiva anular
-		var dome := MeshInstance3D.new()
-		dome.name = "SuperAoEDome"
-		var sph := SphereMesh.new()
-		sph.radius = maxf(blast_radius * 0.18, 1.2)
-		sph.height = sph.radius * 2.0
-		sph.radial_segments = 18
-		sph.rings = 10
-		dome.mesh = sph
-
-		var dome_mat := ShaderMaterial.new()
-		dome_mat.shader = KiCoronaShader
-		dome_mat.set_shader_parameter("base_color", Color(energy_color.r, energy_color.g, energy_color.b, 0.90))
-		dome_mat.set_shader_parameter("speed", 6.5)
-		dome_mat.set_shader_parameter("vertex_displacement", 0.14)
-		dome.material_override = dome_mat
-		exp_parent.add_child(dome)
-		dome.global_position = blast_pos
-
-		var dome_tw: Tween = dome.create_tween()
-		if dome_tw:
-			dome_tw.tween_property(dome, "scale", Vector3.ONE * clampf(blast_radius * 0.42, 2.5, 5.5), 0.45).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
-			dome_tw.tween_property(dome, "scale", Vector3.ONE * 0.05, 0.25)
-			dome_tw.tween_callback(dome.queue_free)
-
-		var ring := MeshInstance3D.new()
-		ring.name = "SuperAoERing"
-		var quad := QuadMesh.new()
-		quad.size = Vector2(3.0, 3.0)
-		ring.mesh = quad
-		ring.rotation.x = -PI * 0.5
-		var r_mat := ShaderMaterial.new()
-		r_mat.shader = ShockwaveShader
-		r_mat.set_shader_parameter("ring_color", Color(energy_color.r, energy_color.g, energy_color.b, 0.92))
-		ring.material_override = r_mat
-		exp_parent.add_child(ring)
-		ring.global_position = blast_pos
-
-		var r_tw: Tween = ring.create_tween()
-		if r_tw:
-			r_tw.tween_property(ring, "scale", Vector3.ONE * (blast_radius * 0.65), 0.55).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-			r_tw.parallel().tween_property(r_mat, "shader_parameter/ring_color:a", 0.0, 0.55)
-			r_tw.tween_callback(ring.queue_free)
-
 		if is_inside_tree() and get_tree():
-			ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), blast_pos, 4, energy_color, false)
+			ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), blast_pos, 4, energy_color, true)
 			KiSmokeFX.spawn_smoke(get_tree(), blast_pos, 2.2)
 
 	var result: Dictionary = { "in_radius": false, "damage_bp": 0.0, "knockback_speed": 0.0, "no_sell": false }
@@ -992,6 +949,10 @@ func _update_beam_geometry() -> void:
 	if inner and inner.mesh is CylinderMesh:
 		(inner.mesh as CylinderMesh).height = dist
 
+	var sheath = beam_core_mesh.get_node_or_null("ZenkaiBeamOuterSheath") as MeshInstance3D
+	if sheath and sheath.mesh is CylinderMesh:
+		(sheath.mesh as CylinderMesh).height = dist
+
 	beam_core_mesh.global_position = (start_pos + current_head_pos) * 0.5
 	var dir = (current_head_pos - start_pos).normalized()
 	if dir.length_squared() > 0.001:
@@ -1197,15 +1158,40 @@ func _build_visual_beam() -> void:
 	cyl.bottom_radius = radius
 	beam_core_mesh.mesh = cyl
 
-	var mat_beam = ShaderMaterial.new()
+	var mat_beam := ShaderMaterial.new()
 	mat_beam.shader = KiBeamShader
+	if ZenkaiVFXManager.get_band_tex():
+		mat_beam.set_shader_parameter("streak_tex", ZenkaiVFXManager.get_band_tex())
+	if ZenkaiVFXManager.get_flame_tex():
+		mat_beam.set_shader_parameter("flame_tex", ZenkaiVFXManager.get_flame_tex())
 	mat_beam.set_shader_parameter("beam_color", energy_color)
 	mat_beam.set_shader_parameter("core_color", Color(1.0, 1.0, 1.0, 1.0))
-	mat_beam.set_shader_parameter("flow_speed", 14.0)
-	mat_beam.set_shader_parameter("core_intensity", 3.8)
+	mat_beam.set_shader_parameter("flow_speed", 16.0)
+	mat_beam.set_shader_parameter("core_intensity", 4.2)
 	beam_core_mesh.material_override = mat_beam
 	beam_core_mesh.visible = not is_orb_super
 	add_child(beam_core_mesh)
+
+	var outer_sheath := MeshInstance3D.new()
+	outer_sheath.name = "ZenkaiBeamOuterSheath"
+	var cyl_sheath := CylinderMesh.new()
+	cyl_sheath.radial_segments = 16
+	cyl_sheath.top_radius = radius * 1.45
+	cyl_sheath.bottom_radius = radius * 1.45
+	cyl_sheath.cap_top = false
+	cyl_sheath.cap_bottom = false
+	outer_sheath.mesh = cyl_sheath
+	var mat_sheath := ShaderMaterial.new()
+	mat_sheath.shader = ZenkaiAuraShader
+	if ZenkaiVFXManager.get_flame_tex():
+		mat_sheath.set_shader_parameter("flame_tex", ZenkaiVFXManager.get_flame_tex())
+	if ZenkaiVFXManager.get_band_tex():
+		mat_sheath.set_shader_parameter("band_tex", ZenkaiVFXManager.get_band_tex())
+	mat_sheath.set_shader_parameter("base_color", Color(energy_color.r, energy_color.g, energy_color.b, 0.72))
+	mat_sheath.set_shader_parameter("speed", 11.0)
+	mat_sheath.set_shader_parameter("has_bio_lightning", 1.0 if tier >= 4 else 0.0)
+	outer_sheath.material_override = mat_sheath
+	beam_core_mesh.add_child(outer_sheath)
 
 	# 1.1 Núcleo interior blanco incandescente (White-Hot Inner Core)
 	var mat_inner = StandardMaterial3D.new()
@@ -1234,10 +1220,15 @@ func _build_visual_beam() -> void:
 	beam_head_mesh.mesh = sph
 	if is_orb_super:
 		var mat_orb := ShaderMaterial.new()
-		mat_orb.shader = KiCoronaShader
+		mat_orb.shader = ZenkaiAuraShader
+		if ZenkaiVFXManager.get_flame_tex():
+			mat_orb.set_shader_parameter("flame_tex", ZenkaiVFXManager.get_flame_tex())
+		if ZenkaiVFXManager.get_band_tex():
+			mat_orb.set_shader_parameter("band_tex", ZenkaiVFXManager.get_band_tex())
 		mat_orb.set_shader_parameter("base_color", Color(energy_color.r, energy_color.g, energy_color.b, 0.94))
-		mat_orb.set_shader_parameter("speed", 5.5)
-		mat_orb.set_shader_parameter("vertex_displacement", 0.08)
+		mat_orb.set_shader_parameter("speed", 6.5)
+		mat_orb.set_shader_parameter("vertex_displacement", 0.09)
+		mat_orb.set_shader_parameter("has_bio_lightning", 1.0)
 		beam_head_mesh.material_override = mat_orb
 	else:
 		beam_head_mesh.material_override = mat_beam
@@ -1342,11 +1333,8 @@ func _spawn_spark_at(pos: Vector3, col: Color) -> void:
 	tw.tween_callback(sw.queue_free)
 
 
-func _spawn_super_impact_explosion_vfx(pos: Vector3, col: Color, bp_ratio: float) -> void:
+func _spawn_super_impact_explosion_vfx(pos: Vector3, col: Color, _bp_ratio: float) -> void:
 	if not is_inside_tree() or not get_tree():
-		return
-	var target_parent: Node = get_tree().current_scene if get_tree().current_scene else get_parent()
-	if not target_parent:
 		return
 	var atk_in_zenkai: bool = bool(attacker and is_instance_valid(attacker) and (attacker.get("is_in_zenkai_state") or attacker.get("is_comeback_zenkai")))
 	var z_tier: int = 5 if (atk_in_zenkai or tier >= 4) else 4
@@ -1356,29 +1344,6 @@ func _spawn_super_impact_explosion_vfx(pos: Vector3, col: Color, bp_ratio: float
 		if cur_tr != null and cur_tr is Resource and "has_bio_lightning" in cur_tr:
 			has_bio = has_bio or bool(cur_tr.get("has_bio_lightning"))
 	ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), pos, z_tier, col, has_bio)
-	var dome := MeshInstance3D.new()
-	dome.name = "SuperImpactExplosionDome"
-	var sp := SphereMesh.new()
-	sp.radius = 0.85
-	sp.height = 1.70
-	dome.mesh = sp
-	var d_mat := StandardMaterial3D.new()
-	d_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	d_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	d_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-	d_mat.albedo_color = Color(col.r, col.g, col.b, 0.85)
-	d_mat.emission_enabled = true
-	d_mat.emission = Color(col.r, col.g, col.b)
-	d_mat.emission_energy_multiplier = 4.5
-	dome.material_override = d_mat
-	target_parent.add_child(dome)
-	dome.global_position = pos
-
-	var max_scale: float = clampf(6.5 * bp_ratio, 4.5, 11.5)
-	var tw := dome.create_tween()
-	tw.tween_property(dome, "scale", Vector3.ONE * max_scale, 0.48).set_trans(Tween.TRANS_EXPO).set_ease(Tween.EASE_OUT)
-	tw.parallel().tween_property(d_mat, "albedo_color:a", 0.0, 0.55).set_delay(0.10)
-	tw.tween_callback(dome.queue_free)
 	KiSmokeFX.spawn_smoke(get_tree(), pos, 1.6)
 
 

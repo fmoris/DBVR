@@ -101,6 +101,9 @@ var _pressure_ring_mat: StandardMaterial3D = null
 var body_mesh_instance: Node3D = null
 var aura_particles: Node3D = null
 var aura_mesh_ref: MeshInstance3D = null
+var aura_outer_mesh_ref: MeshInstance3D = null
+var aura_ground_ring_ref: MeshInstance3D = null
+var aura_sparks_ref: CPUParticles3D = null
 var aura_light_ref: OmniLight3D = null
 
 # Variables para seguimiento de jugador y prevención de clipping
@@ -150,6 +153,7 @@ var _cached_hybrid_ctrl: Node = null
 var _cached_gesture_tree: Node = null
 
 const KiCoronaShader = preload("res://shaders/ki_corona.gdshader")
+const ZenkaiAuraShader = preload("res://shaders/zenkai_aura.gdshader")
 const MeleeTargetDomeClass = preload("res://scripts/MeleeTargetDome.gd")
 const SuperBeamSequenceClass = preload("res://scripts/SuperBeamSequenceController.gd")
 var is_charging_ki: bool = false
@@ -2380,132 +2384,238 @@ func _spawn_zenkai_finish_banner(winner: Node3D, _loser: Node3D, tech_name: Stri
 	)
 
 func _update_aura_visuals(delta: float = 0.0) -> void:
-	# El Aura de Ki SIEMPRE está activa, reflejando el BP y el Ki restante (Punto 12)
 	if aura_node == null or not is_instance_valid(aura_node):
-		# Crear contenedor del Aura
 		aura_node = Node3D.new()
 		aura_node.name = "CharacterKiAura"
 		add_child(aura_node)
-		aura_node.position = Vector3(0, 0, 0)
-		
-		# 1. Crear cilindro procedural
-		var mesh_inst = MeshInstance3D.new()
-		mesh_inst.name = "AuraMesh"
-		var cylinder = CylinderMesh.new()
-		cylinder.top_radius = 0.85
-		cylinder.bottom_radius = 0.95
-		cylinder.height = 2.4
-		cylinder.radial_segments = 24
-		cylinder.rings = 4
-		cylinder.cap_top = false
-		cylinder.cap_bottom = false
-		mesh_inst.mesh = cylinder
-		
-		var mat = ShaderMaterial.new()
-		mat.shader = KiCoronaShader
-		mat.set_shader_parameter("base_color", Color(0.85, 0.95, 1.0, 0.35))
-		mat.set_shader_parameter("vertex_displacement", 0.04)
-		mat.set_shader_parameter("speed", 3.0)
-		mat.set_shader_parameter("scale", 5.0)
-		mesh_inst.material_override = mat
-		aura_node.add_child(mesh_inst)
-		mesh_inst.position = Vector3(0, 1.2, 0)
-		aura_mesh_ref = mesh_inst
-		
-		# 2. Luz dinámica omnidireccional
-		var light = OmniLight3D.new()
+		aura_node.position = Vector3.ZERO
+
+		var flame_tex: Texture2D = ZenkaiVFXManager.get_flame_tex()
+		var band_tex: Texture2D = ZenkaiVFXManager.get_band_tex()
+		var ring_tex: Texture2D = ZenkaiVFXManager.get_ring_tex()
+
+		var inner_mi := MeshInstance3D.new()
+		inner_mi.name = "AuraInnerMesh"
+		inner_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var inner_cyl := CylinderMesh.new()
+		inner_cyl.top_radius = 0.56
+		inner_cyl.bottom_radius = 0.78
+		inner_cyl.height = 2.35
+		inner_cyl.radial_segments = 24
+		inner_cyl.rings = 6
+		inner_cyl.cap_top = false
+		inner_cyl.cap_bottom = false
+		inner_mi.mesh = inner_cyl
+		var inner_mat := ShaderMaterial.new()
+		inner_mat.shader = ZenkaiAuraShader
+		if flame_tex:
+			inner_mat.set_shader_parameter("flame_tex", flame_tex)
+		if band_tex:
+			inner_mat.set_shader_parameter("band_tex", band_tex)
+		inner_mat.set_shader_parameter("base_color", Color(0.85, 0.95, 1.0, 0.55))
+		inner_mat.set_shader_parameter("core_color", Color(1.0, 0.98, 0.92, 1.0))
+		inner_mat.set_shader_parameter("scale", 3.2)
+		inner_mi.material_override = inner_mat
+		aura_node.add_child(inner_mi)
+		inner_mi.position = Vector3(0.0, 1.18, 0.0)
+		aura_mesh_ref = inner_mi
+
+		var outer_mi := MeshInstance3D.new()
+		outer_mi.name = "AuraOuterMesh"
+		outer_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var outer_cyl := CylinderMesh.new()
+		outer_cyl.top_radius = 0.92
+		outer_cyl.bottom_radius = 1.12
+		outer_cyl.height = 2.65
+		outer_cyl.radial_segments = 24
+		outer_cyl.rings = 6
+		outer_cyl.cap_top = false
+		outer_cyl.cap_bottom = false
+		outer_mi.mesh = outer_cyl
+		var outer_mat := ShaderMaterial.new()
+		outer_mat.shader = ZenkaiAuraShader
+		if flame_tex:
+			outer_mat.set_shader_parameter("flame_tex", flame_tex)
+		if band_tex:
+			outer_mat.set_shader_parameter("band_tex", band_tex)
+		outer_mat.set_shader_parameter("base_color", Color(0.85, 0.95, 1.0, 0.38))
+		outer_mat.set_shader_parameter("core_color", Color(1.0, 0.98, 0.92, 1.0))
+		outer_mat.set_shader_parameter("scale", 2.4)
+		outer_mi.material_override = outer_mat
+		aura_node.add_child(outer_mi)
+		outer_mi.position = Vector3(0.0, 1.32, 0.0)
+		aura_outer_mesh_ref = outer_mi
+
+		var ring_mi := MeshInstance3D.new()
+		ring_mi.name = "AuraGroundRing"
+		ring_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		var ring_quad := QuadMesh.new()
+		ring_quad.size = Vector2(2.6, 2.6)
+		ring_mi.mesh = ring_quad
+		ring_mi.rotation_degrees.x = -90.0
+		ring_mi.position = Vector3(0.0, 0.08, 0.0)
+		var ring_mat := StandardMaterial3D.new()
+		ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		ring_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		ring_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		ring_mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+		if ring_tex:
+			ring_mat.albedo_texture = ring_tex
+		ring_mat.albedo_color = Color(0.85, 0.95, 1.0, 0.55)
+		ring_mi.material_override = ring_mat
+		aura_node.add_child(ring_mi)
+		aura_ground_ring_ref = ring_mi
+
+		var sparks := CPUParticles3D.new()
+		sparks.name = "AuraKiMotes"
+		var mote_mesh := SphereMesh.new()
+		mote_mesh.radius = 0.025
+		mote_mesh.height = 0.09
+		mote_mesh.radial_segments = 6
+		mote_mesh.rings = 4
+		var mote_mat := StandardMaterial3D.new()
+		mote_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mote_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		mote_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
+		mote_mat.vertex_color_use_as_albedo = true
+		mote_mesh.material = mote_mat
+		sparks.mesh = mote_mesh
+		sparks.amount = 12
+		sparks.lifetime = 0.75
+		sparks.emission_shape = CPUParticles3D.EMISSION_SHAPE_RING
+		sparks.emission_ring_radius = 0.85
+		sparks.emission_ring_inner_radius = 0.35
+		sparks.emission_ring_height = 0.35
+		sparks.direction = Vector3.UP
+		sparks.spread = 12.0
+		sparks.gravity = Vector3(0.0, 1.2, 0.0)
+		sparks.initial_velocity_min = 2.4
+		sparks.initial_velocity_max = 4.6
+		sparks.position = Vector3(0.0, 0.25, 0.0)
+		sparks.emitting = true
+		aura_node.add_child(sparks)
+		aura_sparks_ref = sparks
+
+		var light := OmniLight3D.new()
 		light.name = "AuraLight"
+		light.shadow_enabled = false
 		light.light_color = Color(0.8, 0.9, 1.0)
 		light.light_energy = 2.5
 		light.omni_range = 3.5
-		light.position = Vector3(0, 1.2, 0)
+		light.position = Vector3(0.0, 1.2, 0.0)
 		aura_node.add_child(light)
 		aura_light_ref = light
-		
-	# Rotar el aura continuamente
-	aura_node.rotate_y(delta * 0.5)
-	
-	# Calcular ratios normalizados de BP (NP) y Ki restante
+
+	aura_node.rotate_y(delta * 0.65)
+	if is_instance_valid(aura_outer_mesh_ref):
+		aura_outer_mesh_ref.rotate_y(-delta * 1.45)
+	if is_instance_valid(aura_ground_ring_ref):
+		aura_ground_ring_ref.rotate_y(delta * 3.2)
+
 	var active_max: float = character_data.max_np if character_data else 20000.0
 	if current_transformation:
 		active_max *= current_transformation.np_multiplier
 	var base_np: float = character_data.base_np if character_data else 9000.0
 	var base_ki: float = character_data.base_ki if character_data else 100.0
-	
+
 	var bp_ratio: float = clampf((current_np - base_np) / maxf(1.0, (active_max - base_np)), 0.0, 1.0)
 	var ki_ratio: float = clampf(current_ki / maxf(1.0, base_ki), 0.0, 1.0)
-	
-	# Factor combinado de potencia activa
+
 	var power_factor: float = bp_ratio * 0.55 + ki_ratio * 0.45
 	if current_transformation:
 		power_factor = maxf(power_factor, 0.65)
-	
-	# Escala física del aura: proporcional al BP y amplificada por recarga o vuelo
-	var target_scale: float = lerp(0.72, 1.85, bp_ratio)
+
+	var target_scale: float = lerpf(0.75, 1.75, bp_ratio)
 	if is_charging_ki:
-		target_scale *= 1.40
+		target_scale *= 1.38
 	elif is_flying_to_opponent:
 		target_scale *= 1.22
 
-	# Efectos visuales de Ki Lleno vs Ki Agotado (Punto 7):
 	if ki_ratio >= 0.88:
-		# KI LLENO / CASI LLENO: Expansión de aura con llamaradas vivas
-		target_scale *= 1.25
+		target_scale *= 1.20
 	elif ki_ratio <= 0.20:
-		# KI BAJO / AGOTÁNDOSE: Aura reducida y desfalleciente
-		var low_factor = clampf(ki_ratio / 0.20, 0.0, 1.0)
-		target_scale *= lerp(0.50, 0.85, low_factor)
+		var low_factor: float = clampf(ki_ratio / 0.20, 0.0, 1.0)
+		target_scale *= lerpf(0.55, 0.85, low_factor)
 
 	aura_node.scale = Vector3.ONE * target_scale
-	
-	# Determinar el color base según estado y transformación
-	var target_color = Color(0.75, 0.92, 1.0, 0.35) # Blanco-celeste de Ki base
+
+	var target_color: Color = Color(0.75, 0.92, 1.0, 0.45)
+	var has_lightning: bool = is_in_furia or is_in_zenkai_state
+	var is_divine_form: bool = false
 	if current_transformation:
 		target_color = current_transformation.aura_color
+		if current_transformation.get("has_bio_lightning") != null and bool(current_transformation.get("has_bio_lightning")):
+			has_lightning = true
+		var fname_up: String = String(current_transformation.form_name).to_upper()
+		if "SSB" in fname_up or "BLUE" in fname_up or "INSTINTO" in fname_up or "EGO" in fname_up:
+			is_divine_form = true
 		if is_in_furia:
 			target_color = target_color.lerp(Color(1.0, 0.28, 0.08, target_color.a), 0.35)
 	elif is_in_zenkai_state or is_in_furia:
-		target_color = Color(1.0, 0.25, 0.1, 0.65) # Carmesí ardiente de Zenkai / Furia
-	elif character_data and character_data.character_name == "Vegeta":
-		target_color = Color(0.85, 0.35, 1.0, 0.40) # Púrpura característico de Vegeta
-		
-	# Modulación de color y alfa según Ki lleno o agotado (Punto 7)
-	var active_alpha = lerp(0.08, 0.85, ki_ratio)
+		target_color = Color(1.0, 0.25, 0.1, 0.75)
+	elif character_data and "VEGETA" in String(character_data.character_name).to_upper():
+		target_color = Color(0.85, 0.35, 1.0, 0.50)
+
+	var active_alpha: float = lerpf(0.14, 0.92, ki_ratio)
 	if ki_ratio >= 0.88:
-		active_alpha = maxf(active_alpha, 0.75)
-		target_color = target_color.lightened(0.20)
+		active_alpha = maxf(active_alpha, 0.85)
+		target_color = target_color.lightened(0.18)
 	elif ki_ratio <= 0.20:
-		var low_t = clampf(ki_ratio / 0.20, 0.0, 1.0)
-		active_alpha = lerp(0.04, 0.18, low_t)
-		target_color = target_color.lerp(Color(0.45, 0.45, 0.50, 0.15), 0.60)
+		var low_t: float = clampf(ki_ratio / 0.20, 0.0, 1.0)
+		active_alpha = lerpf(0.06, 0.22, low_t)
+		target_color = target_color.lerp(Color(0.45, 0.45, 0.50, 0.18), 0.55)
 
 	if is_charging_ki:
 		active_alpha = 1.0
 	elif is_player and not is_charging_ki:
-		active_alpha = minf(active_alpha, 0.40)
+		active_alpha = minf(active_alpha, 0.48)
 	target_color.a = active_alpha
-	
-	if is_instance_valid(aura_mesh_ref) and aura_mesh_ref.material_override is ShaderMaterial:
-		var smat = aura_mesh_ref.material_override as ShaderMaterial
-		smat.set_shader_parameter("base_color", target_color)
-		var aura_speed = lerp(1.5, 6.0, ki_ratio)
-		if ki_ratio >= 0.88:
-			aura_speed = 7.5
-		elif ki_ratio <= 0.20:
-			aura_speed = 1.2
-		if is_charging_ki:
-			aura_speed = 8.5
-		smat.set_shader_parameter("speed", aura_speed)
 
-		var displacement = lerp(0.02, 0.08, bp_ratio)
-		if ki_ratio >= 0.88:
-			displacement = 0.09
-		elif ki_ratio <= 0.20:
-			displacement = 0.015
-		if is_charging_ki:
-			displacement = 0.12
+	var aura_speed: float = lerpf(2.2, 6.8, ki_ratio)
+	if ki_ratio >= 0.88:
+		aura_speed = 8.0
+	elif ki_ratio <= 0.20:
+		aura_speed = 1.6
+	if is_charging_ki:
+		aura_speed = 9.5
+
+	var displacement: float = lerpf(0.04, 0.12, bp_ratio)
+	if is_charging_ki:
+		displacement = 0.16
+
+	var bio_f: float = 1.0 if has_lightning else 0.0
+	var div_f: float = 1.0 if is_divine_form else 0.0
+
+	if is_instance_valid(aura_mesh_ref) and aura_mesh_ref.material_override is ShaderMaterial:
+		var smat := aura_mesh_ref.material_override as ShaderMaterial
+		smat.set_shader_parameter("base_color", target_color)
+		smat.set_shader_parameter("speed", aura_speed)
 		smat.set_shader_parameter("vertex_displacement", displacement)
-		
+		smat.set_shader_parameter("has_bio_lightning", bio_f)
+		smat.set_shader_parameter("is_divine", div_f)
+
+	if is_instance_valid(aura_outer_mesh_ref) and aura_outer_mesh_ref.material_override is ShaderMaterial:
+		var omat := aura_outer_mesh_ref.material_override as ShaderMaterial
+		omat.set_shader_parameter("base_color", Color(target_color.r, target_color.g, target_color.b, target_color.a * 0.72))
+		omat.set_shader_parameter("speed", aura_speed * 1.25)
+		omat.set_shader_parameter("vertex_displacement", displacement * 1.35)
+		omat.set_shader_parameter("has_bio_lightning", bio_f)
+		omat.set_shader_parameter("is_divine", div_f)
+
+	if is_instance_valid(aura_ground_ring_ref) and aura_ground_ring_ref.material_override is StandardMaterial3D:
+		var rmat := aura_ground_ring_ref.material_override as StandardMaterial3D
+		var show_ring: bool = is_charging_ki or current_transformation != null or is_in_furia or is_in_zenkai_state or is_flying_to_opponent
+		aura_ground_ring_ref.visible = show_ring
+		if show_ring:
+			rmat.albedo_color = Color(target_color.r, target_color.g, target_color.b, clampf(active_alpha * 0.85, 0.25, 0.95))
+			var pulse_r: float = 1.0 + sin(float(Time.get_ticks_msec()) * 0.012) * 0.12
+			aura_ground_ring_ref.scale = Vector3.ONE * ((1.35 if is_charging_ki else 1.0) * pulse_r)
+
+	if is_instance_valid(aura_sparks_ref):
+		aura_sparks_ref.emitting = is_charging_ki or current_transformation != null or is_in_furia or is_in_zenkai_state
+		aura_sparks_ref.color = Color(target_color.r, target_color.g, target_color.b, 0.95)
+
 	if is_instance_valid(aura_light_ref):
 		aura_light_ref.shadow_enabled = false
 		aura_light_ref.light_color = target_color
