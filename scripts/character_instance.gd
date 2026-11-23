@@ -4825,8 +4825,8 @@ func _execute_hammer_strike_finisher(opponent: Node3D, swing_velocity: float, re
 		trigger_zenkai_match_finish(self, opponent, "Martillazo Zenkai")
 
 
-## Ejecuta lanzamiento direccional moderado (Ataque Cargado v3 Atrás/Arriba o Golpe Fuerte por Ki == 0)
-func _execute_charged_v3_or_ki_break_finisher(opponent: Node3D, mode: String, swing_velocity: float, _launch_vector: Vector3 = Vector3.ZERO) -> void:
+## Ejecuta lanzamiento direccional (Ataque Cargado v3 Atrás/Arriba/Lateral o Golpe Fuerte por Ki == 0)
+func _execute_charged_v3_or_ki_break_finisher(opponent: Node3D, mode: String, swing_velocity: float, launch_vector: Vector3 = Vector3.ZERO) -> void:
 	if not opponent or not is_instance_valid(opponent):
 		return
 
@@ -4835,6 +4835,7 @@ func _execute_charged_v3_or_ki_break_finisher(opponent: Node3D, mode: String, sw
 	var fwd = (opponent.global_position - my_pos).normalized()
 	fwd.y = 0.0
 	fwd = fwd.normalized() if fwd.length_squared() > 0.01 else -global_transform.basis.z
+	var side_ax: Vector3 = fwd.cross(Vector3.UP).normalized()
 
 	var bp_atk: float = maxf(current_np, 1000.0)
 	var bp_def: float = maxf(opponent.get("current_np") if opponent.get("current_np") != null else 10000.0, 1000.0)
@@ -4847,12 +4848,19 @@ func _execute_charged_v3_or_ki_break_finisher(opponent: Node3D, mode: String, sw
 	var base_speed: float = 44.0
 	var final_speed: float = base_speed * ratio_bp * v_mult
 	var launch_dir: Vector3 = (fwd * 3.8 + Vector3.UP * 0.55).normalized()
-	var mode_tag: String = "HACIA ATRÁS"
-	if mode == "charged_v3_up":
+	if launch_vector.length_squared() > 0.1:
+		launch_dir = launch_vector.normalized()
+	elif mode == "charged_v3_up":
 		launch_dir = (fwd * 1.8 + Vector3.UP * 2.4).normalized()
+
+	var mode_tag: String = "HACIA ATRÁS"
+	if launch_dir.y > 0.45:
 		mode_tag = "POR LOS AIRES"
-	elif mode == "ki_break_launch":
-		launch_dir = (fwd * 3.8 + Vector3.UP * 0.90).normalized()
+	elif absf(launch_dir.dot(side_ax)) > 0.45:
+		mode_tag = "LATERAL"
+	if mode == "ki_break_launch":
+		if launch_vector.length_squared() <= 0.1:
+			launch_dir = (fwd * 3.8 + Vector3.UP * 0.90).normalized()
 		final_speed *= 1.15
 		mode_tag = "IMBLOQUEABLE (SIN KI)"
 
@@ -4996,8 +5004,8 @@ func _start_followup_airborne_sequence(opponent: Node3D, launch_vector: Vector3)
 	var ratio_bp: float = clampf(sqrt(bp_atk / bp_def), 0.50, 3.5)
 	var ki_mult: float = 1.0 + (current_ki / 100.0) * 0.60
 
-	var vert_speed = maxf(launch_vector.y, 4.5) * ratio_bp * 0.9
-	var horiz_speed = maxf(h_comp.length(), 16.0) * ratio_bp * ki_mult
+	var vert_speed = maxf(launch_vector.y, 1.5) * ratio_bp * 0.9
+	var horiz_speed = maxf(h_comp.length(), 14.0) * ratio_bp * ki_mult
 	var final_impulse = h_dir * horiz_speed + Vector3.UP * vert_speed
 
 	# Elevar ligeramente al contrincante sobre el suelo para iniciar vuelo libre por los aires

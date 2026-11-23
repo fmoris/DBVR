@@ -54,8 +54,6 @@ var _tug_enemy_fill: MeshInstance3D = null
 var _tug_divider: MeshInstance3D = null
 var _event_orb: MeshInstance3D = null
 var _event_orb_mat: StandardMaterial3D = null
-var _aura_sphere: MeshInstance3D = null
-var _aura_mat: StandardMaterial3D = null
 
 
 ## Evalúa de forma pura y determinística qué evento Lore disparar según el contexto de combate
@@ -71,19 +69,22 @@ static func evaluate_lore_event_trigger(ctx: Dictionary) -> int:
 	var consec_hits_taken: int = int(ctx.get("consecutive_hits_taken", 0))
 	var has_v3_up: bool = bool(ctx.get("has_v3_up", false))
 	var is_furia_or_trans: bool = bool(ctx.get("is_furia_or_trans", false))
+	var cfg: KiEconomyConfig = KiEconomyConfig.get_default()
 
 	if src == "explosive_wave_input":
-		if def_ki >= 22.0 and consec_hits_taken >= 2:
+		var ew_req: float = float(cfg.melee_explosive_wave_cost) if cfg.get("melee_explosive_wave_cost") != null else 16.0
+		if def_ki >= ew_req and consec_hits_taken >= 2:
 			return LoreEventType.EXPLOSIVE_WAVE
 		return LoreEventType.NONE
 
 	if src == "z_vanish":
-		if atk_ki >= 18.0 and bp_ratio >= 0.70:
+		var zv_req: float = float(cfg.melee_vanish_cost) if cfg.get("melee_vanish_cost") != null else 10.0
+		if atk_ki >= zv_req and bp_ratio >= 0.70:
 			return LoreEventType.Z_VANISH_WAR
 		return LoreEventType.NONE
 
 	if src == "fist_clash":
-		if last_ev != LoreEventType.FIST_FLURRY_CLASH and atk_ki >= 20.0 and def_ki >= 20.0 and bp_ratio >= 0.65 and bp_ratio <= 1.50:
+		if last_ev != LoreEventType.FIST_FLURRY_CLASH and atk_ki >= 16.0 and def_ki >= 16.0 and bp_ratio >= 0.65 and bp_ratio <= 1.50:
 			return LoreEventType.FIST_FLURRY_CLASH
 		return LoreEventType.NONE
 
@@ -93,12 +94,13 @@ static func evaluate_lore_event_trigger(ctx: Dictionary) -> int:
 		return LoreEventType.NONE
 
 	if src == "combo_end":
-		if last_ev != LoreEventType.METEOR_SMASH and (has_v3_up or sonic_hits >= 1) and hits_landed >= 2 and atk_ki >= 12.0:
+		var chase_req: float = float(cfg.melee_meteor_chase_cost) if cfg.get("melee_meteor_chase_cost") != null else 8.0
+		if last_ev != LoreEventType.METEOR_SMASH and (has_v3_up or sonic_hits >= 1) and hits_landed >= 2 and atk_ki >= chase_req:
 			return LoreEventType.METEOR_SMASH
 		return LoreEventType.NONE
 
 	if src == "combo_mid":
-		if last_ev != LoreEventType.SONIC_Z_BURST and hits_landed >= 3 and (sonic_hits >= 2 or is_furia_or_trans) and atk_ki >= 15.0:
+		if last_ev != LoreEventType.SONIC_Z_BURST and hits_landed >= 3 and (sonic_hits >= 2 or is_furia_or_trans) and atk_ki >= 12.0:
 			return LoreEventType.SONIC_Z_BURST
 		return LoreEventType.NONE
 
@@ -162,19 +164,25 @@ func start_event(event_type: int, p_dome: Node3D, p_attacker: Node3D, p_defender
 		gy = float(_defender.get_ground_elevation(vic_origin))
 	_crater_target_pos = Vector3(vic_origin.x, gy, vic_origin.z)
 
+	var cfg_ev: KiEconomyConfig = KiEconomyConfig.get_default()
 	match event_type:
 		LoreEventType.FIST_FLURRY_CLASH:
-			_event_timer = 3.0
-			title_txt = "⚡ ¡CHOQUE FRENÉTICO DE PUÑOS! ⚡"
+			_event_timer = 3.2
+			title_txt = "⚡ ¡CHOQUE DE PUÑOS! — LLENA TU BARRA ⚡"
 			if _hud_root:
 				_hud_root.visible = true
 			if _tug_bar_root:
 				_tug_bar_root.visible = true
+			if _event_orb:
+				_event_orb.visible = true
+				_event_orb.scale = Vector3.ONE
+			if _event_orb_mat:
+				_event_orb_mat.albedo_color = Color(1.0, 0.88, 0.18, 0.90)
 			if _title_label:
 				_title_label.text = title_txt
-				_title_label.modulate = Color(1.0, 0.90, 0.25)
+				_title_label.modulate = Color(1.0, 0.92, 0.25)
 			if _prompt_label:
-				_prompt_label.text = "¡Lanza puñetazos IZQ-DER lo más rápido posible! (Drena Ki)"
+				_prompt_label.text = "¡GOLPEA RÁPIDO! TÚ 50% ⚔️ 50% RIVAL"
 			_update_tug_bar_visual()
 			if _dome and _dome.has_method("perform_z_blink_relocation"):
 				_dome.perform_z_blink_relocation(Vector3(clampf(vic_origin.x, -55.0, 55.0), gy + 5.5, clampf(vic_origin.z, -55.0, 55.0)))
@@ -182,6 +190,7 @@ func start_event(event_type: int, p_dome: Node3D, p_attacker: Node3D, p_defender
 		LoreEventType.METEOR_SMASH:
 			_event_timer = 0.90
 			_substep = 0
+			var ms_cost: int = int(cfg_ev.melee_meteor_chase_cost) if cfg_ev.get("melee_meteor_chase_cost") != null else 8
 			title_txt = "🌌 ¡CAÍDA DEL METEORO!"
 			var m_pos: Dictionary = compute_meteor_smash_positions(_crater_target_pos, axis, gy)
 			if not bool(_defender.get("is_player")):
@@ -195,7 +204,7 @@ func start_event(event_type: int, p_dome: Node3D, p_attacker: Node3D, p_defender
 				_title_label.modulate = Color(0.95, 0.35, 1.0)
 			if _prompt_label:
 				if bool(_attacker.get("is_player")):
-					_prompt_label.text = "¡PERSECUCIÓN AÉREA! Puño arriba o Stick ↑ (12 Ki)"
+					_prompt_label.text = "¡PERSECUCIÓN AÉREA! Puño arriba o Stick ↑ (%d Ki)" % ms_cost
 				else:
 					_prompt_label.text = "⚠️ ¡EL RIVAL TE LANZÓ AL CIELO! Prepárate para frenar..."
 
@@ -203,6 +212,7 @@ func start_event(event_type: int, p_dome: Node3D, p_attacker: Node3D, p_defender
 			_event_timer = 0.65
 			_vanish_hop = 1
 			_vanish_defender_is_player = not bool(_attacker.get("is_player"))
+			var zv_cost_lbl: int = int(_get_z_vanish_hop_cost(_player_char))
 			title_txt = "💨 ¡GUERRA DE Z-VANISH! (1/3)"
 			if _hud_root:
 				_hud_root.visible = true
@@ -210,7 +220,7 @@ func start_event(event_type: int, p_dome: Node3D, p_attacker: Node3D, p_defender
 				_title_label.text = title_txt
 				_title_label.modulate = Color(0.30, 0.95, 1.0)
 			if _prompt_label:
-				_prompt_label.text = "Stick (12 Ki) = ¡Contra-Blink! | Guardia X = Plantarse"
+				_prompt_label.text = "Stick (%d Ki) = ¡Contra-Blink! | Guardia X = Plantarse" % zv_cost_lbl
 			if _dome and _dome.has_method("perform_z_blink_relocation"):
 				_dome.perform_z_blink_relocation()
 
@@ -235,8 +245,7 @@ func start_event(event_type: int, p_dome: Node3D, p_attacker: Node3D, p_defender
 		LoreEventType.EXPLOSIVE_WAVE:
 			_event_timer = 0.55
 			title_txt = "🛡️ ¡ONDA EXPLOSIVA (KIAI)!"
-			var cfg_ew: KiEconomyConfig = KiEconomyConfig.get_default()
-			var ew_cost: float = float(cfg_ew.melee_explosive_wave_cost) if cfg_ew.get("melee_explosive_wave_cost") != null else 22.0
+			var ew_cost: float = float(cfg_ev.melee_explosive_wave_cost) if cfg_ev.get("melee_explosive_wave_cost") != null else 16.0
 			_modify_ki(_defender, -ew_cost)
 			if _hud_root:
 				_hud_root.visible = true
@@ -245,17 +254,11 @@ func start_event(event_type: int, p_dome: Node3D, p_attacker: Node3D, p_defender
 				_title_label.modulate = Color(0.25, 0.92, 1.0)
 			if _prompt_label:
 				_prompt_label.text = "¡Explosión de Ki liberada! (-%d Ki)" % int(ew_cost)
-			if _aura_sphere and is_instance_valid(_aura_sphere):
-				_aura_sphere.visible = true
-				_aura_sphere.scale = Vector3.ONE * 0.5
-				var tw := create_tween().set_parallel(true)
-				tw.tween_property(_aura_sphere, "scale", Vector3.ONE * 8.0, 0.45).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-				if _aura_mat:
-					_aura_mat.albedo_color = Color(0.25, 0.92, 1.0, 0.72)
-					tw.tween_property(_aura_mat, "albedo_color:a", 0.0, 0.48)
 			if _attacker and _attacker.has_method("take_hit"):
 				_attacker.take_hit(160.0, Vector3.ZERO, false)
-			if get_tree():
+			if get_tree() and _defender and is_instance_valid(_defender):
+				var exp_pos: Vector3 = _defender.global_position + Vector3(0.0, 0.9, 0.0)
+				ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), exp_pos, 3, Color(0.25, 0.92, 1.0, 0.95), true)
 				KiSmokeFX.spawn_smoke(get_tree(), _defender.global_position + Vector3(0.0, 0.8, 0.0), 1.4)
 
 		LoreEventType.SONIC_Z_BURST:
@@ -325,39 +328,63 @@ func inject_virtual_clash_punch() -> void:
 
 
 func _process_fist_clash(delta: float, l_vel: Vector3, r_vel: Vector3, l_closed: bool, r_closed: bool) -> void:
-	# Ambos luchadores queman 6 Ki/s durante el choque frenético
-	_modify_ki(_player_char, -6.0 * delta)
-	_modify_ki(_enemy_char, -6.0 * delta)
+	# Ambos luchadores queman 5 Ki/s durante el choque de poder cuerpo a cuerpo
+	_modify_ki(_player_char, -5.0 * delta)
+	_modify_ki(_enemy_char, -5.0 * delta)
 
 	var p_ki: float = float(_player_char.get("current_ki")) if (_player_char and _player_char.get("current_ki") != null) else 0.0
 	var e_ki: float = float(_enemy_char.get("current_ki")) if (_enemy_char and _enemy_char.get("current_ki") != null) else 0.0
 
 	var p_punches: int = 0
-	if _clash_punch_cd_l <= 0.0 and (l_closed or l_vel.length() >= 1.9) and l_vel.length() >= 1.40:
-		_clash_punch_cd_l = 0.11
+	if _clash_punch_cd_l <= 0.0 and ((l_closed and l_vel.length() >= 1.15) or l_vel.length() >= 1.45):
+		_clash_punch_cd_l = 0.10
 		p_punches += 1
-		if _dome and _dome.has_method("_spawn_hit_spark") and _event_orb:
-			_dome._spawn_hit_spark(_event_orb.global_position)
-	if _clash_punch_cd_r <= 0.0 and (r_closed or r_vel.length() >= 1.9) and r_vel.length() >= 1.40:
-		_clash_punch_cd_r = 0.11
+		if _event_orb:
+			if _dome and _dome.has_method("_spawn_hit_spark"):
+				_dome._spawn_hit_spark(_event_orb.global_position)
+			if get_tree():
+				ZenkaiVFXManager.spawn_zenkai_impact_flash(get_tree(), _event_orb.global_position, Color(0.25, 0.92, 1.0, 0.95), 0.75)
+	if _clash_punch_cd_r <= 0.0 and ((r_closed and r_vel.length() >= 1.15) or r_vel.length() >= 1.45):
+		_clash_punch_cd_r = 0.10
 		p_punches += 1
-		if _dome and _dome.has_method("_spawn_hit_spark") and _event_orb:
-			_dome._spawn_hit_spark(_event_orb.global_position)
+		if _event_orb:
+			if _dome and _dome.has_method("_spawn_hit_spark"):
+				_dome._spawn_hit_spark(_event_orb.global_position)
+			if get_tree():
+				ZenkaiVFXManager.spawn_zenkai_impact_flash(get_tree(), _event_orb.global_position, Color(1.0, 0.85, 0.25, 0.95), 0.75)
 
-	if p_punches > 0 and _enemy_char and is_instance_valid(_enemy_char) and _enemy_char.get("procedural_animator"):
-		_enemy_char.procedural_animator.trigger_melee_strike(randi() % 4)
-		if _dome and _dome.has_method("_pulse_defender_both_hands"):
-			_dome._pulse_defender_both_hands(190.0, 0.85, 0.05)
+	if p_punches > 0:
+		if _enemy_char and is_instance_valid(_enemy_char) and _enemy_char.get("procedural_animator"):
+			_enemy_char.procedural_animator.trigger_melee_strike(randi() % 4)
+		if _dome:
+			if _dome.has_method("_pulse_defender_both_hands"):
+				_dome._pulse_defender_both_hands(190.0, 0.85, 0.05)
+			var ap: AudioStreamPlayer3D = _dome.get("audio_player") as AudioStreamPlayer3D
+			if ap:
+				AudioActionManager.play_action("common.melee_hit_light", ap)
 
 	var bp_r: float = _get_player_bp_ratio()
+	# Asimetría Canon Vegeta (Orgullo Saiyan): +15% de empuje en choque si está en Furia
+	if _player_char and is_instance_valid(_player_char) and bool(_player_char.get("is_in_furia")):
+		var p_cd: Variant = _player_char.get("character_data")
+		if p_cd and "character_name" in p_cd and "vegeta" in String(p_cd.character_name).to_lower():
+			bp_r *= 1.15
 	_tug_progress = compute_fist_clash_step(_tug_progress, p_punches, bp_r, delta)
 	_update_tug_bar_visual()
 
+	if _event_orb and is_instance_valid(_event_orb):
+		var pulse_s: float = 0.95 + sin(Time.get_ticks_msec() * 0.035) * 0.18 + float(p_punches) * 0.22
+		_event_orb.scale = Vector3.ONE * pulse_s
+	if _prompt_label:
+		var p_pct: int = int(roundf(_tug_progress * 100.0))
+		var e_pct: int = 100 - p_pct
+		_prompt_label.text = "¡GOLPEA RÁPIDO! TÚ %d%% ⚔️ %d%% RIVAL" % [p_pct, e_pct]
+
 	if p_ki <= 0.0:
 		_resolve_fist_clash_winner(_enemy_char, _player_char, 1.0 - _tug_progress)
-	elif e_ki <= 0.0 or _tug_progress >= 0.96:
+	elif e_ki <= 0.0 or _tug_progress >= 0.98:
 		_resolve_fist_clash_winner(_player_char, _enemy_char, _tug_progress)
-	elif _tug_progress <= 0.04:
+	elif _tug_progress <= 0.02:
 		_resolve_fist_clash_winner(_enemy_char, _player_char, 1.0 - _tug_progress)
 	elif _event_timer <= 0.0:
 		if _tug_progress >= 0.50:
@@ -368,21 +395,45 @@ func _process_fist_clash(delta: float, l_vel: Vector3, r_vel: Vector3, l_closed:
 
 func _resolve_fist_clash_winner(win_node: Node3D, lose_node: Node3D, win_prog: float) -> void:
 	var margin: float = clampf((win_prog - 0.50) * 2.0, 0.0, 1.0)
-	var dmg: float = lerpf(650.0, 950.0, margin)
+	var dmg: float = lerpf(900.0, 1300.0, margin)
+	var win_is_p: bool = win_node != null and is_instance_valid(win_node) and bool(win_node.get("is_player"))
+	var exp_pos: Vector3 = _event_orb.global_position if (_event_orb and is_instance_valid(_event_orb)) else global_position
+
 	if lose_node and is_instance_valid(lose_node) and lose_node.has_method("take_hit"):
 		lose_node.take_hit(dmg, Vector3.ZERO, false)
 	if win_node and is_instance_valid(win_node):
-		_modify_ki(win_node, 10.0)
+		_modify_ki(win_node, 18.0)
 		if win_node.has_method("increase_np"):
-			win_node.increase_np(450.0)
+			win_node.increase_np(500.0)
 		if win_node.has_method("_log_combat_event"):
-			win_node._log_combat_event("⚡ ¡GANÓ EL CHOQUE FRENÉTICO DE PUÑOS! (%.0f BP, +10 Ki)" % dmg, "success")
-	_finish_event({
-		"action": "winner_offense",
-		"winner": win_node,
-		"loser": lose_node,
-		"bonus_hits": 2
-	})
+			win_node._log_combat_event("💥 ¡GANÓ EL CHOQUE DE PUÑOS! (-%.0f BP rival | +18 Ki | +500 BP)" % dmg, "success")
+
+	if _dome and _dome.has_method("_trigger_hit_stop"):
+		_dome._trigger_hit_stop(0.10)
+	if _dome and _dome.has_method("_spawn_parry_shockwave"):
+		_dome._spawn_parry_shockwave(exp_pos)
+	if get_tree():
+		ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), exp_pos, 3, Color(0.25, 0.92, 1.0, 0.95) if win_is_p else Color(1.0, 0.28, 0.16, 0.95), true)
+		var dd_fc: DramaticDirector = DramaticDirector.get_active(get_tree())
+		if dd_fc:
+			var ban_txt: String = "💥 ¡CHOQUE DE PUÑOS GANADO! (+18 KI / +500 BP)" if win_is_p else "⚠️ ¡PERDISTE EL CHOQUE DE PUÑOS!"
+			dd_fc.show_camera_banner(ban_txt, Color(0.25, 0.96, 1.0) if win_is_p else Color(1.0, 0.30, 0.22), 1.65)
+	if _dome and _dome.get("audio_player"):
+		AudioActionManager.play_action("common.block_perfect", _dome.get("audio_player"))
+
+	var lose_ki: float = float(lose_node.get("current_ki")) if (lose_node and is_instance_valid(lose_node) and lose_node.get("current_ki") != null) else 50.0
+	if win_prog >= 0.72 or lose_ki < 10.0:
+		_finish_event({
+			"action": "launch",
+			"victim": lose_node
+		})
+	else:
+		_finish_event({
+			"action": "winner_offense",
+			"winner": win_node,
+			"loser": lose_node,
+			"bonus_hits": 2
+		})
 
 
 func _process_meteor_smash(delta: float, l_ctrl: XRController3D, r_ctrl: XRController3D, l_vel: Vector3, r_vel: Vector3, l_closed: bool, r_closed: bool, stick_l: Vector2, stick_r: Vector2) -> void:
@@ -451,14 +502,20 @@ func _process_meteor_smash(delta: float, l_ctrl: XRController3D, r_ctrl: XRContr
 			_finish_event({ "action": "complete_normal" })
 
 
-func _process_z_vanish_war(delta: float, l_closed: bool, r_closed: bool, stick_l: Vector2, stick_r: Vector2) -> void:
+func _get_z_vanish_hop_cost(fighter: Node3D) -> float:
 	var cfg_zv: KiEconomyConfig = KiEconomyConfig.get_default()
-	var hop_cost: float = 12.0
-	if cfg_zv.get("melee_meteor_chase_cost") != null:
-		hop_cost = float(cfg_zv.melee_meteor_chase_cost)
+	var base_cost: float = float(cfg_zv.melee_vanish_cost) if cfg_zv.get("melee_vanish_cost") != null else 10.0
+	if fighter and is_instance_valid(fighter):
+		var cdata: Variant = fighter.get("character_data")
+		if cdata and "character_name" in cdata and "goku" in String(cdata.character_name).to_lower():
+			return maxf(base_cost - 2.0, 4.0)
+	return base_cost
 
+
+func _process_z_vanish_war(delta: float, l_closed: bool, r_closed: bool, stick_l: Vector2, stick_r: Vector2) -> void:
 	var reactor: Node3D = _player_char if _vanish_defender_is_player else _enemy_char
 	var chaser: Node3D = _enemy_char if _vanish_defender_is_player else _player_char
+	var hop_cost: float = _get_z_vanish_hop_cost(reactor)
 
 	if _vanish_defender_is_player:
 		var stick_flick: bool = _stick_debounce <= 0.0 and (stick_l.length() >= 0.65 or stick_r.length() >= 0.65)
@@ -498,7 +555,7 @@ func _process_z_vanish_war(delta: float, l_closed: bool, r_closed: bool, stick_l
 				if _title_label:
 					_title_label.text = "💨 ¡GUERRA DE Z-VANISH! (%d/3)" % _vanish_hop
 				if _prompt_label:
-					_prompt_label.text = "Stick (12 Ki) = ¡Contra-Blink! | Guardia X = Plantarse"
+					_prompt_label.text = "Stick (%d Ki) = ¡Contra-Blink! | Guardia X = Plantarse" % int(_get_z_vanish_hop_cost(_player_char))
 				return
 			else:
 				if reactor and reactor.has_method("take_hit"):
@@ -719,19 +776,6 @@ func _ensure_visuals() -> void:
 	_event_orb.position = Vector3(0.0, -0.10, -0.52) if (parent_node == cam) else Vector3(0.0, 0.0, -0.52)
 	parent_node.add_child(_event_orb)
 
-	_aura_sphere = MeshInstance3D.new()
-	var aura_s := SphereMesh.new()
-	aura_s.radius = 0.40
-	aura_s.height = 0.80
-	_aura_sphere.mesh = aura_s
-	_aura_mat = StandardMaterial3D.new()
-	_aura_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_aura_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_aura_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-	_aura_mat.albedo_color = Color(0.25, 0.92, 1.0, 0.65)
-	_aura_sphere.material_override = _aura_mat
-	add_child(_aura_sphere)
-
 
 func _hide_all_visuals() -> void:
 	if _hud_root and is_instance_valid(_hud_root):
@@ -740,8 +784,6 @@ func _hide_all_visuals() -> void:
 		_tug_bar_root.visible = false
 	if _event_orb and is_instance_valid(_event_orb):
 		_event_orb.visible = false
-	if _aura_sphere and is_instance_valid(_aura_sphere):
-		_aura_sphere.visible = false
 
 
 func _update_tug_bar_visual() -> void:
@@ -790,6 +832,3 @@ func _exit_tree() -> void:
 	if _event_orb and is_instance_valid(_event_orb):
 		_event_orb.queue_free()
 		_event_orb = null
-	if _aura_sphere and is_instance_valid(_aura_sphere):
-		_aura_sphere.queue_free()
-		_aura_sphere = null
