@@ -3093,8 +3093,9 @@ func _solve_arm_ik_skel(
 		return
 
 	var v: Vector3 = target_skel - s_rest
+	var v_len: float = maxf(v.length(), (target_skel - skeleton.get_bone_global_rest(shoulder_idx).origin).length())
 	var min_d: float = maxf(0.10 * (L1 + L2), absf(L1 - L2) + 0.005 * (L1 + L2))
-	var d: float = clampf(v.length(), min_d, (L1 + L2) * 0.992)
+	var d: float = clampf(v_len, min_d, (L1 + L2) * 0.998)
 	var v_dir: Vector3 = v.normalized() if v.length_squared() > 0.000001 else _skel_char_basis.z
 
 	# Ley de cosenos para ángulo de apertura del triángulo Hombro-Codo-Muñeca
