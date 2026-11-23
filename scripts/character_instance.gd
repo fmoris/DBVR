@@ -3061,11 +3061,31 @@ func _solve_arm_ik_skel(
 	target_basis_skel: Basis,
 	is_left: bool
 ) -> void:
-	var s_rest: Vector3 = skeleton.get_bone_global_rest(shoulder_idx).origin
+	var arm_parent: int = skeleton.get_bone_parent(shoulder_idx)
+	var v_char_raw: Vector3 = _skel_char_basis.inverse() * (target_skel - skeleton.get_bone_global_rest(shoulder_idx).origin).normalized()
+	if arm_parent != -1:
+		var p_name_low: String = skeleton.get_bone_name(arm_parent).to_lower()
+		if ("clavicle" in p_name_low) or ("shoulder" in p_name_low):
+			var clav_yaw: float = clampf(v_char_raw.z, 0.0, 1.0) * 0.28
+			var clav_pitch: float = clampf(v_char_raw.y, -0.3, 1.0) * 0.28
+			var other_s: int = right_arm_idx if is_left else left_arm_idx
+			var s_sign: float = 1.0 if is_left else -1.0
+			if other_s != -1:
+				var span_x: float = (_skel_char_basis.inverse() * (skeleton.get_bone_global_rest(shoulder_idx).origin - skeleton.get_bone_global_rest(other_s).origin)).x
+				if absf(span_x) > 0.01:
+					s_sign = 1.0 if span_x > 0.0 else -1.0
+			var clav_rot_char: Quaternion = Quaternion(_skel_char_basis.y, -s_sign * clav_yaw) * Quaternion(_skel_char_basis.z, s_sign * clav_pitch)
+			var clav_grest: Basis = skeleton.get_bone_global_rest(arm_parent).basis.orthonormalized()
+			var clav_gp: int = skeleton.get_bone_parent(arm_parent)
+			var clav_gp_cur: Basis = skeleton.get_bone_global_pose(clav_gp).basis.orthonormalized() if clav_gp != -1 else Basis.IDENTITY
+			var clav_desired: Basis = (Basis(clav_rot_char) * clav_grest).orthonormalized()
+			skeleton.set_bone_pose_rotation(arm_parent, (clav_gp_cur.inverse() * clav_desired).get_rotation_quaternion())
+
+	var s_rest: Vector3 = skeleton.get_bone_global_pose(arm_parent) * skeleton.get_bone_rest(shoulder_idx).origin if arm_parent != -1 else skeleton.get_bone_global_rest(shoulder_idx).origin
 	var e_rest: Vector3 = skeleton.get_bone_global_rest(forearm_idx).origin
 	var w_rest: Vector3 = skeleton.get_bone_global_rest(hand_idx).origin
 
-	var upper_rest_vec: Vector3 = e_rest - s_rest
+	var upper_rest_vec: Vector3 = e_rest - skeleton.get_bone_global_rest(shoulder_idx).origin
 	var lower_rest_vec: Vector3 = w_rest - e_rest
 	var L1: float = upper_rest_vec.length()
 	var L2: float = lower_rest_vec.length()
@@ -3112,7 +3132,6 @@ func _solve_arm_ik_skel(
 
 	var R_arm_grest: Basis = skeleton.get_bone_global_rest(shoulder_idx).basis.orthonormalized()
 	var R_arm_desired: Basis = (Basis(q_shoulder_delta) * R_arm_grest).orthonormalized()
-	var arm_parent: int = skeleton.get_bone_parent(shoulder_idx)
 	var R_arm_parent_cur: Basis = skeleton.get_bone_global_pose(arm_parent).basis.orthonormalized() if arm_parent != -1 else Basis.IDENTITY
 	var q_shoulder_local: Quaternion = (R_arm_parent_cur.inverse() * R_arm_desired).get_rotation_quaternion()
 	skeleton.set_bone_pose_rotation(shoulder_idx, q_shoulder_local)
