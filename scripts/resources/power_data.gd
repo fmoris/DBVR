@@ -12,3 +12,10 @@ extends Resource
 @export var unlock_requirement_transformation: String = "" # En blanco = disponible en base por defecto
 @export var forbidden_transformations: Array[String] = [] # Fases donde no se puede usar (ej: Genkidama prohibida en SSJ)
 @export var is_finisher: bool = false # Si es true, finaliza la partida al impactar en Zenkai
+
+@export_group("Zenkai Explosión, Audio y Animación")
+@export var explosion_tier: int = 2
+@export var charge_action_id: String = ""
+@export var fire_action_id: String = ""
+@export var impact_action_id: String = "common.ki_blast_impact"
+@export var anim_clip_prefix: String = "hissatsu1"

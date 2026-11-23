@@ -1797,6 +1797,7 @@ func check_zenkai_conditions(opponent_np: float) -> void:
 		emit_signal("furia_changed", is_in_furia)
 		if is_in_furia:
 			play_character_action_audio("common.furia_activate", false)
+			ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), global_position + Vector3(0.0, 0.9, 0.0), 3, Color(1.0, 0.25, 0.1, 0.95), true)
 			var c_name: String = character_data.character_name if character_data else name
 			_log_combat_event("🔥 ¡%s desata su FURIA! (+100%% Ki recarga, x2 BP)" % c_name, "warning")
 		_notify_stats()
@@ -1819,6 +1820,7 @@ func check_zenkai_conditions(opponent_np: float) -> void:
 			zenkai_source = "dominance"
 			emit_signal("zenkai_activated", "dominance")
 			play_character_action_audio("common.zenkai_activate", false)
+			ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), global_position + Vector3(0.0, 0.9, 0.0), 3, Color(1.0, 0.30, 0.12, 0.95), true)
 			var c_name_z: String = character_data.character_name if character_data else name
 			_log_combat_event("🔥 ¡ZENKAI DE DOMINIO ACTIVADO (%s)! Superas al rival en >40%% BP" % c_name_z, "success")
 			_notify_stats()
@@ -2205,6 +2207,11 @@ func transform_to(index: int) -> void:
 		# Feedback cinemático y onda expansiva de transformación
 		if procedural_animator and procedural_animator.has_method("trigger_transformation_roar"):
 			procedural_animator.trigger_transformation_roar()
+		if procedural_animator and procedural_animator.has_method("set_transformation_form"):
+			var anim_lib: String = String(trans.get("anim_library_path")) if (trans and trans.get("anim_library_path") != null) else ""
+			procedural_animator.set_transformation_form(trans.form_name, anim_lib)
+		var has_bio: bool = bool(trans.get("has_bio_lightning")) if (trans and trans.get("has_bio_lightning") != null) else false
+		ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), global_position + Vector3(0.0, 0.9, 0.0), 3, trans.aura_color, has_bio)
 		_spawn_melee_shockwave(global_position + Vector3(0, 1.0, 0))
 		var dd_trans: DramaticDirector = DramaticDirector.get_active(get_tree())
 		if dd_trans:
@@ -2302,6 +2309,8 @@ func trigger_zenkai_match_finish(winner: Node3D, loser: Node3D, tech_name: Strin
 		var w_data: Resource = winner.get("character_data")
 		if w_data and "character_name" in w_data:
 			w_name = w_data.character_name
+	if loser and is_instance_valid(loser):
+		ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), loser.global_position + Vector3(0.0, 0.9, 0.0), 5, Color(1.0, 0.85, 0.25, 1.0), true)
 	emit_signal("game_finished", w_name)
 	emit_signal("match_finished", winner, loser, tech_name)
 	play_character_action_audio("common.ko_finisher", false)
@@ -2498,16 +2507,24 @@ func _update_aura_visuals(delta: float = 0.0) -> void:
 		smat.set_shader_parameter("vertex_displacement", displacement)
 		
 	if is_instance_valid(aura_light_ref):
+		aura_light_ref.shadow_enabled = false
 		aura_light_ref.light_color = target_color
-		var light_energy = lerp(0.8, 8.0, power_factor)
+		var max_form_energy: float = 4.2
+		var max_form_range: float = 6.5
+		if current_transformation:
+			if current_transformation.get("light_energy") != null:
+				max_form_energy = float(current_transformation.get("light_energy"))
+			if current_transformation.get("light_range") != null:
+				max_form_range = float(current_transformation.get("light_range"))
+		var light_energy: float = lerpf(0.8, max_form_energy, power_factor)
 		if ki_ratio >= 0.88:
-			light_energy += 3.0
+			light_energy += 0.8
 		elif ki_ratio <= 0.20:
-			light_energy = lerp(0.3, 1.0, ki_ratio / 0.20)
+			light_energy = lerpf(0.3, 1.0, ki_ratio / 0.20)
 		if is_charging_ki:
-			light_energy += 4.5
-		aura_light_ref.light_energy = light_energy
-		aura_light_ref.omni_range = lerp(2.2, 6.5, bp_ratio)
+			light_energy += 1.2
+		aura_light_ref.light_energy = clampf(light_energy, 0.3, 4.5)
+		aura_light_ref.omni_range = lerpf(2.2, max_form_range, bp_ratio)
 
 func _notify_stats() -> void:
 	emit_signal("stats_changed", current_ki, current_np, is_in_zenkai_state)

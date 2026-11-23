@@ -732,6 +732,26 @@ func _spawn_visual_explosion(pos: Vector3) -> void:
 	if not vfx_parent or not is_inside_tree() or not get_tree():
 		return
 
+	var exp_tier: int = 2
+	if tier >= 4:
+		exp_tier = 5
+	elif tier == 3:
+		exp_tier = 4
+	elif tier == 2:
+		exp_tier = 2
+	else:
+		exp_tier = 2
+
+	var has_lightning: bool = false
+	if shooter_node and is_instance_valid(shooter_node):
+		var cur_tr: Variant = shooter_node.get("current_transformation")
+		if cur_tr != null and cur_tr is Resource and "has_bio_lightning" in cur_tr:
+			has_lightning = bool(cur_tr.get("has_bio_lightning"))
+		if bool(shooter_node.get("is_in_zenkai_state")) or bool(shooter_node.get("is_in_furia")):
+			has_lightning = true
+
+	ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), pos, exp_tier, p_color, has_lightning)
+
 	var flash = MeshInstance3D.new()
 	var sphere_mesh = SphereMesh.new()
 	sphere_mesh.radius = p_radius * 0.6
@@ -883,6 +903,7 @@ func _spawn_deflection_vfx(pos: Vector3) -> void:
 	var vfx_parent: Node = _get_vfx_parent()
 	if not vfx_parent or not is_inside_tree() or not get_tree():
 		return
+	ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), pos, 1, Color(1.0, 0.92, 0.35, 1.0), false)
 	var spark = MeshInstance3D.new()
 	var sphere = SphereMesh.new()
 	sphere.radius = p_radius * 1.8

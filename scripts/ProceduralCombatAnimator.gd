@@ -21,6 +21,8 @@ var skeleton: Skeleton3D = null
 var character_instance: Node3D = null
 var enabled: bool = true
 var is_vegeta_char: bool = false
+var zenkai_anim_loader: ZenkaiAnimationLoader = null
+var zenkai_overlay_weight: float = 0.08
 
 # Diccionario de huesos cacheados con sus transformaciones originales de reposo
 var bone_indices: Dictionary = {}
@@ -142,9 +144,32 @@ func setup(p_skeleton: Skeleton3D, p_character: Node3D) -> void:
 			bone_indices[target] = idx
 			bone_rest_rotations[target] = skeleton.get_bone_rest(idx).basis.get_rotation_quaternion()
 
+	zenkai_anim_loader = ZenkaiAnimationLoader.new()
+	var active_form: String = ""
+	var custom_lib: String = ""
+	if character_instance and character_instance.get("current_transformation") != null:
+		var tr_res: Resource = character_instance.get("current_transformation")
+		if tr_res and "form_name" in tr_res:
+			active_form = String(tr_res.get("form_name"))
+		if tr_res and "anim_library_path" in tr_res:
+			custom_lib = String(tr_res.get("anim_library_path"))
+	if not custom_lib.is_empty():
+		zenkai_anim_loader.load_library(custom_lib)
+	else:
+		zenkai_anim_loader.load_default_for_character(is_vegeta_char, active_form)
+
 	print("[ProceduralCombatAnimator] Configurado para %s. Huesos mapeados: %d/%d" % [
 		character_instance.name, bone_indices.size(), TARGET_BONES.size()
 	])
+
+
+func set_transformation_form(form_name: String, custom_library_path: String = "") -> void:
+	if zenkai_anim_loader == null:
+		zenkai_anim_loader = ZenkaiAnimationLoader.new()
+	if not custom_library_path.is_empty():
+		zenkai_anim_loader.load_library(custom_library_path)
+	else:
+		zenkai_anim_loader.load_default_for_character(is_vegeta_char, form_name)
 
 
 func _find_bone_with_aliases(target: String) -> int:
@@ -533,6 +558,15 @@ func _apply_hips_spine_and_chest(delta: float) -> void:
 		var flinch_roll: float = -0.18 * _st_flinch_factor * _st_flinch_local_dir.x
 		spine_target += Vector3(flinch_pitch, flinch_yaw * 0.4, flinch_roll * 0.5)
 		chest_target += Vector3(flinch_pitch * 0.6, flinch_yaw * 0.6, flinch_roll * 0.5)
+
+	if zenkai_anim_loader != null and zenkai_overlay_weight > 0.001:
+		var z_clip: String = _get_active_zenkai_clip_name()
+		if not z_clip.is_empty() and zenkai_anim_loader.has_clip(z_clip):
+			var z_u: float = _get_active_zenkai_clip_u()
+			var d_spine: Vector3 = zenkai_anim_loader.sample_clip_bone_delta_euler(z_clip, "Spine", z_u)
+			var d_chest: Vector3 = zenkai_anim_loader.sample_clip_bone_delta_euler(z_clip, "Chest", z_u)
+			spine_target += d_spine * zenkai_overlay_weight
+			chest_target += d_chest * zenkai_overlay_weight
 
 	var blend: float = clampf(16.0 * delta, 0.0, 1.0)
 	current_hips_euler = current_hips_euler.lerp(hips_target, blend)
@@ -1030,3 +1064,42 @@ func _set_bone_rot_relative(bone_name: String, offset_euler_char: Vector3) -> vo
 	var rest_quat: Quaternion = bone_rest_rotations[bone_name]
 	var offset_quat: Quaternion = Quaternion.from_euler(offset_euler_char)
 	skeleton.set_bone_pose_rotation(idx, (offset_quat * rest_quat).normalized())
+
+
+func _get_active_zenkai_clip_name() -> String:
+	if _st_is_transforming:
+		return "aura_burst_loop"
+	if _st_super_phase == 2:
+		if _st_super_tech == "big_bang" or _st_super_tech == "genkidama":
+			return "hissatsu2_fire"
+		return "hissatsu1_fire"
+	if _st_super_phase == 1:
+		if _st_super_tech == "big_bang" or _st_super_tech == "genkidama":
+			return "hissatsu2_charge"
+		return "hissatsu1_charge"
+	if _st_is_melee_active:
+		match melee_anim_type:
+			0: return "rush_1"
+			1: return "rush_2"
+			2: return "rush_3"
+			3: return "rush_4"
+			_: return "rush_5"
+	if _st_ki_phase > 0:
+		return "ki_charge_loop"
+	if _st_is_flying:
+		return "dash_loop"
+	if _st_is_launching_air:
+		return "blow_spiral"
+	if _st_is_getup:
+		return "recover_kipup"
+	return "idle_ground"
+
+
+func _get_active_zenkai_clip_u() -> float:
+	if _st_is_transforming:
+		return _st_transform_u
+	if _st_is_melee_active:
+		return _st_melee_u
+	if _st_is_getup:
+		return _st_getup_u
+	return fmod(anim_time * 1.2, 1.0)

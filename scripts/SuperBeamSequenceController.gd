@@ -722,6 +722,7 @@ func _spawn_super_aoe_explosion(blast_pos: Vector3, apply_splash_to_defender: bo
 			r_tw.tween_callback(ring.queue_free)
 
 		if is_inside_tree() and get_tree():
+			ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), blast_pos, 4, energy_color, false)
 			KiSmokeFX.spawn_smoke(get_tree(), blast_pos, 2.2)
 
 	var result: Dictionary = { "in_radius": false, "damage_bp": 0.0, "knockback_speed": 0.0, "no_sell": false }
@@ -1347,6 +1348,14 @@ func _spawn_super_impact_explosion_vfx(pos: Vector3, col: Color, bp_ratio: float
 	var target_parent: Node = get_tree().current_scene if get_tree().current_scene else get_parent()
 	if not target_parent:
 		return
+	var atk_in_zenkai: bool = bool(attacker and is_instance_valid(attacker) and (attacker.get("is_in_zenkai_state") or attacker.get("is_comeback_zenkai")))
+	var z_tier: int = 5 if (atk_in_zenkai or tier >= 4) else 4
+	var has_bio: bool = atk_in_zenkai
+	if attacker and is_instance_valid(attacker):
+		var cur_tr: Variant = attacker.get("current_transformation")
+		if cur_tr != null and cur_tr is Resource and "has_bio_lightning" in cur_tr:
+			has_bio = has_bio or bool(cur_tr.get("has_bio_lightning"))
+	ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), pos, z_tier, col, has_bio)
 	var dome := MeshInstance3D.new()
 	dome.name = "SuperImpactExplosionDome"
 	var sp := SphereMesh.new()
