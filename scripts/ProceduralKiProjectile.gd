@@ -605,8 +605,8 @@ func _apply_projectile_hit(char_node: Node, caster: Node, pos: Vector3, hit_dir:
 			if pre_drain > 0.0 and char_node.has_method("drain_ki"):
 				char_node.drain_ki(pre_drain)
 
-	# 4. Aplicar daño (sin regalar Ki al receptor!) y drenar Ki limpio en impacto abierto
-	var apply_kb_hit: bool = is_charged_blast or is_counter or is_perfect_return or forced_guard_break or (float(profile.get("effective_ratio", 1.0)) >= 0.75)
+	# 4. Aplicar daño sin derribo prematuro: rápidos solo producen flinch; cargados empujan corto sin tumbar
+	var apply_kb_hit: bool = forced_guard_break
 	char_node.take_hit(effective_damage, hit_dir, apply_kb_hit)
 
 	if is_perfect_return:
@@ -615,8 +615,11 @@ func _apply_projectile_hit(char_node: Node, caster: Node, pos: Vector3, hit_dir:
 		if char_node.has_method("_spawn_bp_delta_popup"):
 			char_node._spawn_bp_delta_popup(0.0, "✋ ¡DEVOLUCIÓN PERFECTA!")
 
-	if (forced_guard_break or (bool(profile.get("launches_air_brake", false)) and not was_char_blocking)) and char_node.has_method("apply_knockback"):
-		char_node.apply_knockback(hit_dir, 18.0, 2.5)
+	if forced_guard_break and char_node.has_method("apply_knockback"):
+		char_node.apply_knockback(hit_dir, 15.0, 2.5)
+	elif is_charged_blast and not was_char_blocking and char_node.has_method("apply_knockback"):
+		var short_push_dir: Vector3 = Vector3(hit_dir.x, 0.0, hit_dir.z).normalized() if Vector3(hit_dir.x, 0.0, hit_dir.z).length_squared() > 0.01 else hit_dir
+		char_node.apply_knockback(short_push_dir, 5.5, 4.2)
 
 	if not was_char_blocking:
 		var total_ki_drain: float = float(profile.get("ki_drain", 3.0)) + extra_victim_ki_drain
@@ -625,17 +628,22 @@ func _apply_projectile_hit(char_node: Node, caster: Node, pos: Vector3, hit_dir:
 	elif extra_victim_ki_drain > 0.0 and char_node.has_method("drain_ki"):
 		char_node.drain_ki(extra_victim_ki_drain)
 
-	# 5. Saturación ➔ Apertura + Cortina de Humo Táctica
+	# 5. Saturación ➔ Apertura + Cortina de Humo Táctica (derribo solo al saturar 6.0/6.0 stacks)
+	var saturated_now: bool = false
 	if char_node.has_method("apply_ki_blast_pressure"):
-		char_node.apply_ki_blast_pressure(caster, is_charged_blast, was_char_blocking, profile, pos, extra_stacks)
+		saturated_now = bool(char_node.apply_ki_blast_pressure(caster, is_charged_blast, was_char_blocking, profile, pos, extra_stacks))
+	if saturated_now and not forced_guard_break and char_node.has_method("apply_knockback"):
+		char_node.apply_knockback(hit_dir, 14.0, 2.5)
 
 	# 6. Ganancia de BP del atacante y condiciones de Zenkai
+	# Prohibido K.O. por Ki Blast cargado normal: solo remata si el defensor está SIN DEFENSA y el atacante en Zenkai
 	if caster and is_instance_valid(caster) and char_node != caster and caster.has_method("increase_np"):
 		caster.increase_np(effective_damage * 0.35)
 		caster.check_zenkai_conditions(char_node.current_np)
 		char_node.check_zenkai_conditions(caster.current_np)
-		if is_charged_blast and not was_char_blocking and (was_launched_in_zenkai or bool(caster.get("is_in_zenkai_state"))) and caster.has_method("trigger_zenkai_match_finish"):
-			var p_title_kb: String = power.power_name if (power and "power_name" in power) else "Ki Blast Cargado"
+		var victim_defenseless: bool = char_node.has_method("is_defenseless_for_ko") and bool(char_node.is_defenseless_for_ko())
+		if is_charged_blast and not was_char_blocking and victim_defenseless and (was_launched_in_zenkai or bool(caster.get("is_in_zenkai_state"))) and caster.has_method("trigger_zenkai_match_finish"):
+			var p_title_kb: String = power.power_name if (power and "power_name" in power) else "Ki Blast Cargado (Remate Final)"
 			caster.trigger_zenkai_match_finish(caster, char_node, p_title_kb)
 
 
@@ -699,6 +707,16 @@ func _trigger_explosion(pos: Vector3, collider: Node) -> void:
 				var p_dist = pos.distance_to(proj.global_position)
 				if p_dist <= explosion_radius and int(proj.get("tier")) < self.tier:
 					proj.call_deferred("queue_free")
+
+	# 2.5 Destrucción física de pilares, rocas y cañón con daño secundario por escombros
+	if is_inside_tree() and get_tree():
+		var adm_proj: ArenaDestructionManager = ArenaDestructionManager.get_active(get_tree())
+		if adm_proj:
+			var is_env_hit: bool = collider != null and ("Spire" in collider.name or "Pillar" in collider.name or "Boulder" in collider.name or "Canyon" in collider.name)
+			if is_env_hit or tier >= 2 or has_meta("charge_time"):
+				var caster_bp: float = float(caster.get("current_np")) if (caster and is_instance_valid(caster) and caster.get("current_np") != null) else 10000.0
+				var env_radius: float = maxf(explosion_radius, 3.2 if (tier >= 2 or has_meta("charge_time")) else 1.8)
+				adm_proj.apply_power_aoe_destruction(pos, env_radius, final_damage, caster_bp)
 
 	# 3. Visuales: Destello esférico + Onda refractiva
 	_spawn_visual_explosion(pos)

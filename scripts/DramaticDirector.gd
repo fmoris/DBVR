@@ -507,6 +507,59 @@ func play_dramatic_transformation(fighter: Node3D, trans: Resource) -> void:
 	show_camera_banner("⚡ ¡%s DESPIERTA %s! ⚡" % [char_lbl, f_name], aura_col.lightened(0.2), 1.45)
 
 
+func play_dramatic_zenkai_event(fighter: Node3D, source: String) -> void:
+	if not fighter or not is_instance_valid(fighter):
+		return
+	var is_comeback: bool = (source == "comeback")
+	var zenkai_col: Color = Color(1.0, 0.24, 0.12, 1.0) if is_comeback else Color(1.0, 0.86, 0.16, 1.0)
+	var pos: Vector3 = fighter.get_parent().global_position if (bool(fighter.get("is_player")) and fighter.get_parent() is Node3D) else fighter.global_position
+
+	_set_atmosphere(zenkai_col, 0.44, 0.62, 1.15)
+	_levitate_center = pos
+	_levitation_active = true
+	if _rock_multimesh:
+		_rock_multimesh.visible = true
+
+	if _pillar_mesh and _pillar_mat:
+		_pillar_mat.set_shader_parameter("beam_color", Color(zenkai_col.r, zenkai_col.g, zenkai_col.b, 0.92))
+		_pillar_mesh.global_position = Vector3(pos.x, pos.y + 18.0, pos.z)
+		_pillar_mesh.scale = Vector3(1.05, 1.0, 1.05)
+		_pillar_mesh.visible = true
+
+	if is_inside_tree() and get_tree():
+		ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), pos + Vector3(0.0, 0.95, 0.0), 4, zenkai_col, true)
+	_spawn_shockwave_ring(pos + Vector3(0.0, 0.30, 0.0), zenkai_col, 6.0, 0.65)
+	_spawn_shockwave_ring(pos + Vector3(0.0, 1.05, 0.0), zenkai_col.lightened(0.25), 4.5, 0.50)
+
+	# Repulsión de proyectiles menores en radio 8.0m
+	var scene_root: Node = get_tree().current_scene if (is_inside_tree() and get_tree()) else null
+	if scene_root:
+		for child in scene_root.get_children():
+			if child is Node3D and child.has_method("_trigger_explosion") and child.get("shooter_node") != fighter:
+				if (child as Node3D).global_position.distance_to(pos) <= 8.0:
+					child.queue_free()
+
+	# Presión de aura sobre el rival si está muy cerca
+	var opp: Node3D = _enemy_char if fighter == _player_char else _player_char
+	if opp and is_instance_valid(opp):
+		var opp_pos: Vector3 = opp.get_parent().global_position if (bool(opp.get("is_player")) and opp.get_parent() is Node3D) else opp.global_position
+		if pos.distance_to(opp_pos) < 5.5 and opp.has_method("apply_knockback"):
+			var push_dir: Vector3 = (opp_pos - pos).normalized()
+			if push_dir.length_squared() < 0.01:
+				push_dir = Vector3.BACK
+			opp.apply_knockback(push_dir, 9.5)
+
+	# Micro slow-motion seguro (0.65s reales a 0.28x, restaurado automáticamente a 1.0)
+	if not is_dramatic_pause_active and not _is_finish_playing and Engine.time_scale >= 0.85:
+		Engine.time_scale = 0.28
+		_timescale_restore_timer = 0.65
+
+	play_character_dramatic_voice(fighter, "transform_ssj", "ki_charge")
+	play_dramatic_sfx("common.furia_activate" if is_comeback else "common.zenkai_activate", "common.aura_burst")
+	var banner_txt: String = "🔥 ¡FURIA ZENKAI COMEBACK! — REMONTADA (+35 KI) 🔥" if is_comeback else "⚡ ¡DOMINIO ZENKAI! — FINISHER LISTO (+35 KI) ⚡"
+	show_camera_banner(banner_txt, zenkai_col.lightened(0.18), 1.65)
+
+
 func _apply_npc_hair_tint(fighter: Node3D, col: Color) -> void:
 	var id_key: int = fighter.get_instance_id()
 	if not _saved_hair_materials.has(id_key):

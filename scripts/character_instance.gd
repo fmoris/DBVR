@@ -179,6 +179,11 @@ var is_in_beam_sequence: bool = false
 var active_beam_sequence: Node3D = null
 var is_in_beam_clash: bool = false
 var melee_approach_progress: float = 0.0
+var _power_cooldowns: Dictionary = {}
+var global_super_recovery_timer: float = 0.0
+const GLOBAL_SUPER_RECOVERY_SEC: float = 3.0
+var comeback_zenkai_timer: float = 0.0
+const COMEBACK_ZENKAI_DURATION_SEC: float = 15.0
 
 # Variables de vuelo hacia el contrincante
 var is_flying_to_opponent: bool = false
@@ -729,14 +734,10 @@ func _physics_process(delta: float) -> void:
 				var dash_t: float = clampf(dist / maxf(_dash_initial_dist, 1.0), 0.0, 1.0)
 				var ease_mult: float = lerpf(0.90, 1.38, dash_t)
 				var move_amount = min(flight_speed * _dash_speed_mult * ease_mult * delta, dist - target_dist)
-				if is_player:
-					var origin = get_parent()
-					if origin:
-						origin.global_position += dir * move_amount
-						_clamp_to_arena(origin)
-				else:
-					global_position += dir * move_amount
-					_clamp_to_arena(self)
+				var mover_node: Node3D = (get_parent() as Node3D) if (is_player and get_parent() is Node3D) else self
+				var step_vec: Vector3 = _resolve_solid_arena_step(mover_node, dir * move_amount, true)
+				mover_node.global_position += step_vec
+				_clamp_to_arena(mover_node)
 
 				if dist - move_amount <= target_dist + 0.05:
 					_stop_flight()
@@ -757,14 +758,10 @@ func _physics_process(delta: float) -> void:
 			ragdoll_recovery_timer = 1.65
 	elif velocity.length_squared() > 0.001 and not is_in_bullet_time:
 		var move_step = velocity * delta
-		if is_player:
-			var origin = get_parent()
-			if origin:
-				origin.global_position += move_step
-				_clamp_to_arena(origin)
-		else:
-			global_position += move_step
-			_clamp_to_arena(self)
+		var kb_mover: Node3D = (get_parent() as Node3D) if (is_player and get_parent() is Node3D) else self
+		var safe_step: Vector3 = _resolve_solid_arena_step(kb_mover, move_step, false)
+		kb_mover.global_position += safe_step
+		_clamp_to_arena(kb_mover)
 
 		# Resistencia aerodinámica / fricción
 		velocity.x = move_toward(velocity.x, 0.0, knockback_drag * delta)
@@ -994,7 +991,8 @@ func _process(delta: float) -> void:
 			_update_mouth_expression(delta)
 
 
-	# Regeneración pasiva de Ki en Fase Libre y actualización visual del aura
+	# Regeneración pasiva de Ki en Fase Libre, cooldowns de Súper Poderes y aura
+	_process_power_cooldowns(delta)
 	_process_passive_ki_regen(delta)
 	_update_aura_visuals(delta)
 
@@ -1194,6 +1192,9 @@ func take_hit(amount_np: float, hit_direction: Vector3 = Vector3.ZERO, apply_kb:
 		# Flinch visual reactivo en animación procedural
 		if procedural_animator:
 			procedural_animator.trigger_hit_flinch(clampf(amount_np * 0.005, 0.2, 1.2), dir)
+	elif amount_np >= 10.0 and procedural_animator:
+		var flinch_dir: Vector3 = hit_direction if hit_direction.length_squared() > 0.01 else -global_transform.basis.z
+		procedural_animator.trigger_hit_flinch(0.28, flinch_dir)
 
 
 ## Absorbe el impacto reduciendo 85% del daño a cambio de Ki (Mecánica de Bloqueo / Guardia Cruzada)
@@ -1342,7 +1343,7 @@ static func compute_ki_blast_bp_profile(atk_bp: float, def_bp: float, is_charged
 			dmg_mult = 0.25
 			ki_drain = 2.0
 			stacks_added = 1.0
-		stacks_required = 4.0
+		stacks_required = 7.0
 		smoke_duration = 1.5
 		smoke_obscures = false
 		opening_duration = 0.8
@@ -1355,8 +1356,8 @@ static func compute_ki_blast_bp_profile(atk_bp: float, def_bp: float, is_charged
 		var t: float = clampf((effective_r - 0.55) / 0.20, 0.0, 1.0)
 		dmg_mult = lerpf(0.35, 0.95, t) if is_charged else lerpf(0.30, 0.90, t)
 		ki_drain = lerpf(3.0, 9.0, t) if is_charged else lerpf(1.0, 3.0, t)
-		stacks_added = lerpf(1.5, 3.0, t) if is_charged else lerpf(0.5, 1.0, t)
-		stacks_required = 4.0 if effective_r < 0.65 else 3.0
+		stacks_added = lerpf(1.4, 2.2, t) if is_charged else lerpf(0.6, 1.0, t)
+		stacks_required = 6.0
 		smoke_duration = lerpf(1.8, 3.2, t)
 		smoke_obscures = (t >= 0.5)
 		opening_duration = lerpf(1.0, 1.5, t)
@@ -1369,8 +1370,8 @@ static func compute_ki_blast_bp_profile(atk_bp: float, def_bp: float, is_charged
 		var t_even: float = clampf((effective_r - 0.75) / 0.60, 0.0, 1.0)
 		dmg_mult = lerpf(0.95, 1.15, t_even)
 		ki_drain = 9.0 if is_charged else 3.0
-		stacks_added = 3.0 if is_charged else 1.0
-		stacks_required = 3.0
+		stacks_added = 2.2 if is_charged else 1.0
+		stacks_required = 6.0
 		smoke_duration = 3.5
 		smoke_obscures = true
 		opening_duration = 1.6
@@ -1383,8 +1384,8 @@ static func compute_ki_blast_bp_profile(atk_bp: float, def_bp: float, is_charged
 		var t_sup: float = clampf((effective_r - 1.35) / 0.45, 0.0, 1.0)
 		dmg_mult = lerpf(1.20, 1.45, t_sup)
 		ki_drain = 13.0 if is_charged else 4.5
-		stacks_added = 3.0 if is_charged else 1.0
-		stacks_required = 2.0
+		stacks_added = 2.2 if is_charged else 1.0
+		stacks_required = 6.0
 		smoke_duration = 4.2
 		smoke_obscures = true
 		opening_duration = 2.0
@@ -1396,8 +1397,8 @@ static func compute_ki_blast_bp_profile(atk_bp: float, def_bp: float, is_charged
 	else:
 		dmg_mult = clampf(1.50 + (effective_r - 1.80) * 0.25, 1.50, 2.0)
 		ki_drain = 16.0 if is_charged else 6.0
-		stacks_added = 3.0 if is_charged else 1.25
-		stacks_required = 2.0
+		stacks_added = 2.5 if is_charged else 1.15
+		stacks_required = 5.0
 		smoke_duration = 4.8
 		smoke_obscures = true
 		opening_duration = 2.2
@@ -1545,7 +1546,13 @@ func _update_pressure_ring_visual() -> void:
 		add_child(_pressure_ring_mesh)
 	var ratio: float = clampf(blast_pressure_stacks / maxf(blast_pressure_required, 1.0), 0.0, 1.0)
 	var is_open: bool = blast_opened_timer > 0.01
-	var col: Color = Color(1.0, 0.25, 0.08, 0.92) if is_open else Color(0.15, 0.85, 1.0, 0.45).lerp(Color(1.0, 0.72, 0.12, 0.90), ratio)
+	var col: Color
+	if is_open or ratio >= 0.85:
+		col = Color(1.0, 0.14, 0.08, 0.95)
+	elif ratio >= 0.50:
+		col = Color(1.0, 0.52, 0.08, 0.85)
+	else:
+		col = Color(1.0, 0.92, 0.20, 0.65)
 	if _pressure_ring_mat:
 		_pressure_ring_mat.albedo_color = col
 	_pressure_ring_mesh.scale = Vector3.ONE * (1.28 if is_open else lerpf(0.75, 1.15, ratio))
@@ -1736,6 +1743,21 @@ func _mark_ki_spent() -> void:
 	_passive_regen_cooldown = KiEconomyConfig.get_default().passive_regen_delay_sec
 
 
+func get_combat_act() -> int:
+	if current_transformation != null:
+		return 3 if current_transformation.tier_level >= 2 else 2
+	var ratio: float = current_np / maxf(get_active_max_np(), 1.0)
+	if ratio >= 0.75:
+		return 3
+	if ratio >= 0.35:
+		return 2
+	return 1
+
+
+func is_defenseless_for_ko() -> bool:
+	return is_guard_broken or current_ki <= 1.0 or ground_crater_stun_timer > 0.0 or is_defenseless_crash
+
+
 func _process_passive_ki_regen(delta: float) -> void:
 	if is_match_over or not character_data:
 		return
@@ -1747,7 +1769,9 @@ func _process_passive_ki_regen(delta: float) -> void:
 		return
 	if current_ki >= character_data.base_ki:
 		return
-	var regen: float = KiEconomyConfig.get_default().passive_ki_regen_per_sec * get_dramatic_modifier("passive_ki_mult", 1.0) * delta
+	var act: int = get_combat_act()
+	var act_ki_mult: float = 1.40 if act >= 3 else (1.25 if act == 2 else 1.0)
+	var regen: float = KiEconomyConfig.get_default().passive_ki_regen_per_sec * act_ki_mult * get_dramatic_modifier("passive_ki_mult", 1.0) * delta
 	if is_penalized:
 		regen *= 0.5
 	current_ki = minf(current_ki + regen, character_data.base_ki)
@@ -1787,7 +1811,7 @@ func check_zenkai_conditions(opponent_np: float) -> void:
 	var max_pair_bp: float = maxf(maxf(current_np, opponent_np), 1000.0)
 	var behind_ratio: float = (opponent_np - current_np) / max_pair_bp
 	var lead_ratio: float = (current_np - opponent_np) / max_pair_bp
-	var furia_threshold: float = get_dramatic_modifier("furia_threshold", 0.30)
+	var furia_threshold: float = get_dramatic_modifier("furia_threshold", 0.35)
 
 	# Furia (Comeback): se activa al estar >= 30% atrás (o umbral dramático menor), histéresis al recuperar ventaja
 	var should_furia: bool = is_in_furia
@@ -1817,18 +1841,18 @@ func check_zenkai_conditions(opponent_np: float) -> void:
 
 	var active_max: float = get_active_max_np()
 
-	# Zenkai por Dominio Absoluto (simétrico para ambos jugadores): liderar >= 40% BP y >= 75% máximo activo
-	if lead_ratio >= 0.40 and current_np >= active_max * 0.75:
+	# Zenkai por Dominio Absoluto: requiere brecha >= 45% NP + al menos Acto II (>= 50% NP o transformado)
+	var act_ii_reached: bool = (current_transformation != null) or (current_np >= active_max * 0.50)
+	if lead_ratio >= 0.45 and act_ii_reached:
 		if not is_in_zenkai_state:
 			is_in_zenkai_state = true
 			zenkai_source = "dominance"
 			emit_signal("zenkai_activated", "dominance")
-			play_character_action_audio("common.zenkai_activate", false)
-			ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), global_position + Vector3(0.0, 0.9, 0.0), 3, Color(1.0, 0.30, 0.12, 0.95), true)
+			_on_zenkai_dramatic_trigger("dominance")
 			var c_name_z: String = character_data.character_name if character_data else name
-			_log_combat_event("🔥 ¡ZENKAI DE DOMINIO ACTIVADO (%s)! Superas al rival en >40%% BP" % c_name_z, "success")
+			_log_combat_event("⚡ ¡DOMINIO ZENKAI ACTIVADO (%s)! Brecha ≥45%% BP — FINISHER LISTO" % c_name_z, "success")
 			_notify_stats()
-	elif is_in_zenkai_state and (lead_ratio < 0.32 or current_np < active_max * 0.68):
+	elif is_in_zenkai_state and (lead_ratio < 0.36 or (current_transformation == null and current_np < active_max * 0.44)):
 		is_in_zenkai_state = false
 		zenkai_source = ""
 		_notify_stats()
@@ -1841,14 +1865,28 @@ func trigger_comeback_zenkai() -> void:
 	if not is_in_zenkai_state:
 		is_in_zenkai_state = true
 		is_comeback_zenkai = true
+		comeback_zenkai_timer = COMEBACK_ZENKAI_DURATION_SEC
 		zenkai_source = "comeback"
 		emit_signal("zenkai_activated", "comeback")
-		play_character_action_audio("common.furia_activate", false, "common.zenkai_activate")
+		_on_zenkai_dramatic_trigger("comeback")
 		_notify_stats()
 		_check_transformation_unlocks()
 		var c_name: String = character_data.character_name if character_data else name
-		_log_combat_event("⚡ ¡ZENKAI COMEBACK (%s)! (1 intento de Finisher tras jugada heroica en Furia)" % c_name, "warning")
-		print("[CharacterInstance] %s: ¡ZENKAI COMEBACK ACTIVADO! Tienes un ataque para liquidar o serás penalizado." % c_name)
+		_log_combat_event("🔥 ¡FURIA ZENKAI COMEBACK (%s)! Ventana épica de %.0fs — REMONTADA LISTA" % [c_name, COMEBACK_ZENKAI_DURATION_SEC], "warning")
+		print("[CharacterInstance] %s: ¡ZENKAI COMEBACK ACTIVADO! Ventana de %.0fs para liquidar." % [c_name, COMEBACK_ZENKAI_DURATION_SEC])
+
+
+func _on_zenkai_dramatic_trigger(source: String) -> void:
+	if character_data:
+		current_ki = minf(current_ki + 35.0, character_data.base_ki)
+	_update_aura_visuals()
+	var dd_z: DramaticDirector = DramaticDirector.get_active(get_tree())
+	if dd_z and dd_z.has_method("play_dramatic_zenkai_event"):
+		dd_z.play_dramatic_zenkai_event(self, source)
+	else:
+		var z_col: Color = Color(1.0, 0.24, 0.12, 0.95) if source == "comeback" else Color(1.0, 0.86, 0.16, 0.95)
+		play_character_action_audio("common.furia_activate" if source == "comeback" else "common.zenkai_activate", false)
+		ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), global_position + Vector3(0.0, 0.9, 0.0), 4, z_col, true)
 
 
 func _tick_dramatic_buffs(delta: float) -> void:
@@ -2258,10 +2296,73 @@ func revert_to_base() -> void:
 		if opp.has_method("check_zenkai_conditions"):
 			opp.check_zenkai_conditions(current_np)
 
+func _process_power_cooldowns(delta: float) -> void:
+	if global_super_recovery_timer > 0.0:
+		global_super_recovery_timer = maxf(0.0, global_super_recovery_timer - delta)
+	if is_comeback_zenkai and comeback_zenkai_timer > 0.0:
+		if not is_charging_super and not is_firing_beam and not is_in_beam_sequence and not is_in_bullet_time:
+			comeback_zenkai_timer -= delta
+			if comeback_zenkai_timer <= 0.0:
+				is_comeback_zenkai = false
+				is_in_zenkai_state = false
+				zenkai_source = ""
+				_notify_stats()
+				_log_combat_event("⏳ Ventana de Zenkai Comeback expirada.", "info")
+	if _power_cooldowns.is_empty():
+		return
+	var expired: Array[String] = []
+	for k in _power_cooldowns.keys():
+		var rem: float = float(_power_cooldowns[k]) - delta
+		if rem <= 0.0:
+			expired.append(String(k))
+		else:
+			_power_cooldowns[k] = rem
+	for ek in expired:
+		_power_cooldowns.erase(ek)
+
+
+func get_power_by_name(tech_name: String) -> PowerData:
+	if not character_data or character_data.powers.is_empty():
+		return null
+	var low: String = tech_name.to_lower()
+	for p in character_data.powers:
+		if p and p.power_name.to_lower() == low:
+			return p
+	return null
+
+
+func get_power_cooldown_remaining(power_name: String) -> float:
+	return float(_power_cooldowns.get(power_name.to_lower(), 0.0))
+
+
+func start_power_cooldown(tech_name: String) -> void:
+	var p: PowerData = get_power_by_name(tech_name)
+	var cd: float = float(p.cooldown_sec) if (p and p.get("cooldown_sec") != null) else 7.0
+	if cd > 0.0:
+		if is_in_zenkai_state:
+			cd *= 0.55
+		_power_cooldowns[tech_name.to_lower()] = cd
+	global_super_recovery_timer = GLOBAL_SUPER_RECOVERY_SEC
+
+
 func is_power_usable(power: Resource) -> bool:
-	# En Estado Zenkai se exime todo bloqueo de transformación para permitir lanzar cualquier Super Poder
+	if power == null:
+		return false
+	var is_ki_blast: bool = String(power.gesture_trigger).to_lower() == "ki_blast"
+	var opp: Node3D = _get_opponent()
+	var is_counter_clash: bool = opp != null and is_instance_valid(opp) and bool(opp.get("is_in_beam_sequence"))
+
+	# Anti-spam: cooldown individual + ventana global post-Súper (3.0s), exento para Ki Blast o contraataque en Beam Clash
+	if not is_ki_blast and not is_counter_clash:
+		if global_super_recovery_timer > 0.0:
+			return false
+		if get_power_cooldown_remaining(power.power_name) > 0.0:
+			return false
+
+	# En Estado Zenkai se exime bloqueo de transformación / acto mínimo para permitir Finisher
 	if is_in_zenkai_state:
 		return true
+
 	# 1. ¿Está desbloqueado o es técnica base?
 	var is_unlocked = unlocked_powers.has(power.power_name) or power.unlock_requirement_transformation == ""
 	if not is_unlocked:
@@ -2269,7 +2370,12 @@ func is_power_usable(power: Resource) -> bool:
 	# 2. ¿Prohibido en esta forma?
 	if current_transformation and power.forbidden_transformations.has(current_transformation.form_name):
 		return false
-	# 3. Super Poderes y Finishers ejecutables con Ki o mediante Último Aliento (Fuerza Vital)
+	# 3. Umbral mínimo de Acto (min_np_ratio) en Forma Base para progresión In Crescendo
+	var min_ratio: float = float(power.min_np_ratio) if power.get("min_np_ratio") != null else 0.0
+	if min_ratio > 0.0 and not is_ki_blast and not is_counter_clash and current_transformation == null:
+		var np_ratio: float = current_np / maxf(get_active_max_np(), 1.0)
+		if np_ratio < min_ratio:
+			return false
 	return true
 
 func execute_finisher_hit(power: Resource) -> void:
@@ -3612,6 +3718,62 @@ func get_ground_elevation(world_pos: Vector3) -> float:
 	return 0.5 if on_stone_ring else 0.0
 
 
+## Resuelve un paso de movimiento contra obstáculos sólidos de la arena (pilares, rocas, cañón)
+## evitando atravesarlos por tunneling durante Melee Dash o knockback de alta velocidad.
+func _resolve_solid_arena_step(mover: Node3D, step: Vector3, slide_around: bool) -> Vector3:
+	if mover == null or not is_instance_valid(mover) or step.length_squared() < 0.00001:
+		return step
+	if not is_inside_tree() or not get_world_3d():
+		return step
+	var space: PhysicsDirectSpaceState3D = get_world_3d().direct_space_state
+	if not space:
+		return step
+	var start_c: Vector3 = mover.global_position + Vector3(0.0, 0.95, 0.0)
+	var step_len: float = step.length()
+	var step_dir: Vector3 = step / step_len
+	var probe_dist: float = step_len + 0.55
+	var rq := PhysicsRayQueryParameters3D.create(start_c, start_c + step_dir * probe_dist)
+	rq.collision_mask = 1
+	var hit: Dictionary = space.intersect_ray(rq)
+	if hit.is_empty():
+		return step
+	var col_node: Node = hit.get("collider") as Node
+	if not col_node:
+		return step
+	var is_solid_obstacle: bool = (
+		"Spire" in col_node.name or "Pillar" in col_node.name
+		or "Boulder" in col_node.name or "Canyon" in col_node.name
+		or "Mountain" in col_node.name or col_node.is_in_group("mountains")
+	)
+	if not is_solid_obstacle:
+		return step
+	var n: Vector3 = hit.get("normal", -step_dir) as Vector3
+	var n_xz: Vector3 = Vector3(n.x, 0.0, n.z)
+	if n_xz.length_squared() < 0.01:
+		return step
+	n_xz = n_xz.normalized()
+	if slide_around:
+		var tangent: Vector3 = step - n_xz * step.dot(n_xz)
+		if tangent.length_squared() < 0.0001:
+			tangent = n_xz.cross(Vector3.UP).normalized() * step_len
+		return tangent + n_xz * 0.12
+	var horiz_spd: float = Vector2(velocity.x, velocity.z).length()
+	var adm: ArenaDestructionManager = ArenaDestructionManager.get_active(get_tree())
+	if adm and horiz_spd >= 5.5:
+		var d_res: Dictionary = adm.apply_body_collision_impact(col_node, hit["position"], self, _get_opponent(), horiz_spd)
+		if bool(d_res.get("destroyed", false)):
+			var d_kind: String = String(d_res.get("kind", "boulder"))
+			var d_bp: int = int(d_res.get("bonus_bp", 0.0))
+			var kind_lbl: String = "PILAR" if d_kind == "pillar" else ("MONTAÑA" if d_kind == "mountain" else "ROCA")
+			_log_combat_event("💥 ¡%s DESTRUIDO AL IMPACTO! (-%d BP)" % [kind_lbl, d_bp], "warning")
+			velocity *= 0.45
+			return step * 0.45
+	velocity = Vector3.ZERO
+	is_knocked_back = false
+	var safe_dist: float = maxf(0.0, start_c.distance_to(hit["position"]) - 0.65)
+	return step_dir * minf(step_len, safe_dist)
+
+
 func _clamp_to_arena(node: Node3D, is_melee_dash: bool = false) -> void:
 	if not node or not is_instance_valid(node):
 		return
@@ -3640,13 +3802,14 @@ func _clamp_to_arena(node: Node3D, is_melee_dash: bool = false) -> void:
 			var col = space.intersect_ray(ray_params)
 			if col and col.collider:
 				var collider = col.collider
-				if collider.is_in_group("mountains") or collider.has_meta("is_mountain") or "Mountain" in collider.name or "Canyon" in collider.name or "Boulder" in collider.name:
+				if collider.is_in_group("mountains") or collider.has_meta("is_mountain") or "Mountain" in collider.name or "Canyon" in collider.name or "Boulder" in collider.name or "Spire" in collider.name or "Pillar" in collider.name:
 					var adm: ArenaDestructionManager = ArenaDestructionManager.get_active(get_tree())
 					var d_res: Dictionary = adm.apply_body_collision_impact(collider, col.position, self, _get_opponent(), horiz_speed) if adm else {"destroyed": false}
 					if bool(d_res.get("destroyed", false)):
 						var d_kind: String = String(d_res.get("kind", "boulder"))
 						var d_bp: int = int(d_res.get("bonus_bp", 0.0))
-						_log_combat_event("💥 ¡%s DESTRUIDA CON TU CUERPO! (-%d BP extra)" % ["MONTAÑA" if d_kind == "mountain" else "ROCA", d_bp], "warning")
+						var kind_lbl: String = "PILAR" if d_kind == "pillar" else ("MONTAÑA" if d_kind == "mountain" else "ROCA")
+						_log_combat_event("💥 ¡%s DESTRUIDO CON TU CUERPO! (-%d BP extra)" % [kind_lbl, d_bp], "warning")
 						velocity *= 0.45
 						_wall_crash_immunity_timer = 0.25
 					else:
@@ -4059,6 +4222,13 @@ func start_super_beam_sequence(tech_name: String, col: Color, dmg: float, tier_l
 	is_in_beam_sequence = true
 	is_firing_beam = true
 	beam_tech_name = tech_name
+	start_power_cooldown(tech_name)
+	var fired_power: PowerData = get_power_by_name(tech_name)
+	if fired_power and bool(fired_power.drains_user_ki_on_fire):
+		current_ki = minf(current_ki, 10.0)
+		_mark_ki_spent()
+		_notify_stats()
+		_log_combat_event("💥 ¡%s! Descarga total de energía (Ki drenado)." % tech_name.to_upper(), "warning")
 	if procedural_animator and procedural_animator.has_method("set_super_pose"):
 		procedural_animator.set_super_pose(tech_name, 2)
 	if opp.has_method("set"):
@@ -4768,8 +4938,10 @@ func _end_followup_bullet_time(timed_out: bool = false) -> void:
 
 
 func get_chain_ki_multiplier() -> float:
+	if combat_chain_depth <= 1:
+		return 1.0
 	var step: float = KiEconomyConfig.get_default().chain_ki_cost_step
-	return 1.0 + float(combat_chain_depth) * step
+	return 1.0 + float(combat_chain_depth - 1) * step
 
 
 func start_post_super_followup(opponent: Node3D) -> void:

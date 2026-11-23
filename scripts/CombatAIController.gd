@@ -226,10 +226,12 @@ func _evaluate_tactical_transition(dist: float) -> void:
 
 	var super_chance: float = 0.62 if difficulty == AIDifficulty.Z_HARD else 0.45
 	var super_info: Dictionary = _select_ai_super_power()
-	var super_cost: float = float(super_info.get("ki_cost", 50.0))
-	if host.current_ki >= super_cost and dist >= 5.5 and dist <= 16.0 and randf() < super_chance:
-		_transition_to(AIState.KAMEHAMEHA_CHARGE)
-		return
+	if not super_info.is_empty():
+		var super_cost: float = float(super_info.get("ki_cost", 50.0))
+		if host.current_ki >= super_cost and dist >= 5.5 and dist <= 16.0 and randf() < super_chance:
+			_queued_ai_super = super_info
+			_transition_to(AIState.KAMEHAMEHA_CHARGE)
+			return
 
 	var volley_chance: float = 0.82 if difficulty == AIDifficulty.Z_HARD else 0.70
 	if host.current_ki >= 18.0 and dist >= 5.0 and randf() < volley_chance:
@@ -310,17 +312,18 @@ func _process_state_kamehameha_charge(delta: float) -> void:
 	elif "genkidama" in s_low:
 		sphere_offset = Vector3(0.0, 2.35, 0.0)
 
+	var charge_req: float = float(super_info.get("charge_duration", KAMEHAMEHA_CHARGE_DURATION))
 	if not kamehameha_vfx_sphere or not is_instance_valid(kamehameha_vfx_sphere):
 		kamehameha_vfx_sphere = ZenkaiVFXManager.build_zenkai_orb_visual(host, 0.14, Color(s_color.r, s_color.g, s_color.b, 0.95), true, true)
 		kamehameha_vfx_sphere.name = "AISuperChargeOrb"
 		kamehameha_vfx_sphere.position = sphere_offset
 		_play_ai_sfx("kamehameha_charge")
 	else:
-		var progress = clampf(kamehameha_charge_timer / KAMEHAMEHA_CHARGE_DURATION, 0.1, 1.0)
+		var progress = clampf(kamehameha_charge_timer / maxf(charge_req, 0.5), 0.1, 1.0)
 		kamehameha_vfx_sphere.position = sphere_offset
 		kamehameha_vfx_sphere.scale = Vector3.ONE * (0.14 + progress * 0.24)
 
-	if kamehameha_charge_timer >= KAMEHAMEHA_CHARGE_DURATION:
+	if kamehameha_charge_timer >= charge_req:
 		host.is_charging_ki = false
 		host.stop_charging_super()
 		if kamehameha_vfx_sphere and is_instance_valid(kamehameha_vfx_sphere):
@@ -636,27 +639,31 @@ func _select_ai_super_power() -> Dictionary:
 			continue
 		if p.unlock_requirement_transformation != "" and not host.is_transformation_unlocked(p.unlock_requirement_transformation):
 			continue
+		if host.has_method("is_power_usable") and not host.is_power_usable(p):
+			continue
 		if host.current_ki >= p.ki_cost:
 			candidates.append(p)
 			if best == null or p.base_damage_np > best.base_damage_np:
 				best = p
 
 	var chosen: PowerData = best
-	if candidates.size() > 1 and randf() < 0.38:
+	if candidates.size() > 1 and randf() < 0.45:
 		chosen = candidates[randi() % candidates.size()]
 
 	if chosen:
 		var p_col: Color = chosen.energy_color if chosen.energy_color.a > 0.05 else fallback_color
 		if "BIG BANG" in chosen.power_name.to_upper():
 			p_col = Color(1.0, 0.88, 0.15, 1.0)
+		var chg_dur: float = float(chosen.charge_duration_sec) if chosen.get("charge_duration_sec") != null else KAMEHAMEHA_CHARGE_DURATION
 		return {
 			"name": chosen.power_name,
 			"color": p_col,
 			"damage": chosen.base_damage_np,
 			"ki_cost": chosen.ki_cost,
+			"charge_duration": clampf(chg_dur * 0.85, 1.1, 3.8),
 			"tier": 4 if (chosen.is_finisher or "BIG BANG" in chosen.power_name.to_upper() or "GENKIDAMA" in chosen.power_name.to_upper()) else 3
 		}
-	return { "name": "Super Beam", "color": fallback_color, "damage": 1800.0, "ki_cost": 50.0, "tier": 3 }
+	return {}
 
 
 ## Despierta transformaciones progresivas para cualquier personaje en CharacterData según NP o rival

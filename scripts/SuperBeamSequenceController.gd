@@ -364,10 +364,10 @@ func _check_player_defense_options() -> void:
 				_trigger_beam_clash(defender, String(counter_info["name"]), counter_info["color"], float(counter_info.get("damage", 1800.0)))
 				return
 
-	# OPCIÓN 2: ESQUIVAR (Z-VANISH) — flick rápido en joystick izquierdo o derecho (15 Ki)
+	# OPCIÓN 2: ESQUIVAR (Z-VANISH) — flick rápido en joystick izquierdo o derecho (requiere ≥10 Ki, premia +15 Ki)
 	var stick_l: Vector2 = l_ctrl.get_vector2("primary") if l_ctrl else Vector2.ZERO
 	var stick_r: Vector2 = r_ctrl.get_vector2("primary") if r_ctrl else Vector2.ZERO
-	if (stick_l.length() > 0.72 or stick_r.length() > 0.72 or defender.get("is_teleporting")) and def_ki >= 15.0:
+	if (stick_l.length() > 0.72 or stick_r.length() > 0.72 or defender.get("is_teleporting")) and def_ki >= 10.0:
 		_resolve_evasion()
 		return
 
@@ -726,8 +726,16 @@ func _resolve_evasion() -> void:
 	if attacker and is_instance_valid(attacker) and bool(attacker.get("is_comeback_zenkai")) and attacker.has_method("notify_attack_failed"):
 		attacker.notify_attack_failed()
 
-	if defender and is_instance_valid(defender) and defender.has_method("consume_ki"):
-		defender.consume_ki(15.0)
+	if defender and is_instance_valid(defender):
+		var cfg_ev: KiEconomyConfig = KiEconomyConfig.get_default()
+		var zv_reward: float = float(cfg_ev.super_z_vanish_ki_reward) if cfg_ev.get("super_z_vanish_ki_reward") != null else 15.0
+		var max_k: float = float(defender.character_data.base_ki) if defender.get("character_data") else 100.0
+		var cur_k: float = float(defender.get("current_ki")) if defender.get("current_ki") != null else 0.0
+		defender.set("current_ki", minf(cur_k + zv_reward, max_k))
+		if defender.has_method("_notify_stats"):
+			defender._notify_stats()
+		if defender.has_method("_log_combat_event"):
+			defender._log_combat_event("💨 ¡Z-VANISH PERFECTO! (+%d Ki de contraataque)" % int(zv_reward), "success")
 
 	# Determinar punto real de explosión al continuar su trayectoria recta (colisión con suelo/montaña o fin de rango cercano)
 	var mountain_target: Vector3 = start_pos + beam_dir * 48.0
@@ -826,7 +834,8 @@ func _resolve_direct_hit() -> void:
 	print("[SuperBeamSequence] 💥 ¡IMPACTO DIRECTO DE SUPER HAZ! %s colisionó con el defensor (Daño: %.0f NP)." % [power_name, final_damage])
 
 	var atk_in_zenkai: bool = bool(attacker and is_instance_valid(attacker) and (attacker.get("is_in_zenkai_state") or attacker.get("is_comeback_zenkai")))
-	if atk_in_zenkai and defender and is_instance_valid(defender):
+	var def_exhausted_ko: bool = bool(defender and is_instance_valid(defender) and defender.has_method("is_defenseless_for_ko") and defender.is_defenseless_for_ko() and attacker and is_instance_valid(attacker) and attacker.has_method("get_combat_act") and int(attacker.get_combat_act()) >= 2)
+	if (atk_in_zenkai or def_exhausted_ko) and defender and is_instance_valid(defender):
 		if attacker.has_method("trigger_zenkai_match_finish"):
 			attacker.trigger_zenkai_match_finish(attacker, defender, power_name)
 
@@ -1065,7 +1074,7 @@ func _refresh_super_action_card_text() -> void:
 		if _super_card_border_mat:
 			_super_card_border_mat.albedo_color = Color(0.20, 0.88, 1.0, 0.90)
 		_super_card_label.modulate = Color(0.90, 0.97, 1.0)
-		var vanish_line: String = "• [Aturdido Cráter] Z-Vanish bloqueado" if in_crater else ("• Stick Izq/Der: Esquive Z-Vanish (-15 Ki)" if has_ki else "• [Sin Ki <15] Z-Vanish no disponible")
+		var vanish_line: String = "• [Aturdido Cráter] Z-Vanish bloqueado" if in_crater else ("• Stick Izq/Der: Esquive Z-Vanish (+15 Ki perfecto)" if def_ki >= 10.0 else "• [Sin Ki <10] Z-Vanish no disponible")
 		var deflect_line: String = "• Manotazo veloz: Desviar haz" if bp_deflect_ok else "• Manotazo (BP<70%: Guardia parcial)"
 		var clash_line: String = "• Lanza tu Super (Grips cadera→frente): ¡CHOQUE!" if has_ki else "• [Sin Ki <15] ¡CHOQUE! no disponible"
 		_super_card_label.text = "⚠️ SUPER ENTRANTE — ACCIONES\n%s\n%s\n• 2 Grips al frente + Agitar: Aguantar\n• 2 Puños en X (pecho): Bloqueo\n%s" % [vanish_line, deflect_line, clash_line]

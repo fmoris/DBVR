@@ -271,11 +271,12 @@ static func compute_melee_kinetic_power(stroke_dist: float, speed_mps: float, is
 ## Clasifica un golpe físico VR en 3 niveles según velocidad real, recorrido del brazo y carga
 static func classify_melee_punch_tier(stroke_dist: float, speed_mps: float, is_charged: bool) -> Dictionary:
 	var cfg: KiEconomyConfig = KiEconomyConfig.get_default()
-	var sonic_ref: float = float(cfg.melee_sonic_ki_refund) if cfg.get("melee_sonic_ki_refund") != null else 1.5
+	var sonic_ref: float = float(cfg.melee_sonic_ki_refund) if cfg.get("melee_sonic_ki_refund") != null else 7.0
+	var clean_ref: float = float(cfg.melee_clean_hit_ki_refund) if cfg.get("melee_clean_hit_ki_refund") != null else 4.0
 	if (speed_mps >= 2.85 and stroke_dist >= 0.30) or (is_charged and speed_mps >= 2.40 and stroke_dist >= 0.28):
 		return {
 			"tier": "SONICO",
-			"label": "⚡ ¡SÓNICO!",
+			"label": "⚡ ¡SÓNICO! (+%d Ki)" % int(sonic_ref),
 			"dmg_mult": 1.35,
 			"ki_refund": sonic_ref,
 			"color": Color(1.0, 0.92, 0.25)
@@ -283,9 +284,9 @@ static func classify_melee_punch_tier(stroke_dist: float, speed_mps: float, is_c
 	if (speed_mps >= 1.95 and stroke_dist >= 0.24) or (is_charged and speed_mps >= 1.60):
 		return {
 			"tier": "SOLIDO",
-			"label": "💥 ¡SÓLIDO!",
+			"label": "💥 ¡SÓLIDO! (+%d Ki)" % int(clean_ref),
 			"dmg_mult": 1.00,
-			"ki_refund": 0.0,
+			"ki_refund": clean_ref,
 			"color": Color(1.0, 0.50, 0.15)
 		}
 	return {
@@ -446,7 +447,7 @@ func _update_action_card(is_attack_mode: bool) -> void:
 		if _action_card_border_mat:
 			_action_card_border_mat.albedo_color = Color(0.20, 0.88, 1.0, 0.90)
 		_action_card_label.modulate = Color(0.88, 0.97, 1.0)
-		_action_card_label.text = "🛡️ DEFENDER (⬜ CUADRADOS) | Aro Verde/Oro = ¡YA!\n• Palma o Trig en ⬜ a tiempo: Desvío (+5 Ki)\n• Aro Dorado (≤0.14s): Parry Perfecto (+14 Ki)\n• Guardia X pecho: -7~20 Ki | Stick: Z-Vanish (-14)\n• Abre brazos + 2 Grips (tras 2 golpes): Kiai (-22)"
+		_action_card_label.text = "🛡️ DEFENDER (⬜ CUADRADOS) | Aro Verde/Oro = ¡YA!\n• Palma o Trig en ⬜ a tiempo: Desvío (+16 Ki)\n• Aro Dorado (≤0.14s): Parry Perfecto (+20 Ki)\n• Guardia X pecho: -5~14 Ki | Stick: Z-Vanish (-10)\n• Abre brazos + 2 Grips (tras 2 golpes): Kiai (-16)"
 
 
 func _apply_role_dome_tint(player_attacks: bool) -> void:
@@ -2963,6 +2964,11 @@ func _register_hit(zone: Dictionary, ctrl_node: XRController3D, hand_name: Strin
 	# Un golpe Cargado o V3 NO cancela los golpes restantes del combo; solo avanza al llegar al tope o agotar Ki
 	if atk_ki_left <= 0.0 or current_attack_step >= max_allowed_hits:
 		var msg_tag: String = "🔥 ¡CARGADO V3 EN COMBO!" if is_v3 else "💥 ¡SECUENCIA REGISTRADA!"
+		if current_attack_step >= max_allowed_hits and hits.size() >= max_allowed_hits:
+			var momentum_bonus: float = float(cfg_ki.melee_dome_complete_ki_bonus) if cfg_ki.get("melee_dome_complete_ki_bonus") != null else 18.0
+			_modify_fighter_ki(attacker, momentum_bonus)
+			_spawn_impact_popup(hit_pos + Vector3.UP * 0.22, "⚡ +%d KI MOMENTUM!" % int(momentum_bonus), Color(0.35, 0.96, 1.0))
+			msg_tag = "⚡ ¡COMBO COMPLETO (+%d KI)!" % int(momentum_bonus)
 		_begin_phase_transition("start_defense", 0.50, msg_tag, Color(1.0, 0.75, 0.2))
 
 
