@@ -3081,11 +3081,11 @@ func _solve_arm_ik_skel(
 			var clav_desired: Basis = (Basis(clav_rot_char) * clav_grest).orthonormalized()
 			skeleton.set_bone_pose_rotation(arm_parent, (clav_gp_cur.inverse() * clav_desired).get_rotation_quaternion())
 
-	var s_rest: Vector3 = skeleton.get_bone_global_pose(arm_parent) * skeleton.get_bone_rest(shoulder_idx).origin if arm_parent != -1 else skeleton.get_bone_global_rest(shoulder_idx).origin
+	var s_rest: Vector3 = skeleton.get_bone_global_rest(shoulder_idx).origin
 	var e_rest: Vector3 = skeleton.get_bone_global_rest(forearm_idx).origin
 	var w_rest: Vector3 = skeleton.get_bone_global_rest(hand_idx).origin
 
-	var upper_rest_vec: Vector3 = e_rest - skeleton.get_bone_global_rest(shoulder_idx).origin
+	var upper_rest_vec: Vector3 = e_rest - s_rest
 	var lower_rest_vec: Vector3 = w_rest - e_rest
 	var L1: float = upper_rest_vec.length()
 	var L2: float = lower_rest_vec.length()

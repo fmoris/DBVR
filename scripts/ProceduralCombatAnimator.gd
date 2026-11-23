@@ -850,14 +850,14 @@ func _apply_arms_pose(delta: float) -> void:
 		var sv: float = sin(anim_time * 47.0) * 0.010
 		match _st_super_tech:
 			"kamehameha":
-				des_pos_l = Vector3(-0.28, -0.22 + sv, 0.14)
-				des_pos_r = Vector3(-0.06, -0.22 - sv, 0.08)
-				des_basis_l = palm_fwd_l
-				des_basis_r = palm_fwd_r
-				grip_l = 0.30
-				trig_l = 0.30
-				grip_r = 0.30
-				trig_r = 0.30
+				des_pos_l = Vector3(-0.42, -0.14 + sv, 0.22)
+				des_pos_r = Vector3(0.02, -0.28 - sv, 0.22)
+				des_basis_l = Basis.looking_at(Vector3(-0.35, -0.10, 0.93).normalized(), Vector3(-0.93, 0.0, -0.35).normalized())
+				des_basis_r = Basis.looking_at(Vector3(-0.35, 0.10, 0.93).normalized(), Vector3(-0.93, 0.0, -0.35).normalized())
+				grip_l = 0.35
+				trig_l = 0.35
+				grip_r = 0.35
+				trig_r = 0.35
 			"galick_ho":
 				des_pos_l = Vector3(-0.30, -0.04 + sv, 0.10)
 				des_pos_r = Vector3(-0.08, -0.02 - sv, 0.06)
