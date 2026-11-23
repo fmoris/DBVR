@@ -675,6 +675,49 @@ func _generate_runtime_colliders() -> void:
 			boulder_body.add_child(col)
 		add_child(boulder_body)
 
+	# I. 4 Monolitos / Rocas Tácticas destructibles dentro del perímetro activo de combate (±11.2 m)
+	if get_node_or_null("TacticalRock_0") == null:
+		var rock_coords: Array[Vector3] = [
+			Vector3(11.2, 0.5, 11.2),
+			Vector3(-11.2, 0.5, 11.2),
+			Vector3(11.2, 0.5, -11.2),
+			Vector3(-11.2, 0.5, -11.2)
+		]
+		var tactical_mesh := BoxMesh.new()
+		tactical_mesh.size = Vector3(2.2, 3.2, 2.2)
+		var tactical_mat := StandardMaterial3D.new()
+		tactical_mat.albedo_color = Color(0.68, 0.50, 0.32)
+		tactical_mat.roughness = 0.88
+
+		for t_idx in range(rock_coords.size()):
+			var rock_root := Node3D.new()
+			rock_root.name = "TacticalRock_%d" % t_idx
+			rock_root.position = rock_coords[t_idx]
+			rock_root.rotation.y = float(t_idx) * 0.45 + 0.25
+
+			var r_mesh := MeshInstance3D.new()
+			r_mesh.name = "TacticalRockMesh"
+			r_mesh.mesh = tactical_mesh
+			r_mesh.material_override = tactical_mat
+			r_mesh.position.y = 1.6
+			rock_root.add_child(r_mesh)
+
+			var r_body := StaticBody3D.new()
+			r_body.name = "TacticalRockBody_%d" % t_idx
+			r_body.collision_layer = 1
+			r_body.collision_mask = 1 | 2 | 4
+			r_body.add_to_group("mountains")
+			r_body.set_meta("is_mountain", true)
+
+			var r_col := CollisionShape3D.new()
+			var r_box := BoxShape3D.new()
+			r_box.size = Vector3(2.3, 3.4, 2.3)
+			r_col.shape = r_box
+			r_col.position.y = 1.6
+			r_body.add_child(r_col)
+			rock_root.add_child(r_body)
+			add_child(rock_root)
+
 	var parent_scene: Node = get_tree().current_scene if (get_tree() and get_tree().current_scene) else self
 	var adm := parent_scene.get_node_or_null("ArenaDestructionManager") as ArenaDestructionManager
 	if not adm:

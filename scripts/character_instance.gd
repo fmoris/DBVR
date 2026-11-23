@@ -184,6 +184,8 @@ var global_super_recovery_timer: float = 0.0
 const GLOBAL_SUPER_RECOVERY_SEC: float = 3.0
 var comeback_zenkai_timer: float = 0.0
 const COMEBACK_ZENKAI_DURATION_SEC: float = 15.0
+var _limit_break_tiers_used: Array[int] = []
+var _is_limit_break_running: bool = false
 
 # Variables de vuelo hacia el contrincante
 var is_flying_to_opponent: bool = false
@@ -1841,23 +1843,67 @@ func check_zenkai_conditions(opponent_np: float) -> void:
 
 	var active_max: float = get_active_max_np()
 
-	# Zenkai por Dominio Absoluto: requiere brecha >= 45% NP + al menos Acto II (>= 50% NP o transformado)
-	var act_ii_reached: bool = (current_transformation != null) or (current_np >= active_max * 0.50)
-	if lead_ratio >= 0.45 and act_ii_reached:
+	# Zenkai por Dominio Absoluto: requiere brecha >= 35% NP + al menos Acto II (>= 45% NP o transformado)
+	var act_ii_reached: bool = (current_transformation != null) or (current_np >= active_max * 0.45)
+	if lead_ratio >= 0.35 and act_ii_reached:
 		if not is_in_zenkai_state:
 			is_in_zenkai_state = true
 			zenkai_source = "dominance"
 			emit_signal("zenkai_activated", "dominance")
 			_on_zenkai_dramatic_trigger("dominance")
 			var c_name_z: String = character_data.character_name if character_data else name
-			_log_combat_event("⚡ ¡DOMINIO ZENKAI ACTIVADO (%s)! Brecha ≥45%% BP — FINISHER LISTO" % c_name_z, "success")
+			_log_combat_event("⚡ ¡DOMINIO ZENKAI ACTIVADO (%s)! Brecha ≥35%% BP — FINISHER LISTO" % c_name_z, "success")
 			_notify_stats()
-	elif is_in_zenkai_state and (lead_ratio < 0.36 or (current_transformation == null and current_np < active_max * 0.44)):
+	elif is_in_zenkai_state and (lead_ratio < 0.25 or (current_transformation == null and current_np < active_max * 0.38)):
 		is_in_zenkai_state = false
 		zenkai_source = ""
 		_notify_stats()
 
 	_check_transformation_unlocks()
+
+	# Evento Dramático Despertar Límite por desventaja marcada (>= 40% atrás): evita quedarse atrapado sin forma
+	if not _is_limit_break_running and not is_match_over and behind_ratio >= 0.40:
+		var opp_ref: Node3D = _get_opponent()
+		if opp_ref and is_instance_valid(opp_ref):
+			trigger_limit_break_transformation(opp_ref)
+
+
+func trigger_limit_break_transformation(leader: Node3D) -> bool:
+	if _is_limit_break_running or is_match_over or not character_data or character_data.transformations.is_empty():
+		return false
+	var next_idx: int = current_transformation_index + 1
+	if next_idx < 0 or next_idx >= character_data.transformations.size():
+		return false
+	var trans: TransformationData = character_data.transformations[next_idx]
+	if trans == null or trans.tier_level > 2:
+		return false
+	if _limit_break_tiers_used.has(next_idx):
+		return false
+
+	_is_limit_break_running = true
+	_limit_break_tiers_used.append(next_idx)
+	if not is_transformation_unlocked(trans.form_name):
+		unlock_transformation(trans.form_name)
+	transform_to(next_idx)
+
+	# Regla anti-injusticia: el desfavorecido despierta su forma pero NUNCA sobrepasa al líder
+	if leader and is_instance_valid(leader) and leader.get("current_np") != null:
+		var leader_np: float = float(leader.get("current_np"))
+		if leader_np > 0.0:
+			var max_catchup_np: float = maxf(leader_np * 0.90, 1000.0)
+			if current_np > max_catchup_np:
+				current_np = max_catchup_np
+				secured_np_threshold_ratio = minf(secured_np_threshold_ratio, clampf((current_np * 0.70) / maxf(get_active_max_np(), 1.0), 0.10, 0.50))
+
+	current_ki = minf(current_ki + 25.0, character_data.base_ki)
+	_notify_stats()
+	var dd_lb: DramaticDirector = DramaticDirector.get_active(get_tree())
+	if dd_lb and dd_lb.has_method("play_dramatic_limit_break_transformation"):
+		dd_lb.play_dramatic_limit_break_transformation(self, trans)
+	var c_lbl: String = character_data.character_name if character_data else name
+	_log_combat_event("🔥 ¡DESPERTAR LÍMITE! %s activa %s por brecha de poder (+25 Ki)" % [c_lbl, trans.form_name], "warning")
+	_is_limit_break_running = false
+	return true
 
 func trigger_comeback_zenkai() -> void:
 	if is_match_over:
@@ -2167,27 +2213,24 @@ func _check_transformation_unlocks() -> void:
 	
 	var mult: float = get_transformation_multiplier()
 	var active_max: float = character_data.max_np * mult
-	var active_base: float = character_data.base_np * mult
 	var climb_ratio: float = current_np / maxf(1.0, active_max)
-	var damage_ratio: float = current_np / maxf(1.0, active_base)
 	
 	var opp = _get_opponent()
 	var opp_np: float = opp.get("current_np") if (opp and is_instance_valid(opp) and opp.get("current_np") != null) else current_np
-	var is_lagging_behind: bool = is_in_furia or ((opp_np - current_np) / maxf(maxf(opp_np, current_np), 1.0) >= 0.25)
+	var behind_ratio: float = (opp_np - current_np) / maxf(maxf(opp_np, current_np), 1.0)
+	var is_lagging_behind: bool = is_in_furia or (behind_ratio >= 0.38)
 	
-	# Desbloqueo Fase 1 (SSJ):
-	# Se activa al escalar NP (>= 75% del máx), sufrir daño real (<= 78% del base) o estar en Furia (>= 25% atrás)
+	# Desbloqueo Fase 1 (SSJ): por escalar NP combatiente (>= 72% máx) o Despertar Límite en desventaja real (>= 38%)
 	var form_1: String = character_data.transformations[0].form_name
 	if not is_transformation_unlocked(form_1):
-		if climb_ratio >= 0.75 or damage_ratio <= 0.78 or is_lagging_behind:
+		if climb_ratio >= 0.72 or is_lagging_behind:
 			unlock_transformation(form_1)
 	
-	# Desbloqueo Fase 2 (Super Vegeta / SSJ2):
-	# Se activa estando ya transformado en Fase 1+ al escalar NP (>= 85%), sufrir daño (<= 68%) o en Furia
+	# Desbloqueo Fase 2 (Super Vegeta / SSJ2): escalando en Fase 1+ (>= 82%) o desventaja extrema (>= 38%)
 	if character_data.transformations.size() > 1:
 		var form_2: String = character_data.transformations[1].form_name
 		if not is_transformation_unlocked(form_2):
-			if current_transformation != null and (climb_ratio >= 0.85 or damage_ratio <= 0.68 or is_lagging_behind):
+			if current_transformation != null and (climb_ratio >= 0.82 or is_lagging_behind):
 				unlock_transformation(form_2)
 				
 	# Desbloqueo Fase 3 (SSB / Forma Divina):
@@ -2377,6 +2420,88 @@ func is_power_usable(power: Resource) -> bool:
 		if np_ratio < min_ratio:
 			return false
 	return true
+
+
+func get_power_block_reason(power: Resource) -> String:
+	if power == null:
+		return "Técnica no disponible"
+	var is_ki_blast: bool = String(power.gesture_trigger).to_lower() == "ki_blast"
+	var opp: Node3D = _get_opponent()
+	var is_counter_clash: bool = opp != null and is_instance_valid(opp) and bool(opp.get("is_in_beam_sequence"))
+	if not is_ki_blast and not is_counter_clash:
+		if global_super_recovery_timer > 0.0:
+			return "⏳ Recuperación post-Super: %.1fs" % global_super_recovery_timer
+		var rem_cd: float = get_power_cooldown_remaining(power.power_name)
+		if rem_cd > 0.0:
+			return "⏳ %s en enfriamiento: %.1fs" % [power.power_name, rem_cd]
+	if is_in_zenkai_state:
+		return ""
+	var is_unlocked: bool = unlocked_powers.has(power.power_name) or power.unlock_requirement_transformation == ""
+	if not is_unlocked:
+		return "🔒 %s requiere %s" % [power.power_name, power.unlock_requirement_transformation]
+	if current_transformation and power.forbidden_transformations.has(current_transformation.form_name):
+		return "🚫 %s prohibido en %s" % [power.power_name, current_transformation.form_name]
+	var min_ratio: float = float(power.min_np_ratio) if power.get("min_np_ratio") != null else 0.0
+	if min_ratio > 0.0 and not is_ki_blast and not is_counter_clash and current_transformation == null:
+		var np_ratio: float = current_np / maxf(get_active_max_np(), 1.0)
+		if np_ratio < min_ratio:
+			return "⚡ %s requiere %.0f%% BP (Acto II+)" % [power.power_name, min_ratio * 100.0]
+	return ""
+
+
+func _shorten_power_hud_name(p_name: String) -> String:
+	var low: String = p_name.to_lower()
+	if "super kamehameha" in low:
+		return "S.Kame"
+	if "instant" in low:
+		return "I.Kame"
+	if "kamehameha" in low:
+		return "Kame"
+	if "genkidama" in low:
+		return "Genki"
+	if "galick" in low:
+		return "Galick"
+	if "big bang" in low:
+		return "BigBang"
+	if "final flash" in low:
+		return "F.Flash"
+	if "final explosion" in low:
+		return "F.Exp"
+	if "gamma" in low:
+		return "Gamma"
+	return p_name.substr(0, 7)
+
+
+func get_super_cooldowns_hud_text() -> String:
+	if not character_data or character_data.powers.is_empty():
+		return ""
+	var parts: Array[String] = []
+	var np_ratio: float = current_np / maxf(get_active_max_np(), 1.0)
+	for p in character_data.powers:
+		if p == null or String(p.gesture_trigger).to_lower() == "ki_blast":
+			continue
+		var unlocked: bool = is_in_zenkai_state or unlocked_powers.has(p.power_name) or p.unlock_requirement_transformation == ""
+		if not unlocked:
+			continue
+		if current_transformation and p.forbidden_transformations.has(current_transformation.form_name) and not is_in_zenkai_state:
+			continue
+		var short_n: String = _shorten_power_hud_name(p.power_name)
+		var rem_cd: float = get_power_cooldown_remaining(p.power_name)
+		var min_ratio: float = float(p.min_np_ratio) if p.get("min_np_ratio") != null else 0.0
+		if rem_cd > 0.05:
+			parts.append("%s:⌛%.0fs" % [short_n, ceilf(rem_cd)])
+		elif not is_in_zenkai_state and current_transformation == null and min_ratio > 0.0 and np_ratio < min_ratio:
+			parts.append("%s:🔒" % short_n)
+		else:
+			parts.append("%s:✓" % short_n)
+		if parts.size() >= 4:
+			break
+	if parts.is_empty():
+		return ""
+	var joined: String = " ".join(parts)
+	if global_super_recovery_timer > 0.05:
+		return "⏳%.1fs | %s" % [global_super_recovery_timer, joined]
+	return joined
 
 func execute_finisher_hit(power: Resource) -> void:
 	if power and power.is_finisher:
@@ -3742,6 +3867,7 @@ func _resolve_solid_arena_step(mover: Node3D, step: Vector3, slide_around: bool)
 		return step
 	var is_solid_obstacle: bool = (
 		"Spire" in col_node.name or "Pillar" in col_node.name
+		or "TacticalRock" in col_node.name
 		or "Boulder" in col_node.name or "Canyon" in col_node.name
 		or "Mountain" in col_node.name or col_node.is_in_group("mountains")
 	)
@@ -3802,7 +3928,7 @@ func _clamp_to_arena(node: Node3D, is_melee_dash: bool = false) -> void:
 			var col = space.intersect_ray(ray_params)
 			if col and col.collider:
 				var collider = col.collider
-				if collider.is_in_group("mountains") or collider.has_meta("is_mountain") or "Mountain" in collider.name or "Canyon" in collider.name or "Boulder" in collider.name or "Spire" in collider.name or "Pillar" in collider.name:
+				if collider.is_in_group("mountains") or collider.has_meta("is_mountain") or "Mountain" in collider.name or "Canyon" in collider.name or "Boulder" in collider.name or "Spire" in collider.name or "Pillar" in collider.name or "TacticalRock" in collider.name:
 					var adm: ArenaDestructionManager = ArenaDestructionManager.get_active(get_tree())
 					var d_res: Dictionary = adm.apply_body_collision_impact(collider, col.position, self, _get_opponent(), horiz_speed) if adm else {"destroyed": false}
 					if bool(d_res.get("destroyed", false)):
@@ -4149,7 +4275,7 @@ func _execute_melee_impact(opponent: Node3D) -> void:
 	# Aplicar daño y retroceso físico de impacto directo
 	if opponent.has_method("take_hit"):
 		opponent.take_hit(damage, fwd)
-		increase_np(damage * 0.40)
+		increase_np(damage * 0.65)
 	elif opponent.has_method("apply_knockback"):
 		opponent.apply_knockback(fwd, 14.0)
 
@@ -4553,7 +4679,7 @@ func _execute_melee_flurry_barrage(opponent: Node3D, recorded_hits: Array, launc
 
 	if opponent.has_method("take_hit"):
 		opponent.take_hit(total_damage, Vector3.ZERO)
-		increase_np(total_damage * 0.40)
+		increase_np(total_damage * 0.65)
 
 	# Pulso háptico máximo final
 	if is_player and my_origin:
@@ -4644,7 +4770,7 @@ func _execute_hammer_strike_finisher(opponent: Node3D, swing_velocity: float, re
 	# 5. Aplicar daño primario
 	if opponent.has_method("take_hit"):
 		opponent.take_hit(direct_damage, Vector3.ZERO)
-		increase_np(direct_damage * 0.45)
+		increase_np(direct_damage * 0.70)
 
 	# 6. Cálculo cinético de aplastamiento exclusivo CONTRA EL SUELO (Martillazo DBZ)
 	var ki_mult: float = 1.0 + (ki_spent / 25.0) * 0.85

@@ -1474,7 +1474,7 @@ func _resolve_unblocked_hit(note: Dictionary, zone: Dictionary) -> void:
 			defender.procedural_animator.trigger_hit_flinch(0.75 if (is_hammer or is_v3) else 0.45, -global_transform.basis.z)
 
 	if attacker and is_instance_valid(attacker) and attacker.has_method("increase_np"):
-		attacker.increase_np(raw_dmg * 0.40)
+		attacker.increase_np(raw_dmg * 0.65)
 
 	if audio_player:
 		audio_player.global_position = zone_pos

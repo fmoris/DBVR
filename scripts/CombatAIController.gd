@@ -42,6 +42,8 @@ var current_state: AIState = AIState.IDLE_SPACING
 var state_timer: float = 0.0
 var decision_timer: float = 0.0
 var attack_cooldown: float = 1.6
+var _last_attack_state: int = -1
+var _consecutive_volleys: int = 0
 var dodge_cooldown: float = 0.0
 var block_cooldown: float = 0.0
 var long_chase_cooldown: float = 0.0
@@ -224,27 +226,83 @@ func _evaluate_tactical_transition(dist: float) -> void:
 			attack_cooldown = 2.8
 		return
 
-	var super_chance: float = 0.62 if difficulty == AIDifficulty.Z_HARD else 0.45
 	var super_info: Dictionary = _select_ai_super_power()
-	if not super_info.is_empty():
-		var super_cost: float = float(super_info.get("ki_cost", 50.0))
-		if host.current_ki >= super_cost and dist >= 5.5 and dist <= 16.0 and randf() < super_chance:
-			_queued_ai_super = super_info
-			_transition_to(AIState.KAMEHAMEHA_CHARGE)
-			return
+	var can_super: bool = (
+		not super_info.is_empty()
+		and host.current_ki >= float(super_info.get("ki_cost", 30.0))
+		and dist >= 5.5
+		and dist <= 18.5
+		and _last_attack_state != AIState.KAMEHAMEHA_CHARGE
+	)
+	var can_melee: bool = host.current_ki >= 16.0 and dist <= 18.5
+	var can_volley: bool = (
+		host.current_ki >= 14.0
+		and dist >= 4.5
+		and _last_attack_state != AIState.KI_BLAST_VOLLEY
+		and _consecutive_volleys < 1
+	)
+	var melee_cd_mult: float = 0.70 if difficulty == AIDifficulty.Z_HARD else 1.0
 
-	var volley_chance: float = 0.82 if difficulty == AIDifficulty.Z_HARD else 0.70
-	if host.current_ki >= 18.0 and dist >= 5.0 and randf() < volley_chance:
-		_transition_to(AIState.KI_BLAST_VOLLEY)
-		return
-
-	var melee_chance: float = 0.60 if difficulty == AIDifficulty.Z_HARD else 0.40
-	if host.current_ki >= 22.0 and dist <= 12.5:
-		if player.current_ki < 20.0 or player.is_penalized or randf() < melee_chance:
-			var cd_mult: float = 0.65 if difficulty == AIDifficulty.Z_HARD else 1.0
-			attack_cooldown = randf_range(1.8, 3.2) * cd_mult
+	if dist <= 11.0:
+		if can_melee and (player.current_ki < 20.0 or player.is_penalized or randf() < 0.55):
+			_last_attack_state = AIState.MELEE_RUSH
+			_consecutive_volleys = 0
+			attack_cooldown = randf_range(1.6, 2.8) * melee_cd_mult
 			_transition_to(AIState.MELEE_RUSH)
 			return
+		elif can_super and randf() < 0.55:
+			_queued_ai_super = super_info
+			_last_attack_state = AIState.KAMEHAMEHA_CHARGE
+			_consecutive_volleys = 0
+			_transition_to(AIState.KAMEHAMEHA_CHARGE)
+			return
+		elif can_volley and randf() < 0.45:
+			_last_attack_state = AIState.KI_BLAST_VOLLEY
+			_consecutive_volleys += 1
+			_transition_to(AIState.KI_BLAST_VOLLEY)
+			return
+		elif can_melee:
+			_last_attack_state = AIState.MELEE_RUSH
+			_consecutive_volleys = 0
+			attack_cooldown = randf_range(1.6, 2.8) * melee_cd_mult
+			_transition_to(AIState.MELEE_RUSH)
+			return
+	else:
+		var roll: float = randf()
+		if can_super and roll < 0.42:
+			_queued_ai_super = super_info
+			_last_attack_state = AIState.KAMEHAMEHA_CHARGE
+			_consecutive_volleys = 0
+			_transition_to(AIState.KAMEHAMEHA_CHARGE)
+			return
+		elif can_melee and roll < 0.75:
+			_last_attack_state = AIState.MELEE_RUSH
+			_consecutive_volleys = 0
+			attack_cooldown = randf_range(1.6, 2.8) * melee_cd_mult
+			_transition_to(AIState.MELEE_RUSH)
+			return
+		elif can_volley:
+			_last_attack_state = AIState.KI_BLAST_VOLLEY
+			_consecutive_volleys += 1
+			_transition_to(AIState.KI_BLAST_VOLLEY)
+			return
+		elif can_super:
+			_queued_ai_super = super_info
+			_last_attack_state = AIState.KAMEHAMEHA_CHARGE
+			_consecutive_volleys = 0
+			_transition_to(AIState.KAMEHAMEHA_CHARGE)
+			return
+		elif can_melee:
+			_last_attack_state = AIState.MELEE_RUSH
+			_consecutive_volleys = 0
+			attack_cooldown = randf_range(1.6, 2.8) * melee_cd_mult
+			_transition_to(AIState.MELEE_RUSH)
+			return
+
+	# Si quedó bloqueado solo por no repetir ráfaga consecutiva, habilitar alternancia para el siguiente ciclo
+	if _last_attack_state == AIState.KI_BLAST_VOLLEY:
+		_last_attack_state = -1
+		_consecutive_volleys = 0
 
 
 ## Estado 2: Recarga táctica de Ki
@@ -675,11 +733,17 @@ func _check_ai_transformation() -> void:
 
 	var host_mult: float = host.get_transformation_multiplier() if host.has_method("get_transformation_multiplier") else 1.0
 	var active_max: float = maxf(1.0, host.character_data.max_np * host_mult)
-	var active_base: float = maxf(1.0, host.character_data.base_np * host_mult)
 	var climb_ratio: float = host.current_np / active_max
-	var damage_ratio: float = host.current_np / active_base
 	var player_trans = player.get("current_transformation") if (player and is_instance_valid(player)) else null
 	var player_mult: float = float(player_trans.np_multiplier) if (player_trans and player_trans.get("np_multiplier") != null) else 1.0
+	var player_np: float = float(player.current_np) if (player and is_instance_valid(player)) else host.current_np
+	var behind_ratio: float = (player_np - host.current_np) / maxf(maxf(player_np, host.current_np), 1.0)
+
+	# Si el jugador saca gran ventaja (>= 38%), disparar el Evento Dramático Despertar Límite sin superar al jugador
+	if behind_ratio >= 0.38 and host.has_method("trigger_limit_break_transformation"):
+		if host.trigger_limit_break_transformation(player):
+			_play_ai_sfx("aura")
+			return
 
 	var current_idx: int = -1
 	if host.current_transformation:
@@ -688,15 +752,14 @@ func _check_ai_transformation() -> void:
 	var desired_idx: int = current_idx
 	var total_forms: int = host.character_data.transformations.size()
 
-	# Igualar forma si el jugador supera en multiplicador, o despertar por presión / escalada real de combate
+	# Transformación justa: solo al escalar su propio BP combatiente o igualar la transformación que ya alcanzó el jugador
 	for i in range(total_forms):
 		var form_cand: TransformationData = host.character_data.transformations[i]
 		if not form_cand:
 			continue
-		var pressure_trigger: bool = (i == 0 and (damage_ratio <= 0.75 or climb_ratio >= 0.75)) or (i == 1 and current_idx >= 0 and (damage_ratio <= 0.65 or climb_ratio >= 0.85)) or (i >= 2 and current_idx >= 1 and bool(host.get("is_in_zenkai_state")))
+		var climb_trigger: bool = (i == 0 and climb_ratio >= 0.75) or (i == 1 and current_idx >= 0 and climb_ratio >= 0.85) or (i >= 2 and current_idx >= 1 and bool(host.get("is_in_zenkai_state")))
 		var match_player: bool = (player_trans != null and form_cand.np_multiplier <= player_mult + 0.1)
-		var z_hard_early: bool = (difficulty == AIDifficulty.Z_HARD and damage_ratio <= 0.85 and i == 0)
-		if i > desired_idx and (pressure_trigger or match_player or z_hard_early):
+		if i > desired_idx and (climb_trigger or match_player):
 			desired_idx = i
 
 	if desired_idx > current_idx and desired_idx >= 0 and desired_idx < total_forms:
@@ -705,7 +768,7 @@ func _check_ai_transformation() -> void:
 			host.unlock_transformation(trans.form_name)
 		host.transform_to(desired_idx)
 		_play_ai_sfx("aura")
-		host._log_combat_event("🔥 ¡%s ha despertado %s para igualar la batalla!" % [_get_host_name(), trans.form_name], "warning")
+		host._log_combat_event("🔥 ¡%s ha despertado %s!" % [_get_host_name(), trans.form_name], "warning")
 
 
 ## Instancia un Ki Blast procedural dinámico escalado por BP del rival

@@ -6,6 +6,8 @@ extends Node3D
 
 const BOULDER_MAX_HP: float = 350.0
 const BOULDER_BP_BONUS: float = 450.0
+const TACTICAL_ROCK_MAX_HP: float = 450.0
+const TACTICAL_ROCK_BP_BONUS: float = 450.0
 const PILLAR_MAX_HP: float = 1200.0
 const PILLAR_BP_BONUS: float = 650.0
 const CANYON_MAX_HP: float = 1800.0
@@ -25,6 +27,12 @@ var _pillar_bodies: Array[StaticBody3D] = []
 var _pillar_cols: Array[CollisionShape3D] = []
 var _pillar_hp: PackedFloat32Array = PackedFloat32Array()
 var _pillar_pos: Array[Vector3] = []
+
+var _tactical_roots: Array[Node3D] = []
+var _tactical_bodies: Array[StaticBody3D] = []
+var _tactical_cols: Array[CollisionShape3D] = []
+var _tactical_hp: PackedFloat32Array = PackedFloat32Array()
+var _tactical_pos: Array[Vector3] = []
 
 var _canyon_mm: MultiMeshInstance3D = null
 var _canyon_body: StaticBody3D = null
@@ -111,6 +119,29 @@ func register_arena_destructibles(arena_root: Node) -> void:
 			_pillar_cols.append(spire_col)
 			_pillar_hp.append(PILLAR_MAX_HP)
 			_pillar_pos.append((child as Node3D).global_position)
+
+	_tactical_roots.clear()
+	_tactical_bodies.clear()
+	_tactical_cols.clear()
+	_tactical_hp.clear()
+	_tactical_pos.clear()
+	for child_t in arena_root.get_children():
+		if child_t is Node3D and child_t.name.begins_with("TacticalRock_"):
+			var r_body: StaticBody3D = null
+			var r_col: CollisionShape3D = null
+			for sub in child_t.get_children():
+				if sub is StaticBody3D:
+					r_body = sub as StaticBody3D
+					for rc in r_body.get_children():
+						if rc is CollisionShape3D:
+							r_col = rc as CollisionShape3D
+							break
+					break
+			_tactical_roots.append(child_t as Node3D)
+			_tactical_bodies.append(r_body)
+			_tactical_cols.append(r_col)
+			_tactical_hp.append(TACTICAL_ROCK_MAX_HP)
+			_tactical_pos.append((child_t as Node3D).global_position)
 
 
 func _init_debris_pool() -> void:
@@ -230,6 +261,32 @@ func _collapse_pillar(idx: int) -> void:
 		_pillar_cols[idx].set_deferred("disabled", true)
 
 
+func _collapse_tactical_rock(idx: int) -> void:
+	if idx < 0 or idx >= _tactical_roots.size():
+		return
+	var t_root: Node3D = _tactical_roots[idx]
+	if t_root and is_instance_valid(t_root):
+		t_root.visible = false
+	if idx < _tactical_cols.size() and _tactical_cols[idx] and is_instance_valid(_tactical_cols[idx]):
+		_tactical_cols[idx].set_deferred("disabled", true)
+
+
+func _notify_destruction_feedback(pos: Vector3, title_txt: String, bonus_bp: float, victim: Node3D = null) -> void:
+	var tree: SceneTree = get_tree()
+	if not tree:
+		return
+	ZenkaiVFXManager.spawn_zenkai_explosion(tree, pos + Vector3(0.0, 0.8, 0.0), 3, Color(0.95, 0.65, 0.25, 0.90), false)
+	var dd_d: DramaticDirector = DramaticDirector.get_active(tree)
+	if dd_d:
+		dd_d.show_camera_banner(title_txt, Color(1.0, 0.78, 0.22), 1.45)
+	if victim and is_instance_valid(victim) and victim.has_method("_spawn_bp_delta_popup"):
+		victim._spawn_bp_delta_popup(-bonus_bp, title_txt)
+	elif tree.current_scene:
+		var enemy_f: Node = tree.current_scene.find_child("EnemyCharacterInstance", true, false)
+		if enemy_f and is_instance_valid(enemy_f) and enemy_f.has_method("_spawn_bp_delta_popup"):
+			enemy_f._spawn_bp_delta_popup(0.0, title_txt)
+
+
 func _apply_debris_secondary_damage(origin_pos: Vector3, exclude_victim: Node3D = null) -> void:
 	var tree: SceneTree = get_tree()
 	if not tree or not tree.current_scene:
@@ -277,6 +334,7 @@ func apply_body_collision_impact(collider: Node, impact_pos: Vector3, victim: No
 				spawn_debris_burst(impact_pos, 14, 1.5)
 				spawn_dense_dbz_smoke(impact_pos, victim, 3.4, 2.6)
 				_apply_debris_secondary_damage(impact_pos, victim)
+				_notify_destruction_feedback(impact_pos, "🏛️ ¡PILAR DERRIBADO! (-%d BP)" % int(smash_bonus_bp), smash_bonus_bp, victim)
 				res["destroyed"] = true
 				res["kind"] = "pillar"
 				res["bonus_bp"] = smash_bonus_bp
@@ -284,6 +342,31 @@ func apply_body_collision_impact(collider: Node, impact_pos: Vector3, victim: No
 				spawn_debris_burst(impact_pos, 5, 0.95)
 				spawn_dense_dbz_smoke(impact_pos, victim, 1.8, 1.4)
 				res["kind"] = "pillar"
+				res["bonus_bp"] = smash_bonus_bp
+	elif "TacticalRock" in collider.name or _tactical_bodies.has(collider):
+		var t_idx: int = _tactical_bodies.find(collider)
+		if t_idx == -1:
+			t_idx = _find_nearest_active(impact_pos, _tactical_pos, _tactical_hp, 6.0)
+		if t_idx != -1 and t_idx < _tactical_hp.size() and _tactical_hp[t_idx] > 0.0:
+			_tactical_hp[t_idx] -= dmg
+			if victim and is_instance_valid(victim):
+				if victim.has_method("take_hit"):
+					victim.take_hit(smash_bonus_bp, Vector3.ZERO, false)
+				victim.set("is_staggered", true)
+				victim.set("stagger_timer", maxf(float(victim.get("stagger_timer")) if victim.get("stagger_timer") != null else 0.0, 0.50))
+			if _tactical_hp[t_idx] <= 0.0:
+				_collapse_tactical_rock(t_idx)
+				spawn_debris_burst(impact_pos, 12, 1.35)
+				spawn_dense_dbz_smoke(impact_pos, victim, 3.0, 2.4)
+				_apply_debris_secondary_damage(impact_pos, victim)
+				_notify_destruction_feedback(impact_pos, "🪨 ¡ROCA DESTRUIDA! (-%d BP)" % int(smash_bonus_bp), smash_bonus_bp, victim)
+				res["destroyed"] = true
+				res["kind"] = "tactical"
+				res["bonus_bp"] = smash_bonus_bp
+			else:
+				spawn_debris_burst(impact_pos, 4, 0.90)
+				spawn_dense_dbz_smoke(impact_pos, victim, 1.6, 1.3)
+				res["kind"] = "tactical"
 				res["bonus_bp"] = smash_bonus_bp
 	elif collider == _boulder_body or "Boulder" in collider.name:
 		var b_idx: int = _find_nearest_active(impact_pos, _boulder_pos, _boulder_hp, 12.0)
@@ -350,6 +433,20 @@ func apply_power_aoe_destruction(center: Vector3, radius: float, power_damage: f
 				spawn_debris_burst(_pillar_pos[p] + Vector3.UP * 2.5, 14, 1.45)
 				spawn_dense_dbz_smoke(_pillar_pos[p], null, 3.2, 0.0)
 				_apply_debris_secondary_damage(_pillar_pos[p])
+				_notify_destruction_feedback(_pillar_pos[p], "🏛️ ¡PILAR DERRIBADO!", PILLAR_BP_BONUS)
+				destroyed_count += 1
+
+	for tr in range(_tactical_pos.size()):
+		if tr >= _tactical_hp.size() or _tactical_hp[tr] <= 0.0:
+			continue
+		if Vector2(_tactical_pos[tr].x - center.x, _tactical_pos[tr].z - center.z).length() <= radius + 1.8:
+			_tactical_hp[tr] -= eff_dmg
+			if _tactical_hp[tr] <= 0.0:
+				_collapse_tactical_rock(tr)
+				spawn_debris_burst(_tactical_pos[tr] + Vector3.UP * 1.6, 12, 1.35)
+				spawn_dense_dbz_smoke(_tactical_pos[tr], null, 2.8, 0.0)
+				_apply_debris_secondary_damage(_tactical_pos[tr])
+				_notify_destruction_feedback(_tactical_pos[tr], "🪨 ¡ROCA DESTRUIDA!", TACTICAL_ROCK_BP_BONUS)
 				destroyed_count += 1
 
 	for i in range(_boulder_pos.size()):

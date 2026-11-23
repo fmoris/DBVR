@@ -968,6 +968,19 @@ func _get_player_instance() -> Node3D:
 	return player_instance
 
 
+func _notify_power_blocked(player: Node3D, power: Resource, fallback_msg: String) -> void:
+	var reason: String = fallback_msg
+	if player and player.has_method("get_power_block_reason"):
+		var r_str: String = String(player.get_power_block_reason(power))
+		if r_str != "":
+			reason = r_str
+	emit_signal("phase_changed", reason)
+	emit_signal("gesture_logged", reason, "warning")
+	for ctrl in [left_controller_node, right_controller_node]:
+		if ctrl and is_instance_valid(ctrl) and ctrl.has_method("trigger_haptic_pulse"):
+			ctrl.trigger_haptic_pulse("haptic", 120.0, 0.55, 0.08, 0.0)
+
+
 func _feed_trie(gesture_name: String) -> void:
 	if gesture_name in current_node:
 		current_node = current_node[gesture_name]
@@ -1004,7 +1017,7 @@ func _feed_trie(gesture_name: String) -> void:
 					_cancel_action("Kamehameha cancelado")
 					return
 			else:
-				emit_signal("gesture_logged", "Kamehameha bloqueado o no disponible en este estado.", "error")
+				_notify_power_blocked(player, power, "Kamehameha no disponible en este estado.")
 				_cancel_action("Kamehameha no disponible")
 				return
 		elif gesture_name == "GENKIDAMA_CHARGE":
@@ -1028,7 +1041,7 @@ func _feed_trie(gesture_name: String) -> void:
 					_cancel_action("Genkidama cancelada")
 					return
 			else:
-				emit_signal("gesture_logged", "Genkidama bloqueada o no disponible en este estado.", "error")
+				_notify_power_blocked(player, power, "Genkidama no disponible en este estado.")
 				_cancel_action("Genkidama no disponible")
 				return
 		elif gesture_name == "GALICK_HO_CHARGE":
@@ -1052,7 +1065,7 @@ func _feed_trie(gesture_name: String) -> void:
 					_cancel_action("Galick Ho cancelado")
 					return
 			else:
-				emit_signal("gesture_logged", "Galick Ho bloqueado o no disponible.", "error")
+				_notify_power_blocked(player, power, "Galick Ho no disponible.")
 				_cancel_action("Galick Ho no disponible")
 				return
 		elif gesture_name == "FINAL_FLASH_CHARGE":
@@ -1076,7 +1089,7 @@ func _feed_trie(gesture_name: String) -> void:
 					_cancel_action("Final Flash cancelado")
 					return
 			else:
-				emit_signal("gesture_logged", "Final Flash requiere transformación SSJ o Zenkai.", "error")
+				_notify_power_blocked(player, power, "Final Flash requiere transformación SSJ o Zenkai.")
 				_cancel_action("Final Flash bloqueado")
 				return
 		elif gesture_name == "BIG_BANG_CHARGE":
@@ -1100,7 +1113,7 @@ func _feed_trie(gesture_name: String) -> void:
 					_cancel_action("Big Bang Attack cancelado")
 					return
 			else:
-				emit_signal("gesture_logged", "Big Bang Attack requiere transformación SSJ.", "error")
+				_notify_power_blocked(player, power, "Big Bang Attack no disponible.")
 				_cancel_action("Big Bang Attack bloqueado")
 				return
 		elif gesture_name == "ARM_STRETCHED_OPEN_LEFT":

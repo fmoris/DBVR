@@ -29,7 +29,9 @@ var status_pill_label: Label = null
 var status_pill_style: StyleBoxFlat = null
 var dramatic_bonus_panel: PanelContainer = null
 var dramatic_bonus_label: Label = null
+var super_cooldowns_label: Label = null
 var transform_hint_label: Label = null
+var _scouter_panel_style: StyleBoxFlat = null
 
 var gesture_tree_ref: Node = null
 var player_instance: Node = null
@@ -102,6 +104,8 @@ var _last_zenkai_comeback: bool = false
 var _last_furia_state: bool = false
 var _last_buff_text: String = ""
 var _last_dramatic_hud_text: String = ""
+var _last_cooldowns_hud_text: String = ""
+var _cd_hud_timer: float = 0.0
 var _last_transform_hint_text: String = ""
 var _last_status_override_active: bool = false
 
@@ -119,9 +123,9 @@ func _ready() -> void:
 	mat.render_priority = 110
 	hud_mesh.material_override = mat
 
-	# Redimensionar la malla del HUD a formato Micro-HUD Scouter compacto (15cm x 9.2cm con guía de transformación)
+	# Redimensionar la malla del HUD a formato Micro-HUD Scouter compacto (con cooldowns y guía de transformación)
 	if sub_viewport:
-		sub_viewport.size = Vector2i(720, 442)
+		sub_viewport.size = Vector2i(720, 480)
 	if hud_mesh.mesh is QuadMesh:
 		hud_mesh.mesh.size = Vector2(0.15, 0.092)
 
@@ -267,6 +271,7 @@ func _build_dragon_ball_hud() -> void:
 	panel_style.corner_radius_bottom_left = 18
 	panel_style.corner_radius_bottom_right = 18
 	panel_style.set_content_margin_all(18)
+	_scouter_panel_style = panel_style
 	scouter_panel.add_theme_stylebox_override("panel", panel_style)
 	hud_layout.add_child(scouter_panel)
 
@@ -480,6 +485,18 @@ func _build_dragon_ball_hud() -> void:
 	db_set.shadow_color = Color(0.0, 0.0, 0.0, 0.95)
 	dramatic_bonus_label.label_settings = db_set
 	dramatic_bonus_panel.add_child(dramatic_bonus_label)
+
+	# BLOQUE 4.5: Indicador compacto de Cooldowns de Súper Poderes
+	super_cooldowns_label = Label.new()
+	super_cooldowns_label.name = "SuperCooldownsLabel"
+	super_cooldowns_label.text = ""
+	var scd_set := LabelSettings.new()
+	scd_set.font_size = 19
+	scd_set.font_color = Color(0.42, 0.92, 1.0)
+	scd_set.shadow_size = 3
+	scd_set.shadow_color = Color(0.0, 0.0, 0.0, 0.95)
+	super_cooldowns_label.label_settings = scd_set
+	main_vbox.add_child(super_cooldowns_label)
 
 	# BLOQUE 5: Pista persistente de Transformación (bloqueo / requisito o cómo activarla al instante)
 	transform_hint_label = Label.new()
@@ -830,6 +847,28 @@ func _update_dbz_hud_elements(delta: float) -> void:
 				dramatic_bonus_panel.visible = (dram_text != "")
 				dramatic_bonus_label.text = dram_text
 			_hud_dirty = true
+
+		# Borde dorado pulsante del panel completo al activar Zenkai
+		if _scouter_panel_style:
+			var target_border := Color(1.0, 0.85, 0.15, 0.96) if z_active else Color(0.0, 0.92, 0.68, 0.90)
+			if z_active and hud_mesh and hud_mesh.visible:
+				var p_z: float = (sin(zenkai_pulse_timer) + 1.0) * 0.5
+				target_border = Color(1.0, 0.65 + p_z * 0.30, 0.10, 0.98)
+			if _scouter_panel_style.border_color != target_border:
+				_scouter_panel_style.border_color = target_border
+				_hud_dirty = true
+
+		# 4.5 Indicador compacto de Cooldowns de Súper Poderes (actualizado cada 0.20s)
+		_cd_hud_timer += delta
+		if super_cooldowns_label and player_instance.has_method("get_super_cooldowns_hud_text") and (_cd_hud_timer >= 0.20 or _last_cooldowns_hud_text == ""):
+			_cd_hud_timer = 0.0
+			var cd_txt: String = player_instance.get_super_cooldowns_hud_text()
+			if cd_txt != _last_cooldowns_hud_text:
+				_last_cooldowns_hud_text = cd_txt
+				super_cooldowns_label.text = cd_txt
+				if super_cooldowns_label.label_settings:
+					super_cooldowns_label.label_settings.font_color = Color(1.0, 0.72, 0.22) if ("⏳" in cd_txt or "⌛" in cd_txt) else Color(0.42, 0.92, 1.0)
+				_hud_dirty = true
 
 		# 5. Pista persistente de Transformación (desbloqueada / requisito / máxima)
 		if transform_hint_label and player_instance.has_method("get_next_transformation_status"):

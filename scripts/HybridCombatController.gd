@@ -896,6 +896,24 @@ func _get_torso_yaw(player: Node) -> float:
 	return origin_yaw
 
 
+func _get_super_block_reason(player: Node, tech_name: String) -> String:
+	if not player or not is_instance_valid(player) or not player.has_method("get_power_block_reason"):
+		return ""
+	var cdata = player.get("character_data")
+	if not cdata or cdata.get("powers") == null:
+		return ""
+	var best_reason: String = ""
+	for p in cdata.powers:
+		if p == null:
+			continue
+		if String(p.gesture_trigger) == tech_name:
+			var r: String = String(player.get_power_block_reason(p))
+			if r == "":
+				return ""
+			best_reason = r
+	return best_reason
+
+
 func _is_super_tech_usable(player: Node, tech_name: String) -> bool:
 	if not player or not is_instance_valid(player):
 		return true
@@ -1261,9 +1279,18 @@ func _process_super_powers(delta: float) -> void:
 				candidate_hold_timer = 0.0
 				if super_unusable_warn_cooldown <= 0.0:
 					super_unusable_warn_cooldown = 1.6
-					var req_msg: String = "requiere SSJ o Zenkai" if target_tech == "final_flash" else "requiere Base o Zenkai"
-					if gesture_tree and gesture_tree.has_signal("gesture_logged"):
-						gesture_tree.emit_signal("gesture_logged", "[BLOQUEADO] %s no disponible en esta forma (%s)." % [target_display, req_msg], "warning")
+					var reason: String = _get_super_block_reason(player, target_tech)
+					if reason == "":
+						var req_msg: String = "requiere SSJ o Zenkai" if target_tech == "final_flash" else "requiere Base o Zenkai"
+						reason = "[BLOQUEADO] %s no disponible (%s)." % [target_display, req_msg]
+					if gesture_tree:
+						if gesture_tree.has_signal("phase_changed"):
+							gesture_tree.emit_signal("phase_changed", reason)
+						if gesture_tree.has_signal("gesture_logged"):
+							gesture_tree.emit_signal("gesture_logged", reason, "warning")
+					for ctrl in [left_controller, right_controller]:
+						if ctrl and is_instance_valid(ctrl) and ctrl.has_method("trigger_haptic_pulse"):
+							ctrl.trigger_haptic_pulse("haptic", 120.0, 0.55, 0.08, 0.0)
 				return
 
 			if target_tech == candidate_super_tech:

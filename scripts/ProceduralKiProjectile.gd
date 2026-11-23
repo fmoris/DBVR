@@ -508,7 +508,7 @@ func _apply_projectile_hit(char_node: Node, caster: Node, pos: Vector3, hit_dir:
 			char_node.recharge_ki(clampf(effective_damage * 0.02, 5.0, 25.0))
 
 		if caster and is_instance_valid(caster) and char_node != caster and caster.has_method("increase_np"):
-			caster.increase_np(effective_damage * 0.35)
+			caster.increase_np(effective_damage * 0.55)
 			caster.check_zenkai_conditions(char_node.current_np)
 			char_node.check_zenkai_conditions(caster.current_np)
 			var is_zenkai_finisher: bool = was_launched_in_zenkai or bool(caster.get("is_in_zenkai_state")) or bool(caster.get("is_comeback_zenkai"))
@@ -638,7 +638,7 @@ func _apply_projectile_hit(char_node: Node, caster: Node, pos: Vector3, hit_dir:
 	# 6. Ganancia de BP del atacante y condiciones de Zenkai
 	# Prohibido K.O. por Ki Blast cargado normal: solo remata si el defensor está SIN DEFENSA y el atacante en Zenkai
 	if caster and is_instance_valid(caster) and char_node != caster and caster.has_method("increase_np"):
-		caster.increase_np(effective_damage * 0.35)
+		caster.increase_np(effective_damage * 0.55)
 		caster.check_zenkai_conditions(char_node.current_np)
 		char_node.check_zenkai_conditions(caster.current_np)
 		var victim_defenseless: bool = char_node.has_method("is_defenseless_for_ko") and bool(char_node.is_defenseless_for_ko())
@@ -712,7 +712,7 @@ func _trigger_explosion(pos: Vector3, collider: Node) -> void:
 	if is_inside_tree() and get_tree():
 		var adm_proj: ArenaDestructionManager = ArenaDestructionManager.get_active(get_tree())
 		if adm_proj:
-			var is_env_hit: bool = collider != null and ("Spire" in collider.name or "Pillar" in collider.name or "Boulder" in collider.name or "Canyon" in collider.name)
+			var is_env_hit: bool = collider != null and ("Spire" in collider.name or "Pillar" in collider.name or "TacticalRock" in collider.name or "Boulder" in collider.name or "Canyon" in collider.name)
 			if is_env_hit or tier >= 2 or has_meta("charge_time"):
 				var caster_bp: float = float(caster.get("current_np")) if (caster and is_instance_valid(caster) and caster.get("current_np") != null) else 10000.0
 				var env_radius: float = maxf(explosion_radius, 3.2 if (tier >= 2 or has_meta("charge_time")) else 1.8)

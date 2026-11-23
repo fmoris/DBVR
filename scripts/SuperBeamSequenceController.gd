@@ -815,7 +815,7 @@ func _resolve_direct_hit() -> void:
 	# 2. Notificar al atacante para sostener la pose de empuje de energía
 	if attacker and is_instance_valid(attacker):
 		if attacker.has_method("increase_np"):
-			attacker.increase_np(final_damage * 0.35)
+			attacker.increase_np(final_damage * 0.65)
 		attacker.set("is_firing_beam", true)
 		attacker.set("beam_tech_name", power_name)
 
