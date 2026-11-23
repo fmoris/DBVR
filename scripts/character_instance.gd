@@ -295,12 +295,12 @@ func setup_character() -> void:
 			if skeleton:
 				skeleton.name = "Skeleton3D" # Asegura resolución exacta de tracks para AnimationPlayer y Ragdoll
 				neck_bone_idx = _find_bone_any(["Neck", "neck", "NECK"])
-				left_arm_idx = _find_bone_any(["LeftArm", "SHOULDER_L"])
-				left_forearm_idx = _find_bone_any(["LeftForeArm", "ELBOW_L"])
-				left_hand_idx = _find_bone_any(["LeftHand", "WRIST_L"])
-				right_arm_idx = _find_bone_any(["RightArm", "SHOULDER_R"])
-				right_forearm_idx = _find_bone_any(["RightForeArm", "ELBOW_R"])
-				right_hand_idx = _find_bone_any(["RightHand", "WRIST_R"])
+				left_arm_idx = _find_bone_any(["LeftArm", "SHOULDER_R"])
+				left_forearm_idx = _find_bone_any(["LeftForeArm", "ELBOW_R"])
+				left_hand_idx = _find_bone_any(["LeftHand", "WRIST_R"])
+				right_arm_idx = _find_bone_any(["RightArm", "SHOULDER_L"])
+				right_forearm_idx = _find_bone_any(["RightForeArm", "ELBOW_L"])
+				right_hand_idx = _find_bone_any(["RightHand", "WRIST_L"])
 
 				_calibrate_skeleton_rig()
 
@@ -421,12 +421,12 @@ func _swap_body_mesh_for_path(model_path: String) -> void:
 	if skeleton:
 		skeleton.name = "Skeleton3D"
 		neck_bone_idx = _find_bone_any(["Neck", "neck", "NECK"])
-		left_arm_idx = _find_bone_any(["LeftArm", "SHOULDER_L"])
-		left_forearm_idx = _find_bone_any(["LeftForeArm", "ELBOW_L"])
-		left_hand_idx = _find_bone_any(["LeftHand", "WRIST_L"])
-		right_arm_idx = _find_bone_any(["RightArm", "SHOULDER_R"])
-		right_forearm_idx = _find_bone_any(["RightForeArm", "ELBOW_R"])
-		right_hand_idx = _find_bone_any(["RightHand", "WRIST_R"])
+		left_arm_idx = _find_bone_any(["LeftArm", "SHOULDER_R"])
+		left_forearm_idx = _find_bone_any(["LeftForeArm", "ELBOW_R"])
+		left_hand_idx = _find_bone_any(["LeftHand", "WRIST_R"])
+		right_arm_idx = _find_bone_any(["RightArm", "SHOULDER_L"])
+		right_forearm_idx = _find_bone_any(["RightForeArm", "ELBOW_L"])
+		right_hand_idx = _find_bone_any(["RightHand", "WRIST_L"])
 
 		_calibrate_skeleton_rig()
 
@@ -2886,7 +2886,7 @@ func _compute_hand_align_basis(prefix: String, hand_idx: int) -> Basis:
 	var hand_rot_inv: Basis = hand_grest.basis.orthonormalized().inverse()
 	var skel_up: Vector3 = _skel_char_basis.y
 
-	var side_suffix: String = "_L" if is_left else "_R"
+	var side_suffix: String = "_R" if is_left else "_L"
 	var idx1: int = _find_bone_any([prefix + "Index1", prefix + "IndexProximal", "F_FORE1" + side_suffix])
 	var mid1: int = _find_bone_any([prefix + "Middle1", prefix + "MiddleProximal", "F_MIDDLE1" + side_suffix])
 	var pnk1: int = _find_bone_any([prefix + "Pinky1", prefix + "PinkyProximal", "F_LITTLE1" + side_suffix])
@@ -2914,7 +2914,7 @@ func _compute_hand_align_basis(prefix: String, hand_idx: int) -> Basis:
 func _build_finger_curl_cache(prefix: String) -> void:
 	if not skeleton:
 		return
-	var side_suffix: String = "_L" if prefix == "Left" else "_R"
+	var side_suffix: String = "_R" if prefix == "Left" else "_L"
 	var hand_idx: int = _find_bone_any([prefix + "Hand", "WRIST" + side_suffix])
 	var idx1: int = _find_bone_any([prefix + "Index1", prefix + "IndexProximal", "F_FORE1" + side_suffix])
 	var pnk1: int = _find_bone_any([prefix + "Pinky1", prefix + "PinkyProximal", "F_LITTLE1" + side_suffix])
@@ -4390,7 +4390,7 @@ func _execute_charged_v3_or_ki_break_finisher(opponent: Node3D, mode: String, sw
 
 	var hit_pos: Vector3 = opponent.global_position + Vector3(0.0, 1.1, 0.0)
 	if procedural_animator and procedural_animator.has_method("trigger_melee_strike"):
-		procedural_animator.trigger_melee_strike(2 if mode == "charged_v3_up" else 1)
+		procedural_animator.trigger_melee_strike(2 if mode == "charged_v3_up" else 5)
 	_spawn_melee_shockwave(hit_pos)
 
 	if opponent.get("procedural_animator"):

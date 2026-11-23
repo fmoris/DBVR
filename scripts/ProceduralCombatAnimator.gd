@@ -106,18 +106,18 @@ const BONE_ALIASES: Dictionary = {
 	"UpperChest": ["UpperChest", "SPINE3"],
 	"Neck": ["Neck", "NECK"],
 	"Head": ["Head", "HEAD"],
-	"LeftShoulder": ["LeftShoulder", "CLAVICLE_L"],
-	"LeftArm": ["LeftArm", "SHOULDER_L"],
-	"LeftForeArm": ["LeftForeArm", "ELBOW_L"],
-	"LeftHand": ["LeftHand", "WRIST_L"],
-	"RightShoulder": ["RightShoulder", "CLAVICLE_R"],
-	"RightArm": ["RightArm", "SHOULDER_R"],
-	"RightForeArm": ["RightForeArm", "ELBOW_R"],
-	"RightHand": ["RightHand", "WRIST_R"],
-	"LeftUpLeg": ["LeftUpLeg", "THIGH_L"],
-	"LeftLeg": ["LeftLeg", "CLANK_L"],
-	"RightUpLeg": ["RightUpLeg", "THIGH_R"],
-	"RightLeg": ["RightLeg", "CLANK_R"],
+	"LeftShoulder": ["LeftShoulder", "CLAVICLE_R"],
+	"LeftArm": ["LeftArm", "SHOULDER_R"],
+	"LeftForeArm": ["LeftForeArm", "ELBOW_R"],
+	"LeftHand": ["LeftHand", "WRIST_R"],
+	"RightShoulder": ["RightShoulder", "CLAVICLE_L"],
+	"RightArm": ["RightArm", "SHOULDER_L"],
+	"RightForeArm": ["RightForeArm", "ELBOW_L"],
+	"RightHand": ["RightHand", "WRIST_L"],
+	"LeftUpLeg": ["LeftUpLeg", "THIGH_R"],
+	"LeftLeg": ["LeftLeg", "CLANK_R"],
+	"RightUpLeg": ["RightUpLeg", "THIGH_L"],
+	"RightLeg": ["RightLeg", "CLANK_L"],
 }
 
 
@@ -213,17 +213,22 @@ func trigger_melee_strike(strike_type: int = -1) -> void:
 		melee_anim_type = melee_combo_counter % 4
 		melee_combo_counter += 1
 	else:
-		melee_anim_type = clampi(strike_type, 0, 4)
-	melee_anim_duration = 0.34 if melee_anim_type == 4 else 0.24
+		melee_anim_type = clampi(strike_type, 0, 5)
+	if melee_anim_type == 5:
+		melee_anim_duration = 0.42
+	elif melee_anim_type == 4:
+		melee_anim_duration = 0.38
+	else:
+		melee_anim_duration = 0.24
 	melee_anim_timer = melee_anim_duration
 
 
 var melee_block_timer: float = 0.0
 var melee_block_type: int = 0
 
-func trigger_melee_block(block_type: int = 0) -> void:
+func trigger_melee_block(block_type: int = 0, duration: float = 0.28) -> void:
 	melee_block_type = clampi(block_type, 0, 3)
-	melee_block_timer = 0.28
+	melee_block_timer = maxf(duration, 0.1)
 
 
 func trigger_getup_recovery(duration: float = 0.45) -> void:
@@ -432,6 +437,17 @@ func _apply_hips_spine_and_chest(delta: float) -> void:
 					var s: float = minf((_st_melee_u - 0.35) / 0.35, 1.0)
 					spine_target = Vector3(deg_to_rad(24.0 * s), 0.0, 0.0)
 					chest_target = Vector3(deg_to_rad(18.0 * s), 0.0, 0.0)
+			5: # Golpe Cargado (windup atrás -> estallido frontal)
+				if _st_melee_u < 0.42:
+					var w: float = _st_melee_u / 0.42
+					hips_target = Vector3(0.0, deg_to_rad(-24.0 * w), 0.0)
+					spine_target = Vector3(deg_to_rad(-8.0 * w), 0.0, 0.0)
+					chest_target = Vector3(deg_to_rad(-6.0 * w), deg_to_rad(-32.0 * w), 0.0)
+				else:
+					var s: float = minf((_st_melee_u - 0.42) / 0.28, 1.0)
+					hips_target = Vector3(0.0, deg_to_rad(lerpf(-24.0, 28.0, s)), 0.0)
+					spine_target = Vector3(deg_to_rad(lerpf(-8.0, 14.0, s)), 0.0, 0.0)
+					chest_target = Vector3(deg_to_rad(lerpf(-6.0, 16.0, s)), deg_to_rad(lerpf(-32.0, 38.0, s)), 0.0)
 	elif _st_super_phase == 2:
 		var beam_vib: float = sin(anim_time * 58.0) * 0.02
 		match _st_super_tech:
@@ -781,12 +797,21 @@ func _apply_arms_pose(delta: float) -> void:
 			4: # Martillazo DBZ 2 Manos (arriba -> abajo)
 				if _st_melee_u < 0.35:
 					var w: float = _st_melee_u / 0.35
-					des_pos_l = Vector3(-0.06, lerpf(0.0, 0.42, w), 0.22)
-					des_pos_r = Vector3(0.06, lerpf(0.0, 0.42, w), 0.22)
+					des_pos_l = Vector3(0.06, lerpf(0.0, 0.48, w), 0.18)
+					des_pos_r = Vector3(-0.06, lerpf(0.0, 0.48, w), 0.18)
 				else:
 					var s: float = minf((_st_melee_u - 0.35) / 0.35, 1.0)
-					des_pos_l = Vector3(-0.06, lerpf(0.42, -0.28, s), lerpf(0.22, 0.44, s))
-					des_pos_r = Vector3(0.06, lerpf(0.42, -0.28, s), lerpf(0.22, 0.44, s))
+					des_pos_l = Vector3(0.06, lerpf(0.48, -0.32, s), lerpf(0.18, 0.46, s))
+					des_pos_r = Vector3(-0.06, lerpf(0.48, -0.32, s), lerpf(0.18, 0.46, s))
+			5: # Golpe Cargado (windup atrás en cadera -> puñetazo explosivo a máxima extensión)
+				if _st_melee_u < 0.42:
+					var w: float = _st_melee_u / 0.42
+					des_pos_l = Vector3(0.06, 0.04, lerpf(0.28, 0.36, w))
+					des_pos_r = Vector3(lerpf(0.0, -0.18, w), lerpf(-0.08, -0.14, w), lerpf(0.20, -0.14, w))
+				else:
+					var s: float = minf((_st_melee_u - 0.42) / 0.25, 1.0)
+					des_pos_l = Vector3(lerpf(0.06, 0.14, s), lerpf(0.04, -0.10, s), lerpf(0.36, 0.14, s))
+					des_pos_r = Vector3(lerpf(-0.18, -0.02, s), lerpf(-0.14, 0.04, s), lerpf(-0.14, 0.56, s))
 		grip_l = 1.0
 		trig_l = 1.0
 		grip_r = 1.0
@@ -876,8 +901,10 @@ func _apply_arms_pose(delta: float) -> void:
 				des_basis_r = palm_fwd_r
 				grip_l = 0.85; trig_l = 0.85; grip_r = 0.05; trig_r = 0.15
 			1: # Guardia Cruzada en X
-				des_pos_l = Vector3(-0.08, 0.10, 0.32)
-				des_pos_r = Vector3(0.08, 0.06, 0.30)
+				des_pos_l = Vector3(-0.14, 0.12, 0.30)
+				des_pos_r = Vector3(0.14, 0.08, 0.26)
+				des_basis_l = Basis.looking_at(Vector3(-0.42, 0.82, 0.38).normalized(), Vector3(0.0, 0.35, -0.94).normalized())
+				des_basis_r = Basis.looking_at(Vector3(0.42, 0.82, 0.38).normalized(), Vector3(0.0, 0.35, -0.94).normalized())
 				grip_l = 0.95; trig_l = 0.95; grip_r = 0.95; trig_r = 0.95
 			2: # Choque de Puños (puño derecho extendido al impacto)
 				des_pos_l = Vector3(-0.10, -0.06, 0.18)
@@ -889,10 +916,10 @@ func _apply_arms_pose(delta: float) -> void:
 				des_basis_l = palm_fwd_l; des_basis_r = palm_fwd_r
 				grip_l = 0.10; trig_l = 0.10; grip_r = 0.10; trig_r = 0.10
 	elif _st_is_blocking:
-		des_pos_l = Vector3(-0.08, 0.10, 0.30)
-		des_pos_r = Vector3(0.08, 0.06, 0.28)
-		des_basis_l = Basis.looking_at(Vector3(-0.35, 0.85, 0.38).normalized(), Vector3(0.0, 0.35, -0.94).normalized())
-		des_basis_r = Basis.looking_at(Vector3(0.35, 0.85, 0.38).normalized(), Vector3(0.0, 0.35, -0.94).normalized())
+		des_pos_l = Vector3(-0.14, 0.12, 0.30)
+		des_pos_r = Vector3(0.14, 0.08, 0.26)
+		des_basis_l = Basis.looking_at(Vector3(-0.42, 0.82, 0.38).normalized(), Vector3(0.0, 0.35, -0.94).normalized())
+		des_basis_r = Basis.looking_at(Vector3(0.42, 0.82, 0.38).normalized(), Vector3(0.0, 0.35, -0.94).normalized())
 		grip_l = 0.90
 		trig_l = 0.85
 		grip_r = 0.90
