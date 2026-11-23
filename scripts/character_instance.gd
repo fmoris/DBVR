@@ -2904,10 +2904,11 @@ func _compute_hand_align_basis(prefix: String, hand_idx: int) -> Basis:
 		palm_in_skel = -palm_in_skel
 
 	var f_loc: Vector3 = (hand_rot_inv * finger_dir_skel).normalized()
-	var t_loc: Vector3 = (hand_rot_inv * thumb_skel).normalized()
 	var p_loc: Vector3 = (hand_rot_inv * palm_in_skel).normalized()
 	var x_loc: Vector3 = p_loc if is_left else -p_loc
-	return Basis(x_loc, t_loc, -f_loc).orthonormalized().inverse()
+	var z_loc: Vector3 = -f_loc
+	var y_loc: Vector3 = z_loc.cross(x_loc).normalized()
+	return Basis(x_loc, y_loc, z_loc).orthonormalized().inverse()
 
 
 func _build_finger_curl_cache(prefix: String) -> void:
