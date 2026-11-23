@@ -100,7 +100,11 @@ static func evaluate_lore_event_trigger(ctx: Dictionary) -> int:
 		return LoreEventType.NONE
 
 	if src == "combo_mid":
-		if last_ev != LoreEventType.SONIC_Z_BURST and hits_landed >= 3 and (sonic_hits >= 2 or is_furia_or_trans) and atk_ki >= 12.0:
+		var max_hits: int = int(ctx.get("max_hits", 4))
+		var charged_hits: int = int(ctx.get("charged_hits", 0))
+		var min_hits_req: int = maxi(3, ceili(float(max_hits) * 0.65))
+		var sonic_merit: bool = (sonic_hits >= 3) or (sonic_hits >= 2 and (charged_hits >= 1 or is_furia_or_trans))
+		if last_ev != LoreEventType.SONIC_Z_BURST and hits_landed >= min_hits_req and sonic_merit and atk_ki >= 18.0:
 			return LoreEventType.SONIC_Z_BURST
 		return LoreEventType.NONE
 

@@ -164,7 +164,11 @@ var _last_lore_event_type: int = 0
 var _lore_return_mode: String = ""
 var _scenic_spot_idx: int = 0
 var hammer_ki_paid: bool = false
+static var _sonic_burst_cooldown_melees: int = 0
+var _sonic_burst_used_this_dome: bool = false
+var _sonic_burst_rolled_this_round: bool = false
 var _round_sonic_hits: int = 0
+var _round_charged_hits: int = 0
 var _round_unblocked_hits_taken: int = 0
 var _surge_active_timer: float = 0.0
 var _timing_cue_note_idx: int = -1
@@ -244,6 +248,8 @@ func setup(p_attacker: Node3D, p_defender: Node3D, p_duration: float = -1.0, p_m
 	_rounds_completed_in_dome = 0
 	_sim_used_this_dome = false
 	_sim_exchange_cooldown_melees = maxi(_sim_exchange_cooldown_melees - 1, 0)
+	_sonic_burst_used_this_dome = false
+	_sonic_burst_cooldown_melees = maxi(_sonic_burst_cooldown_melees - 1, 0)
 
 	sfx_hit_light = null
 	sfx_hit_heavy = null
@@ -339,6 +345,8 @@ func start_attack_phase(p_attacker: Node3D, p_defender: Node3D, p_duration: floa
 	hammer_locked_haptic = false
 	hammer_ki_paid = false
 	_round_sonic_hits = 0
+	_round_charged_hits = 0
+	_sonic_burst_rolled_this_round = false
 	_round_unblocked_hits_taken = 0
 	_timing_cue_note_idx = -1
 	_def_stick_used_for_note_idx = -1
@@ -3448,6 +3456,8 @@ func _register_hit(zone: Dictionary, ctrl_node: XRController3D, hand_name: Strin
 		_spawn_parry_shockwave(hit_pos)
 		if is_inside_tree():
 			_trigger_hit_stop(0.045)
+	if is_charged or is_v3:
+		_round_charged_hits += 1
 
 	var orig_col: Color = zone["color"] as Color
 	var flash_col: Color = Color(1.0, 0.2, 0.1) if is_v3 else (Color(1.0, 0.45, 0.1) if is_charged else Color(1.0, 1.0, 0.4))
@@ -3488,21 +3498,34 @@ func _register_hit(zone: Dictionary, ctrl_node: XRController3D, hand_name: Strin
 	current_attack_step += 1
 	_update_sequential_target_highlights()
 
-	# Evento Lore 6: Intercambio Sónico Z-Burst a mitad de un combo largo (no interfiere con combos <= 2 golpes)
+	# Evento Lore 6: Intercambio Sónico Z-Burst a mitad de un combo largo (con umbral proporcional, azar único y cooldown)
 	var atk_ki_left: float = float(attacker.get("current_ki")) if (attacker and attacker.get("current_ki") != null) else 50.0
-	if hits.size() >= 3 and current_attack_step < max_allowed_hits and atk_ki_left >= 15.0 and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")):
+	if not _sonic_burst_used_this_dome and not _sonic_burst_rolled_this_round and _sonic_burst_cooldown_melees <= 0 and hits.size() >= 3 and current_attack_step < max_allowed_hits and atk_ki_left >= 18.0 and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")):
 		var is_fur_t: bool = bool(attacker.get("is_in_furia")) or (int(attacker.get("current_form")) if attacker.get("current_form") != null else 0) > 0
 		var sz_ev: int = MeleeLoreEventScript.evaluate_lore_event_trigger({
 			"trigger_source": "combo_mid",
 			"last_event_type": _last_lore_event_type,
 			"hits_landed": hits.size(),
+			"max_hits": max_allowed_hits,
 			"sonic_hits": _round_sonic_hits,
+			"charged_hits": _round_charged_hits,
 			"is_furia_or_trans": is_fur_t,
 			"atk_ki": atk_ki_left
 		})
 		if sz_ev == MeleeLoreEventScript.LoreEventType.SONIC_Z_BURST:
-			_start_lore_event(sz_ev, "combo_mid")
-			return
+			_sonic_burst_rolled_this_round = true
+			var sb_prob: float = 0.28
+			if is_fur_t:
+				sb_prob += 0.12
+			if _round_sonic_hits >= 4 or (_round_sonic_hits >= 3 and _round_charged_hits >= 1):
+				sb_prob += 0.10
+			sb_prob = clampf(sb_prob, 0.20, 0.50)
+			if randf() < sb_prob:
+				_sonic_burst_used_this_dome = true
+				# setup() decrements by 1 at the start of each subsequent melee, so 3 blocks the next 2 full melees.
+				_sonic_burst_cooldown_melees = 3
+				_start_lore_event(sz_ev, "combo_mid")
+				return
 
 	# Auto-cierre inteligente si el Ki restante ya no alcanza para otro golpe rápido, o al completar el combo
 	var min_quick_cost: float = float(cfg_ki.melee_quick_cost) if cfg_ki.get("melee_quick_cost") != null else 3.0
