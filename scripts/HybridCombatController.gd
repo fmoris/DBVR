@@ -153,7 +153,6 @@ var _air_brake_label: Label3D = null
 var status_pulse_timer: float = 0.0
 
 const VRInGameMenuClass = preload("res://scripts/vr_in_game_menu.gd")
-const StartupChangelogModalClass = preload("res://scripts/StartupChangelogModal.gd")
 var in_game_menu: VRInGameMenu = null
 var menu_toggle_cooldown: float = 0.0
 
@@ -202,9 +201,6 @@ func _find_xr_nodes() -> void:
 				in_game_menu.name = "VRInGameMenu"
 				xr_origin.add_child(in_game_menu)
 			in_game_menu.setup_references(xr_origin, camera, left_controller, right_controller)
-
-		if get_tree() and camera:
-			StartupChangelogModalClass.spawn_if_needed(get_tree(), camera, left_controller, right_controller)
 
 		if ki_lockon_system == null and get_tree() and get_tree().current_scene:
 			ki_lockon_system = KiSenseAndLockOnClass.new()
