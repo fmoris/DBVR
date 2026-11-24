@@ -40,6 +40,7 @@ var _burst_hits: int = 0
 var _burst_hop_timer: float = 0.0
 var _clash_punch_cd_l: float = 0.0
 var _clash_punch_cd_r: float = 0.0
+var _clash_punch_count: int = 0
 var _stick_debounce: float = 0.0
 var _crater_target_pos: Vector3 = Vector3.ZERO
 var _meteor_smash_positions: Dictionary = {}
@@ -84,7 +85,7 @@ static func evaluate_lore_event_trigger(ctx: Dictionary) -> int:
 		return LoreEventType.NONE
 
 	if src == "fist_clash":
-		if last_ev != LoreEventType.FIST_FLURRY_CLASH and atk_ki >= 16.0 and def_ki >= 16.0 and bp_ratio >= 0.65 and bp_ratio <= 1.50:
+		if last_ev != LoreEventType.FIST_FLURRY_CLASH and atk_ki >= 16.0 and def_ki >= 16.0 and bp_ratio >= 0.70 and bp_ratio <= 1.43:
 			return LoreEventType.FIST_FLURRY_CLASH
 		return LoreEventType.NONE
 
@@ -117,6 +118,39 @@ static func compute_fist_clash_step(current_progress: float, player_punches: int
 	var player_push: float = float(maxi(player_punches, 0)) * 0.085 * bp_scale
 	var enemy_pull: float = (0.28 / bp_scale) * maxf(delta, 0.0)
 	return clampf(current_progress + player_push - enemy_pull, 0.0, 1.0)
+
+
+## Exige puño cerrado (G+T) + empuje frontal hacia el rival cerca del orbe para contar golpes reales en ráfaga
+static func evaluate_flurry_clash_punch(vel: Vector3, duel_axis: Vector3, fist_closed: bool, dist_to_orb: float) -> bool:
+	if not fist_closed:
+		return false
+	var fwd: Vector3 = Vector3(duel_axis.x, 0.0, duel_axis.z)
+	fwd = fwd.normalized() if fwd.length_squared() > 0.001 else Vector3.FORWARD
+	var spd: float = vel.length()
+	var fwd_spd: float = vel.dot(fwd)
+	return spd >= 1.30 and fwd_spd >= 1.05 and (dist_to_orb <= 0.55 or fwd_spd >= 1.45)
+
+
+## Pasiva canon simétrica de Goku: en Furia o Kaioken consume 30% menos Ki durante el choque de puños
+static func compute_flurry_clash_ki_drain_rate(base_drain: float, char_name: String, is_furia: bool, form_name: String) -> float:
+	var cn_l: String = char_name.to_lower()
+	var fn_l: String = form_name.to_lower()
+	if "goku" in cn_l and (is_furia or "kaioken" in fn_l):
+		return base_drain * 0.70
+	return base_drain
+
+
+static func _extract_char_and_form(fighter: Node3D) -> Array[String]:
+	var c_name: String = ""
+	var f_name: String = ""
+	if fighter and is_instance_valid(fighter):
+		var cd: Variant = fighter.get("character_data")
+		if cd and cd.get("character_name") != null:
+			c_name = String(cd.get("character_name"))
+		var tf: Variant = fighter.get("current_transformation")
+		if tf and tf.get("form_name") != null:
+			f_name = String(tf.get("form_name"))
+	return [c_name, f_name]
 
 
 ## Calcula posiciones 3D en diagonal dentro de la arena para Meteor Smash (nunca recto vertical)
@@ -158,6 +192,7 @@ func start_event(event_type: int, p_dome: Node3D, p_attacker: Node3D, p_defender
 	_burst_hits = 0
 	_clash_punch_cd_l = 0.0
 	_clash_punch_cd_r = 0.0
+	_clash_punch_count = 0
 	_stick_debounce = 0.0
 
 	_ensure_visuals()
@@ -189,7 +224,7 @@ func start_event(event_type: int, p_dome: Node3D, p_attacker: Node3D, p_defender
 				_title_label.text = title_txt
 				_title_label.modulate = Color(1.0, 0.92, 0.25)
 			if _prompt_label:
-				_prompt_label.text = "¡GOLPEA RÁPIDO! TÚ 50% ⚔️ 50% RIVAL"
+				_prompt_label.text = "¡PUÑO FRONTAL (G+T)! TÚ 50%% ⚔️ 50%% RIVAL  |  ⏱ %.1fs" % _event_timer
 			_update_tug_bar_visual()
 			if _dome and _dome.has_method("perform_z_blink_relocation"):
 				_dome.perform_z_blink_relocation(Vector3(clampf(vic_origin.x, -55.0, 55.0), gy + 5.5, clampf(vic_origin.z, -55.0, 55.0)))
@@ -320,7 +355,7 @@ func process_event(delta: float, l_ctrl: XRController3D, r_ctrl: XRController3D,
 
 	match active_event_type:
 		LoreEventType.FIST_FLURRY_CLASH:
-			_process_fist_clash(delta, l_vel, r_vel, l_closed, r_closed)
+			_process_fist_clash(delta, l_ctrl, r_ctrl, l_vel, r_vel, l_closed, r_closed)
 		LoreEventType.METEOR_SMASH:
 			_process_meteor_smash(delta, l_ctrl, r_ctrl, l_vel, r_vel, l_closed, r_closed, stick_l, stick_r)
 		LoreEventType.Z_VANISH_WAR:
@@ -337,40 +372,61 @@ func process_event(delta: float, l_ctrl: XRController3D, r_ctrl: XRController3D,
 func inject_virtual_clash_punch() -> void:
 	if not is_event_active or active_event_type != LoreEventType.FIST_FLURRY_CLASH:
 		return
+	_clash_punch_count += 1
 	var bp_r: float = _get_player_bp_ratio()
 	_tug_progress = compute_fist_clash_step(_tug_progress, 1, bp_r, 0.0)
 	_update_tug_bar_visual()
+	if _event_orb and is_instance_valid(_event_orb) and _dome and _dome.has_method("_spawn_hit_spark"):
+		_dome._spawn_hit_spark(_event_orb.global_position)
+	if _dome and _dome.get("audio_player"):
+		var ap_v: AudioStreamPlayer3D = _dome.get("audio_player") as AudioStreamPlayer3D
+		if ap_v:
+			ap_v.pitch_scale = clampf(0.95 + _tug_progress * 0.35 + minf(float(_clash_punch_count) * 0.015, 0.15), 0.90, 1.45)
+			var act_v: String = "common.melee_hit_heavy" if (_clash_punch_count % 3 == 0) else "common.melee_hit_light"
+			AudioActionManager.play_action(act_v, ap_v)
 
 
-func _process_fist_clash(delta: float, l_vel: Vector3, r_vel: Vector3, l_closed: bool, r_closed: bool) -> void:
-	# Ambos luchadores queman Ki/s durante el choque de poder cuerpo a cuerpo
+func _process_fist_clash(delta: float, l_ctrl: XRController3D, r_ctrl: XRController3D, l_vel: Vector3, r_vel: Vector3, l_closed: bool, r_closed: bool) -> void:
+	# Ambos luchadores queman Ki/s durante el choque de poder cuerpo a cuerpo (con pasiva de resistencia de Goku)
 	var cfg_fc: KiEconomyConfig = KiEconomyConfig.get_default()
 	var fc_drain: float = float(cfg_fc.melee_flurry_clash_drain_per_sec) if cfg_fc.get("melee_flurry_clash_drain_per_sec") != null else 5.0
-	_modify_ki(_player_char, -fc_drain * delta)
-	_modify_ki(_enemy_char, -fc_drain * delta)
+	var p_cf: Array[String] = _extract_char_and_form(_player_char)
+	var e_cf: Array[String] = _extract_char_and_form(_enemy_char)
+	var p_furia: bool = _player_char != null and is_instance_valid(_player_char) and bool(_player_char.get("is_in_furia"))
+	var e_furia: bool = _enemy_char != null and is_instance_valid(_enemy_char) and bool(_enemy_char.get("is_in_furia"))
+	var p_drain: float = compute_flurry_clash_ki_drain_rate(fc_drain, p_cf[0], p_furia, p_cf[1])
+	var e_drain: float = compute_flurry_clash_ki_drain_rate(fc_drain, e_cf[0], e_furia, e_cf[1])
+	_modify_ki(_player_char, -p_drain * delta)
+	_modify_ki(_enemy_char, -e_drain * delta)
 
 	var p_ki: float = float(_player_char.get("current_ki")) if (_player_char and _player_char.get("current_ki") != null) else 0.0
 	var e_ki: float = float(_enemy_char.get("current_ki")) if (_enemy_char and _enemy_char.get("current_ki") != null) else 0.0
 
+	var axis_fc: Vector3 = _dome.get("_duel_axis") if (_dome and is_instance_valid(_dome) and _dome.get("_duel_axis") != null) else Vector3.FORWARD
+	var orb_pos: Vector3 = _event_orb.global_position if (_event_orb and is_instance_valid(_event_orb)) else global_position
+	var d_orb_l: float = l_ctrl.global_position.distance_to(orb_pos) if (l_ctrl and is_instance_valid(l_ctrl)) else 0.45
+	var d_orb_r: float = r_ctrl.global_position.distance_to(orb_pos) if (r_ctrl and is_instance_valid(r_ctrl)) else 0.45
+
 	var p_punches: int = 0
-	if _clash_punch_cd_l <= 0.0 and ((l_closed and l_vel.length() >= 1.15) or l_vel.length() >= 1.45):
-		_clash_punch_cd_l = 0.10
+	if _clash_punch_cd_l <= 0.0 and evaluate_flurry_clash_punch(l_vel, axis_fc, l_closed, d_orb_l):
+		_clash_punch_cd_l = 0.09
 		p_punches += 1
 		if _event_orb:
 			if _dome and _dome.has_method("_spawn_hit_spark"):
 				_dome._spawn_hit_spark(_event_orb.global_position)
-			if get_tree():
+			if is_inside_tree() and get_tree():
 				ZenkaiVFXManager.spawn_zenkai_impact_flash(get_tree(), _event_orb.global_position, Color(0.25, 0.92, 1.0, 0.95), 0.75)
-	if _clash_punch_cd_r <= 0.0 and ((r_closed and r_vel.length() >= 1.15) or r_vel.length() >= 1.45):
-		_clash_punch_cd_r = 0.10
+	if _clash_punch_cd_r <= 0.0 and evaluate_flurry_clash_punch(r_vel, axis_fc, r_closed, d_orb_r):
+		_clash_punch_cd_r = 0.09
 		p_punches += 1
 		if _event_orb:
 			if _dome and _dome.has_method("_spawn_hit_spark"):
 				_dome._spawn_hit_spark(_event_orb.global_position)
-			if get_tree():
+			if is_inside_tree() and get_tree():
 				ZenkaiVFXManager.spawn_zenkai_impact_flash(get_tree(), _event_orb.global_position, Color(1.0, 0.85, 0.25, 0.95), 0.75)
 
 	if p_punches > 0:
+		_clash_punch_count += p_punches
 		if _enemy_char and is_instance_valid(_enemy_char) and _enemy_char.get("procedural_animator"):
 			_enemy_char.procedural_animator.trigger_melee_strike(randi() % 4)
 		if _dome:
@@ -380,28 +436,39 @@ func _process_fist_clash(delta: float, l_vel: Vector3, r_vel: Vector3, l_closed:
 				_dome._pulse_defender_both_hands(190.0, 0.85, 0.05)
 			var ap: AudioStreamPlayer3D = _dome.get("audio_player") as AudioStreamPlayer3D
 			if ap:
-				AudioActionManager.play_action("common.melee_hit_light", ap)
+				ap.global_position = orb_pos
+				ap.pitch_scale = clampf(0.95 + _tug_progress * 0.35 + minf(float(_clash_punch_count) * 0.015, 0.15), 0.90, 1.45)
+				var clash_sfx: String = "common.melee_hit_heavy" if (_clash_punch_count % 3 == 0) else "common.melee_hit_light"
+				AudioActionManager.play_action(clash_sfx, ap)
 
 	var bp_r: float = _get_player_bp_ratio()
+	var passive_tag: String = ""
 	# Asimetría Canon Vegeta (Orgullo Saiyan): +15% de empuje en choque si está en Furia
-	if _player_char and is_instance_valid(_player_char) and bool(_player_char.get("is_in_furia")):
-		var p_cd: Variant = _player_char.get("character_data")
-		if p_cd and "character_name" in p_cd and "vegeta" in String(p_cd.character_name).to_lower():
-			bp_r *= 1.15
-	if _enemy_char and is_instance_valid(_enemy_char) and bool(_enemy_char.get("is_in_furia")):
-		var e_cd: Variant = _enemy_char.get("character_data")
-		if e_cd and "character_name" in e_cd and "vegeta" in String(e_cd.character_name).to_lower():
-			bp_r /= 1.15
+	if p_furia and "vegeta" in p_cf[0].to_lower():
+		bp_r *= 1.15
+		passive_tag = " | 🔥 ORGULLO x1.15"
+	if e_furia and "vegeta" in e_cf[0].to_lower():
+		bp_r /= 1.15
+	if passive_tag.is_empty() and p_drain < fc_drain - 0.01:
+		passive_tag = " | ⚡ ESPÍRITU -30% KI"
 	_tug_progress = compute_fist_clash_step(_tug_progress, p_punches, bp_r, delta)
 	_update_tug_bar_visual()
+	_sync_event_orb_world_pos()
 
 	if _event_orb and is_instance_valid(_event_orb):
 		var pulse_s: float = 0.95 + sin(Time.get_ticks_msec() * 0.035) * 0.18 + float(p_punches) * 0.22
 		_event_orb.scale = Vector3.ONE * pulse_s
+		if _event_orb_mat:
+			if _tug_progress < 0.40:
+				_event_orb_mat.albedo_color = Color(1.0, 0.30, 0.18, 0.92)
+			elif _tug_progress > 0.60:
+				_event_orb_mat.albedo_color = Color(0.28, 0.94, 1.0, 0.94)
+			else:
+				_event_orb_mat.albedo_color = Color(1.0, 0.88, 0.18, 0.90)
 	if _prompt_label:
 		var p_pct: int = int(roundf(_tug_progress * 100.0))
 		var e_pct: int = 100 - p_pct
-		_prompt_label.text = "¡GOLPEA RÁPIDO! TÚ %d%% ⚔️ %d%% RIVAL" % [p_pct, e_pct]
+		_prompt_label.text = "¡PUÑO FRONTAL (G+T)! TÚ %d%% ⚔️ %d%% RIVAL  |  ⏱ %.1fs%s" % [p_pct, e_pct, maxf(_event_timer, 0.0), passive_tag]
 
 	if p_ki <= 0.0:
 		_resolve_fist_clash_winner(_enemy_char, _player_char, 1.0 - _tug_progress)
@@ -424,12 +491,15 @@ func _resolve_fist_clash_winner(win_node: Node3D, lose_node: Node3D, win_prog: f
 
 	if lose_node and is_instance_valid(lose_node) and lose_node.has_method("take_hit"):
 		lose_node.take_hit(dmg, Vector3.ZERO, false)
+	var cfg_fcw: KiEconomyConfig = KiEconomyConfig.get_default()
+	var fc_win_ki: float = float(cfg_fcw.melee_flurry_clash_win_ki_reward) if cfg_fcw.get("melee_flurry_clash_win_ki_reward") != null else 18.0
 	if win_node and is_instance_valid(win_node):
-		var cfg_fcw: KiEconomyConfig = KiEconomyConfig.get_default()
-		var fc_win_ki: float = float(cfg_fcw.melee_flurry_clash_win_ki_reward) if cfg_fcw.get("melee_flurry_clash_win_ki_reward") != null else 18.0
+		var win_was_furia: bool = bool(win_node.get("is_in_furia"))
 		_modify_ki(win_node, fc_win_ki)
 		if win_node.has_method("increase_np"):
 			win_node.increase_np(500.0)
+		if win_was_furia and not bool(win_node.get("is_in_zenkai_state")) and win_node.has_method("trigger_comeback_zenkai"):
+			win_node.trigger_comeback_zenkai()
 		if win_node.has_method("_log_combat_event"):
 			win_node._log_combat_event("💥 ¡GANÓ EL CHOQUE DE PUÑOS! (-%.0f BP rival | +%d Ki | +500 BP)" % [dmg, int(fc_win_ki)], "success")
 
@@ -437,14 +507,17 @@ func _resolve_fist_clash_winner(win_node: Node3D, lose_node: Node3D, win_prog: f
 		_dome._trigger_hit_stop(0.10)
 	if _dome and _dome.has_method("_spawn_parry_shockwave"):
 		_dome._spawn_parry_shockwave(exp_pos)
-	if get_tree():
+	if is_inside_tree() and get_tree():
 		ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), exp_pos, 3, Color(0.25, 0.92, 1.0, 0.95) if win_is_p else Color(1.0, 0.28, 0.16, 0.95), true)
 		var dd_fc: DramaticDirector = DramaticDirector.get_active(get_tree())
 		if dd_fc:
-			var ban_txt: String = "💥 ¡CHOQUE DE PUÑOS GANADO! (+18 KI / +500 BP)" if win_is_p else "⚠️ ¡PERDISTE EL CHOQUE DE PUÑOS!"
+			var ban_txt: String = "💥 ¡CHOQUE DE PUÑOS GANADO! (+%d KI / +500 BP)" % int(fc_win_ki) if win_is_p else "⚠️ ¡PERDISTE EL CHOQUE DE PUÑOS!"
 			dd_fc.show_camera_banner(ban_txt, Color(0.25, 0.96, 1.0) if win_is_p else Color(1.0, 0.30, 0.22), 1.65)
 	if _dome and _dome.get("audio_player"):
-		AudioActionManager.play_action("common.block_perfect", _dome.get("audio_player"))
+		var ap_w: AudioStreamPlayer3D = _dome.get("audio_player") as AudioStreamPlayer3D
+		if ap_w:
+			ap_w.pitch_scale = 0.90
+			AudioActionManager.play_action("common.melee_hit_heavy", ap_w)
 
 	var lose_ki: float = float(lose_node.get("current_ki")) if (lose_node and is_instance_valid(lose_node) and lose_node.get("current_ki") != null) else 50.0
 	if win_prog >= 0.72 or lose_ki < 10.0:
@@ -741,7 +814,7 @@ func _ensure_visuals() -> void:
 	_title_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.96)
 	_title_label.no_depth_test = true
 	_title_label.render_priority = 127
-	_title_label.position = Vector3(0.0, 0.25, 0.0)
+	_title_label.position = Vector3(0.0, 0.21, 0.0)
 	_hud_root.add_child(_title_label)
 
 	_prompt_label = Label3D.new()
@@ -751,12 +824,12 @@ func _ensure_visuals() -> void:
 	_prompt_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.96)
 	_prompt_label.no_depth_test = true
 	_prompt_label.render_priority = 127
-	_prompt_label.position = Vector3(0.0, 0.16, 0.0)
+	_prompt_label.position = Vector3(0.0, 0.13, 0.0)
 	_hud_root.add_child(_prompt_label)
 
 	_tug_bar_root = Node3D.new()
 	_tug_bar_root.name = "LoreTugBar"
-	_tug_bar_root.position = Vector3(0.0, 0.08, 0.0)
+	_tug_bar_root.position = Vector3(0.0, 0.05, 0.0)
 	_hud_root.add_child(_tug_bar_root)
 
 	var bg_m := MeshInstance3D.new()
@@ -838,7 +911,8 @@ func _sync_event_orb_world_pos() -> void:
 	axis.y = 0.0
 	axis = axis.normalized() if axis.length_squared() > 0.001 else Vector3.FORWARD
 	if cam and is_instance_valid(cam):
-		_event_orb.global_position = cam.global_position + axis * 0.55 + Vector3(0.0, -0.10, 0.0)
+		var orb_dist: float = lerpf(0.34, 0.86, clampf(_tug_progress, 0.0, 1.0)) if active_event_type == LoreEventType.FIST_FLURRY_CLASH else 0.55
+		_event_orb.global_position = cam.global_position + axis * orb_dist + Vector3(0.0, -0.10, 0.0)
 	elif _dome and is_instance_valid(_dome):
 		_event_orb.global_position = _dome.global_position
 

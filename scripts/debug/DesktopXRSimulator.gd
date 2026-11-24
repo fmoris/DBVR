@@ -125,9 +125,17 @@ func _unhandled_input(event: InputEvent) -> void:
 				_hud_visible = not _hud_visible
 				if _hud_panel:
 					_hud_panel.visible = _hud_visible
-			elif key_ev.keycode == KEY_V and _manual_melee_timer <= 0.0:
-				_manual_melee_timer = 0.28
-				_manual_melee_left = not _manual_melee_left
+			elif key_ev.keycode == KEY_V:
+				var ply_v: Node = gesture_tree._get_player_instance() if (gesture_tree and gesture_tree.has_method("_get_player_instance")) else null
+				var dome_v: Variant = ply_v.get("active_target_dome") if ply_v else null
+				var lore_v: Variant = dome_v.get("_lore_ctrl") if (dome_v and is_instance_valid(dome_v)) else null
+				if lore_v and is_instance_valid(lore_v) and bool(lore_v.get("is_event_active")) and int(lore_v.get("active_event_type")) == 1:
+					lore_v.call("inject_virtual_clash_punch")
+					_manual_melee_timer = 0.10
+					_manual_melee_left = not _manual_melee_left
+				elif _manual_melee_timer <= 0.0:
+					_manual_melee_timer = 0.28
+					_manual_melee_left = not _manual_melee_left
 	elif event is InputEventMouseMotion and _mouse_captured and camera:
 		var motion: InputEventMouseMotion = event as InputEventMouseMotion
 		_cam_yaw -= motion.relative.x * MOUSE_SENSITIVITY

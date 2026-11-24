@@ -456,6 +456,10 @@ static func should_release_punch_retraction(last_hit_depth: float, cur_depth: fl
 	return (last_hit_depth - cur_depth) >= 0.13 or (cur_depth <= 0.24 and cur_fwd_vel <= 0.25)
 
 
+static func is_hand_winding_clash_in_red(grip_held: bool, trig_held: bool, dist_to_zone: float, fwd_vel: float, is_hammer: bool) -> bool:
+	return (not is_hammer) and grip_held and (dist_to_zone > 0.34 or (trig_held and fwd_vel <= -0.35))
+
+
 static func evaluate_one_hand_defense_input(
 	t_diff: float,
 	trig_held: bool,
@@ -473,14 +477,17 @@ static func evaluate_one_hand_defense_input(
 			return "EARLY_LOCKOUT"
 		return "NONE"
 	if t_diff <= 0.30 and t_diff >= -0.22:
-		if absf(t_diff) <= 0.12 and just_guard_active and fwd_clash_spd < 1.65:
-			return "PARRY"
-		if not is_hammer and absf(t_diff) <= 0.22 and grip_held and trig_held and vel_mag >= 1.65 and fwd_clash_spd >= 0.85:
+		if not is_hammer and absf(t_diff) <= 0.22 and grip_held and trig_held and vel_mag >= 1.55 and fwd_clash_spd >= 1.05:
 			return "CLASH"
-		if t_diff <= 0.30 and t_diff >= -0.16 and trig_held and (not grip_held) and trig_buffer_active:
-			if absf(t_diff) <= 0.12 and trig_press_age < PARRY_CHORD_GRACE_SEC and t_diff > -0.10:
-				return "WAIT_CHORD"
-			return "BLOCK_GREEN" if t_diff <= 0.18 else "BLOCK_YELLOW"
+		if absf(t_diff) <= 0.12 and just_guard_active and fwd_clash_spd < 1.05:
+			return "PARRY"
+		if t_diff <= 0.30 and t_diff >= -0.16 and trig_held and trig_buffer_active:
+			if not grip_held:
+				if absf(t_diff) <= 0.12 and trig_press_age < PARRY_CHORD_GRACE_SEC and t_diff > -0.10:
+					return "WAIT_CHORD"
+				return "BLOCK_GREEN" if t_diff <= 0.18 else "BLOCK_YELLOW"
+			elif not is_hammer and t_diff > 0.12:
+				return "BLOCK_YELLOW"
 	return "NONE"
 
 
@@ -702,6 +709,7 @@ func _update_action_card(is_attack_mode: bool) -> void:
 	var gx_c: int = int(cfg_c.melee_guard_charged_cost)
 	var zv_c: int = int(_get_vanish_cost_and_label(defender).get("cost", cfg_c.melee_vanish_cost))
 	var ew_c: int = int(cfg_c.melee_explosive_wave_cost)
+	var cl_even_r: int = int(cfg_c.melee_clash_even_ki_reward) if cfg_c.get("melee_clash_even_ki_reward") != null else 6
 	var cl_r: int = int(cfg_c.melee_clash_win_reward)
 	if is_attack_mode:
 		if _action_card_border_mat:
@@ -712,7 +720,7 @@ func _update_action_card(is_attack_mode: bool) -> void:
 		if _action_card_border_mat:
 			_action_card_border_mat.albedo_color = Color(0.20, 0.88, 1.0, 0.90)
 		_action_card_label.modulate = Color(0.88, 0.97, 1.0)
-		_action_card_label.text = "🛡️ DEFENDER (⬜) | Rojo=Fallo si pulsas | Ámbar=Parcial\n• Ámbar/Verde+Trigger: Bloqueo 1 Mano (+%d Ki en Verde) | Puño fuerte(G+T): ¡CHOQUE! (+%d Ki)\n• Dorado(≤0.12s)+Trigger+Grip: ¡PARRY! (+%d Ki, invierte turno)\n• Guardia X pecho (-%d Ki): Para Cargado (Roto por V3)\n• Stick: %s (-%d) | 2 Grips abiertos: Kiai (-%d)" % [defl_r, cl_r, parry_r, gx_c, ("Shunkan" if ("goku" in String((defender.get("character_data").character_name if (defender and defender.get("character_data") and "character_name" in defender.get("character_data")) else "")).to_lower()) else "Z-Vanish"), zv_c, ew_c]
+		_action_card_label.text = "🛡️ DEFENDER (⬜) | Rojo=Fallo si pulsas | Ámbar=Parcial\n• Ámbar/Verde+Trigger: Bloqueo 1 Mano (+%d Ki en Verde) | Puño fuerte(G+T): ¡CHOQUE! (+%d~%d Ki)\n• Dorado(≤0.12s)+Trigger+Grip: ¡PARRY! (+%d Ki, invierte turno)\n• Guardia X pecho (-%d Ki): Para Cargado (Roto por V3)\n• Stick: %s (-%d) | 2 Grips abiertos: Kiai (-%d)" % [defl_r, cl_even_r, cl_r, parry_r, gx_c, ("Shunkan" if ("goku" in String((defender.get("character_data").character_name if (defender and defender.get("character_data") and "character_name" in defender.get("character_data")) else "")).to_lower()) else "Z-Vanish"), zv_c, ew_c]
 
 
 func _apply_role_dome_tint(player_attacks: bool) -> void:
@@ -1308,7 +1316,7 @@ func _process_defense_rhythm(delta: float) -> void:
 		elif t_diff > note_prewarn and active_ring and is_instance_valid(active_ring):
 			active_ring.visible = false
 
-		# Castigo estricto por pulsar defensa ANTES de Ámbar/Verde (>0.30s), sin penalizar formar Guardia X o Kiai con ambos Grips
+		# Castigo estricto por pulsar defensa ANTES de Ámbar/Verde (>0.30s), sin penalizar Guardia X/Kiai ni preparar puño de Choque
 		if defender_is_player and not is_def_crashed and t_diff > 0.30 and not crossing_now and not is_early_locked:
 			var forming_x_or_kiai: bool = false
 			var lc_el: XRController3D = _get_controller("LeftHand")
@@ -1318,8 +1326,16 @@ func _process_defense_rhythm(delta: float) -> void:
 				if hands_dist_el < 0.38 or hands_dist_el >= 0.65:
 					forming_x_or_kiai = true
 			if not forming_x_or_kiai:
-				var early_trig_any: bool = (buffer_trig_timer_l > 0.0) or (buffer_trig_timer_r > 0.0)
-				var early_grip_any: bool = (buffer_grip_timer_l > 0.0) or (buffer_grip_timer_r > 0.0)
+				var zone_pos_el: Vector3 = active_zone["node"].global_position
+				var fwd_el: Vector3 = _get_punch_forward_world()
+				var d_l_el: float = lc_el.global_position.distance_to(zone_pos_el) if lc_el else 999.0
+				var d_r_el: float = rc_el.global_position.distance_to(zone_pos_el) if rc_el else 999.0
+				var fv_l_el: float = def_left_velocity.dot(fwd_el)
+				var fv_r_el: float = def_right_velocity.dot(fwd_el)
+				var wind_l: bool = is_hand_winding_clash_in_red(def_grip_l, def_trig_l, d_l_el, fv_l_el, is_hammer)
+				var wind_r: bool = is_hand_winding_clash_in_red(def_grip_r, def_trig_r, d_r_el, fv_r_el, is_hammer)
+				var early_trig_any: bool = (not wind_l and buffer_trig_timer_l > 0.0) or (not wind_r and buffer_trig_timer_r > 0.0)
+				var early_grip_any: bool = (not wind_l and buffer_grip_timer_l > 0.0) or (not wind_r and buffer_grip_timer_r > 0.0)
 				var early_res: String = evaluate_one_hand_defense_input(t_diff, false, false, early_trig_any, early_grip_any, false, 0.0, 0.0, 0.0, is_hammer)
 				if early_res == "EARLY_LOCKOUT":
 					active_note["early_lockout"] = true
@@ -1486,17 +1502,51 @@ func _resolve_fist_clash(note: Dictionary, zone: Dictionary, hand_idx: int) -> v
 	var bp_atk: float = maxf(float(attacker.get("current_np")) if (attacker and attacker.get("current_np") != null) else 9000.0, 100.0)
 	var r_bp: float = bp_def / bp_atk
 	var cfg_fc: KiEconomyConfig = KiEconomyConfig.get_default()
-	var clash_cost: float = float(cfg_fc.melee_clash_cost) if cfg_fc.get("melee_clash_cost") != null else 4.0
-	var clash_win: float = float(cfg_fc.melee_clash_win_reward) if cfg_fc.get("melee_clash_win_reward") != null else 8.0
+	var clash_cost: float = float(cfg_fc.melee_clash_cost) if cfg_fc.get("melee_clash_cost") != null else 3.0
+	var clash_even_reward: float = float(cfg_fc.melee_clash_even_ki_reward) if cfg_fc.get("melee_clash_even_ki_reward") != null else 6.0
+	var clash_win: float = float(cfg_fc.melee_clash_win_reward) if cfg_fc.get("melee_clash_win_reward") != null else 14.0
 
 	var score: float = 0.25
 	if r_bp >= 0.70:
 		clash_penalty_hits += 1
-		var def_ki_gain: float = clash_win if r_bp > 1.40 else clash_cost
-		var atk_ki_gain: float = -clash_cost if r_bp > 1.40 else 2.0
-		var def_bp_gain: float = 350.0 if r_bp > 1.40 else 300.0
-		var atk_bp_gain: float = 100.0 if r_bp > 1.40 else 250.0
-		score = 1.00 if r_bp > 1.40 else 0.65
+		var fc_ev: int = MeleeLoreEventScript.LoreEventType.NONE
+		if phase == DomePhase.DEFENSE_RHYTHM and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")):
+			var atk_ki_fc: float = float(attacker.get("current_ki")) if (attacker and attacker.get("current_ki") != null) else 0.0
+			var def_ki_fc: float = float(defender.get("current_ki")) if (defender and defender.get("current_ki") != null) else 0.0
+			fc_ev = MeleeLoreEventScript.evaluate_lore_event_trigger({
+				"trigger_source": "fist_clash",
+				"last_event_type": _last_lore_event_type,
+				"atk_ki": atk_ki_fc,
+				"def_ki": def_ki_fc,
+				"bp_ratio": r_bp
+			})
+
+		if fc_ev == MeleeLoreEventScript.LoreEventType.FIST_FLURRY_CLASH:
+			score = 0.65
+			note["defense_score"] = score
+			defense_score_sum += score
+			if audio_player:
+				audio_player.global_position = zone_pos
+				audio_player.pitch_scale = 1.08
+				AudioActionManager.play_action("common.melee_hit_heavy", audio_player)
+			_spawn_parry_shockwave(zone_pos)
+			_pulse_defender_hand(hand_idx, 210.0, 1.0, 0.16)
+			if defender and is_instance_valid(defender) and defender.get("procedural_animator"):
+				defender.procedural_animator.trigger_melee_block(2)
+			last_action_feedback = "⚡ ¡CHOQUE → RÁFAGA!"
+			pip_results.append("clash")
+			_spawn_impact_popup(zone_pos, "⚡ ¡CHOQUE → RÁFAGA!", Color(1.0, 0.92, 0.25))
+			emit_signal("defense_action_resolved", "fist_clash", zone["id"], true, 0.0, 0.0)
+			if _check_ki_break_after_note():
+				return
+			_start_lore_event(fc_ev, "fist_clash")
+			return
+
+		var def_ki_gain: float = clash_win if r_bp > 1.43 else clash_even_reward
+		var atk_ki_gain: float = -clash_cost if r_bp > 1.43 else 2.0
+		var def_bp_gain: float = 350.0 if r_bp > 1.43 else 300.0
+		var atk_bp_gain: float = 100.0 if r_bp > 1.43 else 250.0
+		score = 1.00 if r_bp > 1.43 else 0.65
 
 		_modify_fighter_ki(defender, def_ki_gain, true)
 		_modify_fighter_ki(attacker, atk_ki_gain)
@@ -1507,8 +1557,8 @@ func _resolve_fist_clash(note: Dictionary, zone: Dictionary, hand_idx: int) -> v
 
 		if audio_player:
 			audio_player.global_position = zone_pos
-			audio_player.pitch_scale = 1.15
-			AudioActionManager.play_action("common.block_perfect", audio_player)
+			audio_player.pitch_scale = 1.12
+			AudioActionManager.play_action("common.melee_hit_heavy", audio_player)
 		_spawn_parry_shockwave(zone_pos)
 		_pulse_defender_hand(hand_idx, 210.0, 1.0, 0.16)
 		if defender and is_instance_valid(defender) and defender.get("procedural_animator"):
@@ -1517,7 +1567,7 @@ func _resolve_fist_clash(note: Dictionary, zone: Dictionary, hand_idx: int) -> v
 		_trigger_dynamic_melee_mobility(float(note.get("power", 1.35)), bool(note.get("is_charged", false)), bool(note.get("is_charged_v3", false)), false, defender, attacker, lat_c * 7.5 + Vector3.UP * 2.4, 0.22, true)
 		_trigger_hit_stop(0.08)
 
-		last_action_feedback = "⚡ ¡CHOQUE DE PUÑOS! +%d Ki (-1 golpe)" % int(def_ki_gain)
+		last_action_feedback = "⚡ ¡CHOQUE DE PUÑOS! +%d Ki" % int(def_ki_gain)
 		pip_results.append("clash")
 		_spawn_impact_popup(zone_pos, "⚡ ¡CHOQUE!", Color(1.0, 1.0, 0.85))
 		emit_signal("defense_action_resolved", "fist_clash", zone["id"], true, def_ki_gain, def_bp_gain)
@@ -1530,6 +1580,10 @@ func _resolve_fist_clash(note: Dictionary, zone: Dictionary, hand_idx: int) -> v
 			defender.take_hit(partial_dmg, Vector3.ZERO)
 		if attacker and attacker.has_method("increase_np"):
 			attacker.increase_np(200.0)
+		if audio_player:
+			audio_player.global_position = zone_pos
+			audio_player.pitch_scale = 0.88
+			AudioActionManager.play_action("common.melee_hit_heavy", audio_player)
 		_spawn_hit_spark(zone_pos)
 		_pulse_defender_hand(hand_idx, 160.0, 0.75, 0.14)
 		var lat_cl: Vector3 = _duel_axis.cross(Vector3.UP).normalized() * (1.0 if hand_idx == 1 else -1.0)
@@ -1543,22 +1597,7 @@ func _resolve_fist_clash(note: Dictionary, zone: Dictionary, hand_idx: int) -> v
 
 	note["defense_score"] = score
 	defense_score_sum += score
-	if _check_ki_break_after_note():
-		return
-
-	# Evento Lore 1: Choque Frenético de Puños solo cuando el defensor igualó/ganó el choque
-	if r_bp >= 0.70 and phase == DomePhase.DEFENSE_RHYTHM and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")):
-		var atk_ki_fc: float = float(attacker.get("current_ki")) if (attacker and attacker.get("current_ki") != null) else 0.0
-		var def_ki_fc: float = float(defender.get("current_ki")) if (defender and defender.get("current_ki") != null) else 0.0
-		var fc_ev: int = MeleeLoreEventScript.evaluate_lore_event_trigger({
-			"trigger_source": "fist_clash",
-			"last_event_type": _last_lore_event_type,
-			"atk_ki": atk_ki_fc,
-			"def_ki": def_ki_fc,
-			"bp_ratio": r_bp
-		})
-		if fc_ev == MeleeLoreEventScript.LoreEventType.FIST_FLURRY_CLASH:
-			_start_lore_event(fc_ev, "fist_clash")
+	_check_ki_break_after_note()
 
 
 func _resolve_defensive_z_vanish(note: Dictionary, zone: Dictionary) -> void:
@@ -2190,6 +2229,9 @@ func _start_lore_event(event_type: int, return_mode: String) -> void:
 	if not is_active or not _lore_ctrl or bool(_lore_ctrl.get("is_event_active")):
 		return
 	var prev_phase: DomePhase = phase
+	_hitstop_end_msec = 0
+	if Engine.time_scale < 1.0:
+		Engine.time_scale = 1.0
 	_last_lore_event_type = event_type
 	_lore_return_mode = return_mode
 	_has_prev_atk_local = false
@@ -2199,7 +2241,11 @@ func _start_lore_event(event_type: int, return_mode: String) -> void:
 	_hide_all_charge_spheres()
 	_set_target_zones_visible(false)
 	if melee_hud_anchor and is_instance_valid(melee_hud_anchor):
-		melee_hud_anchor.visible = false
+		melee_hud_anchor.visible = true
+		if header_label and is_instance_valid(header_label):
+			header_label.visible = false
+	elif header_label and is_instance_valid(header_label):
+		header_label.visible = false
 	if action_card_anchor and is_instance_valid(action_card_anchor):
 		action_card_anchor.visible = false
 	var started: bool = bool(_lore_ctrl.call("start_event", event_type, self, attacker, defender))
@@ -2208,6 +2254,8 @@ func _start_lore_event(event_type: int, return_mode: String) -> void:
 		_set_target_zones_visible(true)
 		if melee_hud_anchor and is_instance_valid(melee_hud_anchor):
 			melee_hud_anchor.visible = true
+		if header_label and is_instance_valid(header_label):
+			header_label.visible = true
 		if action_card_anchor and is_instance_valid(action_card_anchor):
 			action_card_anchor.visible = true
 
@@ -2269,6 +2317,8 @@ func _on_lore_event_finished(event_type: int, outcome: Dictionary) -> void:
 		_set_target_zones_visible(true)
 		if melee_hud_anchor and is_instance_valid(melee_hud_anchor):
 			melee_hud_anchor.visible = true
+		if header_label and is_instance_valid(header_label):
+			header_label.visible = true
 		if action_card_anchor and is_instance_valid(action_card_anchor):
 			action_card_anchor.visible = true
 		var winner: Node3D = outcome.get("winner") as Node3D
@@ -2299,9 +2349,11 @@ func _on_lore_event_finished(event_type: int, outcome: Dictionary) -> void:
 	_set_target_zones_visible(true)
 	if melee_hud_anchor and is_instance_valid(melee_hud_anchor):
 		melee_hud_anchor.visible = true
+	if header_label and is_instance_valid(header_label):
+		header_label.visible = true
 	if action_card_anchor and is_instance_valid(action_card_anchor):
 		action_card_anchor.visible = true
-	if _lore_return_mode in ["combo_mid", "fist_clash", "guard_break", "z_vanish_war"] and _has_unresolved_notes():
+	if _lore_return_mode in ["combo_mid", "guard_break", "z_vanish_war"] and _has_unresolved_notes():
 		phase = DomePhase.DEFENSE_RHYTHM
 	else:
 		evaluate_round_outcome()
@@ -2466,10 +2518,14 @@ func start_simultaneous_exchange() -> void:
 	_last_role_is_attack = -1
 
 	if _action_card_label and is_instance_valid(_action_card_label):
+		var cfg_sim_card: KiEconomyConfig = KiEconomyConfig.get_default()
+		var sim_q_cost: int = int(cfg_sim_card.melee_quick_cost) if cfg_sim_card.get("melee_quick_cost") != null else 3
+		var sim_cl_ki: int = int(cfg_sim_card.melee_sim_clash_ki_reward) if cfg_sim_card.get("melee_sim_clash_ki_reward") != null else 8
+		var sim_flurry_n: int = int(cfg_sim_card.melee_sim_clashes_to_flurry) if cfg_sim_card.get("melee_sim_clashes_to_flurry") != null else 2
 		if _action_card_border_mat:
 			_action_card_border_mat.albedo_color = Color(1.0, 0.85, 0.18, 0.95)
 		_action_card_label.modulate = Color(1.0, 0.96, 0.72)
-		_action_card_label.text = "⚡ INTERCAMBIO SIMULTÁNEO ANIME\n• Golpea ⭕ con puño (G+T): -3 Ki\n• Si el rival golpea el mismo ⭕: 💥 ¡EXPLOSIÓN!\n• Bloquea ⬜ con Trigger (Verde) o Parry Dorado (G+T)\n• Gana el primero en 4 golpes, Parry o dejar sin Ki!"
+		_action_card_label.text = "⚡ INTERCAMBIO SIMULTÁNEO ANIME\n• Golpea ⭕/💥 con puño (G+T): -%d Ki | 💥 Choque = +%d Ki ambos (%d = ¡Ráfaga!)\n• Bloquea ⬜ con Trigger (Verde) o G+T rápido (¡CHOQUE!) / Dorado (¡PARRY!)\n• Gana el primero en 4 golpes, Parry o dejar sin Ki!" % [sim_q_cost, sim_cl_ki, sim_flurry_n]
 
 	_spawn_simultaneous_node("ATTACK")
 	_spawn_simultaneous_node("DEFEND")
@@ -2539,10 +2595,10 @@ func _sync_simultaneous_zone_visuals() -> void:
 		var role: String = String(slot["role"])
 		var t_rem: float = float(slot["timer"])
 		var max_t: float = maxf(float(slot["max_t"]), 0.01)
-		_set_single_zone_shape(zone, role)
+		var is_clash_spot: bool = (role == "ATTACK") and bool(slot["ai_claiming"]) and t_rem <= 0.55
+		_set_single_zone_shape(zone, "CLASH" if is_clash_spot else role)
 
 		if role == "ATTACK":
-			var is_clash_spot: bool = bool(slot["ai_claiming"]) and t_rem <= 0.55
 			var col_a: Color = Color(1.0, 0.25, 0.15, 0.95) if is_clash_spot else Color(1.0, 0.62, 0.14, 0.92)
 			_tint_zone_shapes(zone, col_a, col_a, 2.6 if is_clash_spot else 1.8, Color(1.0, 0.95, 0.72, 0.95))
 			if zone.get("node") and is_instance_valid(zone["node"]):
@@ -2583,6 +2639,43 @@ func _sync_simultaneous_zone_visuals() -> void:
 				step_lbl.text = "⬜"
 				step_lbl.modulate = col_d
 				step_lbl.visible = true
+
+
+func _resolve_simultaneous_clash(p_node: Node3D, ai_node: Node3D, z_pos: Vector3) -> bool:
+	_sim_clash_count += 1
+	var cfg_sc: KiEconomyConfig = KiEconomyConfig.get_default()
+	var sim_clash_ki: float = float(cfg_sc.melee_sim_clash_ki_reward) if cfg_sc.get("melee_sim_clash_ki_reward") != null else 8.0
+	var clash_thresh: int = int(cfg_sc.melee_sim_clashes_to_flurry) if cfg_sc.get("melee_sim_clashes_to_flurry") != null else 2
+	_modify_fighter_ki(p_node, sim_clash_ki)
+	_modify_fighter_ki(ai_node, sim_clash_ki)
+	if p_node and is_instance_valid(p_node) and p_node.has_method("increase_np"):
+		p_node.increase_np(100.0)
+	if ai_node and is_instance_valid(ai_node) and ai_node.has_method("increase_np"):
+		ai_node.increase_np(100.0)
+	_spawn_parry_shockwave(z_pos)
+	if is_inside_tree() and get_tree():
+		ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), z_pos, 2, Color(1.0, 0.85, 0.25, 0.95), true)
+	if ai_node and is_instance_valid(ai_node) and ai_node.get("procedural_animator"):
+		ai_node.procedural_animator.trigger_melee_strike(randi() % 4)
+	if audio_player:
+		audio_player.global_position = z_pos
+		audio_player.pitch_scale = 1.12 + minf(float(_sim_clash_count) * 0.06, 0.24)
+		AudioActionManager.play_action("common.melee_hit_heavy", audio_player)
+	_pulse_player_both_hands(220.0, 0.95, 0.14)
+	var lat_s: Vector3 = _duel_axis.cross(Vector3.UP).normalized() * (1.0 if _sim_clash_count % 2 == 0 else -1.0)
+	_trigger_dynamic_melee_mobility(2.2, true, false, false, p_node, ai_node, lat_s * 5.0 + Vector3.UP * 1.4, 0.18, false)
+	last_action_feedback = "💥 ¡CHOQUE SIMULTÁNEO #%d! (+%d Ki, +100 BP)" % [_sim_clash_count, int(sim_clash_ki)]
+	_spawn_impact_popup(z_pos, "💥 ¡CHOQUE #%d!" % _sim_clash_count, Color(1.0, 0.92, 0.25))
+
+	var p_ki_chk: float = float(p_node.get("current_ki")) if (p_node and is_instance_valid(p_node) and p_node.get("current_ki") != null) else 0.0
+	var ai_ki_chk: float = float(ai_node.get("current_ki")) if (ai_node and is_instance_valid(ai_node) and ai_node.get("current_ki") != null) else 0.0
+	if p_ki_chk >= 16.0 and ai_ki_chk >= 16.0 and _sim_clash_count >= clash_thresh and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")):
+		attacker = p_node
+		defender = ai_node
+		_sim_nodes.clear()
+		_start_lore_event(MeleeLoreEventScript.LoreEventType.FIST_FLURRY_CLASH, "sim_exchange")
+		return true
+	return false
 
 
 func _process_simultaneous_exchange(delta: float) -> void:
@@ -2718,28 +2811,11 @@ func _process_simultaneous_exchange(delta: float) -> void:
 				_sim_last_hit_local[punched_h] = c_hit.position
 				_sim_last_hit_depth[punched_h] = l_depth_s if punched_h == 0 else r_depth_s
 				_sim_last_impact_zone = zid
-				_modify_fighter_ki(p_node, -cfg_s.melee_quick_cost)
 				if bool(slot["ai_claiming"]) and t_rem <= 0.55:
-					# ¡EXPLOSIÓN ANIME POR CHOQUE EN LA MISMA ZONA!
-					_sim_clash_count += 1
-					var sim_clash_ki: float = float(cfg_s.melee_sim_clash_ki_reward) if cfg_s.get("melee_sim_clash_ki_reward") != null else 8.0
-					_modify_fighter_ki(p_node, sim_clash_ki)
-					_modify_fighter_ki(ai_node, sim_clash_ki)
-					_spawn_parry_shockwave(z_pos)
-					if is_inside_tree() and get_tree():
-						ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), z_pos, 2, Color(1.0, 0.85, 0.25, 0.95), true)
-					if ai_node.get("procedural_animator"):
-						ai_node.procedural_animator.trigger_melee_strike(randi() % 4)
-					if audio_player:
-						audio_player.global_position = z_pos
-						audio_player.pitch_scale = 1.15
-						AudioActionManager.play_action("common.block_perfect", audio_player)
-					_pulse_player_both_hands(220.0, 0.95, 0.14)
-					var lat_s: Vector3 = _duel_axis.cross(Vector3.UP).normalized() * (1.0 if _sim_clash_count % 2 == 0 else -1.0)
-					_trigger_dynamic_melee_mobility(2.2, true, false, false, p_node, ai_node, lat_s * 5.0 + Vector3.UP * 1.4, 0.18, false)
-					last_action_feedback = "💥 ¡CHOQUE SIMULTÁNEO! (+%d Ki ambos)" % int(sim_clash_ki)
-					_spawn_impact_popup(z_pos, "💥 ¡CHOQUE!", Color(1.0, 0.92, 0.25))
+					if _resolve_simultaneous_clash(p_node, ai_node, z_pos):
+						return
 				else:
+					_modify_fighter_ki(p_node, -cfg_s.melee_quick_cost)
 					_sim_enemy_hits_taken += 1
 					_modify_fighter_ki(ai_node, -6.0)
 					if ai_node.has_method("take_hit"):
@@ -2847,6 +2923,13 @@ func _process_simultaneous_exchange(delta: float) -> void:
 							p_node.trigger_comeback_zenkai()
 						_finish_simultaneous_exchange(p_node, ai_node, true, true)
 						return
+					elif s_act == "CLASH":
+						_consume_defender_hand_buffer(parry_h)
+						_sim_last_impact_zone = zid
+						if _resolve_simultaneous_clash(p_node, ai_node, z_pos):
+							return
+						remove_indices.append(idx)
+						continue
 					elif s_act == "BLOCK_GREEN" or s_act == "BLOCK_YELLOW":
 						_consume_defender_hand_buffer(parry_h)
 						if s_act == "BLOCK_GREEN":
@@ -2919,7 +3002,7 @@ func _process_simultaneous_exchange(delta: float) -> void:
 	elif e_ki_s <= 2.0:
 		_finish_simultaneous_exchange(p_node, ai_node, true)
 	elif _sim_duration <= 0.0:
-		var p_won: bool = _sim_enemy_hits_taken >= _sim_player_hits_taken
+		var p_won: bool = (_sim_enemy_hits_taken > _sim_player_hits_taken) or (_sim_enemy_hits_taken == _sim_player_hits_taken and p_ki_s >= e_ki_s)
 		_finish_simultaneous_exchange(p_node if p_won else ai_node, ai_node if p_won else p_node, p_won)
 
 
@@ -2927,11 +3010,12 @@ func _finish_simultaneous_exchange(winner: Node3D, loser: Node3D, player_won: bo
 	attacker = winner
 	defender = loser
 	last_impact_vector = _compute_zone_launch_vector(_sim_last_impact_zone, false, 12.5)
+	var bp_bonus_s: float = 150.0 + float(_sim_clash_count) * 50.0
 	if winner and is_instance_valid(winner) and winner.has_method("increase_np"):
-		winner.increase_np(150.0)
+		winner.increase_np(bp_bonus_s)
 	var dd_sim: DramaticDirector = DramaticDirector.get_active(get_tree())
 	if dd_sim:
-		var win_txt: String = "⚡ ¡GANASTE EL INTERCAMBIO SIMULTÁNEO! (+150 BP)" if player_won else "⚠️ ¡EL RIVAL ROMPIÓ EL INTERCAMBIO!"
+		var win_txt: String = "⚡ ¡GANASTE EL INTERCAMBIO SIMULTÁNEO! (+%d BP)" % int(bp_bonus_s) if player_won else "⚠️ ¡EL RIVAL ROMPIÓ EL INTERCAMBIO!"
 		dd_sim.show_camera_banner(win_txt, Color(0.25, 0.96, 1.0) if player_won else Color(1.0, 0.28, 0.18), 1.6)
 	var mode_sim: String = "sim_parry_launch" if from_parry else ("charged_v3_up" if last_impact_vector.y > 4.0 else "charged_v3_back")
 	_trigger_finisher_and_close(mode_sim, 4.2)
