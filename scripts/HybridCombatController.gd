@@ -75,8 +75,7 @@ var l_torso_vel: Vector3 = Vector3.ZERO
 var r_torso_vel: Vector3 = Vector3.ZERO
 var super_phase1_anchor_z: float = 0.0
 var super_unusable_warn_cooldown: float = 0.0
-# Punto 3: Ventana "¡HAAA!" de 0.5s, láser guía y suavizado de dirección (cero allocs)
-var super_aim_lock_window: float = -1.0
+# Punto 3: Láser guía y suavizado de dirección (cero allocs)
 var _aim_dir_history: PackedVector3Array = PackedVector3Array()
 var _aim_dir_cursor: int = 0
 var _aim_dir_filled: int = 0
@@ -135,7 +134,6 @@ var vertical_step_cooldown: float = 0.0
 var right_stick_flicked: bool = false
 var is_step_moving: bool = false
 var step_audio_player: AudioStreamPlayer = null
-var snd_step: AudioStream = null
 
 # --- Frenado Aéreo (Air Brake agitando ambos controles físicos tras ser lanzado) ---
 var _prev_air_l_vel: Vector3 = Vector3.ZERO
@@ -148,9 +146,6 @@ var _air_brake_root: Node3D = null
 var _air_brake_fill_mesh: MeshInstance3D = null
 var _air_brake_fill_mat: StandardMaterial3D = null
 var _air_brake_label: Label3D = null
-
-# Temporizador para comprobación periódica de estado en HUD
-var status_pulse_timer: float = 0.0
 
 const VRInGameMenuClass = preload("res://scripts/vr_in_game_menu.gd")
 var in_game_menu: VRInGameMenu = null
@@ -174,6 +169,18 @@ func _exit_tree() -> void:
 	if _air_brake_root and is_instance_valid(_air_brake_root):
 		_air_brake_root.queue_free()
 		_air_brake_root = null
+	if _guide_laser_mesh and is_instance_valid(_guide_laser_mesh):
+		_guide_laser_mesh.queue_free()
+		_guide_laser_mesh = null
+	if _ctrl_cue_l and is_instance_valid(_ctrl_cue_l):
+		_ctrl_cue_l.queue_free()
+		_ctrl_cue_l = null
+	if _ctrl_cue_r and is_instance_valid(_ctrl_cue_r):
+		_ctrl_cue_r.queue_free()
+		_ctrl_cue_r = null
+	if ki_lockon_system and is_instance_valid(ki_lockon_system):
+		ki_lockon_system.queue_free()
+		ki_lockon_system = null
 
 
 func _find_xr_nodes() -> void:
@@ -313,7 +320,7 @@ func _process(delta: float) -> void:
 	# 3. Comprobación de estado Melee / Bullet-Time (Minijuego de cajas)
 	var player = gesture_tree._get_player_instance() if gesture_tree else null
 	_update_body_space_metrics(player)
-	var in_melee_minigame = player and (player.get("is_in_bullet_time") or player.get("is_flying_to_opponent") or player.get("is_flying_to_melee"))
+	var in_melee_minigame = player and (player.get("is_in_bullet_time") or player.get("is_flying_to_opponent"))
 	if in_melee_minigame:
 		was_in_melee_minigame = true
 		if _air_brake_root and is_instance_valid(_air_brake_root):
@@ -624,25 +631,6 @@ func _process_ki_recharge(delta: float) -> void:
 
 
 # --- MÉTODOS AUXILIARES BIOMÉTRICOS ---
-func _is_arm_extended(controller: XRController3D) -> bool:
-	if not controller or not camera:
-		return false
-	var cam_pos = camera.global_position
-	var ctrl_pos = controller.global_position
-	var dist = cam_pos.distance_to(ctrl_pos)
-	var cam_fwd = -camera.global_transform.basis.z
-	cam_fwd.y = 0.0
-	if cam_fwd.length_squared() > 0.001:
-		cam_fwd = cam_fwd.normalized()
-	else:
-		cam_fwd = Vector3.FORWARD
-	var to_ctrl = (ctrl_pos - cam_pos)
-	var forward_proj = to_ctrl.dot(cam_fwd)
-	
-	# El brazo está extendido al frente si proyecta al menos 0.35m adelante y dist 3D >= 0.38m
-	return forward_proj >= 0.35 and dist >= 0.38
-
-
 func _get_controller_palm_world_dir(controller: XRController3D, is_left: bool) -> Vector3:
 	if not controller:
 		return Vector3.FORWARD
@@ -1665,7 +1653,6 @@ func _reset_super_state() -> void:
 	super_phase2_ready_notified = false
 	candidate_super_tech = ""
 	candidate_hold_timer = 0.0
-	super_aim_lock_window = -1.0
 	_phase2_heartbeat_timer = 0.0
 	_aim_dir_filled = 0
 	_hide_guide_laser()
@@ -1996,7 +1983,6 @@ func _execute_melee_punch(controller: XRController3D) -> void:
 			var opp = get_tree().current_scene.find_child("EnemyCharacterInstance", true, false)
 			if opp:
 				player.set("is_target_locked", true)
-				player.set("target_opponent", opp)
 
 	if gesture_tree:
 		gesture_tree._cleanup_ki_blast_charge_sphere(0)
@@ -2042,7 +2028,7 @@ func _process_grid_step_movement(delta: float) -> void:
 		return
 
 	# Si estamos volando en dash hacia el rival, no se permite movimiento manual
-	if player.get("is_flying_to_melee") or player.get("is_flying_to_opponent"):
+	if player.get("is_flying_to_opponent"):
 		return
 
 	# A. ELEVACIÓN VERTICAL POR CLIC DE STICK
@@ -2200,7 +2186,7 @@ func _play_step_audio(pitch: float = 1.25) -> void:
 	if step_audio_player:
 		step_audio_player.pitch_scale = pitch * randf_range(0.92, 1.08)
 		step_audio_player.volume_db = -5.0
-		AudioActionManager.play_action("common.dodge_vanish", step_audio_player, snd_step)
+		AudioActionManager.play_action("common.dodge_vanish", step_audio_player)
 
 
 func _ensure_air_brake_bar() -> void:
@@ -2459,7 +2445,7 @@ func _process_bio_haptics(delta: float) -> void:
 	if not player or not is_instance_valid(player):
 		return
 
-	if player.get("is_in_bullet_time") or player.get("is_flying_to_melee"):
+	if player.get("is_in_bullet_time") or player.get("is_flying_to_opponent"):
 		bio_haptic_timer = 0.0
 		return
 

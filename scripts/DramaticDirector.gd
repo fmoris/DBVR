@@ -311,6 +311,7 @@ func reset_for_new_match() -> void:
 			cr.visible = false
 	if mini_scene_controller:
 		mini_scene_controller.reset_match_state()
+	MeleeTargetDome.reset_match_static_state()
 
 
 func _process(delta: float) -> void:

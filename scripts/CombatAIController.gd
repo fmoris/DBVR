@@ -20,7 +20,6 @@ enum AIState {
 	KI_BLAST_VOLLEY,
 	KAMEHAMEHA_CHARGE,
 	MELEE_RUSH,
-	STEP_DODGE,
 	DEFENSIVE_BLOCK
 }
 
@@ -76,7 +75,6 @@ var _queued_ai_super: Dictionary = {}
 var audio_player_3d: AudioStreamPlayer3D = null
 var snd_kamehameha: AudioStream = null
 var snd_aura: AudioStream = null
-var snd_vanish: AudioStream = null
 var snd_ki_blast: AudioStream = null
 
 
@@ -594,48 +592,6 @@ func execute_step_movement(move_dir: Vector3) -> bool:
 	return true
 
 
-## Persecución Z-Dash rápida cuando el oponente quedó lejos (> 22m)
-func execute_long_range_chase() -> bool:
-	if not host or not is_instance_valid(host):
-		return false
-	if not player or not is_instance_valid(player):
-		var opp = host._get_opponent()
-		if opp is CharacterInstance:
-			player = opp
-	if not player or not is_instance_valid(player):
-		return false
-	if is_stepping or bool(host.get("is_flying_to_opponent")) or bool(host.get("is_in_bullet_time")) or bool(host.get("is_in_beam_sequence")) or bool(host.get("is_ragdoll_active")):
-		return false
-
-	var p_pos: Vector3 = player.global_position
-	var p_xz := Vector3(p_pos.x, 0.0, p_pos.z)
-	var h_xz := Vector3(host.global_position.x, 0.0, host.global_position.z)
-	var diff_xz: Vector3 = h_xz - p_xz
-	if diff_xz.length() <= LONG_CHASE_TRIGGER_DIST:
-		return false
-
-	var dir_from_player: Vector3 = diff_xz.normalized() if diff_xz.length_squared() > 0.01 else Vector3.FORWARD
-	var desired_dist: float = maxf(LONG_CHASE_TARGET_DIST, MIN_ALLOWED_DISTANCE + 1.0)
-	var target_xz: Vector3 = p_xz + dir_from_player * desired_dist
-	var max_lim: float = maxf(float(host.get("arena_half_limit")) - 3.0, 20.0)
-	target_xz.x = clampf(target_xz.x, -max_lim, max_lim)
-	target_xz.z = clampf(target_xz.z, -max_lim, max_lim)
-	var ground_y: float = host.get_ground_elevation(target_xz)
-	var target_pos := Vector3(target_xz.x, maxf(p_pos.y, ground_y), target_xz.z)
-
-	is_stepping = true
-	long_chase_cooldown = 2.0
-	_play_ai_sfx("step")
-	var tw := host.create_tween().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	tw.tween_property(host, "global_position", target_pos, 0.55)
-	tw.tween_callback(func() -> void:
-		is_stepping = false
-		if host and is_instance_valid(host):
-			host._clamp_to_arena(host, true)
-	)
-	return true
-
-
 ## Ejecuta un paso vertical (subir o bajar en el aire)
 func execute_vertical_step(is_up: bool) -> bool:
 	if not host or not is_instance_valid(host) or is_stepping:
@@ -870,7 +826,7 @@ func _spawn_ki_blast(target_pos: Vector3, is_charged: bool = false, is_final: bo
 
 
 ## Instancia el Super Ataque dinámico según CharacterData del rival
-func _spawn_kamehameha_beam(target_pos: Vector3) -> void:
+func _spawn_kamehameha_beam(_target_pos: Vector3) -> void:
 	var super_info: Dictionary = _queued_ai_super if not _queued_ai_super.is_empty() else _select_ai_super_power()
 	_queued_ai_super = {}
 	var s_name: String = String(super_info.get("name", "Kamehameha"))
@@ -888,53 +844,6 @@ func _spawn_kamehameha_beam(target_pos: Vector3) -> void:
 		if opp and is_instance_valid(opp):
 			host.start_super_beam_sequence(s_name, s_color, s_dmg, s_tier)
 			return
-
-	var fwd = (target_pos - host.global_position).normalized()
-	if fwd.length_squared() < 0.01:
-		fwd = -host.global_transform.basis.z
-
-	var spawn_pos = host.global_position + Vector3(0.0, 1.25, 0.0) + fwd * 0.70
-	var dir = (target_pos - spawn_pos).normalized()
-	var projectile_radius = 0.36
-	var speed = 30.0
-	var energy_color = Color(s_color.r, s_color.g, s_color.b, 0.98)
-
-	var projectile = Node3D.new()
-	projectile.name = "EnemySuper_" + s_name.replace(" ", "") + "_" + str(Time.get_ticks_msec())
-	ZenkaiVFXManager.build_zenkai_orb_visual(projectile, projectile_radius, energy_color, true, true)
-
-	var light = OmniLight3D.new()
-	light.light_color = energy_color
-	light.light_energy = 3.5
-	light.omni_range = 4.0
-	projectile.add_child(light)
-
-	projectile.set_script(ProceduralKiProjectileScript)
-	projectile.set("speed_velocity", dir * speed)
-	projectile.set("p_radius", projectile_radius)
-	projectile.set("p_color", energy_color)
-	projectile.set("tier", 3)
-	projectile.set("base_damage", 1800.0)
-	projectile.set("explosion_radius", 3.2)
-	projectile.set("shooter_node", host)
-	projectile.set("was_launched_in_zenkai", bool(host.get("is_in_zenkai_state")))
-
-	var excludes: Array[RID] = []
-	if host.has_method("get_projectile_exclude_rids"):
-		excludes = host.get_projectile_exclude_rids().duplicate()
-	else:
-		for child in host.get_children():
-			if child is CollisionObject3D:
-				excludes.append(child.get_rid())
-	projectile.set("ray_query_exclude", excludes)
-
-	var current_scene = host.get_tree().current_scene
-	current_scene.add_child(projectile)
-	projectile.global_position = spawn_pos
-
-	_play_ai_sfx("kamehameha_fire")
-	if host.has_method("_spawn_melee_shockwave"):
-		host._spawn_melee_shockwave(spawn_pos)
 
 
 ## Reproductor de audio SFX para la IA
@@ -963,4 +872,4 @@ func _play_ai_sfx(sfx_type: String) -> void:
 		"step", "vanish":
 			audio_player_3d.pitch_scale = randf_range(1.15, 1.35)
 			audio_player_3d.volume_db = -4.0
-			AudioActionManager.play_action("common.dodge_vanish", audio_player_3d, snd_vanish)
+			AudioActionManager.play_action("common.dodge_vanish", audio_player_3d)

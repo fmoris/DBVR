@@ -25,20 +25,23 @@ Mapa vivo de funcionalidades, escenas, recursos, shaders y puntos de entrada de 
 | **Recurso de Personaje** | [character_data.gd](file:///d:/Mis%20Documentos/dbzvr/scripts/resources/character_data.gd) | Definición base de personaje, modelos GLB, poderes y transformaciones. |
 | **Recurso de Transformación** | [transformation_data.gd](file:///d:/Mis%20Documentos/dbzvr/scripts/resources/transformation_data.gd) | Multiplicadores NP, drenaje de Ki, color de aura, `aura_vfx_path`, `has_bio_lightning`, `light_energy`, `light_range`, `aura_loop_action_id` y `anim_library_path`. |
 | **Recurso de Poder / Técnica** | [power_data.gd](file:///d:/Mis%20Documentos/dbzvr/scripts/resources/power_data.gd) | Costo de Ki, daño NP, `explosion_tier` (1..5), `charge_action_id`, `fire_action_id`, `impact_action_id` y `anim_clip_prefix`. |
+| **Economía de Ki y Balance Canon** | [ki_economy_config.gd](file:///d:/Mis%20Documentos/dbzvr/scripts/resources/ki_economy_config.gd), [ki_economy.tres](file:///d:/Mis%20Documentos/dbzvr/resources/ki_economy.tres) | Fuente única de verdad para recarga de Ki, drenaje por guardias, reembolsos diferidos por impacto limpio, Z-Vanish, Kiai, Choques e Intercambio Simultáneo. |
 | **Perfiles de Goku y Vegeta** | [goku.tres](file:///d:/Mis%20Documentos/dbzvr/resources/goku.tres), [goku_zenkai.tres](file:///d:/Mis%20Documentos/dbzvr/resources/goku_zenkai.tres), [vegeta.tres](file:///d:/Mis%20Documentos/dbzvr/resources/vegeta.tres) | Perfiles completos de Goku (Base, SSJ, SSJ2, SSJ3, SSB, Ultra Instinto) y Vegeta (Base, SSJ, Super Vegeta, SSB, Ultra Ego) con sus técnicas y referencias Zenkai. |
 
 ---
 
-## 3. Combate, Gestos VR, Proyectiles y Secuencias de Super Haz
+## 3. Combate, Gestos VR, Proyectiles, Melee y Secuencias de Super Haz
 
 | Componente | Ruta | Responsabilidad |
 |---|---|---|
 | **Motor Gestual Biométrico (GSS v3)** | [GesturePhaseTree.gd](file:///d:/Mis%20Documentos/dbzvr/scripts/GesturePhaseTree.gd) | Reconocimiento de poses en 2 fases (Recarga de Ki, Kamehameha, Galick Ho, Final Flash, Big Bang, Genkidama). |
-| **Controlador Híbrido de Combate VR** | [HybridCombatController.gd](file:///d:/Mis%20Documentos/dbzvr/scripts/HybridCombatController.gd) | Disparo de Ki Blasts, desvío físico con manos, guardia cruzada, Melee Dash y Momento de Determinación. |
+| **Controlador Híbrido de Combate VR** | [HybridCombatController.gd](file:///d:/Mis%20Documentos/dbzvr/scripts/HybridCombatController.gd) | Disparo de Ki Blasts, desvío físico con manos, guardia cruzada, frenado aéreo, Approach Bar y Melee Dash. |
+| **Cúpula Melee Rítmico (VR + Simulador)** | [MeleeTargetDome.gd](file:///d:/Mis%20Documentos/dbzvr/scripts/MeleeTargetDome.gd) | Declaración táctica (Rápido/Cargado/V3/Martillazo), defensa rítmica con semáforo, Parry, Choque de Puños, Intercambio Simultáneo Anime, recompensas de Ki diferidas y soporte `DesktopXRSimulator`. |
+| **Eventos Dinámicos Lore Melee** | [MeleeLoreEventController.gd](file:///d:/Mis%20Documentos/dbzvr/scripts/MeleeLoreEventController.gd) | Orquesta `FIST_FLURRY_CLASH`, `METEOR_SMASH`, `Z_VANISH_WAR` (Shunkan Idō/Zanzoken), `GUARD_PRESSURE_BREAK`, `EXPLOSIVE_WAVE` y `SONIC_Z_BURST` tras impactos reales. |
 | **Proyectiles de Ki (Rápidos / Cargados)** | [ProceduralKiProjectile.gd](file:///d:/Mis%20Documentos/dbzvr/scripts/ProceduralKiProjectile.gd) | Física de vuelo, homing, desvío con manos, choques en aire y detonación AoE conectada a `ZenkaiVFXManager` (Tiers 1 y 2). |
 | **Secuencia Bullet-Time de Super Haz** | [SuperBeamSequenceController.gd](file:///d:/Mis%20Documentos/dbzvr/scripts/SuperBeamSequenceController.gd) | Bullet-Time adaptativo por diferencial de NP, Z-Vanish, desvío, contención, choque de haces y explosión Zenkai (Tiers 4 y 5). |
 | **Choque de Poderes (Beam Clash)** | [BeamClashController.gd](file:///d:/Mis%20Documentos/dbzvr/scripts/BeamClashController.gd) | Duelo de haces de energía entre atacante y defensor. |
-| **Inteligencia Artificial 1v1** | [CombatAIController.gd](file:///d:/Mis%20Documentos/dbzvr/scripts/CombatAIController.gd) | Toma de decisiones reactiva del rival en Fase Libre y Fase de Cadena. |
+| **Inteligencia Artificial 1v1** | [CombatAIController.gd](file:///d:/Mis%20Documentos/dbzvr/scripts/CombatAIController.gd) | Toma de decisiones reactiva del rival en Fase Libre, Melee Rush y Follow-Up Bullet-Time. |
 
 ---
 
@@ -52,3 +55,14 @@ Mapa vivo de funcionalidades, escenas, recursos, shaders y puntos de entrada de 
 | **Shaders de Aura, Haz y Onda de Choque** | [zenkai_aura.gdshader](file:///d:/Mis%20Documentos/dbzvr/shaders/zenkai_aura.gdshader), [ki_beam.gdshader](file:///d:/Mis%20Documentos/dbzvr/shaders/ki_beam.gdshader), [shockwave.gdshader](file:///d:/Mis%20Documentos/dbzvr/shaders/shockwave.gdshader) | Shaders alimentados con texturas reales de Zenkai (`aura_vertical_streaks.png`, `aura_flame_band.png`, `beam_core_strip.png`). Eliminado uso de `ki_sphere.gdshader` y `ki_corona.gdshader`. |
 | **Catálogo de Partículas y Mallas Zenkai** | `res://assets/vfx_zenkai/{common,particles}/` | 47 texturas reales extraídas de `common_ioram/vram` y los 8 paquetes `effect/*_{goku,vegeta}_*` (descompresor `HLCS`/`0HCS`) organizadas en `aura/`, `lightning/`, `blast/`, `beam/`, `explosion/` e `impact/`. |
 | **Diccionario y Mapa de Audio Zenkai** | [audio_actions.json](file:///d:/Mis%20Documentos/dbzvr/assets/audio/audio_actions.json), [sound_dictionary.json](file:///d:/Mis%20Documentos/dbzvr/assets/audio/sfx_zenkai/sound_dictionary.json) | 62 acciones de audio pobladas al 100% con efectos `snd_dbgstr` y bancos `.nub` de Goku y Vegeta (`goku_zenkai/`, `vegeta_zenkai/`, `sfx_zenkai/`). |
+
+---
+
+## 5. Dirección Dramática, Arena Destructible y Pruebas en Escritorio
+
+| Componente | Ruta | Responsabilidad |
+|---|---|---|
+| **Director Dramático Cinematográfico** | [DramaticDirector.gd](file:///d:/Mis%20Documentos/dbzvr/scripts/DramaticDirector.gd) | Intros, Finishers K.O., eventos Zenkai, banners 3D, reset de estado estático entre combates y control de atmósfera/cámara lenta. |
+| **Destrucción de Arena e Impactos** | [ArenaDestructionManager.gd](file:///d:/Mis%20Documentos/dbzvr/scripts/ArenaDestructionManager.gd) | Física de destrucción de rocas/pilares (`PillarSpire_*`), cráteres sísmicos (`METEOR_SMASH` y Martillazo), escombros y daño ambiental AoE. |
+| **Simulador XR en Escritorio** | [DesktopXRSimulator.gd](file:///d:/Mis%20Documentos/dbzvr/scripts/debug/DesktopXRSimulator.gd) | Simulación de manos, cámara, gatillos y sticks para probar combate libre y Melee Rítmico sin visor OpenXR conectado. |
+| **Runner Automatizado de Combate** | [CombatSequenceRunner.gd](file:///d:/Mis%20Documentos/dbzvr/scripts/tests/CombatSequenceRunner.gd) | Ejecuta secuencias automatizadas `--test-suite=all` sobre `DesktopXRSimulator` para validación en escritorio. |

@@ -41,7 +41,6 @@ var _burst_hop_timer: float = 0.0
 var _clash_punch_cd_l: float = 0.0
 var _clash_punch_cd_r: float = 0.0
 var _stick_debounce: float = 0.0
-var _ai_tick_accum: float = 0.0
 var _crater_target_pos: Vector3 = Vector3.ZERO
 
 # Nodos visuales reutilizables (cero alocaciones por frame)
@@ -155,7 +154,6 @@ func start_event(event_type: int, p_dome: Node3D, p_attacker: Node3D, p_defender
 	_clash_punch_cd_l = 0.0
 	_clash_punch_cd_r = 0.0
 	_stick_debounce = 0.0
-	_ai_tick_accum = 0.0
 
 	_ensure_visuals()
 	_hide_all_visuals()
@@ -284,8 +282,9 @@ func start_event(event_type: int, p_dome: Node3D, p_attacker: Node3D, p_defender
 				_title_label.text = title_txt
 				_title_label.modulate = Color(1.0, 0.88, 0.20)
 			if _prompt_label:
+				var sb_hop_lbl: int = int(cfg_ev.melee_sonic_burst_hop_cost) if cfg_ev.get("melee_sonic_burst_hop_cost") != null else 6
 				if bool(_attacker.get("is_player")):
-					_prompt_label.text = "¡Golpea el Orbe Dorado! (1/3 · -6 Ki/salto | Stick ↓=Guardar Ki)"
+					_prompt_label.text = "¡Golpea el Orbe Dorado! (1/3 · -%d Ki/salto | Stick ↓=Guardar Ki)" % sb_hop_lbl
 				else:
 					_prompt_label.text = "⚠️ ¡EL RIVAL TE PERSIGUE A VELOCIDAD SÓNICA!"
 			if _dome and _dome.has_method("perform_z_blink_relocation"):
@@ -308,10 +307,10 @@ func process_event(delta: float, l_ctrl: XRController3D, r_ctrl: XRController3D,
 
 	var l_closed: bool = _is_fist_closed_ctrl(l_ctrl)
 	var r_closed: bool = _is_fist_closed_ctrl(r_ctrl)
-	var l_grip: bool = l_ctrl != null and (l_ctrl.get_float("grip") > 0.50 or l_ctrl.is_button_pressed("grip_click"))
-	var r_grip: bool = r_ctrl != null and (r_ctrl.get_float("grip") > 0.50 or r_ctrl.is_button_pressed("grip_click"))
-	var stick_l: Vector2 = l_ctrl.get_vector2("primary") if l_ctrl else Vector2.ZERO
-	var stick_r: Vector2 = r_ctrl.get_vector2("primary") if r_ctrl else Vector2.ZERO
+	var l_grip: bool = _ctrl_float(l_ctrl, &"grip") > 0.50 or _ctrl_pressed(l_ctrl, &"grip_click")
+	var r_grip: bool = _ctrl_float(r_ctrl, &"grip") > 0.50 or _ctrl_pressed(r_ctrl, &"grip_click")
+	var stick_l: Vector2 = _ctrl_vec2(l_ctrl, &"primary")
+	var stick_r: Vector2 = _ctrl_vec2(r_ctrl, &"primary")
 
 	match active_event_type:
 		LoreEventType.FIST_FLURRY_CLASH:
@@ -338,9 +337,11 @@ func inject_virtual_clash_punch() -> void:
 
 
 func _process_fist_clash(delta: float, l_vel: Vector3, r_vel: Vector3, l_closed: bool, r_closed: bool) -> void:
-	# Ambos luchadores queman 5 Ki/s durante el choque de poder cuerpo a cuerpo
-	_modify_ki(_player_char, -5.0 * delta)
-	_modify_ki(_enemy_char, -5.0 * delta)
+	# Ambos luchadores queman Ki/s durante el choque de poder cuerpo a cuerpo
+	var cfg_fc: KiEconomyConfig = KiEconomyConfig.get_default()
+	var fc_drain: float = float(cfg_fc.melee_flurry_clash_drain_per_sec) if cfg_fc.get("melee_flurry_clash_drain_per_sec") != null else 5.0
+	_modify_ki(_player_char, -fc_drain * delta)
+	_modify_ki(_enemy_char, -fc_drain * delta)
 
 	var p_ki: float = float(_player_char.get("current_ki")) if (_player_char and _player_char.get("current_ki") != null) else 0.0
 	var e_ki: float = float(_enemy_char.get("current_ki")) if (_enemy_char and _enemy_char.get("current_ki") != null) else 0.0
@@ -418,11 +419,13 @@ func _resolve_fist_clash_winner(win_node: Node3D, lose_node: Node3D, win_prog: f
 	if lose_node and is_instance_valid(lose_node) and lose_node.has_method("take_hit"):
 		lose_node.take_hit(dmg, Vector3.ZERO, false)
 	if win_node and is_instance_valid(win_node):
-		_modify_ki(win_node, 18.0)
+		var cfg_fcw: KiEconomyConfig = KiEconomyConfig.get_default()
+		var fc_win_ki: float = float(cfg_fcw.melee_flurry_clash_win_ki_reward) if cfg_fcw.get("melee_flurry_clash_win_ki_reward") != null else 18.0
+		_modify_ki(win_node, fc_win_ki)
 		if win_node.has_method("increase_np"):
 			win_node.increase_np(500.0)
 		if win_node.has_method("_log_combat_event"):
-			win_node._log_combat_event("💥 ¡GANÓ EL CHOQUE DE PUÑOS! (-%.0f BP rival | +18 Ki | +500 BP)" % dmg, "success")
+			win_node._log_combat_event("💥 ¡GANÓ EL CHOQUE DE PUÑOS! (-%.0f BP rival | +%d Ki | +500 BP)" % [dmg, int(fc_win_ki)], "success")
 
 	if _dome and _dome.has_method("_trigger_hit_stop"):
 		_dome._trigger_hit_stop(0.10)
@@ -670,14 +673,13 @@ func _process_sonic_z_burst(delta: float, l_ctrl: XRController3D, r_ctrl: XRCont
 			_clash_punch_cd_l = 0.25
 			_clash_punch_cd_r = 0.25
 			hit_burst = true
-	else:
-		if _burst_hop_timer <= 0.35:
-			hit_burst = true
 
 	if hit_burst:
+		var cfg_sb: KiEconomyConfig = KiEconomyConfig.get_default()
+		var sb_hop_cost: float = float(cfg_sb.melee_sonic_burst_hop_cost) if cfg_sb.get("melee_sonic_burst_hop_cost") != null else 6.0
 		var atk_ki: float = float(_attacker.get("current_ki")) if (_attacker and _attacker.get("current_ki") != null) else 0.0
-		if atk_ki >= 6.0:
-			_modify_ki(_attacker, -6.0)
+		if atk_ki >= sb_hop_cost:
+			_modify_ki(_attacker, -sb_hop_cost)
 			_burst_hits += 1
 			_substep += 1
 			if _defender and _defender.has_method("take_hit"):
@@ -694,7 +696,7 @@ func _process_sonic_z_burst(delta: float, l_ctrl: XRController3D, r_ctrl: XRCont
 			if _dome and _dome.has_method("perform_z_blink_relocation"):
 				_dome.perform_z_blink_relocation()
 			if _prompt_label and atk_is_player:
-				_prompt_label.text = "¡Golpea el Orbe Dorado! (%d/3 · -6 Ki/salto | Stick ↓=Guardar Ki)" % (_substep + 1)
+				_prompt_label.text = "¡Golpea el Orbe Dorado! (%d/3 · -%d Ki/salto | Stick ↓=Guardar Ki)" % [_substep + 1, int(sb_hop_cost)]
 			return
 
 	if _burst_hop_timer <= 0.0 or _event_timer <= 0.0:
@@ -869,10 +871,34 @@ func _get_player_bp_ratio() -> float:
 	return maxf(p_bp, 100.0) / maxf(e_bp, 100.0)
 
 
+func _ctrl_pressed(c: XRController3D, action: StringName) -> bool:
+	if not c:
+		return false
+	if _dome and is_instance_valid(_dome) and _dome.has_method("_ctrl_pressed"):
+		return bool(_dome._ctrl_pressed(c, action))
+	return c.is_button_pressed(action)
+
+
+func _ctrl_float(c: XRController3D, action: StringName) -> float:
+	if not c:
+		return 0.0
+	if _dome and is_instance_valid(_dome) and _dome.has_method("_ctrl_float"):
+		return float(_dome._ctrl_float(c, action))
+	return c.get_float(action)
+
+
+func _ctrl_vec2(c: XRController3D, action: StringName) -> Vector2:
+	if not c:
+		return Vector2.ZERO
+	if _dome and is_instance_valid(_dome) and _dome.has_method("_ctrl_vec2"):
+		return _dome._ctrl_vec2(c, action) as Vector2
+	return c.get_vector2(action)
+
+
 func _is_fist_closed_ctrl(c: XRController3D) -> bool:
 	if not c:
 		return false
-	return (c.get_float("trigger") > 0.50 and c.get_float("grip") > 0.50) or (c.is_button_pressed("trigger_click") and c.is_button_pressed("grip_click"))
+	return (_ctrl_float(c, &"trigger") > 0.50 and _ctrl_float(c, &"grip") > 0.50) or (_ctrl_pressed(c, &"trigger_click") and _ctrl_pressed(c, &"grip_click"))
 
 
 func _modify_ki(fighter: Node3D, delta_ki: float) -> void:

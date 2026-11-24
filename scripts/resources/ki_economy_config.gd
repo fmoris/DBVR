@@ -49,6 +49,19 @@ static var _cached: KiEconomyConfig = null
 @export var melee_clash_cost: float = 3.0
 @export var melee_clash_win_reward: float = 14.0
 @export var melee_crater_super_charge_mult: float = 1.35
+@export var melee_cancel_cost: float = 6.0
+@export var melee_parry_attacker_ki_drain: float = 10.0
+@export var melee_deflect_attacker_ki_drain: float = 4.0
+@export var melee_yellow_block_ki_cost: float = 4.0
+@export var melee_broken_1hand_ki_cost: float = 10.0
+@export var melee_hit_taken_quick_ki_drain: float = 6.0
+@export var melee_hit_taken_charged_ki_drain: float = 12.0
+@export var melee_hit_taken_heavy_ki_drain: float = 16.0
+@export var melee_flurry_clash_drain_per_sec: float = 5.0
+@export var melee_flurry_clash_win_ki_reward: float = 18.0
+@export var melee_sonic_burst_hop_cost: float = 6.0
+@export var melee_sim_clash_ki_reward: float = 8.0
+@export var melee_sim_guard_x_cost: float = 6.0
 
 @export_group("Ki Blast Tactical Overhaul")
 @export var ki_blast_deflect_ki_reward: float = 16.0

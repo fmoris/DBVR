@@ -612,9 +612,16 @@ func swap_character_data(new_data: CharacterData) -> void:
 		_pressure_ring_mesh.visible = false
 	emit_signal("dramatic_buffs_changed")
 	if is_player:
+		MeleeTargetDomeClass.reset_match_static_state()
 		var dd_swap: DramaticDirector = DramaticDirector.get_active(get_tree())
 		if dd_swap:
 			dd_swap.reset_for_new_match()
+	if _dash_vfx_ring and is_instance_valid(_dash_vfx_ring):
+		_dash_vfx_ring.queue_free()
+		_dash_vfx_ring = null
+	if _followup_banner_node and is_instance_valid(_followup_banner_node):
+		_followup_banner_node.queue_free()
+		_followup_banner_node = null
 	is_charging_ki = false
 	is_charging_super = false
 	is_firing_beam = false
@@ -648,6 +655,18 @@ func swap_character_data(new_data: CharacterData) -> void:
 		cached_ai_controller.set("enabled", true)
 		if cached_ai_controller.has_method("reset_ai_for_character"):
 			cached_ai_controller.reset_ai_for_character()
+
+
+func _exit_tree() -> void:
+	if _dash_vfx_ring and is_instance_valid(_dash_vfx_ring):
+		_dash_vfx_ring.queue_free()
+		_dash_vfx_ring = null
+	if _followup_banner_node and is_instance_valid(_followup_banner_node):
+		_followup_banner_node.queue_free()
+		_followup_banner_node = null
+	if _pressure_ring_mesh and is_instance_valid(_pressure_ring_mesh):
+		_pressure_ring_mesh.queue_free()
+		_pressure_ring_mesh = null
 
 
 func _physics_process(delta: float) -> void:
@@ -1042,7 +1061,8 @@ func _trigger_poise_resisted_feedback(hit_direction: Vector3) -> void:
 					ctrl.trigger_haptic_pulse("haptic", 110.0, 0.45, 0.09, 0.0)
 		_log_combat_event("[SUPER ARMOR] ¡Aguantando la lluvia de ataques! Poise: %.0f/%.0f" % [current_charge_poise, max_charge_poise], "info")
 	else:
-		_log_combat_event("[SUPER ARMOR] ¡Goku aguanta los ataques mientras carga energía!", "info")
+		var c_poise_name: String = character_data.character_name if character_data else name
+		_log_combat_event("[SUPER ARMOR] ¡%s aguanta los ataques mientras carga energía!" % c_poise_name, "info")
 
 
 func take_hit(amount_np: float, hit_direction: Vector3 = Vector3.ZERO, apply_kb: bool = true) -> void:
@@ -1211,10 +1231,11 @@ func block_hit(amount_np: float, hit_direction: Vector3 = Vector3.ZERO) -> void:
 		is_guard_broken = true
 		guard_break_timer = 1.2
 
-		# Daño parcial penetra la guardia (55% de daño al BP)
+		# Daño parcial penetra la guardia (55% de daño al BP) respetando el piso irreversible asegurado
 		var old_np_gb: float = current_np
 		var break_damage: float = amount_np * 0.55
-		current_np = maxf(current_np - break_damage, 100.0)
+		var floor_limit_gb: float = maxf(get_active_max_np() * secured_np_threshold_ratio, 100.0)
+		current_np = maxf(current_np - break_damage, floor_limit_gb)
 		_notify_stats()
 		if old_np_gb - current_np >= 80.0:
 			_spawn_bp_delta_popup(-(old_np_gb - current_np), "GUARDIA ROTA")
@@ -1761,8 +1782,9 @@ func _update_secured_threshold(active_max: float) -> void:
 		return
 	var ratio: float = current_np / active_max
 	if ratio >= 0.98:
-		# Piso máximo 85% para que el BP siempre pueda oscilar en combate
-		secured_np_threshold_ratio = maxf(secured_np_threshold_ratio, 0.85)
+		# Piso máximo configurable en KiEconomyConfig para que el BP siempre pueda oscilar en combate
+		var full_floor: float = clampf(KiEconomyConfig.get_default().secured_floor_at_full, 0.50, 0.95)
+		secured_np_threshold_ratio = maxf(secured_np_threshold_ratio, full_floor)
 	elif ratio >= 0.80:
 		secured_np_threshold_ratio = maxf(secured_np_threshold_ratio, 0.75)
 	elif ratio >= 0.60:
@@ -1778,7 +1800,7 @@ func check_zenkai_conditions(opponent_np: float) -> void:
 	var max_pair_bp: float = maxf(maxf(current_np, opponent_np), 1000.0)
 	var behind_ratio: float = (opponent_np - current_np) / max_pair_bp
 	var lead_ratio: float = (current_np - opponent_np) / max_pair_bp
-	var furia_threshold: float = get_dramatic_modifier("furia_threshold", 0.35)
+	var furia_threshold: float = get_dramatic_modifier("furia_threshold", 0.30)
 
 	# Furia (Comeback): se activa al estar >= 30% atrás (o umbral dramático menor), histéresis al recuperar ventaja
 	var should_furia: bool = is_in_furia
@@ -1808,18 +1830,18 @@ func check_zenkai_conditions(opponent_np: float) -> void:
 
 	var active_max: float = get_active_max_np()
 
-	# Zenkai por Dominio Absoluto: requiere brecha >= 35% NP + al menos Acto II (>= 45% NP o transformado)
+	# Zenkai por Dominio Absoluto (GDD Canon): requiere brecha >= 40% BP + Acto II (>= 45% NP o transformado)
 	var act_ii_reached: bool = (current_transformation != null) or (current_np >= active_max * 0.45)
-	if lead_ratio >= 0.35 and act_ii_reached:
+	if lead_ratio >= 0.40 and act_ii_reached:
 		if not is_in_zenkai_state:
 			is_in_zenkai_state = true
 			zenkai_source = "dominance"
 			emit_signal("zenkai_activated", "dominance")
 			_on_zenkai_dramatic_trigger("dominance")
 			var c_name_z: String = character_data.character_name if character_data else name
-			_log_combat_event("⚡ ¡DOMINIO ZENKAI ACTIVADO (%s)! Brecha ≥35%% BP — FINISHER LISTO" % c_name_z, "success")
+			_log_combat_event("⚡ ¡DOMINIO ZENKAI ACTIVADO (%s)! Brecha ≥40%% BP — FINISHER LISTO" % c_name_z, "success")
 			_notify_stats()
-	elif is_in_zenkai_state and (lead_ratio < 0.25 or (current_transformation == null and current_np < active_max * 0.38)):
+	elif is_in_zenkai_state and (lead_ratio < 0.28 or (current_transformation == null and current_np < active_max * 0.38)):
 		is_in_zenkai_state = false
 		zenkai_source = ""
 		_notify_stats()
@@ -4203,74 +4225,6 @@ func _process_mutual_body_collision() -> void:
 		_clamp_to_arena(opponent)
 
 
-## Gatilla una separación táctica suave hacia la distancia inicial (atacante inmóvil, defensor retrocede poco)
-func _trigger_tactical_separation(opponent: Node3D, _separation_speed: float = 4.0) -> void:
-	if not opponent or not is_instance_valid(opponent):
-		return
-	# Solo procesar cuando ambos jugadores NO están en una fase de secuencia
-	if is_in_bullet_time or is_flying_to_opponent:
-		return
-	if opponent.get("is_in_bullet_time") or opponent.get("is_flying_to_opponent"):
-		return
-
-	var my_origin = get_parent() if is_player else null
-	var my_pos = my_origin.global_position if my_origin else global_position
-	var opp_pos = opponent.global_position
-	var diff = opp_pos - my_pos
-	diff.y = 0.0
-	var fwd_dir = diff.normalized() if diff.length_squared() > 0.001 else Vector3(0.0, 0.0, -1.0)
-
-	# El atacante NO se mueve
-	velocity = Vector3.ZERO
-	is_knocked_back = false
-
-	# El defensor retrocede suavemente hasta la distancia inicial canónica (~5.5m)
-	var current_dist = diff.length()
-	var desired_dist = 5.5
-	if current_dist < desired_dist:
-		var gentle_speed = clampf((desired_dist - current_dist) * 2.5, 2.0, 4.5)
-		opponent.set("velocity", fwd_dir * gentle_speed)
-		opponent.set("is_knocked_back", false)
-
-	print("[Combat] Separación suave hacia distancia inicial (~2.8m). Atacante inmóvil.")
-
-
-func _execute_melee_impact(opponent: Node3D) -> void:
-	if not opponent or not is_instance_valid(opponent):
-		return
-
-	var my_origin = get_parent() if is_player else null
-	var my_pos = my_origin.global_position if my_origin else global_position
-	var fwd = (opponent.global_position - my_pos).normalized()
-	if fwd.length_squared() < 0.01:
-		fwd = -global_transform.basis.z
-
-	var damage = 450.0
-	if is_in_zenkai_state:
-		damage *= 2.0
-
-	# Aplicar daño y retroceso físico de impacto directo
-	if opponent.has_method("take_hit"):
-		opponent.take_hit(damage, fwd)
-		increase_np(damage * 0.65)
-	elif opponent.has_method("apply_knockback"):
-		opponent.apply_knockback(fwd, 14.0)
-
-	# Pulso háptico si es el jugador
-	if is_player and my_origin:
-		for hand_name in ["LeftHand", "RightHand"]:
-			var ctrl = my_origin.get_node_or_null(hand_name)
-			if ctrl and ctrl.has_method("trigger_haptic_pulse"):
-				ctrl.trigger_haptic_pulse("haptic", 200.0, 1.0, 0.25, 0.0)
-		_log_combat_event("[Melee] ¡Impacto directo cuerpo a cuerpo! Daño: %.0f NP" % damage, "success")
-
-
-## Calcula la duración dinámica del Bullet-Time canónico (micro-turno de acción rápida)
-func calculate_bullet_time_duration(p_attacker: Node3D, p_defender: Node3D) -> float:
-	var n_hits: int = calculate_melee_attack_count(p_attacker, p_defender)
-	return float(n_hits) * 1.35 + 0.80
-
-
 ## Calcula la cantidad estratégica de golpes permitidos según Transformación y Ratio de BP (Base 4..7, tope 8 con emboscada)
 func calculate_melee_attack_count(p_attacker: Node3D, p_defender: Node3D) -> int:
 	var count: int = 4
@@ -4607,97 +4561,6 @@ func apply_meteor_crater_setup(victim: Node3D, crater_pos: Vector3) -> void:
 		gss.emit_signal("phase_changed", "🔥 ¡RIVAL EN EL CRÁTER! ¡LANZA TU SUPER!")
 	if is_in_zenkai_state and not is_match_over:
 		trigger_zenkai_match_finish(self, victim, "Caída del Meteoro Zenkai")
-
-
-## Ejecuta cinematográficamente la ráfaga de puñetazos (flurry) acumulada durante el Bullet-Time
-func _execute_melee_flurry_barrage(opponent: Node3D, recorded_hits: Array, launch_vector: Vector3 = Vector3.ZERO) -> void:
-	if not opponent or not is_instance_valid(opponent):
-		return
-
-	var hit_count: int = recorded_hits.size()
-	var my_origin = get_parent() if is_player else null
-	var my_pos = my_origin.global_position if my_origin else global_position
-	var fwd = (opponent.global_position - my_pos).normalized()
-	if fwd.length_squared() < 0.01:
-		fwd = -global_transform.basis.z
-
-	if hit_count == 0:
-		print("[BulletTime] 0 golpes conectados. El oponente esquivó la embestida.")
-		_log_combat_event("¡El oponente esquivó tu embestida!", "warning")
-		_separate_fighters_to_canonical_distance(opponent, 8.0)
-		var dd_m0: DramaticDirector = DramaticDirector.get_active(get_tree())
-		if dd_m0 and dd_m0.mini_scene_controller:
-			dd_m0.mini_scene_controller.notify_melee_completed()
-		return
-
-	# Daño escalado: potencia por golpe sumada con bonus de combo (+15% por cada golpe adicional)
-	var total_damage: float = 0.0
-	var has_charged_hit: bool = false
-	for h in recorded_hits:
-		var p_power = float(h.get("power", 1.0))
-		var is_c = bool(h.get("is_charged", false))
-		if is_c:
-			has_charged_hit = true
-			total_damage += 280.0 * p_power
-		else:
-			total_damage += 140.0 * p_power
-
-	var combo_bonus: float = 1.0 + float(hit_count) * 0.15
-	total_damage *= combo_bonus * get_dramatic_modifier("damage_mult", 1.0)
-	if is_in_zenkai_state:
-		total_damage *= 2.0
-
-	# Secuencia de impactos de alta velocidad anime (tatatatata)
-	for i in range(hit_count):
-		var hit_info = recorded_hits[i]
-
-		# Animación ofensiva cíclica (Jab, Cross, Gancho, Patada) y Flinch reactivo en el oponente
-		if procedural_animator and procedural_animator.has_method("trigger_melee_strike"):
-			procedural_animator.trigger_melee_strike(i % 4)
-		if opponent.get("procedural_animator"):
-			opponent.procedural_animator.trigger_hit_flinch(0.45, -fwd)
-
-		# Pulso háptico en mandos durante la ráfaga
-		if is_player and my_origin:
-			var h_name: String = hit_info.get("hand", "RightHand")
-			var ctrl = my_origin.get_node_or_null(h_name)
-			if ctrl and ctrl.has_method("trigger_haptic_pulse"):
-				ctrl.trigger_haptic_pulse("haptic", 160.0, 0.75, 0.05, 0.0)
-
-		# Intervalo rítmico de 0.04s entre golpes
-		await get_tree().create_timer(0.04).timeout
-		if not is_instance_valid(opponent):
-			return
-
-	# Impacto final: El atacante NO se mueve
-	velocity = Vector3.ZERO
-	is_knocked_back = false
-
-	if opponent.has_method("take_hit"):
-		opponent.take_hit(total_damage, Vector3.ZERO)
-		increase_np(total_damage * 0.65)
-
-	# Pulso háptico máximo final
-	if is_player and my_origin:
-		for h in ["LeftHand", "RightHand"]:
-			var ctrl = my_origin.get_node_or_null(h)
-			if ctrl and ctrl.has_method("trigger_haptic_pulse"):
-				ctrl.trigger_haptic_pulse("haptic", 220.0, 1.0, 0.25, 0.0)
-
-	_log_combat_event("💥 ¡RÁFAGA DE COMBATE! %d golpes conectados. Daño total: %.0f NP" % [hit_count, total_damage], "success")
-
-	# Expulsión y separación canónica garantizada al concluir la ráfaga
-	if has_charged_hit and launch_vector.length_squared() > 0.1:
-		print("[BulletTime] Ráfaga concluida con golpe cargado. Expulsando al rival por los aires.")
-		var h_dir = (opponent.global_position - my_pos).normalized()
-		h_dir.y = 0.0
-		var final_impulse = (h_dir * 22.0 + Vector3.UP * 5.0)
-		opponent.set("knockback_drag", 1.8)
-		opponent.set("velocity", final_impulse)
-		opponent.set("is_knocked_back", true)
-	else:
-		print("[BulletTime] Ráfaga concluida. Separando combatientes a distancia canónica (6.0m).")
-		_separate_fighters_to_canonical_distance(opponent, 6.0)
 
 
 ## Ejecuta el demoledor Martillazo de Dragon Ball Z como Finisher de corte en Bullet-Time
@@ -5129,7 +4992,7 @@ func trigger_explosive_wave_chain_break() -> bool:
 	var my_pos: Vector3 = get_parent().global_position if (is_player and get_parent()) else global_position
 	_spawn_melee_shockwave(my_pos + Vector3.UP * 1.0)
 	KiSmokeFX.spawn_smoke(get_tree(), my_pos, 1.3)
-	play_character_action_audio("common.ki_burst", false, "common.dodge_vanish")
+	play_character_action_audio("common.furia_activate", false, "common.dodge_vanish")
 
 	if opp and is_instance_valid(opp):
 		if opp.has_method("_end_followup_bullet_time"):
@@ -5210,89 +5073,28 @@ func _hide_followup_decision_banner() -> void:
 	_followup_banner_node = null
 
 
-## Genera la onda de choque expansiva del impacto físico masivo (Melee Shockwave)
+## Genera la onda de choque expansiva del impacto físico masivo vía ZenkaiVFXManager
 func _spawn_melee_shockwave(pos: Vector3) -> void:
-	var flash = MeshInstance3D.new()
-	var sphere = SphereMesh.new()
-	sphere.radius = 0.25
-	sphere.height = 0.50
-	flash.mesh = sphere
-
-	var mat = StandardMaterial3D.new()
-	mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
-	mat.blend_mode = StandardMaterial3D.BLEND_MODE_ADD
-	mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color(1.0, 0.95, 0.4, 0.95)
-	flash.material_override = mat
-
-	var scene_root = get_tree().current_scene if (is_inside_tree() and get_tree() and get_tree().current_scene) else get_parent()
-	if scene_root:
-		scene_root.add_child(flash)
-	else:
-		add_child(flash)
-	flash.global_position = pos
-
-	var tw = flash.create_tween().set_parallel(true)
-	tw.tween_property(flash, "scale", Vector3.ONE * 5.5, 0.18).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tw.tween_property(mat, "albedo_color:a", 0.0, 0.18)
-	tw.chain().tween_callback(flash.queue_free)
+	if not is_inside_tree() or not get_tree():
+		return
+	ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), pos, 1, Color(1.0, 0.92, 0.35, 0.95), false)
+	ZenkaiVFXManager.spawn_zenkai_impact_flash(get_tree(), pos, Color(1.0, 0.96, 0.55, 1.0), 1.1)
 
 
-## Genera el cráter visual y polvo tras estrellarse contra el suelo (Ring o Llanura)
+## Genera el cráter visual y destello tras estrellarse contra el suelo (Ring o Llanura)
 func _spawn_ground_crash_vfx(pos: Vector3, is_stone_ring: bool) -> void:
-	var crater = MeshInstance3D.new()
-	var cylinder = CylinderMesh.new()
-	cylinder.top_radius = 1.4
-	cylinder.bottom_radius = 1.8
-	cylinder.height = 0.08
-	cylinder.radial_segments = 16
-	crater.mesh = cylinder
-
-	var mat = StandardMaterial3D.new()
-	mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
-	mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color(0.8, 0.7, 0.5, 0.8) if not is_stone_ring else Color(0.95, 0.9, 0.7, 0.9)
-	crater.material_override = mat
-
-	var scene_root = get_tree().current_scene if (is_inside_tree() and get_tree() and get_tree().current_scene) else get_parent()
-	if scene_root:
-		scene_root.add_child(crater)
-	else:
-		add_child(crater)
-	crater.global_position = pos
-
-	var tw = crater.create_tween().set_parallel(true)
-	tw.tween_property(crater, "scale", Vector3.ONE * 2.2, 0.35).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tw.tween_property(mat, "albedo_color:a", 0.0, 0.50)
-	tw.chain().tween_callback(crater.queue_free)
+	if not is_inside_tree() or not get_tree():
+		return
+	var crater_col: Color = Color(0.95, 0.88, 0.65, 0.92) if is_stone_ring else Color(0.80, 0.68, 0.48, 0.88)
+	ZenkaiVFXManager.spawn_zenkai_crater_decal(get_tree(), pos, 2.2, crater_col)
+	ZenkaiVFXManager.spawn_zenkai_impact_flash(get_tree(), pos + Vector3.UP * 0.25, Color(1.0, 0.85, 0.45, 0.95), 1.35)
 
 
-## Genera un destello visual en el punto del impacto de la ráfaga
+## Genera un destello visual en el punto del impacto de la ráfaga vía ZenkaiVFXManager
 func _spawn_flurry_spark(pos: Vector3) -> void:
-	var spark = MeshInstance3D.new()
-	var sphere = SphereMesh.new()
-	sphere.radius = 0.03
-	sphere.height = 0.06
-	spark.mesh = sphere
-
-	var mat = StandardMaterial3D.new()
-	mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
-	mat.blend_mode = StandardMaterial3D.BLEND_MODE_ADD
-	mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color(1.0, 0.85, 0.2, 0.95)
-	spark.material_override = mat
-
-	var scene_root = get_tree().current_scene if (is_inside_tree() and get_tree() and get_tree().current_scene) else get_parent()
-	if scene_root:
-		scene_root.add_child(spark)
-	else:
-		add_child(spark)
-	spark.global_position = pos
-
-	var tw = spark.create_tween().set_parallel(true)
-	tw.tween_property(spark, "scale", Vector3.ONE * 0.35, 0.08).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tw.tween_property(mat, "albedo_color:a", 0.0, 0.08)
-	tw.chain().tween_callback(spark.queue_free)
+	if not is_inside_tree() or not get_tree():
+		return
+	ZenkaiVFXManager.spawn_zenkai_impact_flash(get_tree(), pos, Color(1.0, 0.85, 0.25, 0.95), 0.45)
 
 
 func _ensure_character_audio_players() -> void:
