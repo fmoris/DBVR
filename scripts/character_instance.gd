@@ -3887,6 +3887,28 @@ func get_projectile_exclude_rids() -> Array[RID]:
 	return cached_exclude_rids
 
 
+static func clamp_launch_angle_diagonal(impulse: Vector3, max_pitch_deg: float = 32.0, fallback_fwd: Vector3 = Vector3.FORWARD) -> Vector3:
+	var speed: float = impulse.length()
+	if speed < 0.001:
+		return impulse
+	var horiz := Vector3(impulse.x, 0.0, impulse.z)
+	var h_len: float = horiz.length()
+	var h_dir: Vector3
+	if h_len > 0.001:
+		h_dir = horiz / h_len
+	else:
+		var fb := Vector3(fallback_fwd.x, 0.0, fallback_fwd.z)
+		h_dir = fb.normalized() if fb.length_squared() > 0.001 else Vector3.FORWARD
+	var max_tan: float = tan(deg_to_rad(clampf(max_pitch_deg, 5.0, 60.0)))
+	var vy: float = impulse.y
+	var max_abs_vy: float = maxf(h_len, 0.001) * max_tan
+	if absf(vy) > max_abs_vy or h_len < 0.001:
+		var sign_y: float = 1.0 if vy >= 0.0 else -1.0
+		var clamped_dir: Vector3 = (h_dir + Vector3.UP * (sign_y * max_tan)).normalized()
+		return clamped_dir * speed
+	return impulse
+
+
 static func step_ballistic_launch_velocity(vel: Vector3, delta: float, air_damping: float = 1.18, grav: float = 10.5) -> Vector3:
 	var h_decay: float = exp(-maxf(air_damping, 0.1) * delta)
 	var vx: float = vel.x * h_decay
@@ -4702,10 +4724,10 @@ func apply_meteor_crater_setup(victim: Node3D, crater_pos: Vector3) -> void:
 	if victim.get("procedural_animator"):
 		victim.procedural_animator.trigger_hit_flinch(1.4, Vector3.UP)
 
-	var perch_xz := Vector3(clampf(ground_pt.x + back_dir.x * 11.0, -74.0, 74.0), 0.0, clampf(ground_pt.z + back_dir.z * 11.0, -74.0, 74.0))
+	var perch_xz := Vector3(clampf(ground_pt.x + back_dir.x * 14.5, -74.0, 74.0), 0.0, clampf(ground_pt.z + back_dir.z * 14.5, -74.0, 74.0))
 	var perch_ground: float = get_ground_elevation(perch_xz)
 	if atk_root and is_instance_valid(atk_root):
-		atk_root.global_position = Vector3(perch_xz.x, maxf(ground_y, perch_ground) + 7.5, perch_xz.z)
+		atk_root.global_position = Vector3(perch_xz.x, maxf(ground_y, perch_ground) + 5.2, perch_xz.z)
 		_clamp_to_arena(atk_root, true)
 	velocity = Vector3.ZERO
 	is_knocked_back = false
@@ -4803,23 +4825,23 @@ func _execute_hammer_strike_finisher(opponent: Node3D, swing_velocity: float, re
 		opponent.take_hit(direct_damage, Vector3.ZERO)
 		increase_np(direct_damage * 0.70)
 
-	# 6. Cálculo cinético de aplastamiento exclusivo CONTRA EL SUELO (Martillazo DBZ)
+	# 6. Cálculo cinético de aplastamiento diagonal hacia el suelo (nunca recto vertical para permitir apuntar remate)
 	var ki_mult: float = clampf(1.0 + (ki_spent / 25.0) * 0.45, 1.0, 1.35)
 	var swing_mult: float = clampf(v_clean / 2.2, 0.85, 1.35)
 	var final_speed: float = clampf(28.0 * clampf(ratio_bp, 0.75, 1.45) * ki_mult * swing_mult, 24.0, 40.0)
 
-	var launch_dir: Vector3 = (fwd * 1.4 + Vector3.DOWN * 3.8).normalized()
-	var final_impulse: Vector3 = launch_dir * final_speed
+	var launch_dir: Vector3 = (fwd * 2.9 + Vector3.DOWN * 1.8).normalized()
+	var final_impulse: Vector3 = clamp_launch_angle_diagonal(launch_dir * final_speed, 32.0, fwd)
 
 	var opp_pos_cur: Vector3 = opponent.get_parent().global_position if (opponent.get("is_player") and opponent.get_parent() is Node3D) else opponent.global_position
 	var ground_h: float = get_ground_elevation(opp_pos_cur)
 	opponent.set("is_ballistic_launch", false)
 	opponent.set("ballistic_elapsed", 0.0)
-	opponent.set("knockback_drag", 14.0)
+	opponent.set("knockback_drag", 9.0)
 	opponent.set("velocity", final_impulse)
 	opponent.set("is_knocked_back", true)
 
-	# Si ya está cerca del piso (<= ground_h + 1.5m), estrellar de inmediato con cráter sísmico y Ragdoll en el suelo
+	# Si ya está cerca del piso (<= ground_h + 1.5m), estrellar y deslizar al frente en diagonal apuntable
 	if opp_pos_cur.y <= ground_h + 1.5:
 		if opponent.get("is_player"):
 			var p_orig = opponent.get_parent()
@@ -4829,9 +4851,10 @@ func _execute_hammer_strike_finisher(opponent: Node3D, swing_velocity: float, re
 			opponent.global_position.y = ground_h
 		if opponent.has_method("_on_ground_crash_impact"):
 			opponent._on_ground_crash_impact(maxf(final_speed * 0.45, 12.0), opp_pos_cur, ground_h)
-		opponent.set("velocity", fwd * clampf(final_speed * 0.22, 3.0, 9.0))
+		opponent.set("knockback_drag", 9.0)
+		opponent.set("velocity", fwd * clampf(final_speed * 0.55, 14.0, 22.0))
 	elif bool(opponent.get("is_player")) and opponent.has_method("begin_air_brake"):
-		opponent.begin_air_brake(final_impulse.length(), direct_damage, bp_atk, 14.0)
+		opponent.begin_air_brake(final_impulse.length(), direct_damage, bp_atk, 9.0)
 
 	# REQUISITO CANÓNICO: El martillazo CORTA Y TERMINA el minijuego por completo (sin Follow-Up Bullet Time)
 	is_in_bullet_time = false
@@ -4879,7 +4902,7 @@ func _execute_charged_v3_or_ki_break_finisher(opponent: Node3D, mode: String, sw
 	if launch_vector.length_squared() > 0.1:
 		launch_dir = launch_vector.normalized()
 	elif mode == "charged_v3_up":
-		launch_dir = (fwd * 1.8 + Vector3.UP * 2.4).normalized()
+		launch_dir = (fwd * 2.7 + Vector3.UP * 1.45).normalized()
 
 	var h_dir_v3: Vector3 = Vector3(launch_dir.x, 0.0, launch_dir.z)
 	h_dir_v3 = h_dir_v3.normalized() if h_dir_v3.length_squared() > 0.01 else fwd
@@ -4887,10 +4910,11 @@ func _execute_charged_v3_or_ki_break_finisher(opponent: Node3D, mode: String, sw
 	var mode_tag: String = "HACIA ATRÁS"
 	var horiz_speed: float
 	var vert_speed: float
-	if launch_dir.y > 0.45:
-		mode_tag = "POR LOS AIRES"
-		horiz_speed = clampf(25.0 * ratio_bp * v_mult, 22.0, 32.0)
-		vert_speed = clampf(11.2 * ratio_bp, 9.2, 14.0)
+	var is_upward_diag: bool = (mode == "charged_v3_up") or (launch_dir.y > 0.35)
+	if is_upward_diag:
+		mode_tag = "DIAGONAL ARRIBA"
+		horiz_speed = clampf(28.0 * ratio_bp * v_mult, 25.0, 35.0)
+		vert_speed = clampf(9.2 * ratio_bp, 7.6, 11.2)
 	else:
 		if absf(launch_dir.dot(side_ax)) > 0.45:
 			mode_tag = "LATERAL"
@@ -4908,7 +4932,7 @@ func _execute_charged_v3_or_ki_break_finisher(opponent: Node3D, mode: String, sw
 		horiz_speed = minf(horiz_speed, 33.0)
 		vert_speed = minf(vert_speed, 10.0)
 
-	var final_impulse: Vector3 = h_dir_v3 * horiz_speed + Vector3.UP * vert_speed
+	var final_impulse: Vector3 = clamp_launch_angle_diagonal(h_dir_v3 * horiz_speed + Vector3.UP * vert_speed, 28.0, h_dir_v3)
 	var final_speed: float = final_impulse.length()
 
 	var hit_pos: Vector3 = opponent.global_position + Vector3(0.0, 1.1, 0.0)
@@ -5066,15 +5090,15 @@ func _start_followup_airborne_sequence(opponent: Node3D, launch_vector: Vector3)
 	var horiz_speed: float
 	var vert_speed: float
 	if launch_vector.y > 4.0:
-		horiz_speed = clampf(25.0 * ratio_bp * ki_mult, 22.0, 32.0)
-		vert_speed = clampf(11.0 * ratio_bp, 8.8, 13.8)
+		horiz_speed = clampf(28.0 * ratio_bp * ki_mult, 25.0, 35.0)
+		vert_speed = clampf(9.2 * ratio_bp, 7.6, 11.2)
 	else:
 		horiz_speed = clampf(28.0 * ratio_bp * ki_mult, 25.0, 36.0)
 		vert_speed = clampf(7.6 * ratio_bp, 6.2, 9.6)
 	if bool(opponent.get("is_player")):
 		horiz_speed = minf(horiz_speed, 32.0)
 		vert_speed = minf(vert_speed, 10.0)
-	var final_impulse = h_dir * horiz_speed + Vector3.UP * vert_speed
+	var final_impulse: Vector3 = clamp_launch_angle_diagonal(h_dir * horiz_speed + Vector3.UP * vert_speed, 28.0, h_dir)
 
 	# Elevar ligeramente al contrincante sobre el suelo para iniciar vuelo libre por los aires
 	var ground_h = get_ground_elevation(opponent.global_position)

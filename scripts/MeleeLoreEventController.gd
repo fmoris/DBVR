@@ -42,6 +42,7 @@ var _clash_punch_cd_l: float = 0.0
 var _clash_punch_cd_r: float = 0.0
 var _stick_debounce: float = 0.0
 var _crater_target_pos: Vector3 = Vector3.ZERO
+var _meteor_smash_positions: Dictionary = {}
 
 # Nodos visuales reutilizables (cero alocaciones por frame)
 var _hud_root: Node3D = null
@@ -118,19 +119,23 @@ static func compute_fist_clash_step(current_progress: float, player_punches: int
 	return clampf(current_progress + player_push - enemy_pull, 0.0, 1.0)
 
 
-## Calcula posiciones 3D seguras dentro de la arena para Meteor Smash (sin rotar XRCamera3D)
+## Calcula posiciones 3D en diagonal dentro de la arena para Meteor Smash (nunca recto vertical)
 static func compute_meteor_smash_positions(crater_pos: Vector3, duel_axis: Vector3, ground_y: float) -> Dictionary:
 	var axis := Vector3(duel_axis.x, 0.0, duel_axis.z)
 	axis = axis.normalized() if axis.length_squared() > 0.001 else Vector3.FORWARD
 	var cx: float = clampf(crater_pos.x, -74.0, 74.0)
 	var cz: float = clampf(crater_pos.z, -74.0, 74.0)
-	var px: float = clampf(cx - axis.x * 11.0, -74.0, 74.0)
-	var pz: float = clampf(cz - axis.z * 11.0, -74.0, 74.0)
+	var air_x: float = clampf(cx + axis.x * 7.5, -74.0, 74.0)
+	var air_z: float = clampf(cz + axis.z * 7.5, -74.0, 74.0)
+	var crater_x: float = clampf(cx + axis.x * 13.5, -74.0, 74.0)
+	var crater_z: float = clampf(cz + axis.z * 13.5, -74.0, 74.0)
+	var px: float = clampf(crater_x - axis.x * 14.5, -74.0, 74.0)
+	var pz: float = clampf(crater_z - axis.z * 14.5, -74.0, 74.0)
 	return {
-		"air_victim_pos": Vector3(cx, ground_y + 15.5, cz),
-		"above_attacker_pos": Vector3(cx - axis.x * 0.85, ground_y + 17.0, cz - axis.z * 0.85),
-		"crater_ground_pos": Vector3(cx, ground_y, cz),
-		"post_slam_attacker_pos": Vector3(px, ground_y + 7.5, pz)
+		"air_victim_pos": Vector3(air_x, ground_y + 11.5, air_z),
+		"above_attacker_pos": Vector3(clampf(air_x - axis.x * 1.2, -74.0, 74.0), ground_y + 12.8, clampf(air_z - axis.z * 1.2, -74.0, 74.0)),
+		"crater_ground_pos": Vector3(crater_x, ground_y, crater_z),
+		"post_slam_attacker_pos": Vector3(px, ground_y + 5.2, pz)
 	}
 
 
@@ -194,11 +199,12 @@ func start_event(event_type: int, p_dome: Node3D, p_attacker: Node3D, p_defender
 			_substep = 0
 			var ms_cost: int = int(cfg_ev.melee_meteor_chase_cost) if cfg_ev.get("melee_meteor_chase_cost") != null else 8
 			title_txt = "🌌 ¡CAÍDA DEL METEORO!"
-			var m_pos: Dictionary = compute_meteor_smash_positions(_crater_target_pos, axis, gy)
+			_meteor_smash_positions = compute_meteor_smash_positions(_crater_target_pos, axis, gy)
+			_crater_target_pos = _meteor_smash_positions["crater_ground_pos"]
 			if not bool(_defender.get("is_player")):
-				_defender.global_position = m_pos["air_victim_pos"]
+				_defender.global_position = _meteor_smash_positions["air_victim_pos"]
 			elif _dome and _dome.has_method("_apply_melee_arena_surge"):
-				_dome._apply_melee_arena_surge(Vector3.UP * 8.0, 0.25)
+				_dome._apply_melee_arena_surge(-axis * 7.5 + Vector3.UP * 5.0, 0.25)
 			if _hud_root:
 				_hud_root.visible = true
 			if _title_label:
@@ -461,7 +467,7 @@ func _process_meteor_smash(delta: float, l_ctrl: XRController3D, r_ctrl: XRContr
 	var chase_cost: float = float(cfg_m.melee_meteor_chase_cost) if cfg_m.get("melee_meteor_chase_cost") != null else 12.0
 	var axis: Vector3 = _dome.get("_duel_axis") if (_dome and _dome.get("_duel_axis") != null) else Vector3.FORWARD
 	var gy: float = _crater_target_pos.y
-	var m_pos: Dictionary = compute_meteor_smash_positions(_crater_target_pos, axis, gy)
+	var m_pos: Dictionary = _meteor_smash_positions if not _meteor_smash_positions.is_empty() else compute_meteor_smash_positions(_crater_target_pos, axis, gy)
 
 	if _substep == 0:
 		var chase_triggered: bool = false
