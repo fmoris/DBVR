@@ -50,6 +50,7 @@ var long_chase_cooldown: float = 0.0
 var spacing_step_timer: float = 0.0
 var next_spacing_interval: float = 1.0
 var is_stepping: bool = false
+var _ai_followup_delay: float = 0.0
 
 # Parámetros de combate por casillas / pasos
 const AI_STEP_DISTANCE: float = 2.0
@@ -107,11 +108,35 @@ func _physics_process(delta: float) -> void:
 	if not enabled or not host or not is_instance_valid(host) or bool(host.get("is_match_over")) or DramaticDirector.is_dramatic_pause_active:
 		return
 
-	# Si la IA está en Bullet-Time (Minijuego Melee Rítmico), mantener guardia y esperar resolución rítmica
+	# En Bullet-Time Melee la defensa/bloqueo lo gobierna exclusivamente MeleeTargetDome (evitar doble mitigación -85%)
 	if host.is_in_bullet_time:
-		if not host.is_blocking and not host.is_guard_broken and host.current_ki > 5.0:
-			host.is_blocking = true
+		if host.is_blocking:
+			host.is_blocking = false
 		return
+
+	# En Follow-Up Bullet-Time, la IA reacciona usando tiempo real (Engine.time_scale puede estar en 0.08)
+	if host.is_in_followup_bullet_time:
+		if not player or not is_instance_valid(player):
+			var opp_fu = host._get_opponent()
+			if opp_fu is CharacterInstance:
+				player = opp_fu
+		_ai_followup_delay += delta / maxf(Engine.time_scale, 0.01)
+		if _ai_followup_delay >= 0.65:
+			_ai_followup_delay = 0.0
+			var super_pick: Dictionary = _select_ai_super_power()
+			var super_cost: float = float(super_pick.get("ki_cost", 30.0))
+			if not super_pick.is_empty() and host.current_ki >= maxf(super_cost, 30.0) and randf() < 0.35:
+				host._end_followup_bullet_time(false)
+				_transition_to(AIState.KAMEHAMEHA_CHARGE)
+			elif host.current_ki >= 16.0 and randf() < 0.55:
+				host.start_flight_to_opponent()
+			elif host.current_ki >= 8.0:
+				host._end_followup_bullet_time(false)
+				_transition_to(AIState.KI_BLAST_VOLLEY)
+			else:
+				host._end_followup_bullet_time(true)
+		return
+	_ai_followup_delay = 0.0
 
 	# Si la IA está en secuencia de Super Haz de Ki o Choque de Haces, la resolución la gestionan esos controladores
 	if host.get("is_in_beam_sequence") or host.get("is_in_beam_clash") or host.get("is_firing_beam"):
@@ -462,7 +487,13 @@ func _transition_to(new_state: AIState) -> void:
 			_queued_ai_super = _select_ai_super_power()
 			host.start_charging_super()
 		AIState.MELEE_RUSH:
-			host.start_flight_to_opponent()
+			var free_opening: bool = player != null and is_instance_valid(player) and host.has_method("has_free_melee_opening_against") and host.has_free_melee_opening_against(player)
+			var dash_cost: float = KiEconomyConfig.get_default().melee_dash_cost
+			if free_opening:
+				host.start_flight_to_opponent()
+			elif host.current_ki >= dash_cost:
+				host.consume_ki(dash_cost)
+				host.start_flight_to_opponent()
 			_transition_to(AIState.IDLE_SPACING)
 		AIState.DEFENSIVE_BLOCK:
 			host.is_blocking = true

@@ -79,7 +79,7 @@ static func evaluate_lore_event_trigger(ctx: Dictionary) -> int:
 
 	if src == "z_vanish":
 		var zv_req: float = float(cfg.melee_vanish_cost) if cfg.get("melee_vanish_cost") != null else 10.0
-		if atk_ki >= zv_req and bp_ratio >= 0.70:
+		if last_ev != LoreEventType.Z_VANISH_WAR and atk_ki >= zv_req and bp_ratio >= 0.70:
 			return LoreEventType.Z_VANISH_WAR
 		return LoreEventType.NONE
 
@@ -215,7 +215,7 @@ func start_event(event_type: int, p_dome: Node3D, p_attacker: Node3D, p_defender
 		LoreEventType.Z_VANISH_WAR:
 			_event_timer = 0.65
 			_vanish_hop = 1
-			_vanish_defender_is_player = not bool(_attacker.get("is_player"))
+			_vanish_defender_is_player = bool(_attacker.get("is_player"))
 			var zv_cost_lbl: int = int(_get_z_vanish_hop_cost(_player_char))
 			title_txt = "💨 ¡GUERRA DE Z-VANISH! (1/3)"
 			if _hud_root:
@@ -224,12 +224,16 @@ func start_event(event_type: int, p_dome: Node3D, p_attacker: Node3D, p_defender
 				_title_label.text = title_txt
 				_title_label.modulate = Color(0.30, 0.95, 1.0)
 			if _prompt_label:
-				_prompt_label.text = "Stick (%d Ki) = ¡Contra-Blink! | Guardia X = Plantarse" % zv_cost_lbl
+				if _vanish_defender_is_player:
+					_prompt_label.text = "Stick (%d Ki) = ¡Contra-Blink! | Guardia X = Plantarse" % zv_cost_lbl
+				else:
+					_prompt_label.text = "⚡ ¡ESQUIVASTE CON Z-VANISH! A ver si el rival reacciona..."
 			if _dome and _dome.has_method("perform_z_blink_relocation"):
 				_dome.perform_z_blink_relocation()
 
 		LoreEventType.GUARD_PRESSURE_BREAK:
 			_event_timer = 1.80
+			var ew_gb_cost: int = int(cfg_ev.melee_explosive_wave_cost) if cfg_ev.get("melee_explosive_wave_cost") != null else 16
 			title_txt = "💥 ¡DESGARRE DE GUARDIA!"
 			if _hud_root:
 				_hud_root.visible = true
@@ -242,9 +246,9 @@ func start_event(event_type: int, p_dome: Node3D, p_attacker: Node3D, p_defender
 				_title_label.modulate = Color(1.0, 0.50, 0.15)
 			if _prompt_label:
 				if bool(_attacker.get("is_player")):
-					_prompt_label.text = "¡Golpea fuerte la grieta para QUEBRAR su Guardia!"
+					_prompt_label.text = "¡Golpea fuerte la grieta (Grip+Trigger) para QUEBRAR su Guardia!"
 				else:
-					_prompt_label.text = "¡TU GUARDIA SE AGRIETA! Abre ambos brazos + Grips (15 Ki)"
+					_prompt_label.text = "¡TU GUARDIA SE AGRIETA! Abre ambos brazos + Grips (%d Ki)" % ew_gb_cost
 
 		LoreEventType.EXPLOSIVE_WAVE:
 			_event_timer = 0.55
@@ -287,6 +291,7 @@ func start_event(event_type: int, p_dome: Node3D, p_attacker: Node3D, p_defender
 			if _dome and _dome.has_method("perform_z_blink_relocation"):
 				_dome.perform_z_blink_relocation(Vector3(clampf(vic_origin.x + 10.0, -60.0, 60.0), gy + 9.0, clampf(vic_origin.z - 8.0, -60.0, 60.0)))
 
+	_sync_event_orb_world_pos()
 	emit_signal("lore_event_started", event_type, title_txt)
 	return true
 
@@ -295,6 +300,7 @@ func process_event(delta: float, l_ctrl: XRController3D, r_ctrl: XRController3D,
 	if not is_event_active:
 		return
 
+	_sync_event_orb_world_pos()
 	_clash_punch_cd_l = maxf(_clash_punch_cd_l - delta, 0.0)
 	_clash_punch_cd_r = maxf(_clash_punch_cd_r - delta, 0.0)
 	_stick_debounce = maxf(_stick_debounce - delta, 0.0)
@@ -313,9 +319,9 @@ func process_event(delta: float, l_ctrl: XRController3D, r_ctrl: XRController3D,
 		LoreEventType.METEOR_SMASH:
 			_process_meteor_smash(delta, l_ctrl, r_ctrl, l_vel, r_vel, l_closed, r_closed, stick_l, stick_r)
 		LoreEventType.Z_VANISH_WAR:
-			_process_z_vanish_war(delta, l_closed, r_closed, stick_l, stick_r)
+			_process_z_vanish_war(delta, l_ctrl, r_ctrl, l_closed, r_closed, stick_l, stick_r)
 		LoreEventType.GUARD_PRESSURE_BREAK:
-			_process_guard_break(delta, l_ctrl, r_ctrl, l_vel, r_vel, l_grip, r_grip)
+			_process_guard_break(delta, l_ctrl, r_ctrl, l_vel, r_vel, l_closed, r_closed, l_grip, r_grip)
 		LoreEventType.EXPLOSIVE_WAVE:
 			if _event_timer <= 0.0:
 				_finish_event({ "action": "separate", "distance": 10.0 })
@@ -361,7 +367,9 @@ func _process_fist_clash(delta: float, l_vel: Vector3, r_vel: Vector3, l_closed:
 		if _enemy_char and is_instance_valid(_enemy_char) and _enemy_char.get("procedural_animator"):
 			_enemy_char.procedural_animator.trigger_melee_strike(randi() % 4)
 		if _dome:
-			if _dome.has_method("_pulse_defender_both_hands"):
+			if _dome.has_method("_pulse_player_both_hands"):
+				_dome._pulse_player_both_hands(190.0, 0.85, 0.05)
+			elif _dome.has_method("_pulse_defender_both_hands"):
 				_dome._pulse_defender_both_hands(190.0, 0.85, 0.05)
 			var ap: AudioStreamPlayer3D = _dome.get("audio_player") as AudioStreamPlayer3D
 			if ap:
@@ -373,6 +381,10 @@ func _process_fist_clash(delta: float, l_vel: Vector3, r_vel: Vector3, l_closed:
 		var p_cd: Variant = _player_char.get("character_data")
 		if p_cd and "character_name" in p_cd and "vegeta" in String(p_cd.character_name).to_lower():
 			bp_r *= 1.15
+	if _enemy_char and is_instance_valid(_enemy_char) and bool(_enemy_char.get("is_in_furia")):
+		var e_cd: Variant = _enemy_char.get("character_data")
+		if e_cd and "character_name" in e_cd and "vegeta" in String(e_cd.character_name).to_lower():
+			bp_r /= 1.15
 	_tug_progress = compute_fist_clash_step(_tug_progress, p_punches, bp_r, delta)
 	_update_tug_bar_visual()
 
@@ -463,9 +475,13 @@ func _process_meteor_smash(delta: float, l_ctrl: XRController3D, r_ctrl: XRContr
 		if chase_triggered and float(_attacker.get("current_ki")) >= chase_cost:
 			_modify_ki(_attacker, -chase_cost)
 			_substep = 1
-			_event_timer = 1.80
-			if _dome and _dome.has_method("perform_z_blink_relocation"):
-				_dome.perform_z_blink_relocation(m_pos["above_attacker_pos"])
+			_event_timer = 1.80 if atk_is_player else 1.25
+			if atk_is_player:
+				if _dome and _dome.has_method("perform_z_blink_relocation"):
+					_dome.perform_z_blink_relocation(m_pos["above_attacker_pos"])
+			elif _attacker and is_instance_valid(_attacker):
+				_attacker.global_position = m_pos["above_attacker_pos"]
+			_sync_event_orb_world_pos()
 			if _event_orb:
 				_event_orb.visible = true
 			if _event_orb_mat:
@@ -473,7 +489,10 @@ func _process_meteor_smash(delta: float, l_ctrl: XRController3D, r_ctrl: XRContr
 			if _title_label:
 				_title_label.text = "🔨 ¡ESTRÉLLALO AL SUELO!"
 			if _prompt_label:
-				_prompt_label.text = "¡Baja ambos puños o golpea fuerte hacia abajo!" if atk_is_player else "⚠️ ¡EL RIVAL APARECIÓ SOBRE TI!"
+				if atk_is_player:
+					_prompt_label.text = "¡Baja ambos puños o golpea fuerte hacia abajo!"
+				else:
+					_prompt_label.text = "🛡️ ¡GUARDIA X O STICK (Z-VANISH %d Ki) PARA EVITAR CRÁTER!" % int(_get_z_vanish_hop_cost(_defender))
 			return
 
 		if _event_timer <= 0.0:
@@ -486,7 +505,24 @@ func _process_meteor_smash(delta: float, l_ctrl: XRController3D, r_ctrl: XRContr
 			if (down_avg >= 1.10 and (l_closed or r_closed)) or (near_orb and (l_vel.length() >= 1.65 or r_vel.length() >= 1.65)):
 				slam_hit = true
 		else:
-			if _event_timer <= 0.90:
+			var def_ki_ms: float = float(_defender.get("current_ki")) if (_defender and _defender.get("current_ki") != null) else 0.0
+			var zv_ms: float = _get_z_vanish_hop_cost(_defender)
+			if (stick_l.length() >= 0.65 or stick_r.length() >= 0.65) and def_ki_ms >= zv_ms:
+				_modify_ki(_defender, -zv_ms)
+				if get_tree() and _defender:
+					KiSmokeFX.spawn_smoke(get_tree(), _defender.global_position + Vector3(0.0, 0.8, 0.0), 1.2)
+				_finish_event({ "action": "separate", "distance": 9.0 })
+				return
+			elif l_closed and r_closed and l_ctrl != null and r_ctrl != null and l_ctrl.global_position.distance_to(r_ctrl.global_position) < 0.34:
+				var g_ms_cost: float = float(cfg_m.melee_guard_charged_cost) if cfg_m.get("melee_guard_charged_cost") != null else 8.0
+				_modify_ki(_defender, -g_ms_cost)
+				if _defender and _defender.has_method("take_hit"):
+					_defender.take_hit(180.0, Vector3.DOWN, false)
+				if _dome and _dome.has_method("_spawn_block_spark") and _defender:
+					_dome._spawn_block_spark(_defender.global_position + Vector3.UP * 1.0, Color(0.25, 0.85, 1.0))
+				_finish_event({ "action": "separate", "distance": 8.0 })
+				return
+			elif _event_timer <= 0.45:
 				slam_hit = true
 
 		if slam_hit:
@@ -516,14 +552,14 @@ func _get_z_vanish_hop_cost(fighter: Node3D) -> float:
 	return base_cost
 
 
-func _process_z_vanish_war(delta: float, l_closed: bool, r_closed: bool, stick_l: Vector2, stick_r: Vector2) -> void:
+func _process_z_vanish_war(delta: float, l_ctrl: XRController3D, r_ctrl: XRController3D, l_closed: bool, r_closed: bool, stick_l: Vector2, stick_r: Vector2) -> void:
 	var reactor: Node3D = _player_char if _vanish_defender_is_player else _enemy_char
 	var chaser: Node3D = _enemy_char if _vanish_defender_is_player else _player_char
 	var hop_cost: float = _get_z_vanish_hop_cost(reactor)
 
 	if _vanish_defender_is_player:
 		var stick_flick: bool = _stick_debounce <= 0.0 and (stick_l.length() >= 0.65 or stick_r.length() >= 0.65)
-		var guard_x: bool = l_closed and r_closed
+		var guard_x: bool = l_closed and r_closed and l_ctrl != null and r_ctrl != null and l_ctrl.global_position.distance_to(r_ctrl.global_position) < 0.34
 		var r_ki: float = float(reactor.get("current_ki")) if reactor and reactor.get("current_ki") != null else 0.0
 		if stick_flick and r_ki >= hop_cost:
 			_stick_debounce = 0.24
@@ -563,26 +599,26 @@ func _process_z_vanish_war(delta: float, l_closed: bool, r_closed: bool, stick_l
 				return
 			else:
 				if reactor and reactor.has_method("take_hit"):
-					reactor.take_hit(360.0, Vector3.BACK, true)
+					reactor.take_hit(360.0, Vector3.ZERO, false)
 				if chaser and chaser.has_method("increase_np"):
 					chaser.increase_np(240.0)
-				_finish_event({ "action": "separate", "distance": 9.5 })
+				_finish_event({ "action": "launch", "victim": reactor })
 				return
 
 	if _event_timer <= 0.0:
 		# Jugador no contra-blinkeó ni bloqueó a tiempo -> Patada a la espalda
 		if reactor and reactor.has_method("take_hit"):
-			reactor.take_hit(360.0, Vector3.BACK, true)
+			reactor.take_hit(360.0, Vector3.ZERO, false)
 		_finish_event({ "action": "launch", "victim": reactor })
 
 
-func _process_guard_break(_delta: float, l_ctrl: XRController3D, r_ctrl: XRController3D, l_vel: Vector3, r_vel: Vector3, l_grip: bool, r_grip: bool) -> void:
+func _process_guard_break(_delta: float, l_ctrl: XRController3D, r_ctrl: XRController3D, l_vel: Vector3, r_vel: Vector3, l_closed: bool, r_closed: bool, l_grip: bool, r_grip: bool) -> void:
 	var atk_is_player: bool = bool(_attacker.get("is_player"))
 	var orb_pos: Vector3 = _event_orb.global_position if _event_orb else global_position
 
 	if atk_is_player:
-		var l_hit: bool = l_ctrl != null and l_ctrl.global_position.distance_to(orb_pos) <= 0.34 and l_vel.length() >= 1.65
-		var r_hit: bool = r_ctrl != null and r_ctrl.global_position.distance_to(orb_pos) <= 0.34 and r_vel.length() >= 1.65
+		var l_hit: bool = l_closed and l_ctrl != null and l_ctrl.global_position.distance_to(orb_pos) <= 0.34 and l_vel.length() >= 1.65
+		var r_hit: bool = r_closed and r_ctrl != null and r_ctrl.global_position.distance_to(orb_pos) <= 0.34 and r_vel.length() >= 1.65
 		if l_hit or r_hit:
 			if _defender and is_instance_valid(_defender):
 				_defender.set("is_blocking", false)
@@ -595,10 +631,12 @@ func _process_guard_break(_delta: float, l_ctrl: XRController3D, r_ctrl: XRContr
 			_finish_event({ "action": "winner_offense", "winner": _attacker, "loser": _defender, "bonus_hits": 1 })
 			return
 	else:
+		var cfg_gb: KiEconomyConfig = KiEconomyConfig.get_default()
+		var ew_gb: float = float(cfg_gb.melee_explosive_wave_cost) if cfg_gb.get("melee_explosive_wave_cost") != null else 16.0
 		var def_ki: float = float(_defender.get("current_ki")) if (_defender and _defender.get("current_ki") != null) else 0.0
 		var hands_spread: bool = l_ctrl != null and r_ctrl != null and l_ctrl.global_position.distance_to(r_ctrl.global_position) >= 0.72 and l_grip and r_grip
-		if hands_spread and def_ki >= 15.0:
-			_modify_ki(_defender, -15.0)
+		if hands_spread and def_ki >= ew_gb:
+			_modify_ki(_defender, -ew_gb)
 			if _attacker and _attacker.has_method("take_hit"):
 				_attacker.take_hit(140.0, Vector3.ZERO, false)
 			_finish_event({ "action": "separate", "distance": 9.0 })
@@ -777,8 +815,24 @@ func _ensure_visuals() -> void:
 	_event_orb_mat.no_depth_test = true
 	_event_orb_mat.render_priority = 125
 	_event_orb.material_override = _event_orb_mat
-	_event_orb.position = Vector3(0.0, -0.10, -0.52) if (parent_node == cam) else Vector3(0.0, 0.0, -0.52)
-	parent_node.add_child(_event_orb)
+	var orb_parent: Node3D = _dome if (_dome and is_instance_valid(_dome)) else self
+	orb_parent.add_child(_event_orb)
+	_sync_event_orb_world_pos()
+
+
+func _sync_event_orb_world_pos() -> void:
+	if not _event_orb or not is_instance_valid(_event_orb) or not _event_orb.is_inside_tree():
+		return
+	var cam: Camera3D = _get_cam()
+	var axis: Vector3 = Vector3.FORWARD
+	if _dome and is_instance_valid(_dome) and _dome.get("_duel_axis") != null:
+		axis = _dome.get("_duel_axis") as Vector3
+	axis.y = 0.0
+	axis = axis.normalized() if axis.length_squared() > 0.001 else Vector3.FORWARD
+	if cam and is_instance_valid(cam):
+		_event_orb.global_position = cam.global_position + axis * 0.55 + Vector3(0.0, -0.10, 0.0)
+	elif _dome and is_instance_valid(_dome):
+		_event_orb.global_position = _dome.global_position
 
 
 func _hide_all_visuals() -> void:

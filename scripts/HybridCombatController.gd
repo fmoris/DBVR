@@ -125,10 +125,10 @@ var determination_hit_cooldown: float = 0.0
 # --- Movimiento por Casillas / Pasos (Yu Yu Hakusho / DB Legends / Ajedrez) ---
 const STEP_DISTANCE: float = 3.0 # Metros por paso/casilla
 const VERTICAL_STEP: float = 2.0 # Metros por salto o descenso en el aire
-const MIN_ALLOWED_DISTANCE: float = 11.5 # Distancia mínima táctica en Modo Libre ("turnos en tiempo real")
+const MIN_ALLOWED_DISTANCE: float = 7.5 # Distancia mínima táctica en Modo Libre ("turnos en tiempo real")
 const MAX_VERTICAL_HEIGHT: float = 9.0 # Límite superior de vuelo en metros
-const MELEE_APPROACH_RANGE: float = 15.5
-const MELEE_DECAY_RANGE: float = 16.5
+const MELEE_APPROACH_RANGE: float = 9.0
+const MELEE_DECAY_RANGE: float = 10.5
 var melee_approach_progress: float = 0.0
 var step_cooldown: float = 0.0
 var vertical_step_cooldown: float = 0.0
@@ -237,14 +237,15 @@ func _process(delta: float) -> void:
 		if gesture_tree and gesture_tree.has_signal("gesture_logged"):
 			gesture_tree.emit_signal("gesture_logged", "[INPUT] Modo activo: " + mode_name, "info")
 
-	# 2. Calcular velocidades lineales de los mandos en espacio local del XROrigin3D (inmune a knocksbacks/pasos)
+	# 2. Calcular velocidades lineales de los mandos en espacio local del XROrigin3D (tiempo real, inmune a time_scale/knockbacks)
 	if delta > 0.0:
+		var real_dt: float = maxf(delta / maxf(Engine.time_scale, 0.01), 0.001)
 		var orig_basis: Basis = xr_origin.global_transform.basis.orthonormalized() if (xr_origin and is_instance_valid(xr_origin)) else Basis.IDENTITY
 		var l_loc: Vector3 = left_controller.position
 		var r_loc: Vector3 = right_controller.position
 		if _has_prev_local_pos:
-			left_velocity = orig_basis * ((l_loc - prev_left_local_pos) / delta)
-			right_velocity = orig_basis * ((r_loc - prev_right_local_pos) / delta)
+			left_velocity = orig_basis * ((l_loc - prev_left_local_pos) / real_dt)
+			right_velocity = orig_basis * ((r_loc - prev_right_local_pos) / real_dt)
 		prev_left_local_pos = l_loc
 		prev_right_local_pos = r_loc
 		_has_prev_local_pos = true
@@ -333,7 +334,8 @@ func _process(delta: float) -> void:
 			if gesture_tree:
 				gesture_tree._cancel_action("En combate cuerpo a cuerpo")
 				gesture_tree._reset_to_idle()
-		_process_guard()
+		if player and is_instance_valid(player) and bool(player.get("is_blocking")):
+			player.set("is_blocking", false)
 		_process_hud_toggle(delta)
 		return
 
@@ -429,6 +431,11 @@ func _process_melee_approach_bar(delta: float, player: Node) -> void:
 		melee_approach_progress = maxf(melee_approach_progress - delta * 0.35, 0.0)
 		if player and is_instance_valid(player):
 			player.set("melee_approach_progress", melee_approach_progress)
+		return
+
+	if is_charging_ki or ki_prep_phase or current_super_state != SuperPowerState.IDLE or bool(player.get("is_in_followup_bullet_time")):
+		melee_approach_progress = maxf(melee_approach_progress - delta * 0.25, 0.0)
+		player.set("melee_approach_progress", melee_approach_progress)
 		return
 
 	var opp: Node3D = player._get_opponent() if player.has_method("_get_opponent") else null
@@ -808,13 +815,16 @@ func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta:
 			var in_fu_renzoku: bool = (not is_charged) and p_ref != null and is_instance_valid(p_ref) and bool(p_ref.get("is_in_followup_bullet_time"))
 			if in_fu_renzoku and gesture_tree:
 				var cfg_r: KiEconomyConfig = KiEconomyConfig.get_default()
-				var renzoku_cost: float = cfg_r.ki_blast_cost * 2.5
+				var renzoku_cost: float = cfg_r.ki_blast_cost * 3.0
 				if float(p_ref.get("current_ki")) >= renzoku_cost:
-					p_ref.consume_ki(renzoku_cost)
-					Engine.time_scale = 1.0
-					if p_ref.has_method("_hide_followup_decision_banner"):
-						p_ref._hide_followup_decision_banner()
-					for r_i: int in range(5):
+					if p_ref.has_method("_end_followup_bullet_time"):
+						p_ref._end_followup_bullet_time(false)
+					else:
+						p_ref.set("is_in_followup_bullet_time", false)
+						Engine.time_scale = 1.0
+						if p_ref.has_method("_hide_followup_decision_banner"):
+							p_ref._hide_followup_decision_banner()
+					for r_i: int in range(3):
 						var r_act: String = "ki_blast_right" if (r_i % 2 == 0) else "ki_blast_left"
 						var r_hand: int = r_i % 2
 						var delay_s: float = float(r_i) * 0.08
@@ -833,7 +843,7 @@ func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta:
 										pa_n.trigger_ki_blast_shot(r_hand)
 							)
 					if gesture_tree.has_signal("gesture_logged"):
-						gesture_tree.emit_signal("gesture_logged", "💥 ¡RENZOKU ENERGY DAN! Ráfaga x5 en seguimiento", "success")
+						gesture_tree.emit_signal("gesture_logged", "💥 ¡RENZOKU ENERGY DAN! Ráfaga x3 en seguimiento", "success")
 					if is_left:
 						left_charge_time = 0.0
 						left_is_charging = false
@@ -2266,9 +2276,9 @@ func _update_air_brake_with_motion(delta: float, player: Node, l_vel: Vector3, r
 	if _air_brake_root and is_instance_valid(_air_brake_root):
 		_air_brake_root.visible = true
 
-	var safe_dt: float = maxf(delta, 0.001)
-	var l_accel: float = (l_vel - _prev_air_l_vel).length() / safe_dt
-	var r_accel: float = (r_vel - _prev_air_r_vel).length() / safe_dt
+	var real_dt: float = maxf(delta / maxf(Engine.time_scale, 0.01), 0.001)
+	var l_accel: float = (l_vel - _prev_air_l_vel).length() / real_dt
+	var r_accel: float = (r_vel - _prev_air_r_vel).length() / real_dt
 	_prev_air_l_vel = l_vel
 	_prev_air_r_vel = r_vel
 
@@ -2280,12 +2290,12 @@ func _update_air_brake_with_motion(delta: float, player: Node, l_vel: Vector3, r
 	if l_shake >= 1.35:
 		_air_l_active_timer = 0.24
 	else:
-		_air_l_active_timer = maxf(_air_l_active_timer - delta, 0.0)
+		_air_l_active_timer = maxf(_air_l_active_timer - real_dt, 0.0)
 
 	if r_shake >= 1.35:
 		_air_r_active_timer = 0.24
 	else:
-		_air_r_active_timer = maxf(_air_r_active_timer - delta, 0.0)
+		_air_r_active_timer = maxf(_air_r_active_timer - real_dt, 0.0)
 
 	var l_moving: bool = _air_l_active_timer > 0.0
 	var r_moving: bool = _air_r_active_timer > 0.0
@@ -2294,12 +2304,12 @@ func _update_air_brake_with_motion(delta: float, player: Node, l_vel: Vector3, r
 
 	var active_shake: float = (l_shake if l_moving else 0.0) + (r_shake if r_moving else 0.0)
 	var effort_rate: float = clampf(active_shake * 0.52, 0.0, 7.8) * sync_mult
-	var effort_gain: float = effort_rate * delta
+	var effort_gain: float = effort_rate * real_dt
 	var completed_now: bool = false
 	if effort_gain > 0.0 and player.has_method("add_air_brake_effort"):
-		completed_now = bool(player.add_air_brake_effort(effort_gain, delta))
+		completed_now = bool(player.add_air_brake_effort(effort_gain, real_dt))
 	elif player.has_method("add_air_brake_effort"):
-		completed_now = bool(player.add_air_brake_effort(0.0, delta))
+		completed_now = bool(player.add_air_brake_effort(0.0, real_dt))
 
 	var prog: float = 1.0 if completed_now else (float(player.get("air_brake_progress")) if player.get("air_brake_progress") != null else 0.0)
 	var diff_lbl: String = String(player.get("air_brake_difficulty_label")) if player.get("air_brake_difficulty_label") != null else "NORMAL"
@@ -2317,7 +2327,7 @@ func _update_air_brake_with_motion(delta: float, player: Node, l_vel: Vector3, r
 	if completed_now and _air_brake_root and is_instance_valid(_air_brake_root):
 		_air_brake_root.visible = false
 
-	_air_haptic_cd = maxf(_air_haptic_cd - delta, 0.0)
+	_air_haptic_cd = maxf(_air_haptic_cd - real_dt, 0.0)
 	if (l_moving or r_moving) and _air_haptic_cd <= 0.0:
 		_air_haptic_cd = 0.06
 		var pulse_amp: float = clampf(0.28 + effort_rate * 0.08, 0.28, 0.78)

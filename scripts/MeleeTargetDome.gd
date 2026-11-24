@@ -250,6 +250,10 @@ func setup(p_attacker: Node3D, p_defender: Node3D, p_duration: float = -1.0, p_m
 	_sim_exchange_cooldown_melees = maxi(_sim_exchange_cooldown_melees - 1, 0)
 	_sonic_burst_used_this_dome = false
 	_sonic_burst_cooldown_melees = maxi(_sonic_burst_cooldown_melees - 1, 0)
+	if attacker and is_instance_valid(attacker) and attacker.has_method("set"):
+		attacker.set("is_blocking", false)
+	if defender and is_instance_valid(defender) and defender.has_method("set"):
+		defender.set("is_blocking", false)
 
 	sfx_hit_light = null
 	sfx_hit_heavy = null
@@ -353,6 +357,10 @@ func start_attack_phase(p_attacker: Node3D, p_defender: Node3D, p_duration: floa
 	_set_target_zones_visible(true)
 	_hide_all_charge_spheres()
 	_refresh_melee_ki_bar()
+	if attacker and is_instance_valid(attacker) and attacker.has_method("set"):
+		attacker.set("is_blocking", false)
+	if defender and is_instance_valid(defender) and defender.has_method("set"):
+		defender.set("is_blocking", false)
 
 	var base_hits: int = 3
 	if p_max_hits > 0:
@@ -360,7 +368,7 @@ func start_attack_phase(p_attacker: Node3D, p_defender: Node3D, p_duration: floa
 	elif attacker and is_instance_valid(attacker) and attacker.has_method("calculate_melee_attack_count"):
 		base_hits = attacker.calculate_melee_attack_count(attacker, defender)
 
-	max_allowed_hits = maxi(1, base_hits - pending_attack_penalty)
+	max_allowed_hits = clampi(base_hits - pending_attack_penalty, 1, 9)
 	pending_attack_penalty = 0
 
 	duration = p_duration if p_duration > 0.0 else (float(max_allowed_hits) * 1.65 + 1.40)
@@ -594,8 +602,8 @@ func _begin_phase_transition(mode: String, wait_sec: float, msg: String, col: Co
 		audio_player.pitch_scale = 1.15 if player_will_attack else 0.85
 		AudioActionManager.play_action("common.block_perfect", audio_player, sfx_parry)
 	if player_will_attack:
-		_pulse_defender_hand(0, 150.0, 0.75, 0.14)
-		_pulse_defender_hand(1, 150.0, 0.75, 0.14)
+		_pulse_player_hand(0, 150.0, 0.75, 0.14)
+		_pulse_player_hand(1, 150.0, 0.75, 0.14)
 	else:
 		_pulse_defender_both_hands(110.0, 0.50, 0.07)
 	if header_label and is_instance_valid(header_label):
@@ -619,6 +627,8 @@ func _process_phase_transition(delta: float) -> void:
 		continue_attacker_offense()
 	elif mode == "start_simultaneous":
 		start_simultaneous_exchange()
+	else:
+		evaluate_round_outcome()
 
 
 func _generate_planned_attack_sequence(n_hits: int) -> void:
@@ -861,7 +871,10 @@ func _refresh_header_hud(is_charging_hammer: bool = false, active_zone_name: Str
 			header_label.text = "⚔️ ATACAS — 🔨 ¡BAJA AMBOS PUÑOS!"
 			return
 		if is_charging_hammer:
-			header_label.text = "⚔️ ATACAS — 🔨 MARTILLAZO [%s]" % bar_str
+			var h_pct: float = clampf(hammer_charge_time / maxf(HAMMER_CHARGE_REQ, 0.01), 0.0, 1.0)
+			var h_len: int = int(roundf(h_pct * 8.0))
+			var h_bar: String = "█".repeat(h_len) + "░".repeat(8 - h_len)
+			header_label.text = "⚔️ ATACAS — 🔨 MARTILLAZO [%s]" % h_bar
 			return
 
 		var max_fist_charge: float = maxf(fist_charge_times[0], fist_charge_times[1])
@@ -936,6 +949,37 @@ func start_defense_phase() -> void:
 	def_left_velocity = Vector3.ZERO
 	def_right_velocity = Vector3.ZERO
 	_has_prev_def_local = false
+	buffer_grip_timer_l = 0.0
+	buffer_grip_timer_r = 0.0
+	buffer_trig_timer_l = 0.0
+	buffer_trig_timer_r = 0.0
+	def_grip_l = false
+	def_grip_r = false
+	def_trig_l = false
+	def_trig_r = false
+	prev_grip_l = false
+	prev_grip_r = false
+	prev_trig_l = false
+	prev_trig_r = false
+	if attacker and is_instance_valid(attacker) and attacker.has_method("set"):
+		attacker.set("is_blocking", false)
+	if defender and is_instance_valid(defender) and defender.has_method("set"):
+		defender.set("is_blocking", false)
+		if bool(defender.get("is_player")):
+			var orig_sd: XROrigin3D = defender.get_parent() as XROrigin3D
+			if orig_sd:
+				var lc_sd: XRController3D = orig_sd.get_node_or_null("LeftHand") as XRController3D
+				var rc_sd: XRController3D = orig_sd.get_node_or_null("RightHand") as XRController3D
+				if lc_sd:
+					def_grip_l = lc_sd.get_float("grip") > 0.50 or lc_sd.is_button_pressed("grip_click")
+					def_trig_l = lc_sd.get_float("trigger") > 0.50 or lc_sd.is_button_pressed("trigger_click")
+					prev_grip_l = def_grip_l
+					prev_trig_l = def_trig_l
+				if rc_sd:
+					def_grip_r = rc_sd.get_float("grip") > 0.50 or rc_sd.is_button_pressed("grip_click")
+					def_trig_r = rc_sd.get_float("trigger") > 0.50 or rc_sd.is_button_pressed("trigger_click")
+					prev_grip_r = def_grip_r
+					prev_trig_r = def_trig_r
 	_pending_finisher_mode = ""
 	_pending_finisher_vel = 0.0
 	_skip_btn_prev = false
@@ -986,9 +1030,9 @@ func _process_defense_rhythm(delta: float) -> void:
 
 	var all_resolved: bool = (first_unresolved_idx == -1)
 	var is_def_crashed: bool = defender_is_defenseless or (defender != null and is_instance_valid(defender) and bool(defender.get("is_defenseless_crash")))
-	var defender_is_player: bool = (not is_def_crashed) and bool(defender.get("is_player")) if (defender and is_instance_valid(defender)) else false
+	var defender_is_player: bool = (defender != null and is_instance_valid(defender) and bool(defender.get("is_player")))
 
-	# Onda Explosiva (Kiai de Emergencia) al recibir >= 2 golpes sin bloquear en la ronda y tener >= 22 Ki
+	# Onda Explosiva (Kiai de Emergencia) al recibir >= 2 golpes sin bloquear en la ronda
 	if defender_is_player and not is_def_crashed and _round_unblocked_hits_taken >= 2 and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")):
 		var def_orig: XROrigin3D = defender.get_parent() as XROrigin3D
 		if def_orig:
@@ -1034,71 +1078,93 @@ func _process_defense_rhythm(delta: float) -> void:
 				var strike_type: int = 4 if is_hammer else (first_unresolved_idx % 4)
 				attacker.procedural_animator.trigger_melee_strike(strike_type)
 
-		# Semáforo estricto de 3 ventanas en Aro + Cuadrado: Rojo (>0.30s) -> Amarillo (0.16..0.30s) -> Verde (<=0.16s) -> Dorado (<=0.12s Parry)
+		# Semáforo legible: Rojo (>0.30s esperar) -> Ámbar (0.18..0.30s) -> Verde (<=0.18s y >=-0.16s) -> Blanco-Dorado (<=0.11s Parry)
 		var note_prewarn: float = float(active_note.get("prewarn_sec", RING_PREWARN_SEC))
-		var crossing_now: bool = _is_defender_crossing_arms() if defender_is_player else false
+		var crossing_now: bool = _is_defender_crossing_arms() if (defender_is_player and not is_def_crashed) else false
 		var is_early_locked: bool = bool(active_note.get("early_lockout", false))
 
 		if t_diff >= -0.22 and t_diff <= note_prewarn:
 			if active_ring and is_instance_valid(active_ring):
 				active_ring.visible = true
 				var t_factor: float = clampf(maxf(t_diff, 0.0) / maxf(note_prewarn, 0.01), 0.0, 1.0)
-				var base_ring_scale: float = 1.08 if absf(t_diff) <= 0.12 else 1.0
+				var base_ring_scale: float = 1.08 if absf(t_diff) <= 0.11 else 1.0
 				active_ring.scale = Vector3.ONE * (base_ring_scale + t_factor * 1.65)
 				var r_mat: StandardMaterial3D = active_ring.material_override as StandardMaterial3D
-				var zone_tint: Color
+				var ring_tint: Color
+				var shape_tint: Color
 				if is_early_locked:
-					zone_tint = Color(1.0, 0.10, 0.10, 1.0)
-				elif absf(t_diff) <= 0.12:
-					zone_tint = Color(1.0, 0.94, 0.18, 1.0)
-				elif t_diff <= 0.16:
-					zone_tint = Color(0.20, 1.0, 0.40, 1.0)
-					if defender_is_player and _timing_cue_note_idx != first_unresolved_idx:
+					ring_tint = Color(1.0, 0.08, 0.08, 1.0)
+					shape_tint = ring_tint
+				elif absf(t_diff) <= 0.11:
+					ring_tint = Color(1.0, 0.96, 0.62, 1.0)
+					shape_tint = ring_tint
+				elif t_diff <= 0.18 and t_diff >= -0.16:
+					ring_tint = Color(0.15, 1.0, 0.35, 1.0)
+					shape_tint = ring_tint
+					if defender_is_player and not is_def_crashed and _timing_cue_note_idx != first_unresolved_idx:
 						_timing_cue_note_idx = first_unresolved_idx
 						_pulse_defender_both_hands(140.0, 0.35, 0.04)
-				elif t_diff <= 0.30:
-					zone_tint = Color(1.0, 0.85, 0.14, 0.96)
-				elif is_hammer:
-					zone_tint = Color(0.82, 0.28, 1.0, 0.90)
-				elif bool(active_note.get("is_charged_v3", false)):
-					zone_tint = Color(1.0, 0.22, 0.10, 0.92)
-				elif bool(active_note.get("is_charged", false)):
-					zone_tint = Color(1.0, 0.55, 0.14, 0.92)
+				elif t_diff <= 0.30 and t_diff > 0.18:
+					ring_tint = Color(1.0, 0.56, 0.08, 0.96)
+					shape_tint = ring_tint
 				else:
-					zone_tint = Color(0.20, 0.85, 1.0, 0.88)
+					ring_tint = Color(0.95, 0.16, 0.16, 0.90)
+					if is_hammer:
+						shape_tint = Color(0.82, 0.28, 1.0, 0.90)
+					elif bool(active_note.get("is_charged_v3", false)):
+						shape_tint = Color(1.0, 0.22, 0.10, 0.92)
+					elif bool(active_note.get("is_charged", false)):
+						shape_tint = Color(1.0, 0.55, 0.14, 0.92)
+					else:
+						shape_tint = ring_tint
 				if r_mat:
-					r_mat.albedo_color = zone_tint
-				_tint_zone_shapes(active_zone, zone_tint, zone_tint, 2.4 if t_diff <= 0.30 else 1.6, Color(1.0, 1.0, 1.0, 0.92))
+					r_mat.albedo_color = ring_tint
+				_tint_zone_shapes(active_zone, shape_tint, shape_tint, 2.4 if (t_diff <= 0.30 and t_diff >= -0.16) else 1.6, Color(1.0, 1.0, 1.0, 0.92))
 		elif t_diff > note_prewarn and active_ring and is_instance_valid(active_ring):
 			active_ring.visible = false
 
-		# Castigo estricto por defender ANTES de Amarillo/Verde (>0.30s): recibe el golpe de lleno
-		if defender_is_player and t_diff > 0.30 and t_diff <= note_prewarn and not crossing_now and not is_early_locked:
-			var early_hand_idx: int = _get_defender_hand_near_zone(active_zone["node"].global_position, 0.24)
-			var early_hand_vel: float = (def_left_velocity if early_hand_idx == 0 else def_right_velocity).length() if early_hand_idx != -1 else 0.0
-			var early_btn: bool = buffer_trig_timer_l > 0.08 or buffer_trig_timer_r > 0.08 or buffer_grip_timer_l > 0.08 or buffer_grip_timer_r > 0.08
-			if early_btn or (early_hand_idx != -1 and early_hand_vel >= 0.55):
-				active_note["early_lockout"] = true
-				is_early_locked = true
-				if active_ring and is_instance_valid(active_ring):
-					var r_mat_e: StandardMaterial3D = active_ring.material_override as StandardMaterial3D
-					if r_mat_e:
-						r_mat_e.albedo_color = Color(1.0, 0.10, 0.10, 1.0)
-				_tint_zone_shapes(active_zone, Color(1.0, 0.10, 0.10, 1.0), Color(1.0, 0.10, 0.10), 2.5, Color(1.0, 0.3, 0.3, 0.95))
-				_pulse_defender_both_hands(95.0, 0.50, 0.14)
-				_spawn_impact_popup(active_zone["node"].global_position, "❌ ¡MUY PRONTO! GOLPE DE LLENO", Color(1.0, 0.18, 0.14))
+		# Castigo estricto por defender cerca de la caja ANTES de Ámbar/Verde (>0.30s), sin penalizar formar Guardia X o Kiai
+		if defender_is_player and not is_def_crashed and t_diff > 0.30 and t_diff <= note_prewarn and not crossing_now and not is_early_locked:
+			var forming_x_or_kiai: bool = false
+			var def_orig_el: XROrigin3D = defender.get_parent() as XROrigin3D
+			if def_orig_el:
+				var lc_el: XRController3D = def_orig_el.get_node_or_null("LeftHand") as XRController3D
+				var rc_el: XRController3D = def_orig_el.get_node_or_null("RightHand") as XRController3D
+				if lc_el and rc_el:
+					var hands_dist_el: float = lc_el.global_position.distance_to(rc_el.global_position)
+					if hands_dist_el < 0.38 or (hands_dist_el >= 0.65 and def_grip_l and def_grip_r):
+						forming_x_or_kiai = true
+			if not forming_x_or_kiai:
+				var early_hand_idx: int = _get_defender_hand_near_zone(active_zone["node"].global_position, 0.24)
+				var early_hand_vel: float = (def_left_velocity if early_hand_idx == 0 else def_right_velocity).length() if early_hand_idx != -1 else 0.0
+				var early_btn_hand: bool = (early_hand_idx == 0 and (buffer_trig_timer_l > 0.08 or buffer_grip_timer_l > 0.08)) or (early_hand_idx == 1 and (buffer_trig_timer_r > 0.08 or buffer_grip_timer_r > 0.08))
+				if early_hand_idx != -1 and (early_btn_hand or early_hand_vel >= 0.55):
+					active_note["early_lockout"] = true
+					is_early_locked = true
+					if active_ring and is_instance_valid(active_ring):
+						var r_mat_e: StandardMaterial3D = active_ring.material_override as StandardMaterial3D
+						if r_mat_e:
+							r_mat_e.albedo_color = Color(1.0, 0.08, 0.08, 1.0)
+					_tint_zone_shapes(active_zone, Color(1.0, 0.08, 0.08, 1.0), Color(1.0, 0.08, 0.08), 2.5, Color(1.0, 0.3, 0.3, 0.95))
+					_pulse_defender_both_hands(95.0, 0.50, 0.14)
+					_spawn_impact_popup(active_zone["node"].global_position, "❌ ¡MUY PRONTO! GOLPE DE LLENO", Color(1.0, 0.18, 0.14))
+
+		if is_def_crashed and t_diff <= 0.0:
+			_resolve_unblocked_hit(active_note, active_zone)
+			return
 
 		if is_early_locked and defender_is_player and t_diff <= 0.0 and not crossing_now:
 			_resolve_unblocked_hit(active_note, active_zone)
 			return
 
-		# Ventana de resolución defensiva (hasta ±0.30s incluyendo Amarillo 0.16..0.30s, Verde <=0.16s, Dorado <=0.12s)
-		if t_diff <= 0.30 and t_diff >= -0.22:
+		# Ventana de resolución defensiva (hasta ±0.30s incluyendo Ámbar 0.18..0.30s, Verde <=0.18s, Dorado <=0.12s)
+		if not is_def_crashed and t_diff <= 0.30 and t_diff >= -0.22:
 			var zone_pos: Vector3 = active_zone["node"].global_position
 			if defender_is_player:
+				var not_locked_out: bool = not is_early_locked
 				# 1. Z-Vanish Defensivo real con Stick en timing
 				var def_orig_zv: XROrigin3D = defender.get_parent() as XROrigin3D
-				if def_orig_zv and _def_stick_used_for_note_idx != first_unresolved_idx:
+				if not_locked_out and def_orig_zv and _def_stick_used_for_note_idx != first_unresolved_idx:
 					var l_zv: XRController3D = def_orig_zv.get_node_or_null("LeftHand") as XRController3D
 					var r_zv: XRController3D = def_orig_zv.get_node_or_null("RightHand") as XRController3D
 					var st_l: Vector2 = l_zv.get_vector2("primary") if l_zv else Vector2.ZERO
@@ -1112,35 +1178,34 @@ func _process_defense_rhythm(delta: float) -> void:
 							_resolve_defensive_z_vanish(active_note, active_zone)
 							return
 
-				var not_locked_out: bool = not is_early_locked
 				var hand_parry_idx: int = _get_defender_hand_near_zone(zone_pos, 0.28) if not crossing_now else -1
-				var hand_clash_idx: int = _get_defender_hand_near_zone(zone_pos, 0.28) if not crossing_now else -1
+				var hand_clash_idx: int = hand_parry_idx
 
-				# 2. Bloqueo Perfecto (Parry) en Aro Dorado (<= 0.12s): puño cerrado fresco (sin límite restrictivo de velocidad lateral)
+				# 2. Bloqueo Perfecto (Parry) en Aro Blanco-Dorado (<= 0.12s): puño cerrado fresco sin embestida frontal fuerte
 				if not_locked_out and hand_parry_idx != -1 and absf(t_diff) <= 0.12:
 					var p_vec: Vector3 = def_left_velocity if hand_parry_idx == 0 else def_right_velocity
-					var fwd_to_atk: Vector3 = -_duel_axis
+					var fwd_to_atk: Vector3 = _duel_axis
 					var fwd_spd: float = p_vec.dot(fwd_to_atk.normalized()) if fwd_to_atk.length_squared() > 0.01 else 0.0
 					if fwd_spd < 1.65 and _is_defender_just_guard_active(hand_parry_idx):
 						_resolve_perfect_parry(active_note, active_zone)
 						return
 
-				# 3. Choque de Puños (puñetazo explosivo frontal >= 1.65 m/s, no aplica a Martillazo)
-				if hand_clash_idx != -1 and not is_hammer and absf(t_diff) <= 0.22:
+				# 3. Choque de Puños (puñetazo explosivo frontal hacia el rival >= 1.65 m/s, no aplica a Martillazo)
+				if not_locked_out and hand_clash_idx != -1 and not is_hammer and absf(t_diff) <= 0.22:
 					var clash_closed: bool = _is_defender_fist_closed(hand_clash_idx)
 					var clash_vec: Vector3 = def_left_velocity if hand_clash_idx == 0 else def_right_velocity
-					var fwd_clash_spd: float = clash_vec.dot((-_duel_axis).normalized())
+					var fwd_clash_spd: float = clash_vec.dot(_duel_axis.normalized()) if _duel_axis.length_squared() > 0.01 else 0.0
 					if clash_closed and clash_vec.length() >= 1.65 and fwd_clash_spd >= 0.85:
 						_resolve_fist_clash(active_note, active_zone, hand_clash_idx)
 						return
 
-				# 4. Desvío con 1 Mano en Verde (<=0.16s) o Amarillo (0.16..0.30s): ESTRICTAMENTE Palma abierta (sin Grip ni Trigger!)
+				# 4. Desvío con 1 Mano en Verde (<=0.18s y >=-0.16s) o Ámbar (0.18..0.30s): ESTRICTAMENTE Palma abierta
 				if not_locked_out and hand_parry_idx != -1 and t_diff <= 0.30 and t_diff >= -0.16:
 					var h_vel: float = (def_left_velocity if hand_parry_idx == 0 else def_right_velocity).length()
 					var h_trig: bool = def_trig_l if hand_parry_idx == 0 else def_trig_r
 					var h_grip: bool = def_grip_l if hand_parry_idx == 0 else def_grip_r
 					if (not h_grip) and (not h_trig) and h_vel >= 0.38:
-						var timing_grade: String = "GREEN" if absf(t_diff) <= 0.16 else "YELLOW"
+						var timing_grade: String = "GREEN" if (t_diff <= 0.18 and t_diff >= -0.16) else "YELLOW"
 						_resolve_hand_block(active_note, active_zone, hand_parry_idx, timing_grade)
 						if phase != DomePhase.DEFENSE_RHYTHM:
 							return
@@ -1154,7 +1219,7 @@ func _process_defense_rhythm(delta: float) -> void:
 				_resolve_ai_defense(active_note, active_zone)
 				if phase != DomePhase.DEFENSE_RHYTHM:
 					return
-		elif t_diff < -0.20:
+		elif t_diff < -0.22:
 			_resolve_unblocked_hit(active_note, active_zone)
 			if phase != DomePhase.DEFENSE_RHYTHM:
 				return
@@ -1217,7 +1282,7 @@ func _resolve_perfect_parry(note: Dictionary, zone: Dictionary) -> void:
 		var bp_atk: float = maxf(float(attacker.get("current_np")) if (attacker and attacker.get("current_np") != null) else 10000.0, 100.0)
 		var bp_def: float = maxf(float(defender.get("current_np")) if (defender and defender.get("current_np") != null) else 10000.0, 100.0)
 		if bp_def < bp_atk * 1.25:
-			_cut_melee_hammer_defended(defender, attacker, 50.0)
+			_cut_melee_hammer_defended(defender, attacker, 0.0)
 			return
 
 	pending_attack_penalty = 0
@@ -1283,7 +1348,8 @@ func _resolve_fist_clash(note: Dictionary, zone: Dictionary, hand_idx: int) -> v
 		_spawn_hit_spark(zone_pos)
 		_pulse_defender_hand(hand_idx, 160.0, 0.75, 0.14)
 		var lat_cl: Vector3 = _duel_axis.cross(Vector3.UP).normalized() * (1.0 if hand_idx == 1 else -1.0)
-		_trigger_dynamic_melee_mobility(float(note.get("power", 1.2)), bool(note.get("is_charged", false)), bool(note.get("is_charged_v3", false)), false, attacker, defender, -_duel_axis * 6.5 + lat_cl * 2.4 + Vector3.UP * 1.4, 0.22, false)
+		var atk_to_def_fc: Vector3 = (-_duel_axis if (defender and is_instance_valid(defender) and bool(defender.get("is_player"))) else _duel_axis)
+		_trigger_dynamic_melee_mobility(float(note.get("power", 1.2)), bool(note.get("is_charged", false)), bool(note.get("is_charged_v3", false)), false, attacker, defender, atk_to_def_fc * 6.5 + lat_cl * 2.4 + Vector3.UP * 1.4, 0.22, false)
 
 		last_action_feedback = "💥 ¡SUPERADO EN CHOQUE! (-%d BP)" % int(partial_dmg)
 		pip_results.append("hit")
@@ -1295,8 +1361,8 @@ func _resolve_fist_clash(note: Dictionary, zone: Dictionary, hand_idx: int) -> v
 	if _check_ki_break_after_note():
 		return
 
-	# Evento Lore 1: Choque Frenético de Puños si ambos peleadores tienen buen Ki y BP competitivo
-	if phase == DomePhase.DEFENSE_RHYTHM and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")):
+	# Evento Lore 1: Choque Frenético de Puños solo cuando el defensor igualó/ganó el choque
+	if r_bp >= 0.70 and phase == DomePhase.DEFENSE_RHYTHM and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")):
 		var atk_ki_fc: float = float(attacker.get("current_ki")) if (attacker and attacker.get("current_ki") != null) else 0.0
 		var def_ki_fc: float = float(defender.get("current_ki")) if (defender and defender.get("current_ki") != null) else 0.0
 		var fc_ev: int = MeleeLoreEventScript.evaluate_lore_event_trigger({
@@ -1358,12 +1424,10 @@ func _resolve_hand_block(note: Dictionary, zone: Dictionary, hand_idx: int, timi
 	var is_v3: bool = bool(note.get("is_charged_v3", false))
 	var is_charged: bool = bool(note.get("is_charged", false))
 	if is_hammer:
-		_spawn_impact_popup(zone["node"].global_position, "🔨 ¡1 MANO ROTA POR MARTILLAZO!", Color(1.0, 0.25, 0.95))
-		_resolve_unblocked_hit(note, zone)
+		_resolve_unblocked_hit(note, zone, "🔨 ¡1 MANO ROTA POR MARTILLAZO!")
 		return
 	if is_v3:
-		_spawn_impact_popup(zone["node"].global_position, "🔥 ¡1 MANO ROTA POR V3!", Color(1.0, 0.22, 0.12))
-		_resolve_unblocked_hit(note, zone)
+		_resolve_unblocked_hit(note, zone, "🔥 ¡1 MANO ROTA POR V3!")
 		return
 
 	note["resolved"] = true
@@ -1376,6 +1440,10 @@ func _resolve_hand_block(note: Dictionary, zone: Dictionary, hand_idx: int, timi
 	var score: float = 1.0
 	var cfg_hb: KiEconomyConfig = KiEconomyConfig.get_default()
 	var deflect_reward: float = float(cfg_hb.melee_deflect_ki_reward) if cfg_hb.get("melee_deflect_ki_reward") != null else 16.0
+	var atk_to_def_hb: Vector3 = (-_duel_axis if (defender and is_instance_valid(defender) and bool(defender.get("is_player"))) else _duel_axis)
+	if atk_to_def_hb.length_squared() < 0.01:
+		atk_to_def_hb = -global_transform.basis.z
+	atk_to_def_hb = atk_to_def_hb.normalized()
 
 	if is_charged:
 		# Cargado rompe el bloqueo de 1 Mano: 65% daño, -10 Ki y empuje fuerte (obliga a Guardia X o Parry)
@@ -1386,9 +1454,10 @@ func _resolve_hand_block(note: Dictionary, zone: Dictionary, hand_idx: int, timi
 		if defender and defender.has_method("take_hit"):
 			defender.take_hit(broken_dmg, Vector3.ZERO)
 		if defender and defender.get("procedural_animator"):
-			defender.procedural_animator.trigger_hit_flinch(0.55, -global_transform.basis.z)
+			defender.procedural_animator.trigger_hit_flinch(0.55, atk_to_def_hb)
 		if audio_player:
 			audio_player.global_position = zone_pos
+			audio_player.pitch_scale = 1.0
 			AudioActionManager.play_action("common.melee_hit_heavy", audio_player, sfx_hit_heavy)
 		_spawn_block_spark(zone_pos, Color(1.0, 0.45, 0.12))
 		last_action_feedback = "💥 ¡CARGADO ROMPE 1 MANO! (Usa X o Parry)"
@@ -1404,9 +1473,10 @@ func _resolve_hand_block(note: Dictionary, zone: Dictionary, hand_idx: int, timi
 			defender.take_hit(partial_dmg, Vector3.ZERO)
 		if audio_player:
 			audio_player.global_position = zone_pos
+			audio_player.pitch_scale = 1.0
 			AudioActionManager.play_action("common.melee_hit_light", audio_player, sfx_hit_light)
 		_spawn_block_spark(zone_pos, Color(1.0, 0.85, 0.18))
-		last_action_feedback = "⚠️ ¡BLOQUEO AMARILLO! (-4 Ki, 45%% daño)"
+		last_action_feedback = "⚠️ ¡BLOQUEO AMARILLO! (-4 Ki, 45% daño)"
 		pip_results.append("blocked")
 		_spawn_impact_popup(zone_pos, "⚠️ ¡AMARILLO! (Parcial)", Color(1.0, 0.85, 0.18))
 		emit_signal("defense_action_resolved", "hand_block_yellow", zone["id"], true, -4.0, 0.0)
@@ -1430,7 +1500,7 @@ func _resolve_hand_block(note: Dictionary, zone: Dictionary, hand_idx: int, timi
 		defender.procedural_animator.trigger_melee_block(0)
 	var lat_b: Vector3 = _duel_axis.cross(Vector3.UP).normalized() * (1.0 if hand_idx == 1 else -1.0)
 	var back_dist: float = 5.4 if is_charged else 3.4
-	_trigger_dynamic_melee_mobility(float(note.get("power", 1.0)), is_charged, false, false, defender, attacker, -_duel_axis * back_dist + lat_b * 2.2 + Vector3.UP * 1.1, 0.20, false)
+	_trigger_dynamic_melee_mobility(float(note.get("power", 1.0)), is_charged, false, false, defender, attacker, atk_to_def_hb * back_dist + lat_b * 2.2 + Vector3.UP * 1.1, 0.20, false)
 
 	_pulse_defender_hand(hand_idx, 180.0, 0.85, 0.10)
 	note["defense_score"] = score
@@ -1477,14 +1547,18 @@ func _resolve_cross_arm_guard(note: Dictionary, zone: Dictionary) -> void:
 
 	_spawn_block_spark(zone_pos, Color(1.0, 0.25, 0.12) if is_v3 else Color(0.2, 0.7, 1.0))
 	_pulse_defender_both_hands(180.0 if is_v3 else 140.0, 0.90 if is_v3 else 0.65, 0.16 if is_v3 else 0.10)
+	var defender_is_player_g: bool = bool(defender.get("is_player")) if (defender and is_instance_valid(defender)) else false
+	var atk_to_def_g: Vector3 = (-_duel_axis if defender_is_player_g else _duel_axis)
+	if atk_to_def_g.length_squared() < 0.01:
+		atk_to_def_g = -global_transform.basis.z
+	atk_to_def_g = atk_to_def_g.normalized()
 	if defender and is_instance_valid(defender):
 		if is_v3 and defender.get("procedural_animator"):
-			defender.procedural_animator.trigger_hit_flinch(0.95, -global_transform.basis.z)
+			defender.procedural_animator.trigger_hit_flinch(0.95, atk_to_def_g)
 		elif defender.get("procedural_animator"):
 			defender.procedural_animator.trigger_melee_block(1)
 
-	var defender_is_player_g: bool = bool(defender.get("is_player")) if (defender and is_instance_valid(defender)) else false
-	var push_back: Vector3 = (-_duel_axis if defender_is_player_g else _duel_axis) * (6.2 if (is_hammer or is_v3) else 4.2)
+	var push_back: Vector3 = atk_to_def_g * (6.2 if (is_hammer or is_v3) else 4.2)
 	_apply_melee_arena_surge(push_back + Vector3.UP * (-1.4 if is_hammer else 0.5), 0.22)
 
 	if is_v3:
@@ -1504,7 +1578,7 @@ func _resolve_cross_arm_guard(note: Dictionary, zone: Dictionary) -> void:
 			_trigger_finisher_and_close(v3_mode_g, float(note.get("velocity", 3.5)))
 			return
 	else:
-		var g_score: float = 0.55 if is_charged else (0.20 if is_hammer else 0.25)
+		var g_score: float = 0.20 if is_hammer else (0.55 if is_charged else 0.25)
 		note["defense_score"] = g_score
 		defense_score_sum += g_score
 		last_action_feedback = "🔨 ¡MARTILLO APLASTA GUARDIA (-%d Ki)!" % int(ki_cost) if is_hammer else ("🛡️ ¡CARGADO ABSORBIDO! (-%d Ki)" % int(ki_cost) if is_charged else "🛡️ GUARDIA CRUZADA (-%d Ki)" % int(ki_cost))
@@ -1520,7 +1594,7 @@ func _resolve_cross_arm_guard(note: Dictionary, zone: Dictionary) -> void:
 		var bp_atk_h: float = maxf(float(attacker.get("current_np")) if (attacker and attacker.get("current_np") != null) else 10000.0, 100.0)
 		var bp_def_h: float = maxf(float(defender.get("current_np")) if (defender and defender.get("current_np") != null) else 10000.0, 100.0)
 		if bp_def_h < bp_atk_h * 1.25:
-			_cut_melee_hammer_defended(defender, attacker, final_dmg)
+			_cut_melee_hammer_defended(defender, attacker, final_dmg_scaled)
 			return
 
 	# Evento Lore 4: Desgarre de Guardia si abusa de Guardia Cruzada (2+ segundas notas) o Ki crítico
@@ -1537,27 +1611,27 @@ func _resolve_cross_arm_guard(note: Dictionary, zone: Dictionary) -> void:
 
 
 func _cut_melee_hammer_defended(p_def: Node3D, p_atk: Node3D, chip_dmg: float) -> void:
+	if not is_active:
+		return
 	is_active = false
-	if p_def and is_instance_valid(p_def):
-		p_def.set("is_in_bullet_time", false)
-		var push_dir: Vector3 = (p_def.global_position - p_atk.global_position).normalized() if (p_atk and is_instance_valid(p_atk)) else Vector3.BACK
-		push_dir.y = 0.0
-		if push_dir.length_squared() < 0.001:
-			push_dir = Vector3.BACK
-		if p_def.has_method("apply_knockback"):
-			p_def.apply_knockback(push_dir.normalized(), 6.5)
-	if p_atk and is_instance_valid(p_atk):
-		p_atk.set("is_in_bullet_time", false)
-		p_atk.set("active_target_dome", null)
-	if p_def and p_def.has_method("_separate_fighters_to_canonical_distance") and p_atk:
-		p_def._separate_fighters_to_canonical_distance(p_atk, 5.5)
-	elif p_atk and p_atk.has_method("_separate_fighters_to_canonical_distance") and p_def:
-		p_atk._separate_fighters_to_canonical_distance(p_def, 5.5)
+	_kill_surge_tween()
+	_hitstop_end_msec = 0
+	if Engine.time_scale < 1.0:
+		Engine.time_scale = 1.0
+	phase = DomePhase.COMPLETED
+	_hide_all_charge_spheres()
+	_reset_all_timing_rings()
+	for f_cut in [p_def, p_atk]:
+		if f_cut and is_instance_valid(f_cut):
+			f_cut.set("is_in_bullet_time", false)
+			f_cut.set("is_blocking", false)
+			f_cut.set("active_target_dome", null)
 	_spawn_impact_popup(global_position, "🛡️ ¡MARTILLO FRENADO! (-%d BP)" % int(chip_dmg), Color(0.4, 0.9, 1.0), true)
+	emit_signal("bullet_time_completed", [], Vector3.ZERO)
 	queue_free()
 
 
-func _resolve_unblocked_hit(note: Dictionary, zone: Dictionary) -> void:
+func _resolve_unblocked_hit(note: Dictionary, zone: Dictionary, custom_popup: String = "") -> void:
 	note["resolved"] = true
 	consecutive_guard_hits = 0
 	_round_unblocked_hits_taken += 1
@@ -1585,18 +1659,23 @@ func _resolve_unblocked_hit(note: Dictionary, zone: Dictionary) -> void:
 	var surge_mag: float = 8.2 if (is_charged or is_v3 or is_hammer) else 5.5
 	_trigger_dynamic_melee_mobility(note_power, is_charged, is_v3, is_hammer, attacker, defender, surge_dir * surge_mag, 0.22, real_launch_vec.y > 4.0)
 
+	var atk_to_def_uh: Vector3 = (-_duel_axis if (defender and is_instance_valid(defender) and bool(defender.get("is_player"))) else _duel_axis)
+	if atk_to_def_uh.length_squared() < 0.01:
+		atk_to_def_uh = -global_transform.basis.z
+	atk_to_def_uh = atk_to_def_uh.normalized()
 	if defender and is_instance_valid(defender):
 		var raw_dmg_scaled: float = raw_dmg * attacker_damage_mult
 		if defender.has_method("take_hit"):
-			defender.take_hit(raw_dmg_scaled, -global_transform.basis.z)
+			defender.take_hit(raw_dmg_scaled, atk_to_def_uh)
 		if defender.get("procedural_animator"):
-			defender.procedural_animator.trigger_hit_flinch(0.75 if (is_hammer or is_v3) else 0.45, -global_transform.basis.z)
+			defender.procedural_animator.trigger_hit_flinch(0.75 if (is_hammer or is_v3) else 0.45, atk_to_def_uh)
 
 	if attacker and is_instance_valid(attacker) and attacker.has_method("increase_np"):
 		attacker.increase_np(raw_dmg * 0.65)
 
 	if audio_player:
 		audio_player.global_position = zone_pos
+		audio_player.pitch_scale = 1.0
 		var act_id := "common.melee_hit_heavy" if (is_charged or is_v3 or is_hammer) else "common.melee_hit_light"
 		var fb := sfx_hit_heavy if (is_charged or is_v3 or is_hammer) else sfx_hit_light
 		AudioActionManager.play_action(act_id, audio_player, fb)
@@ -1608,9 +1687,9 @@ func _resolve_unblocked_hit(note: Dictionary, zone: Dictionary) -> void:
 	var pwr_lbl: String = "🔥 V3 x%.1f" % note_power if is_v3 else ("⚡ CARGADO x%.1f" % note_power if is_charged else "💥 RÁPIDO x%.1f" % note_power)
 	if is_hammer:
 		pwr_lbl = "🔨 MARTILLAZO x%.1f" % note_power
-	last_action_feedback = pwr_lbl
+	last_action_feedback = custom_popup if not custom_popup.is_empty() else pwr_lbl
 	pip_results.append("hit")
-	_spawn_impact_popup(zone_pos, pwr_lbl, Color(1.0, 0.42, 0.15))
+	_spawn_impact_popup(zone_pos, custom_popup if not custom_popup.is_empty() else pwr_lbl, Color(1.0, 0.42, 0.15))
 	if is_charged or is_v3 or is_hammer:
 		_spawn_parry_shockwave(zone_pos)
 		if is_hammer:
@@ -1629,7 +1708,7 @@ func _resolve_unblocked_hit(note: Dictionary, zone: Dictionary) -> void:
 			return
 	elif is_v3:
 		var v3_mode: String = "charged_v3_up" if String(note.get("v3_launch_mode", "BACK")) == "UP" else "charged_v3_back"
-		if has_remaining_notes:
+		if has_remaining_notes or v3_mode == "charged_v3_up":
 			_pending_finisher_mode = v3_mode
 			_pending_finisher_vel = float(note.get("velocity", 3.5))
 		else:
@@ -1648,49 +1727,98 @@ func _resolve_ai_defense(note: Dictionary, zone: Dictionary) -> void:
 	var bp_def: float = maxf(float(defender.get("current_np")) if (defender and defender.get("current_np") != null) else 9000.0, 100.0)
 	var bp_atk: float = maxf(float(attacker.get("current_np")) if (attacker and attacker.get("current_np") != null) else 9000.0, 100.0)
 	var r_bp: float = bp_def / bp_atk
+	var cfg_ai_d: KiEconomyConfig = KiEconomyConfig.get_default()
+	var kiai_cost: float = float(cfg_ai_d.melee_explosive_wave_cost) if cfg_ai_d.get("melee_explosive_wave_cost") != null else 16.0
+	var vanish_cost: float = float(cfg_ai_d.melee_vanish_cost) if cfg_ai_d.get("melee_vanish_cost") != null else 10.0
+	var guard_cost: float = float(cfg_ai_d.melee_hammer_guard_cost) if is_hammer else (float(cfg_ai_d.melee_guard_charged_cost) if is_charged else float(cfg_ai_d.melee_guard_quick_cost))
 
-	# Si la IA no tiene Ki suficiente, no puede frenar ataques pesados
+	# Onda Kiai de emergencia disponible también para la IA si recibe 2+ golpes limpios con Ki suficiente
+	if _round_unblocked_hits_taken >= 2 and def_ki >= kiai_cost and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")) and randf() < 0.35:
+		var ew_ai: int = MeleeLoreEventScript.evaluate_lore_event_trigger({
+			"trigger_source": "explosive_wave_input",
+			"def_ki": def_ki,
+			"consecutive_hits_taken": _round_unblocked_hits_taken
+		})
+		if ew_ai == MeleeLoreEventScript.LoreEventType.EXPLOSIVE_WAVE:
+			_start_lore_event(ew_ai, "explosive_wave")
+			return
+
+	# Si la IA no tiene Ki suficiente, no puede frenar ataques
 	if def_ki <= 5.0:
 		_resolve_unblocked_hit(note, zone)
 		return
 
 	var roll: float = randf()
+	var acc: float = 0.0
 	if is_hammer:
-		if in_zenkai and roll < 0.12:
+		var parry_w: float = 0.12 if in_zenkai else 0.0
+		var guard_w: float = 0.33 if def_ki >= guard_cost else 0.0
+		acc += parry_w
+		if parry_w > 0.0 and roll < acc:
 			_resolve_perfect_parry(note, zone)
-		elif def_ki >= 22.0 and roll < 0.45:
+			return
+		acc += guard_w
+		if guard_w > 0.0 and roll < acc:
 			_resolve_cross_arm_guard(note, zone)
-		else:
-			_resolve_unblocked_hit(note, zone)
+			return
+		_resolve_unblocked_hit(note, zone)
 	elif is_v3:
-		if in_zenkai and roll < 0.16:
+		var parry_w: float = 0.16 if in_zenkai else 0.0
+		var clash_w: float = 0.26 if r_bp >= 0.72 else 0.0
+		var vanish_w: float = 0.18 if def_ki >= vanish_cost else 0.0
+		acc += parry_w
+		if parry_w > 0.0 and roll < acc:
 			_resolve_perfect_parry(note, zone)
-		elif r_bp >= 0.72 and roll < 0.42:
+			return
+		acc += clash_w
+		if clash_w > 0.0 and roll < acc:
 			_resolve_fist_clash(note, zone, 0)
-		elif roll < 0.58:
+			return
+		acc += vanish_w
+		if vanish_w > 0.0 and roll < acc:
 			_resolve_defensive_z_vanish(note, zone)
-		else:
-			_resolve_unblocked_hit(note, zone)
+			return
+		_resolve_unblocked_hit(note, zone)
 	elif is_charged:
-		if in_zenkai and roll < 0.12:
+		var parry_w: float = 0.12 if in_zenkai else 0.0
+		var guard_w: float = 0.42 if def_ki >= guard_cost else 0.0
+		var clash_w: float = 0.18 if r_bp >= 0.70 else 0.0
+		acc += parry_w
+		if parry_w > 0.0 and roll < acc:
 			_resolve_perfect_parry(note, zone)
-		elif def_ki >= 16.0 and roll < 0.55:
+			return
+		acc += guard_w
+		if guard_w > 0.0 and roll < acc:
 			_resolve_cross_arm_guard(note, zone)
-		elif r_bp >= 0.70 and roll < 0.72:
+			return
+		acc += clash_w
+		if clash_w > 0.0 and roll < acc:
 			_resolve_fist_clash(note, zone, 0)
-		else:
-			_resolve_unblocked_hit(note, zone)
+			return
+		_resolve_unblocked_hit(note, zone)
 	else:
-		if in_zenkai and roll < 0.10:
+		var parry_w: float = 0.10 if in_zenkai else 0.0
+		var clash_w: float = 0.18 if r_bp >= 0.70 else 0.0
+		var deflect_w: float = 0.36
+		var guard_w: float = 0.16 if def_ki >= guard_cost else 0.0
+		acc += parry_w
+		if parry_w > 0.0 and roll < acc:
 			_resolve_perfect_parry(note, zone)
-		elif r_bp >= 0.70 and roll < 0.28:
+			return
+		acc += clash_w
+		if clash_w > 0.0 and roll < acc:
 			_resolve_fist_clash(note, zone, 0)
-		elif roll < 0.62:
-			_resolve_hand_block(note, zone, 0, "GREEN")
-		elif roll < 0.78:
+			return
+		acc += deflect_w
+		if roll < acc:
+			var ai_grade: String = "YELLOW" if randf() < 0.20 else "GREEN"
+			_resolve_hand_block(note, zone, 0, ai_grade)
+			return
+		acc += guard_w
+		if guard_w > 0.0 and roll < acc:
 			_resolve_cross_arm_guard(note, zone)
-		else:
-			_resolve_unblocked_hit(note, zone)
+			return
+		_resolve_unblocked_hit(note, zone)
 
 
 func _check_ki_break_after_note() -> bool:
@@ -1716,6 +1844,8 @@ func _start_unblockable_ki_break(p_winner: Node3D, p_victim: Node3D) -> void:
 	phase = DomePhase.UNBLOCKABLE_KI_BREAK
 	ki_break_attacker = p_winner
 	ki_break_victim = p_victim
+	_has_prev_atk_local = false
+	hand_must_retract = [false, false]
 	_reset_all_timing_rings()
 	_hide_all_charge_spheres()
 
@@ -1724,26 +1854,29 @@ func _start_unblockable_ki_break(p_winner: Node3D, p_victim: Node3D) -> void:
 		p_victim.set("is_guard_broken", true)
 		p_victim.set("guard_break_timer", 2.0)
 
-	# Mostrar únicamente la caja central gigante dorada/roja
+	# Mostrar únicamente la caja central circular gigante dorada/roja
 	for zone in target_zones:
 		var z_id: int = int(zone["id"])
 		var z_node: Node3D = zone["node"] as Node3D
 		if z_node and is_instance_valid(z_node):
-			z_node.visible = (z_id == 1)
 			if z_id == 1:
+				_set_single_zone_shape(zone, "ATTACK")
+				z_node.visible = true
 				z_node.scale = Vector3.ONE * 1.65
 				_tint_zone_shapes(zone, Color(1.0, 0.25, 0.1, 0.95), Color(1.0, 0.75, 0.1), 3.2, Color(1.0, 1.0, 1.0, 0.95))
 				var slbl: Label3D = zone.get("step_label") as Label3D
 				if slbl:
 					slbl.text = "💥"
 					slbl.visible = true
+			else:
+				z_node.visible = false
 
 	var winner_is_player: bool = bool(p_winner.get("is_player")) if p_winner else false
 	ki_break_timer = 3.5 if winner_is_player else 0.90
 	if header_label and is_instance_valid(header_label):
 		header_label.modulate = Color(1.0, 0.25, 0.15)
 		if winner_is_player:
-			header_label.text = "💥 ¡RIVAL SIN KI! ¡INDEFENSO!\n¡GOLPEA LA CAJA CENTRAL (Grip+Trigger) PARA LANZARLO!"
+			header_label.text = "💥 ¡RIVAL SIN KI! ¡INDEFENSO!\n¡GOLPEA EL CÍRCULO CENTRAL (Grip+Trigger) PARA LANZARLO!"
 		else:
 			header_label.text = "⚠️ ¡TE QUEDASTE SIN KI! ¡GUARDIA ROTA!\n¡ATAQUE FUERTE IMBLOQUEABLE ENTRANTE!"
 
@@ -1770,15 +1903,20 @@ func _process_unblockable_ki_break(delta: float) -> void:
 
 
 func _execute_unblockable_ki_break_hit(swing_vel: float) -> void:
+	attacker = ki_break_attacker
+	defender = ki_break_victim
+	last_impact_vector = _compute_zone_launch_vector(1, false, 13.0)
+	var atk_to_def_kb: Vector3 = (-_duel_axis if (ki_break_victim and is_instance_valid(ki_break_victim) and bool(ki_break_victim.get("is_player"))) else _duel_axis)
+	if atk_to_def_kb.length_squared() < 0.01:
+		atk_to_def_kb = Vector3.BACK
+	atk_to_def_kb = atk_to_def_kb.normalized()
 	if ki_break_victim and is_instance_valid(ki_break_victim) and ki_break_victim.has_method("take_hit"):
-		ki_break_victim.take_hit(500.0, Vector3.BACK)
+		ki_break_victim.take_hit(500.0, atk_to_def_kb)
 	if ki_break_attacker and is_instance_valid(ki_break_attacker) and ki_break_attacker.has_method("increase_np"):
 		ki_break_attacker.increase_np(250.0)
 	if target_zones.size() > 1:
 		_spawn_hit_spark(target_zones[1]["node"].global_position)
 
-	attacker = ki_break_attacker
-	defender = ki_break_victim
 	_trigger_finisher_and_close("ki_break_launch", swing_vel)
 
 
@@ -1786,6 +1924,7 @@ func _trigger_finisher_and_close(finisher_name: String, swing_vel: float) -> voi
 	if not is_active:
 		return
 	is_active = false
+	_kill_surge_tween()
 	_hitstop_end_msec = 0
 	if Engine.time_scale < 1.0:
 		Engine.time_scale = 1.0
@@ -1820,13 +1959,27 @@ func _set_target_zones_visible(v: bool) -> void:
 func _start_lore_event(event_type: int, return_mode: String) -> void:
 	if not is_active or not _lore_ctrl or bool(_lore_ctrl.get("is_event_active")):
 		return
+	var prev_phase: DomePhase = phase
 	_last_lore_event_type = event_type
 	_lore_return_mode = return_mode
+	_has_prev_atk_local = false
+	_has_prev_def_local = false
 	phase = DomePhase.LORE_EVENT
 	_reset_all_timing_rings()
 	_hide_all_charge_spheres()
 	_set_target_zones_visible(false)
-	_lore_ctrl.call("start_event", event_type, self, attacker, defender)
+	if melee_hud_anchor and is_instance_valid(melee_hud_anchor):
+		melee_hud_anchor.visible = false
+	if action_card_anchor and is_instance_valid(action_card_anchor):
+		action_card_anchor.visible = false
+	var started: bool = bool(_lore_ctrl.call("start_event", event_type, self, attacker, defender))
+	if not started:
+		phase = prev_phase
+		_set_target_zones_visible(true)
+		if melee_hud_anchor and is_instance_valid(melee_hud_anchor):
+			melee_hud_anchor.visible = true
+		if action_card_anchor and is_instance_valid(action_card_anchor):
+			action_card_anchor.visible = true
 
 
 func _process_lore_event(delta: float) -> void:
@@ -1843,22 +1996,18 @@ func _process_lore_event(delta: float) -> void:
 		_lore_ctrl.call("process_event", delta, l_ctrl, r_ctrl, def_left_velocity, def_right_velocity)
 
 
-func _close_dome_with_separation(sep_dist: float) -> void:
+func _close_dome_with_separation(_sep_dist: float) -> void:
 	if not is_active:
 		return
 	is_active = false
+	_kill_surge_tween()
 	_hitstop_end_msec = 0
 	if Engine.time_scale < 1.0:
 		Engine.time_scale = 1.0
 	phase = DomePhase.COMPLETED
 	_hide_all_charge_spheres()
 	_reset_all_timing_rings()
-	if attacker and defender and is_instance_valid(attacker) and is_instance_valid(defender):
-		if attacker.has_method("_separate_fighters_to_canonical_distance"):
-			attacker._separate_fighters_to_canonical_distance(defender, sep_dist)
-		elif defender.has_method("_separate_fighters_to_canonical_distance"):
-			defender._separate_fighters_to_canonical_distance(attacker, sep_dist)
-	emit_signal("bullet_time_completed", hits, last_impact_vector)
+	emit_signal("bullet_time_completed", [], Vector3.ZERO)
 	if dome_mesh and is_instance_valid(dome_mesh):
 		var tw := create_tween()
 		tw.tween_property(dome_mesh, "scale", Vector3.ZERO, 0.12).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
@@ -1873,6 +2022,7 @@ func _on_lore_event_finished(event_type: int, outcome: Dictionary) -> void:
 	var act: String = String(outcome.get("action", "complete_normal"))
 	if act == "meteor_crater":
 		is_active = false
+		_kill_surge_tween()
 		_hitstop_end_msec = 0
 		if Engine.time_scale < 1.0:
 			Engine.time_scale = 1.0
@@ -1887,14 +2037,20 @@ func _on_lore_event_finished(event_type: int, outcome: Dictionary) -> void:
 		return
 	elif act == "winner_offense":
 		_set_target_zones_visible(true)
+		if melee_hud_anchor and is_instance_valid(melee_hud_anchor):
+			melee_hud_anchor.visible = true
+		if action_card_anchor and is_instance_valid(action_card_anchor):
+			action_card_anchor.visible = true
 		var winner: Node3D = outcome.get("winner") as Node3D
 		var loser: Node3D = outcome.get("loser") as Node3D
 		if winner and is_instance_valid(winner) and loser and is_instance_valid(loser):
 			attacker = winner
 			defender = loser
-		pending_attack_penalty = 0
+		var bonus_h: int = int(outcome.get("bonus_hits", 0))
+		pending_attack_penalty = -bonus_h
 		var w_is_p: bool = attacker != null and bool(attacker.get("is_player"))
-		_begin_phase_transition("continue_offense", 0.45, "🔥 ¡%s TOMAS LA INICIATIVA!" % ("TÚ" if w_is_p else "EL RIVAL"), Color(1.0, 0.78, 0.20))
+		var init_msg: String = "🔥 ¡TOMAS LA INICIATIVA!" if w_is_p else "🔥 ¡EL RIVAL TOMA LA INICIATIVA!"
+		_begin_phase_transition("continue_offense", 0.45, init_msg, Color(1.0, 0.78, 0.20))
 		return
 	elif act == "separate":
 		_close_dome_with_separation(float(outcome.get("distance", 9.0)))
@@ -1905,11 +2061,16 @@ func _on_lore_event_finished(event_type: int, outcome: Dictionary) -> void:
 			var tmp_a: Node3D = attacker
 			attacker = defender
 			defender = tmp_a
+		last_impact_vector = _compute_zone_launch_vector(1, false, 12.0)
 		_trigger_finisher_and_close("charged_v3_back", 4.0)
 		return
 
 	# Caso complete_normal
 	_set_target_zones_visible(true)
+	if melee_hud_anchor and is_instance_valid(melee_hud_anchor):
+		melee_hud_anchor.visible = true
+	if action_card_anchor and is_instance_valid(action_card_anchor):
+		action_card_anchor.visible = true
 	if _lore_return_mode == "combo_mid":
 		phase = DomePhase.ATTACK_RECORDING
 		_update_sequential_target_highlights()
@@ -1926,6 +2087,37 @@ func evaluate_round_outcome() -> void:
 	_tutorial_controls_shown = true
 	if _check_ki_break_after_note():
 		return
+
+	# Evento Lore 2: Caída del Meteoro (antes de _pending_finisher_mode V3 para no bloquear V3 UP, excluyendo Martillazo)
+	if _pending_finisher_mode != "hammer_strike" and _last_lore_event_type != MeleeLoreEventScript.LoreEventType.METEOR_SMASH and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")):
+		var hits_landed: int = 0
+		var clean_sonic_hits: int = 0
+		var has_v3_up: bool = false
+		for h_chk in hits:
+			if h_chk.get("resolved", false) and float(h_chk.get("defense_score", 0.0)) <= 0.05:
+				hits_landed += 1
+				var z_chk: int = int(h_chk.get("zone_id", -1))
+				var is_sonic_chk: bool = String(h_chk.get("tier", "")) == "SONICO"
+				if is_sonic_chk:
+					clean_sonic_hits += 1
+				if bool(h_chk.get("is_charged_v3", false)) and String(h_chk.get("v3_launch_mode", "")) == "UP":
+					has_v3_up = true
+				elif z_chk == 0 and (bool(h_chk.get("is_charged", false)) or is_sonic_chk):
+					has_v3_up = true
+		var atk_ki_end: float = float(attacker.get("current_ki")) if (attacker and attacker.get("current_ki") != null) else 0.0
+		var m_ev: int = MeleeLoreEventScript.evaluate_lore_event_trigger({
+			"trigger_source": "combo_end",
+			"last_event_type": _last_lore_event_type,
+			"has_v3_up": has_v3_up,
+			"sonic_hits": clean_sonic_hits,
+			"hits_landed": hits_landed,
+			"atk_ki": atk_ki_end
+		})
+		if m_ev == MeleeLoreEventScript.LoreEventType.METEOR_SMASH:
+			_pending_finisher_mode = ""
+			_start_lore_event(m_ev, "combo_end")
+			return
+
 	if _pending_finisher_mode != "":
 		var fin_mode: String = _pending_finisher_mode
 		var fin_vel: float = _pending_finisher_vel
@@ -1933,37 +2125,12 @@ func evaluate_round_outcome() -> void:
 		_trigger_finisher_and_close(fin_mode, fin_vel)
 		return
 
-	# Evento Lore 2: Caída del Meteoro (tras conectar V3 arriba o golpe sónico/cargado en Rostro 0)
-	if _last_lore_event_type != MeleeLoreEventScript.LoreEventType.METEOR_SMASH and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")):
-		var hits_landed: int = 0
-		var has_v3_up: bool = false
-		for h_chk in hits:
-			if h_chk.get("resolved", false) and float(h_chk.get("defense_score", 0.0)) < 0.5:
-				hits_landed += 1
-				var z_chk: int = int(h_chk.get("zone_id", -1))
-				if bool(h_chk.get("is_charged_v3", false)) and String(h_chk.get("v3_launch_mode", "")) == "UP":
-					has_v3_up = true
-				elif z_chk == 0 and (bool(h_chk.get("is_charged", false)) or String(h_chk.get("tier", "")) == "SONICO"):
-					has_v3_up = true
-		var atk_ki_end: float = float(attacker.get("current_ki")) if (attacker and attacker.get("current_ki") != null) else 0.0
-		var m_ev: int = MeleeLoreEventScript.evaluate_lore_event_trigger({
-			"trigger_source": "combo_end",
-			"last_event_type": _last_lore_event_type,
-			"has_v3_up": has_v3_up,
-			"sonic_hits": _round_sonic_hits,
-			"hits_landed": hits_landed,
-			"atk_ki": atk_ki_end
-		})
-		if m_ev == MeleeLoreEventScript.LoreEventType.METEOR_SMASH:
-			_start_lore_event(m_ev, "combo_end")
-			return
-
 	# Regla de Lanzamiento por Dominio de Ronda (>= 60% golpes limpios con remate Cargado/Sónico)
 	var n_hits_chk: int = maxi(defense_round_total_hits, hits.size())
 	var clean_hits: int = 0
 	var last_clean_strong: bool = false
 	for h_dom in hits:
-		if h_dom.get("resolved", false) and float(h_dom.get("defense_score", 0.0)) < 0.5:
+		if h_dom.get("resolved", false) and float(h_dom.get("defense_score", 0.0)) <= 0.05:
 			clean_hits += 1
 			last_clean_strong = bool(h_dom.get("is_charged", false)) or bool(h_dom.get("is_charged_v3", false)) or String(h_dom.get("tier", "")) == "SONICO"
 	if n_hits_chk >= 2 and clean_hits >= ceili(float(n_hits_chk) * 0.60) and last_clean_strong:
@@ -1984,7 +2151,7 @@ func evaluate_round_outcome() -> void:
 			var sim_prob: float = 0.45 if (bp_even and _rounds_completed_in_dome >= 1) else (0.55 if _rounds_completed_in_dome >= 2 else 0.0)
 			if sim_prob > 0.0 and randf() < sim_prob:
 				_sim_used_this_dome = true
-				_sim_exchange_cooldown_melees = 1
+				_sim_exchange_cooldown_melees = 2
 				_begin_phase_transition("start_simultaneous", 0.55, "⚡🔥 ¡INTERCAMBIO SIMULTÁNEO ANIME! 🔥⚡\n⭕ ATACA Y ⬜ BLOQUEA A LA VEZ", Color(1.0, 0.88, 0.18))
 				return
 
@@ -2021,6 +2188,7 @@ func start_simultaneous_exchange() -> void:
 		evaluate_round_outcome()
 		return
 	phase = DomePhase.SIMULTANEOUS_EXCHANGE
+	hits.clear()
 	_hide_all_charge_spheres()
 	_reset_all_timing_rings()
 	_sim_nodes.clear()
@@ -2032,6 +2200,25 @@ func start_simultaneous_exchange() -> void:
 	_sim_hand_retract = [false, false]
 	_sim_last_hit_local = [Vector3.ZERO, Vector3.ZERO]
 	_sim_last_impact_zone = 1
+	_has_prev_def_local = false
+	def_left_velocity = Vector3.ZERO
+	def_right_velocity = Vector3.ZERO
+	def_grip_l = false
+	def_grip_r = false
+	def_trig_l = false
+	def_trig_r = false
+	prev_grip_l = false
+	prev_grip_r = false
+	prev_trig_l = false
+	prev_trig_r = false
+	buffer_grip_timer_l = 0.0
+	buffer_grip_timer_r = 0.0
+	buffer_trig_timer_l = 0.0
+	buffer_trig_timer_r = 0.0
+	if pair[0].has_method("set"):
+		pair[0].set("is_blocking", false)
+	if pair[1].has_method("set"):
+		pair[1].set("is_blocking", false)
 	last_action_feedback = ""
 	_last_role_is_attack = -1
 
@@ -2071,6 +2258,11 @@ func _spawn_simultaneous_node(forced_role: String = "") -> void:
 			else:
 				def_cnt += 1
 		role = "DEFEND" if (atk_cnt >= 2 or (def_cnt == 0 and randf() < 0.65)) else "ATTACK"
+	if role == "DEFEND":
+		var ai_sn: Node3D = _get_player_and_ai()[1]
+		var cfg_sn: KiEconomyConfig = KiEconomyConfig.get_default()
+		if ai_sn and is_instance_valid(ai_sn):
+			_modify_fighter_ki(ai_sn, -float(cfg_sn.melee_quick_cost))
 	var max_t: float = 1.15 if role == "DEFEND" else 1.55
 	var ai_cl: bool = (role == "ATTACK" and randf() < 0.48)
 	_sim_nodes.append({
@@ -2126,16 +2318,16 @@ func _sync_simultaneous_zone_visuals() -> void:
 		else:
 			var col_d: Color
 			if bool(slot["early_lockout"]):
-				col_d = Color(1.0, 0.10, 0.10, 1.0)
-			elif absf(t_rem) <= 0.12:
-				col_d = Color(1.0, 0.94, 0.18, 1.0)
-			elif t_rem <= 0.16:
-				col_d = Color(0.20, 1.0, 0.40, 1.0)
-			elif t_rem <= 0.30:
-				col_d = Color(1.0, 0.85, 0.14, 0.96)
+				col_d = Color(1.0, 0.08, 0.08, 1.0)
+			elif absf(t_rem) <= 0.11:
+				col_d = Color(1.0, 0.96, 0.62, 1.0)
+			elif absf(t_rem) <= 0.16:
+				col_d = Color(0.15, 1.0, 0.35, 1.0)
+			elif t_rem <= 0.30 and t_rem > 0.16:
+				col_d = Color(1.0, 0.56, 0.08, 0.96)
 			else:
-				col_d = Color(0.20, 0.85, 1.0, 0.88)
-			_tint_zone_shapes(zone, col_d, col_d, 2.3 if t_rem <= 0.30 else 1.4, Color(1.0, 1.0, 1.0, 0.92))
+				col_d = Color(0.95, 0.16, 0.16, 0.90)
+			_tint_zone_shapes(zone, col_d, col_d, 2.3 if absf(t_rem) <= 0.30 else 1.4, Color(1.0, 1.0, 1.0, 0.92))
 			if zone.get("node") and is_instance_valid(zone["node"]):
 				(zone["node"] as Node3D).scale = Vector3.ONE * 1.10
 			if ring and is_instance_valid(ring):
@@ -2167,16 +2359,17 @@ func _process_simultaneous_exchange(delta: float) -> void:
 		_finish_simultaneous_exchange(p_node, ai_node, true)
 		return
 
+	var real_dt: float = maxf(delta / maxf(Engine.time_scale, 0.01), 0.001)
 	var l_ctrl: XRController3D = p_orig.get_node_or_null("LeftHand") as XRController3D
 	var r_ctrl: XRController3D = p_orig.get_node_or_null("RightHand") as XRController3D
 	var orig_basis: Basis = p_orig.global_transform.basis.orthonormalized()
 	var l_loc: Vector3 = l_ctrl.position if l_ctrl else Vector3.ZERO
 	var r_loc: Vector3 = r_ctrl.position if r_ctrl else Vector3.ZERO
-	if delta > 0.0001 and _has_prev_def_local:
+	if _has_prev_def_local:
 		if l_ctrl:
-			def_left_velocity = orig_basis * ((l_loc - _def_prev_l_local) / delta)
+			def_left_velocity = orig_basis * ((l_loc - _def_prev_l_local) / real_dt)
 		if r_ctrl:
-			def_right_velocity = orig_basis * ((r_loc - _def_prev_r_local) / delta)
+			def_right_velocity = orig_basis * ((r_loc - _def_prev_r_local) / real_dt)
 	_def_prev_l_local = l_loc
 	_def_prev_r_local = r_loc
 	_has_prev_def_local = true
@@ -2204,16 +2397,16 @@ func _process_simultaneous_exchange(delta: float) -> void:
 		prev_grip_r = def_grip_r
 		prev_trig_r = def_trig_r
 
-	buffer_grip_timer_l = maxf(buffer_grip_timer_l - delta, 0.0)
-	buffer_grip_timer_r = maxf(buffer_grip_timer_r - delta, 0.0)
-	buffer_trig_timer_l = maxf(buffer_trig_timer_l - delta, 0.0)
-	buffer_trig_timer_r = maxf(buffer_trig_timer_r - delta, 0.0)
+	buffer_grip_timer_l = maxf(buffer_grip_timer_l - real_dt, 0.0)
+	buffer_grip_timer_r = maxf(buffer_grip_timer_r - real_dt, 0.0)
+	buffer_trig_timer_l = maxf(buffer_trig_timer_l - real_dt, 0.0)
+	buffer_trig_timer_r = maxf(buffer_trig_timer_r - real_dt, 0.0)
 
 	var crossing_now: bool = false
-	if l_ctrl and r_ctrl and (def_grip_l or def_trig_l) and (def_grip_r or def_trig_r):
+	if l_ctrl and r_ctrl and def_grip_l and def_trig_l and def_grip_r and def_trig_r:
 		var cam_s: Camera3D = _get_player_camera()
 		var chest_y: float = cam_s.global_position.y - 0.25 if cam_s else global_position.y
-		crossing_now = l_ctrl.global_position.distance_to(r_ctrl.global_position) < 0.34 and l_ctrl.global_position.y <= chest_y + 0.18
+		crossing_now = l_ctrl.global_position.distance_to(r_ctrl.global_position) < 0.30 and l_ctrl.global_position.y <= chest_y + 0.18
 
 	var cfg_s: KiEconomyConfig = KiEconomyConfig.get_default()
 	var remove_indices: Array[int] = []
@@ -2256,14 +2449,16 @@ func _process_simultaneous_exchange(delta: float) -> void:
 						ai_node.procedural_animator.trigger_melee_strike(randi() % 4)
 					if audio_player:
 						audio_player.global_position = z_pos
+						audio_player.pitch_scale = 1.15
 						AudioActionManager.play_action("common.block_perfect", audio_player)
-					_pulse_defender_both_hands(220.0, 0.95, 0.14)
+					_pulse_player_both_hands(220.0, 0.95, 0.14)
 					var lat_s: Vector3 = _duel_axis.cross(Vector3.UP).normalized() * (1.0 if _sim_clash_count % 2 == 0 else -1.0)
 					_trigger_dynamic_melee_mobility(2.2, true, false, false, p_node, ai_node, lat_s * 5.0 + Vector3.UP * 1.4, 0.18, false)
 					last_action_feedback = "💥 ¡CHOQUE SIMULTÁNEO! (+8 Ki ambos)"
 					_spawn_impact_popup(z_pos, "💥 ¡CHOQUE!", Color(1.0, 0.92, 0.25))
 				else:
 					_sim_enemy_hits_taken += 1
+					_modify_fighter_ki(ai_node, -6.0)
 					if ai_node.has_method("take_hit"):
 						ai_node.take_hit(220.0, _duel_axis)
 					if p_node.has_method("increase_np"):
@@ -2273,14 +2468,27 @@ func _process_simultaneous_exchange(delta: float) -> void:
 					_spawn_hit_spark(z_pos)
 					if audio_player:
 						audio_player.global_position = z_pos
+						audio_player.pitch_scale = 1.0
 						AudioActionManager.play_action("common.melee_hit_heavy", audio_player)
-					_pulse_defender_hand(punched_h, 200.0, 0.9, 0.12)
+					_pulse_player_hand(punched_h, 200.0, 0.9, 0.12)
 					_trigger_dynamic_melee_mobility(1.6, true, false, false, p_node, ai_node, _duel_axis * 4.5 + Vector3.UP * 0.8, 0.18, false)
 					last_action_feedback = "🥊 ¡IMPACTO (%d/4)!" % _sim_enemy_hits_taken
 					_spawn_impact_popup(z_pos, "💥 ¡GOLPE!", Color(1.0, 0.65, 0.18))
 					spawn_counter_def = true
 				remove_indices.append(idx)
 			elif t_rem <= -0.25:
+				if bool(slot["ai_claiming"]):
+					_sim_player_hits_taken += 1
+					_sim_last_impact_zone = zid
+					_modify_fighter_ki(p_node, -6.0)
+					_modify_fighter_ki(ai_node, -cfg_s.melee_quick_cost)
+					if p_node.has_method("take_hit"):
+						p_node.take_hit(160.0, -_duel_axis)
+					if ai_node.get("procedural_animator"):
+						ai_node.procedural_animator.trigger_melee_strike(randi() % 4)
+					_pulse_player_both_hands(170.0, 0.80, 0.10)
+					last_action_feedback = "💥 ¡TE GANÓ LA ZONA (%d/4)!" % _sim_player_hits_taken
+					_spawn_impact_popup(z_pos, "💥 ¡CONTRA-GOLPE!", Color(1.0, 0.32, 0.15))
 				remove_indices.append(idx)
 		else:
 			if t_rem > 0.30 and not crossing_now and not bool(slot["early_lockout"]):
@@ -2291,18 +2499,24 @@ func _process_simultaneous_exchange(delta: float) -> void:
 					if ch_e and ch_e.global_position.distance_to(z_pos) <= 0.24 and vh_e >= 0.55:
 						e_hand = hi_e
 						break
-				if buffer_trig_timer_l > 0.08 or buffer_trig_timer_r > 0.08 or buffer_grip_timer_l > 0.08 or buffer_grip_timer_r > 0.08 or e_hand != -1:
+				if e_hand != -1:
 					slot["early_lockout"] = true
 					_spawn_impact_popup(z_pos, "❌ ¡MUY PRONTO!", Color(1.0, 0.15, 0.15))
 
 			var is_locked_s: bool = bool(slot["early_lockout"])
 			if not is_locked_s and t_rem <= 0.30 and t_rem >= -0.18:
 				var parry_h: int = -1
-				for hi_p in [0, 1]:
-					var ch_p: XRController3D = l_ctrl if hi_p == 0 else r_ctrl
-					if not crossing_now and ch_p and ch_p.global_position.distance_to(z_pos) <= 0.28:
-						parry_h = hi_p
-						break
+				if not crossing_now:
+					var d_l_s: float = l_ctrl.global_position.distance_to(z_pos) if l_ctrl else 999.0
+					var d_r_s: float = r_ctrl.global_position.distance_to(z_pos) if r_ctrl else 999.0
+					var in_l_s: bool = d_l_s <= 0.28
+					var in_r_s: bool = d_r_s <= 0.28
+					if in_l_s and in_r_s:
+						parry_h = 0 if def_left_velocity.length() >= def_right_velocity.length() else 1
+					elif in_l_s:
+						parry_h = 0
+					elif in_r_s:
+						parry_h = 1
 				if parry_h != -1 and absf(t_rem) <= 0.12 and _is_defender_just_guard_active(parry_h):
 					var parry_ki_s: float = float(cfg_s.melee_parry_ki_reward) if cfg_s.get("melee_parry_ki_reward") != null else 20.0
 					_modify_fighter_ki(p_node, parry_ki_s)
@@ -2310,16 +2524,17 @@ func _process_simultaneous_exchange(delta: float) -> void:
 					if p_node.has_method("increase_np"):
 						p_node.increase_np(450.0)
 					_spawn_parry_shockwave(z_pos)
-					_pulse_defender_both_hands(250.0, 1.0, 0.24)
+					_pulse_player_both_hands(250.0, 1.0, 0.24)
 					if audio_player:
 						audio_player.global_position = z_pos
+						audio_player.pitch_scale = 1.30
 						AudioActionManager.play_action("common.block_perfect", audio_player)
 					_sim_last_impact_zone = zid
 					_spawn_impact_popup(z_pos, "✨ ¡PARRY DECISIVO!", Color(1.0, 0.94, 0.22))
 					# GDD Canon: Parry Perfecto en Furia dispara Zenkai Comeback
 					if bool(p_node.get("is_in_furia")) and not bool(p_node.get("is_in_zenkai_state")) and p_node.has_method("trigger_comeback_zenkai"):
 						p_node.trigger_comeback_zenkai()
-					_finish_simultaneous_exchange(p_node, ai_node, true)
+					_finish_simultaneous_exchange(p_node, ai_node, true, true)
 					return
 
 				if parry_h != -1:
@@ -2328,9 +2543,17 @@ func _process_simultaneous_exchange(delta: float) -> void:
 					var h_trig_s: bool = def_trig_l if parry_h == 0 else def_trig_r
 					if not h_grip_s and not h_trig_s and h_vel_s >= 0.38:
 						if absf(t_rem) <= 0.16:
-							_modify_fighter_ki(p_node, 10.0)
+							var defl_sim: float = float(cfg_s.melee_deflect_ki_reward) if cfg_s.get("melee_deflect_ki_reward") != null else 16.0
+							_modify_fighter_ki(p_node, defl_sim)
+							_modify_fighter_ki(ai_node, -6.0)
 							_spawn_block_spark(z_pos, Color(0.25, 1.0, 0.50))
-							last_action_feedback = "✋ ¡DESVÍO! (+10 Ki)"
+							if ai_node.get("procedural_animator"):
+								ai_node.procedural_animator.trigger_hit_flinch(0.35, _duel_axis)
+							if audio_player:
+								audio_player.global_position = z_pos
+								audio_player.pitch_scale = 1.25
+								AudioActionManager.play_action("common.melee_hit_light", audio_player)
+							last_action_feedback = "✋ ¡DESVÍO! (+%d Ki)" % int(defl_sim)
 							_spawn_impact_popup(z_pos, "✋ ¡DESVÍO!", Color(0.25, 1.0, 0.50))
 						else:
 							_modify_fighter_ki(p_node, -4.0)
@@ -2359,7 +2582,7 @@ func _process_simultaneous_exchange(delta: float) -> void:
 				if ai_node.get("procedural_animator"):
 					ai_node.procedural_animator.trigger_melee_strike(randi() % 4)
 				_trigger_dynamic_melee_mobility(1.5, true, false, false, ai_node, p_node, -_duel_axis * 4.5 + Vector3.UP * 0.6, 0.18, false)
-				_pulse_defender_both_hands(180.0, 0.85, 0.12)
+				_pulse_player_both_hands(180.0, 0.85, 0.12)
 				last_action_feedback = "💥 ¡GOLPE RECIBIDO (%d/4)!" % _sim_player_hits_taken
 				_spawn_impact_popup(z_pos, "💥 ¡IMPACTO!", Color(1.0, 0.30, 0.15))
 				remove_indices.append(idx)
@@ -2379,16 +2602,18 @@ func _process_simultaneous_exchange(delta: float) -> void:
 
 	var p_ki_s: float = float(p_node.get("current_ki")) if p_node.get("current_ki") != null else 0.0
 	var e_ki_s: float = float(ai_node.get("current_ki")) if ai_node.get("current_ki") != null else 0.0
-	if p_ki_s <= 2.0 or _sim_player_hits_taken >= 4:
+	if _sim_enemy_hits_taken >= 4:
+		_finish_simultaneous_exchange(p_node, ai_node, true)
+	elif p_ki_s <= 2.0 or _sim_player_hits_taken >= 4:
 		_finish_simultaneous_exchange(ai_node, p_node, false)
-	elif e_ki_s <= 2.0 or _sim_enemy_hits_taken >= 4:
+	elif e_ki_s <= 2.0:
 		_finish_simultaneous_exchange(p_node, ai_node, true)
 	elif _sim_duration <= 0.0:
 		var p_won: bool = _sim_enemy_hits_taken >= _sim_player_hits_taken
 		_finish_simultaneous_exchange(p_node if p_won else ai_node, ai_node if p_won else p_node, p_won)
 
 
-func _finish_simultaneous_exchange(winner: Node3D, loser: Node3D, player_won: bool) -> void:
+func _finish_simultaneous_exchange(winner: Node3D, loser: Node3D, player_won: bool, from_parry: bool = false) -> void:
 	attacker = winner
 	defender = loser
 	last_impact_vector = _compute_zone_launch_vector(_sim_last_impact_zone, false, 12.5)
@@ -2398,7 +2623,7 @@ func _finish_simultaneous_exchange(winner: Node3D, loser: Node3D, player_won: bo
 	if dd_sim:
 		var win_txt: String = "⚡ ¡GANASTE EL INTERCAMBIO SIMULTÁNEO! (+150 BP)" if player_won else "⚠️ ¡EL RIVAL ROMPIÓ EL INTERCAMBIO!"
 		dd_sim.show_camera_banner(win_txt, Color(0.25, 0.96, 1.0) if player_won else Color(1.0, 0.28, 0.18), 1.6)
-	var mode_sim: String = "charged_v3_up" if last_impact_vector.y > 4.0 else "charged_v3_back"
+	var mode_sim: String = "sim_parry_launch" if from_parry else ("charged_v3_up" if last_impact_vector.y > 4.0 else "charged_v3_back")
 	_trigger_finisher_and_close(mode_sim, 4.2)
 
 
@@ -2407,15 +2632,24 @@ func continue_attacker_offense() -> void:
 	start_attack_phase(attacker, defender)
 
 
-## Genera secuencia rítmica de la IA incluyendo posibles Cargados v3 o Martillazo al suelo
+## Genera secuencia rítmica de la IA incluyendo posibles Cargados v3 o Martillazo al suelo (con consumo real de Ki)
 func generate_ai_attack_sequence() -> void:
 	hits.clear()
+	_round_sonic_hits = 0
 	var ai_in_zenkai: bool = bool(attacker.get("is_in_zenkai_state")) if attacker else false
 	var num_hits: int = max_allowed_hits
 	var curr_time: float = NOTE_CADENCE_SEC
 	var last_zone: int = -1
+	var cfg_ai_a: KiEconomyConfig = KiEconomyConfig.get_default()
+	var q_cost: float = float(cfg_ai_a.melee_quick_cost) if cfg_ai_a.get("melee_quick_cost") != null else 3.0
+	var chg_cost: float = float(cfg_ai_a.melee_charged_cost) if cfg_ai_a.get("melee_charged_cost") != null else 7.0
+	var v3_cost: float = float(cfg_ai_a.melee_v3_cost) if cfg_ai_a.get("melee_v3_cost") != null else 11.0
+	var hm_cost: float = float(cfg_ai_a.melee_hammer_cost) if cfg_ai_a.get("melee_hammer_cost") != null else 15.0
 
 	for i in range(num_hits):
+		var ai_ki_now: float = float(attacker.get("current_ki")) if (attacker and attacker.get("current_ki") != null) else 50.0
+		if i > 0 and ai_ki_now < q_cost:
+			break
 		var zone_id: int = randi() % ZONE_DEFINITIONS.size()
 		if zone_id == last_zone:
 			zone_id = (zone_id + 1) % ZONE_DEFINITIONS.size()
@@ -2427,22 +2661,33 @@ func generate_ai_attack_sequence() -> void:
 		var is_charged: bool = false
 		var power: float = 1.0
 		var v3_mode: String = "BACK"
+		var hit_cost: float = q_cost
 
-		if is_last and (ai_in_zenkai or (attacker and float(attacker.get("current_ki")) > 35.0)):
+		if is_last and (ai_in_zenkai or ai_ki_now >= chg_cost):
 			var r: float = randf()
-			if r < 0.22:
+			if r < 0.22 and ai_ki_now >= hm_cost:
 				is_hammer = true
 				is_charged = true
 				power = 4.5
 				zone_id = 1
-			elif r < 0.48:
+				hit_cost = hm_cost
+			elif r < 0.48 and ai_ki_now >= v3_cost:
 				is_v3 = true
 				is_charged = true
 				power = 3.0
 				v3_mode = "UP" if zone_id == 0 else "BACK"
-			elif r < 0.78:
+				hit_cost = v3_cost
+			elif r < 0.78 and ai_ki_now >= chg_cost:
 				is_charged = true
 				power = 2.0
+				hit_cost = chg_cost
+
+		_modify_fighter_ki(attacker, -minf(hit_cost, ai_ki_now))
+		var is_sonic_ai: bool = is_hammer or is_v3 or ai_in_zenkai or (is_charged and randf() < 0.45) or (randf() < 0.25)
+		var ai_tier: String = "SONICO" if is_sonic_ai else "SOLIDO"
+		var ai_tier_mult: float = 1.35 if is_sonic_ai else 1.0
+		if is_sonic_ai:
+			_round_sonic_hits += 1
 
 		var target_pos: Vector3 = target_zones[zone_id]["node"].global_position if zone_id < target_zones.size() else global_position
 		var label_name: String = "Martillazo DBZ" if is_hammer else ("Cargado v3" if is_v3 else String(ZONE_DEFINITIONS[zone_id]["name"]))
@@ -2454,6 +2699,8 @@ func generate_ai_attack_sequence() -> void:
 			"hand": "Right" if (i % 2 == 0) else "Left",
 			"time_offset": curr_time,
 			"power": power,
+			"tier": ai_tier,
+			"tier_dmg_mult": ai_tier_mult,
 			"is_charged": is_charged,
 			"is_charged_v3": is_v3,
 			"is_hammer": is_hammer,
@@ -2475,6 +2722,8 @@ func restart_as_attacker() -> void:
 	var temp: Node3D = attacker
 	attacker = defender
 	defender = temp
+	defender_is_defenseless = false
+	attacker_damage_mult = 1.0
 	last_action_feedback = ""
 
 	emit_signal("perfect_parry_triggered", attacker, defender)
@@ -2486,6 +2735,7 @@ func finish_without_hits() -> void:
 	if not is_active:
 		return
 	is_active = false
+	_kill_surge_tween()
 	_hitstop_end_msec = 0
 	if Engine.time_scale < 1.0:
 		Engine.time_scale = 1.0
@@ -2529,6 +2779,7 @@ func _update_defender_velocities(delta: float) -> void:
 	var origin: XROrigin3D = defender.get_parent() as XROrigin3D
 	if not origin:
 		return
+	var real_dt: float = maxf(delta / maxf(Engine.time_scale, 0.01), 0.001)
 	var orig_basis: Basis = origin.global_transform.basis.orthonormalized()
 	var left_ctrl: XRController3D = origin.get_node_or_null("LeftHand") as XRController3D
 	var right_ctrl: XRController3D = origin.get_node_or_null("RightHand") as XRController3D
@@ -2536,9 +2787,9 @@ func _update_defender_velocities(delta: float) -> void:
 	var r_loc: Vector3 = right_ctrl.position if right_ctrl else Vector3.ZERO
 	if _has_prev_def_local:
 		if left_ctrl:
-			def_left_velocity = orig_basis * ((l_loc - _def_prev_l_local) / delta)
+			def_left_velocity = orig_basis * ((l_loc - _def_prev_l_local) / real_dt)
 		if right_ctrl:
-			def_right_velocity = orig_basis * ((r_loc - _def_prev_r_local) / delta)
+			def_right_velocity = orig_basis * ((r_loc - _def_prev_r_local) / real_dt)
 	_def_prev_l_local = l_loc
 	_def_prev_r_local = r_loc
 	_has_prev_def_local = true
@@ -2608,10 +2859,19 @@ func _get_defender_hand_near_zone(zone_pos: Vector3, threshold: float) -> int:
 		return -1
 	var left_ctrl: XRController3D = origin.get_node_or_null("LeftHand") as XRController3D
 	var right_ctrl: XRController3D = origin.get_node_or_null("RightHand") as XRController3D
-
-	if left_ctrl and left_ctrl.global_position.distance_to(zone_pos) <= threshold:
+	var dist_l: float = left_ctrl.global_position.distance_to(zone_pos) if left_ctrl else 999.0
+	var dist_r: float = right_ctrl.global_position.distance_to(zone_pos) if right_ctrl else 999.0
+	var in_l: bool = dist_l <= threshold
+	var in_r: bool = dist_r <= threshold
+	if in_l and in_r:
+		var vel_l: float = def_left_velocity.length()
+		var vel_r: float = def_right_velocity.length()
+		if absf(vel_l - vel_r) > 0.12:
+			return 0 if vel_l >= vel_r else 1
+		return 0 if dist_l <= dist_r else 1
+	if in_l:
 		return 0
-	if right_ctrl and right_ctrl.global_position.distance_to(zone_pos) <= threshold:
+	if in_r:
 		return 1
 	return -1
 
@@ -2645,6 +2905,13 @@ func _trigger_hit_stop(freeze_time: float = 0.08) -> void:
 	_hitstop_end_msec = Time.get_ticks_msec() + int(maxf(freeze_time, 0.01) * 1000.0)
 
 
+func _kill_surge_tween() -> void:
+	_surge_active_timer = 0.0
+	if _surge_tween and is_instance_valid(_surge_tween):
+		_surge_tween.kill()
+	_surge_tween = null
+
+
 func _pulse_defender_hand(hand_idx: int, freq: float, amp: float, dur: float) -> void:
 	if not defender or not is_instance_valid(defender) or not defender.get("is_player"):
 		return
@@ -2660,6 +2927,24 @@ func _pulse_defender_hand(hand_idx: int, freq: float, amp: float, dur: float) ->
 func _pulse_defender_both_hands(freq: float, amp: float, dur: float) -> void:
 	_pulse_defender_hand(0, freq, amp, dur)
 	_pulse_defender_hand(1, freq, amp, dur)
+
+
+func _pulse_player_hand(hand_idx: int, freq: float, amp: float, dur: float) -> void:
+	var p_node: Node3D = _get_player_and_ai()[0]
+	if not p_node or not is_instance_valid(p_node):
+		return
+	var origin: XROrigin3D = p_node.get_parent() as XROrigin3D
+	if not origin:
+		return
+	var h_name: String = "LeftHand" if hand_idx == 0 else "RightHand"
+	var ctrl: XRController3D = origin.get_node_or_null(h_name) as XRController3D
+	if ctrl and ctrl.has_method("trigger_haptic_pulse"):
+		ctrl.trigger_haptic_pulse("haptic", freq, amp, dur, 0.0)
+
+
+func _pulse_player_both_hands(freq: float, amp: float, dur: float) -> void:
+	_pulse_player_hand(0, freq, amp, dur)
+	_pulse_player_hand(1, freq, amp, dur)
 
 
 # ==============================================================================
@@ -2811,7 +3096,7 @@ func _build_target_boxes() -> void:
 		step_lbl.modulate = Color(1.0, 0.95, 0.25, 1.0)
 		step_lbl.outline_modulate = Color(0.0, 0.0, 0.0, 0.95)
 		step_lbl.no_depth_test = true
-		step_lbl.render_priority = 112
+		step_lbl.render_priority = 118
 		step_lbl.position = Vector3(0.0, 0.0, 0.048)
 		step_lbl.visible = false
 		zone_node.add_child(step_lbl)
@@ -3378,7 +3663,7 @@ func _compute_zone_launch_vector(zone_id: int, is_hammer: bool, power_scale: flo
 	var fwd: Vector3 = _duel_axis if atk_is_p else -_duel_axis
 	fwd.y = 0.0
 	fwd = fwd.normalized() if fwd.length_squared() > 0.01 else Vector3.FORWARD
-	var dome_right: Vector3 = global_transform.basis.x
+	var dome_right: Vector3 = global_transform.basis.x if is_inside_tree() else fwd.cross(Vector3.UP)
 	dome_right.y = 0.0
 	dome_right = dome_right.normalized() if dome_right.length_squared() > 0.01 else fwd.cross(Vector3.UP).normalized()
 
@@ -3501,7 +3786,7 @@ func _register_hit(zone: Dictionary, ctrl_node: XRController3D, hand_name: Strin
 	# Evento Lore 6: Intercambio Sónico Z-Burst a mitad de un combo largo (con umbral proporcional, azar único y cooldown)
 	var atk_ki_left: float = float(attacker.get("current_ki")) if (attacker and attacker.get("current_ki") != null) else 50.0
 	if not _sonic_burst_used_this_dome and not _sonic_burst_rolled_this_round and _sonic_burst_cooldown_melees <= 0 and hits.size() >= 3 and current_attack_step < max_allowed_hits and atk_ki_left >= 18.0 and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")):
-		var is_fur_t: bool = bool(attacker.get("is_in_furia")) or (int(attacker.get("current_form")) if attacker.get("current_form") != null else 0) > 0
+		var is_fur_t: bool = bool(attacker.get("is_in_furia")) or (int(attacker.get("current_transformation_index")) if attacker.get("current_transformation_index") != null else -1) >= 0
 		var sz_ev: int = MeleeLoreEventScript.evaluate_lore_event_trigger({
 			"trigger_source": "combo_mid",
 			"last_event_type": _last_lore_event_type,
@@ -3544,10 +3829,14 @@ func _register_hit(zone: Dictionary, ctrl_node: XRController3D, hand_name: Strin
 func _check_hammer_finisher() -> bool:
 	if not hammer_primed and hammer_charge_time < HAMMER_CHARGE_REQ:
 		return false
+	if current_attack_step >= max_allowed_hits or attack_step_cooldown > 0.0 or target_zones.size() <= 1:
+		return false
 
 	var left_ctrl: XRController3D = _get_controller("LeftHand")
 	var right_ctrl: XRController3D = _get_controller("RightHand")
 	if not left_ctrl or not right_ctrl:
+		return false
+	if not is_fist_closed[0] or not is_fist_closed[1] or left_ctrl.global_position.distance_to(right_ctrl.global_position) > 0.42:
 		return false
 
 	var down_l: float = -left_velocity.y
@@ -3558,9 +3847,17 @@ func _check_hammer_finisher() -> bool:
 	if avg_down > 0.55 or down_l > 0.65 or down_r > 0.65 or (avg_down > 0.40 and peak_speed > 0.95):
 		var cfg_hm: KiEconomyConfig = KiEconomyConfig.get_default()
 		var hm_cost: float = float(cfg_hm.melee_hammer_cost) if cfg_hm.get("melee_hammer_cost") != null else 15.0
+		var atk_ki_before: float = float(attacker.get("current_ki")) if (attacker and attacker.get("current_ki") != null) else 0.0
+		if atk_ki_before < hm_cost:
+			hammer_charge_time = 0.0
+			hammer_primed = false
+			hammer_locked_haptic = false
+			_spawn_impact_popup(target_zones[1]["node"].global_position, "⚠️ ¡KI INSUFICIENTE (-%d Ki)!" % int(hm_cost), Color(1.0, 0.35, 0.25))
+			return false
 		hammer_ki_paid = true
 		_modify_fighter_ki(attacker, -hm_cost)
 
+		var hammer_pos: Vector3 = target_zones[1]["node"].global_position
 		var hm_launch: Vector3 = _compute_zone_launch_vector(1, true, 13.0)
 		last_impact_vector = hm_launch
 		was_last_hit_charged = true
@@ -3569,7 +3866,7 @@ func _check_hammer_finisher() -> bool:
 		hits.append({
 			"zone_id": 1,
 			"name": "Martillazo DBZ",
-			"pos": target_zones[1]["node"].global_position,
+			"pos": hammer_pos,
 			"hand": "BothHands",
 			"time_offset": clean_time_offset,
 			"power": 4.5,
@@ -3587,15 +3884,32 @@ func _check_hammer_finisher() -> bool:
 		hammer_charge_time = 0.0
 		hammer_primed = false
 		hammer_locked_haptic = false
+		fist_charge_times = [0.0, 0.0]
+		fist_locked_haptic = [false, false]
+		fist_v3_locked_haptic = [false, false]
+		hand_must_retract = [true, true]
+		_last_hit_local = [left_ctrl.position, right_ctrl.position]
+		_hide_all_charge_spheres()
 		current_attack_step += 1
 		attack_step_cooldown = 0.16
-		var hammer_pos: Vector3 = target_zones[1]["node"].global_position
 		_spawn_parry_shockwave(hammer_pos)
 		_spawn_impact_popup(hammer_pos, "🔨 ¡MARTILLAZO REGISTRADO!", Color(0.95, 0.35, 1.0))
+		if audio_player:
+			audio_player.global_position = hammer_pos
+			audio_player.pitch_scale = 0.90
+			AudioActionManager.play_action("common.melee_hit_heavy", audio_player, sfx_hit_heavy)
+		_pulse_player_both_hands(220.0, 1.0, 0.22)
+		emit_signal("target_hit", hits.size(), "Martillazo DBZ", hammer_pos, true, 4.5)
 		var atk_ki_hm: float = float(attacker.get("current_ki")) if (attacker and attacker.get("current_ki") != null) else 50.0
 		var min_q_hm: float = float(cfg_hm.melee_quick_cost) if cfg_hm.get("melee_quick_cost") != null else 3.0
 		if current_attack_step >= max_allowed_hits or atk_ki_hm < min_q_hm:
-			_begin_phase_transition("start_defense", 0.50, "🔨 ¡MARTILLAZO DBZ LISTO!", Color(0.95, 0.35, 1.0))
+			var msg_hm: String = "🔨 ¡MARTILLAZO DBZ LISTO!"
+			if current_attack_step >= max_allowed_hits and hits.size() >= max_allowed_hits:
+				var momentum_hm: float = float(cfg_hm.melee_dome_complete_ki_bonus) if cfg_hm.get("melee_dome_complete_ki_bonus") != null else 18.0
+				_modify_fighter_ki(attacker, momentum_hm)
+				_spawn_impact_popup(hammer_pos + Vector3.UP * 0.22, "⚡ +%d KI MOMENTUM!" % int(momentum_hm), Color(0.35, 0.96, 1.0))
+				msg_hm = "🔨 ¡MARTILLAZO + COMBO (+%d KI)!" % int(momentum_hm)
+			_begin_phase_transition("start_defense", 0.50, msg_hm, Color(0.95, 0.35, 1.0))
 		else:
 			_update_sequential_target_highlights()
 		return true
@@ -3635,6 +3949,7 @@ func _update_controller_velocities(delta: float) -> void:
 	if delta <= 0.0001:
 		return
 
+	var real_dt: float = maxf(delta / maxf(Engine.time_scale, 0.01), 0.001)
 	var left_ctrl: XRController3D = _get_controller("LeftHand")
 	var right_ctrl: XRController3D = _get_controller("RightHand")
 	var p_node: Node3D = attacker if (attacker and is_instance_valid(attacker) and attacker.get("is_player")) else (defender if (defender and is_instance_valid(defender) and defender.get("is_player")) else null)
@@ -3646,9 +3961,9 @@ func _update_controller_velocities(delta: float) -> void:
 
 	if _has_prev_atk_local:
 		if left_ctrl:
-			left_velocity = orig_basis * ((l_loc - _prev_l_local) / delta)
+			left_velocity = orig_basis * ((l_loc - _prev_l_local) / real_dt)
 		if right_ctrl:
-			right_velocity = orig_basis * ((r_loc - _prev_r_local) / delta)
+			right_velocity = orig_basis * ((r_loc - _prev_r_local) / real_dt)
 	_prev_l_local = l_loc
 	_prev_r_local = r_loc
 	_has_prev_atk_local = true
@@ -3703,6 +4018,8 @@ func _update_fist_states(delta: float, is_charging_hammer: bool) -> void:
 					if c.has_method("trigger_haptic_pulse"):
 						c.trigger_haptic_pulse("haptic", 220.0, 1.0, 0.22, 0.0)
 			_update_hand_charge_sphere(i, c, fist_charge_times[i])
+		elif is_charging_hammer:
+			_update_hand_charge_sphere(i, c, 0.0)
 		elif not eff_closed:
 			fist_charge_times[i] = 0.0
 			fist_locked_haptic[i] = false
@@ -3710,6 +4027,8 @@ func _update_fist_states(delta: float, is_charging_hammer: bool) -> void:
 			_punch_origin_local[i] = c.position
 			_punch_origin_init[i] = true
 			_update_hand_charge_sphere(i, c, 0.0)
+		else:
+			_update_hand_charge_sphere(i, c, fist_charge_times[i])
 
 
 func _update_hand_charge_sphere(hand_idx: int, ctrl: XRController3D, charge_t: float) -> void:
@@ -3875,6 +4194,11 @@ func _spawn_parry_shockwave(pos: Vector3) -> void:
 	else:
 		add_child(wave)
 	wave.global_position = pos
+	var s_dir: Vector3 = Vector3(_duel_axis.x, 0.0, _duel_axis.z)
+	if s_dir.length_squared() > 0.001:
+		s_dir = s_dir.normalized()
+		wave.rotation.y = atan2(s_dir.x, s_dir.z)
+	wave.rotate_object_local(Vector3.RIGHT, PI * 0.5)
 
 	var tw := wave.create_tween().set_parallel(true)
 	tw.tween_property(wave, "scale", Vector3.ONE * 2.2, 0.20).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
@@ -3883,6 +4207,7 @@ func _spawn_parry_shockwave(pos: Vector3) -> void:
 
 
 func _exit_tree() -> void:
+	_kill_surge_tween()
 	_hitstop_end_msec = 0
 	if Engine.time_scale < 1.0:
 		Engine.time_scale = 1.0
