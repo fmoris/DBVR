@@ -1730,6 +1730,9 @@ func _process_transformations() -> void:
 	var player = gesture_tree._get_player_instance() if gesture_tree else null
 	if not player or not is_instance_valid(player) or not player.character_data:
 		return
+	if player.has_method("is_in_active_combat_sequence") and player.is_in_active_combat_sequence():
+		gesture_transform_timer = 0.0
+		return
 
 	# Botón A (mando derecho) o X (mando izquierdo): Avanzar transformación SECUENCIALMENTE
 	if just_pressed_ax:

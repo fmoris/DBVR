@@ -136,8 +136,25 @@ func _physics_process(delta: float) -> void:
 		return
 	_ai_followup_delay = 0.0
 
-	# Si la IA está en secuencia de Super Haz de Ki o Choque de Haces, la resolución la gestionan esos controladores
-	if host.get("is_in_beam_sequence") or host.get("is_in_beam_clash") or host.get("is_firing_beam"):
+	# Buscar jugador si no está asignado (siempre disponible antes de chequear bloqueos de secuencia)
+	if not player or not is_instance_valid(player):
+		var opp = host._get_opponent()
+		if opp is CharacterInstance:
+			player = opp
+
+	# Si la IA está en secuencia de Super Haz de Ki, Choque de Haces, o cualquiera de los dos está en cadena activa, pausar IA y bloqueo autónomo de transformaciones
+	var player_in_seq: bool = player != null and is_instance_valid(player) and (
+		bool(player.get("is_in_bullet_time"))
+		or bool(player.get("is_in_followup_bullet_time"))
+		or bool(player.get("is_flying_to_opponent"))
+		or bool(player.get("is_in_beam_sequence"))
+		or bool(player.get("is_in_beam_clash"))
+	)
+	if host.get("is_in_beam_sequence") or host.get("is_in_beam_clash") or host.get("is_firing_beam") or player_in_seq or (host.has_method("is_in_active_combat_sequence") and host.is_in_active_combat_sequence()):
+		if host.is_charging_ki:
+			host.is_charging_ki = false
+		if host.procedural_animator and host.procedural_animator.has_method("set_ki_recharge_phase"):
+			host.procedural_animator.set_ki_recharge_phase(0)
 		return
 
 	# Si el personaje está en ragdoll, volando, noqueado o aturdido en cráter, pausar toma de decisiones
@@ -148,13 +165,8 @@ func _physics_process(delta: float) -> void:
 			host.procedural_animator.set_ki_recharge_phase(0)
 		return
 
-	# Buscar jugador si no está asignado
-	if not player or not is_instance_valid(player):
-		var opp = host._get_opponent()
-		if opp is CharacterInstance:
-			player = opp
-		if not player:
-			return
+	if not player:
+		return
 
 	# Actualizar temporizadores
 	if attack_cooldown > 0.0:
@@ -716,6 +728,8 @@ func _check_ai_transformation() -> void:
 	if not host or not host.character_data or host.character_data.transformations.is_empty():
 		return
 	if difficulty == AIDifficulty.TRAINING:
+		return
+	if host.has_method("is_in_active_combat_sequence") and host.is_in_active_combat_sequence():
 		return
 
 	var host_mult: float = host.get_transformation_multiplier() if host.has_method("get_transformation_multiplier") else 1.0

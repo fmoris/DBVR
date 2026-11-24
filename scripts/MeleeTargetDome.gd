@@ -11,9 +11,9 @@ const MeleeLoreEventScript = preload("res://scripts/MeleeLoreEventController.gd"
 ##   * Martillazo DBZ (2 manos arriba 0.85s -> abajo): rompe 1 mano y estrella contra el suelo
 ##   * Cancelación de Ataque: Joystick derecho hacia atrás (separa a 5.5m)
 ## - Defensas:
-##   * Palma abierta en caja = Desvío (+1.00 pto, +12 Ki)
-##   * Puñetazo contra caja = Choque de Puños (0 daño y ++Ki ambos si BP parejo, -1 ataque al rival)
-##   * Grip+Trigger al impacto (90ms) = Bloqueo Perfecto (Parry + inversión inmediata)
+##   * Trigger en caja (Verde/Ámbar) = Bloqueo / Desvío 1 Mano (+1.00 pto Verde, +Ki; sin Grip)
+##   * Puñetazo contra caja (G+T frontal) = Choque de Puños (0 daño y ++Ki ambos si BP parejo, -1 ataque al rival)
+##   * Grip+Trigger al impacto (Dorado ≤120ms) = Bloqueo Perfecto (Parry + inversión inmediata)
 ##   * Ambos puños al pecho en 'X' = Guardia Cruzada (-85% daño, +0.25 ptos, consume Ki)
 ## - Iniciativa por Dominio: Si S_def > N/2 -> invierte roles; si S_def <= N/2 -> continúa ofensiva.
 ## - Ruptura por Ki == 0: Golpe Fuerte Imbloqueable que expulsa al luchador sin Ki.
@@ -85,8 +85,10 @@ var _def_prev_l_local: Vector3 = Vector3.ZERO
 var _def_prev_r_local: Vector3 = Vector3.ZERO
 var _has_prev_def_local: bool = false
 var _punch_origin_local: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]
+var _punch_origin_depth: Array[float] = [0.0, 0.0]
 var _punch_origin_init: Array[bool] = [false, false]
 var _last_hit_local: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]
+var _last_hit_depth: Array[float] = [0.0, 0.0]
 var _pending_finisher_mode: String = ""
 var _pending_finisher_vel: float = 0.0
 var _skip_btn_prev: bool = false
@@ -101,6 +103,10 @@ var _sim_spawn_timer: float = 0.0
 var _sim_duration: float = 12.0
 var _sim_hand_retract: Array[bool] = [false, false]
 var _sim_last_hit_local: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]
+var _sim_last_hit_depth: Array[float] = [0.0, 0.0]
+var _sim_origin_depth: Array[float] = [0.0, 0.0]
+var _sim_origin_local: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]
+var _sim_origin_init: Array[bool] = [false, false]
 var _sim_last_impact_zone: int = 1
 
 # Puño cerrado obligatorio (Grip+Trigger) y carga en 3 niveles (0: Izquierda, 1: Derecha)
@@ -194,6 +200,7 @@ var _last_def_hl_key: String = ""
 # Parámetros de Defensa Rítmica (0.90s por nota para mayor agilidad)
 const NOTE_CADENCE_SEC: float = 0.90
 const RING_PREWARN_SEC: float = 0.85
+const PARRY_CHORD_GRACE_SEC: float = 0.055
 var defense_timer: float = 0.0
 var defense_total_duration: float = 0.0
 var consecutive_guard_hits: int = 0
@@ -202,6 +209,8 @@ var buffer_grip_timer_l: float = 0.0
 var buffer_grip_timer_r: float = 0.0
 var buffer_trig_timer_l: float = 0.0
 var buffer_trig_timer_r: float = 0.0
+var _trig_press_age_l: float = 0.0
+var _trig_press_age_r: float = 0.0
 var prev_grip_l: bool = false
 var prev_grip_r: bool = false
 var prev_trig_l: bool = false
@@ -426,6 +435,87 @@ static func classify_melee_punch_tier(stroke_dist: float, speed_mps: float, is_c
 	}
 
 
+static func evaluate_real_punch_motion(vel: Vector3, punch_fwd: Vector3, stroke_dist: float, fwd_stroke: float, is_charged: bool) -> Dictionary:
+	var fwd_n: Vector3 = punch_fwd.normalized() if punch_fwd.length_squared() > 0.0001 else Vector3.FORWARD
+	var v_mag: float = vel.length()
+	var fwd_vel: float = vel.dot(fwd_n)
+	var min_vel: float = 1.35 if is_charged else 1.50
+	var min_fwd_vel: float = 0.95 if is_charged else 1.15
+	var min_stroke: float = 0.20
+	var min_fwd_stroke: float = 0.12
+	var valid: bool = (v_mag >= min_vel) and (fwd_vel >= min_fwd_vel) and (fwd_vel >= v_mag * 0.55) and (stroke_dist >= min_stroke) and (fwd_stroke >= min_fwd_stroke)
+	return {
+		"valid": valid,
+		"v_mag": v_mag,
+		"fwd_vel": fwd_vel,
+		"punch_speed": v_mag
+	}
+
+
+static func should_release_punch_retraction(last_hit_depth: float, cur_depth: float, cur_fwd_vel: float) -> bool:
+	return (last_hit_depth - cur_depth) >= 0.13 or (cur_depth <= 0.24 and cur_fwd_vel <= 0.25)
+
+
+static func evaluate_one_hand_defense_input(
+	t_diff: float,
+	trig_held: bool,
+	grip_held: bool,
+	trig_buffer_active: bool,
+	grip_buffer_active: bool,
+	just_guard_active: bool,
+	trig_press_age: float,
+	fwd_clash_spd: float,
+	vel_mag: float,
+	is_hammer: bool
+) -> String:
+	if t_diff > 0.30:
+		if trig_buffer_active or grip_buffer_active:
+			return "EARLY_LOCKOUT"
+		return "NONE"
+	if t_diff <= 0.30 and t_diff >= -0.22:
+		if absf(t_diff) <= 0.12 and just_guard_active and fwd_clash_spd < 1.65:
+			return "PARRY"
+		if not is_hammer and absf(t_diff) <= 0.22 and grip_held and trig_held and vel_mag >= 1.65 and fwd_clash_spd >= 0.85:
+			return "CLASH"
+		if t_diff <= 0.30 and t_diff >= -0.16 and trig_held and (not grip_held) and trig_buffer_active:
+			if absf(t_diff) <= 0.12 and trig_press_age < PARRY_CHORD_GRACE_SEC and t_diff > -0.10:
+				return "WAIT_CHORD"
+			return "BLOCK_GREEN" if t_diff <= 0.18 else "BLOCK_YELLOW"
+	return "NONE"
+
+
+func _get_punch_forward_world() -> Vector3:
+	var fwd: Vector3 = _duel_axis
+	fwd.y = 0.0
+	if fwd.length_squared() > 0.0001:
+		return fwd.normalized()
+	var cam: Camera3D = _get_player_camera()
+	if cam and is_instance_valid(cam):
+		var cam_f: Vector3 = -cam.global_transform.basis.z
+		cam_f.y = 0.0
+		if cam_f.length_squared() > 0.0001:
+			return cam_f.normalized()
+	return Vector3.FORWARD
+
+
+func _get_hand_depth_local(ctrl: XRController3D) -> float:
+	if not ctrl:
+		return 0.0
+	var origin: XROrigin3D = _cached_xr_origin if (_cached_xr_origin and is_instance_valid(_cached_xr_origin)) else null
+	if not origin:
+		var p_node: Node3D = attacker if (attacker and is_instance_valid(attacker) and bool(attacker.get("is_player"))) else (defender if (defender and is_instance_valid(defender) and bool(defender.get("is_player"))) else null)
+		if p_node and p_node.get_parent() is XROrigin3D:
+			origin = p_node.get_parent() as XROrigin3D
+	var orig_basis: Basis = origin.global_transform.basis.orthonormalized() if (origin and is_instance_valid(origin)) else Basis.IDENTITY
+	var cam: Camera3D = _get_player_camera()
+	var cam_loc: Vector3 = cam.position if (cam and is_instance_valid(cam) and (origin == null or cam.get_parent() == origin)) else Vector3.ZERO
+	var fwd_w: Vector3 = _get_punch_forward_world()
+	var fwd_loc: Vector3 = (orig_basis.inverse() * fwd_w).normalized()
+	if fwd_loc.length_squared() < 0.0001:
+		fwd_loc = Vector3.FORWARD
+	return (ctrl.position - cam_loc).dot(fwd_loc)
+
+
 func start_attack_phase(p_attacker: Node3D, p_defender: Node3D, p_duration: float = -1.0, p_max_hits: int = -1) -> void:
 	attacker = p_attacker
 	defender = p_defender
@@ -440,7 +530,11 @@ func start_attack_phase(p_attacker: Node3D, p_defender: Node3D, p_duration: floa
 	fist_v3_locked_haptic = [false, false]
 	hand_must_retract = [false, false]
 	_has_prev_atk_local = false
+	_punch_origin_local = [Vector3.ZERO, Vector3.ZERO]
+	_punch_origin_depth = [0.0, 0.0]
 	_punch_origin_init = [false, false]
+	_last_hit_local = [Vector3.ZERO, Vector3.ZERO]
+	_last_hit_depth = [0.0, 0.0]
 	_pending_finisher_mode = ""
 	_pending_finisher_vel = 0.0
 	_skip_btn_prev = false
@@ -618,7 +712,7 @@ func _update_action_card(is_attack_mode: bool) -> void:
 		if _action_card_border_mat:
 			_action_card_border_mat.albedo_color = Color(0.20, 0.88, 1.0, 0.90)
 		_action_card_label.modulate = Color(0.88, 0.97, 1.0)
-		_action_card_label.text = "🛡️ DEFENDER (⬜) | Rojo=Pronto | Amarillo=Parcial\n• Verde+Palma: Desvío (+%d Ki, Rápidos) | Puño fuerte: ¡CHOQUE! (+%d Ki)\n• Dorado(≤0.12s)+Puño(G+T): ¡PARRY! (+%d Ki, invierte turno)\n• Guardia X pecho (-%d Ki): Para Cargado (Roto por V3)\n• Stick: %s (-%d) | 2 Grips abiertos: Kiai (-%d)" % [defl_r, cl_r, parry_r, gx_c, ("Shunkan" if ("goku" in String((defender.get("character_data").character_name if (defender and defender.get("character_data") and "character_name" in defender.get("character_data")) else "")).to_lower()) else "Z-Vanish"), zv_c, ew_c]
+		_action_card_label.text = "🛡️ DEFENDER (⬜) | Rojo=Pronto | Amarillo=Parcial\n• Verde+Trigger: Desvío 1 Mano (+%d Ki, Rápidos) | Puño fuerte(G+T): ¡CHOQUE! (+%d Ki)\n• Dorado(≤0.12s)+Trigger+Grip: ¡PARRY! (+%d Ki, invierte turno)\n• Guardia X pecho (-%d Ki): Para Cargado (Roto por V3)\n• Stick: %s (-%d) | 2 Grips abiertos: Kiai (-%d)" % [defl_r, cl_r, parry_r, gx_c, ("Shunkan" if ("goku" in String((defender.get("character_data").character_name if (defender and defender.get("character_data") and "character_name" in defender.get("character_data")) else "")).to_lower()) else "Z-Vanish"), zv_c, ew_c]
 
 
 func _apply_role_dome_tint(player_attacks: bool) -> void:
@@ -991,7 +1085,7 @@ func _refresh_header_hud(is_charging_hammer: bool = false, active_zone_name: Str
 			var cfg_ew_h: KiEconomyConfig = KiEconomyConfig.get_default()
 			var kiai_cost_h: float = float(cfg_ew_h.melee_explosive_wave_cost) if cfg_ew_h.get("melee_explosive_wave_cost") != null else 16.0
 			var kiai_hint: String = "\n🔥 ¡ABRE BRAZOS+2 GRIPS=ONDA KIAI (-%d Ki)!" % int(kiai_cost_h) if (_round_unblocked_hits_taken >= 2 and def_ki_now >= kiai_cost_h) else ""
-			var tut_def: String = "\nAro Verde/Oro=¡YA! | Stick=Z-Vanish" if not _tutorial_controls_shown else ""
+			var tut_def: String = "\nTrigger=Bloqueo 1 Mano | Dorado+G+T=Parry | Stick=Z-Vanish" if not _tutorial_controls_shown else ""
 			_set_header("🛡️ DEFIENDES (%d/%d) %s  %s%s%s%s" % [step_num, hits.size(), active_zone_name, pips, fb_line, kiai_hint, tut_def], Color(0.25, 0.90, 1.0))
 		else:
 			_apply_role_dome_tint(true)
@@ -1046,6 +1140,8 @@ func start_defense_phase() -> void:
 	buffer_grip_timer_r = 0.0
 	buffer_trig_timer_l = 0.0
 	buffer_trig_timer_r = 0.0
+	_trig_press_age_l = 0.0
+	_trig_press_age_r = 0.0
 	def_grip_l = false
 	def_grip_r = false
 	def_trig_l = false
@@ -1212,7 +1308,7 @@ func _process_defense_rhythm(delta: float) -> void:
 		elif t_diff > note_prewarn and active_ring and is_instance_valid(active_ring):
 			active_ring.visible = false
 
-		# Castigo estricto por defender cerca de la caja ANTES de Ámbar/Verde (>0.30s), sin penalizar formar Guardia X o Kiai
+		# Castigo estricto por pulsar defensa cerca de la caja ANTES de Ámbar/Verde (>0.30s), sin penalizar formar Guardia X o Kiai
 		if defender_is_player and not is_def_crashed and t_diff > 0.30 and t_diff <= note_prewarn and not crossing_now and not is_early_locked:
 			var forming_x_or_kiai: bool = false
 			var lc_el: XRController3D = _get_controller("LeftHand")
@@ -1223,18 +1319,21 @@ func _process_defense_rhythm(delta: float) -> void:
 					forming_x_or_kiai = true
 			if not forming_x_or_kiai:
 				var early_hand_idx: int = _get_defender_hand_near_zone(active_zone["node"].global_position, 0.24)
-				var early_hand_vel: float = (def_left_velocity if early_hand_idx == 0 else def_right_velocity).length() if early_hand_idx != -1 else 0.0
-				var early_btn_hand: bool = (early_hand_idx == 0 and (buffer_trig_timer_l > 0.08 or buffer_grip_timer_l > 0.08)) or (early_hand_idx == 1 and (buffer_trig_timer_r > 0.08 or buffer_grip_timer_r > 0.08))
-				if early_hand_idx != -1 and (early_btn_hand or early_hand_vel >= 0.55):
-					active_note["early_lockout"] = true
-					is_early_locked = true
-					if active_ring and is_instance_valid(active_ring):
-						var r_mat_e: StandardMaterial3D = active_ring.material_override as StandardMaterial3D
-						if r_mat_e:
-							r_mat_e.albedo_color = Color(1.0, 0.08, 0.08, 1.0)
-					_tint_zone_shapes(active_zone, Color(1.0, 0.08, 0.08, 1.0), Color(1.0, 0.08, 0.08), 2.5, Color(1.0, 0.3, 0.3, 0.95))
-					_pulse_defender_both_hands(95.0, 0.50, 0.14)
-					_spawn_impact_popup(active_zone["node"].global_position, "❌ ¡MUY PRONTO! GOLPE DE LLENO", Color(1.0, 0.18, 0.14))
+				if early_hand_idx != -1:
+					var e_trig_buf: bool = (buffer_trig_timer_l > 0.05) if early_hand_idx == 0 else (buffer_trig_timer_r > 0.05)
+					var e_grip_buf: bool = (buffer_grip_timer_l > 0.05) if early_hand_idx == 0 else (buffer_grip_timer_r > 0.05)
+					var early_res: String = evaluate_one_hand_defense_input(t_diff, false, false, e_trig_buf, e_grip_buf, false, 0.0, 0.0, 0.0, is_hammer)
+					if early_res == "EARLY_LOCKOUT":
+						active_note["early_lockout"] = true
+						is_early_locked = true
+						_consume_defender_note_buffers()
+						if active_ring and is_instance_valid(active_ring):
+							var r_mat_e: StandardMaterial3D = active_ring.material_override as StandardMaterial3D
+							if r_mat_e:
+								r_mat_e.albedo_color = Color(1.0, 0.08, 0.08, 1.0)
+						_tint_zone_shapes(active_zone, Color(1.0, 0.08, 0.08, 1.0), Color(1.0, 0.08, 0.08), 2.5, Color(1.0, 0.3, 0.3, 0.95))
+						_pulse_defender_both_hands(95.0, 0.50, 0.14)
+						_spawn_impact_popup(active_zone["node"].global_position, "❌ ¡MUY PRONTO! GOLPE DE LLENO", Color(1.0, 0.18, 0.14))
 
 		if is_def_crashed and t_diff <= 0.0:
 			_resolve_unblocked_hit(active_note, active_zone)
@@ -1261,43 +1360,44 @@ func _process_defense_rhythm(delta: float) -> void:
 						var cur_def_ki: float = float(defender.get("current_ki")) if defender.get("current_ki") != null else 0.0
 						_def_stick_used_for_note_idx = first_unresolved_idx
 						if cur_def_ki >= vanish_cost:
+							_consume_defender_note_buffers()
 							_resolve_defensive_z_vanish(active_note, active_zone)
 							return
 
 				var hand_parry_idx: int = _get_defender_hand_near_zone(zone_pos, 0.28) if not crossing_now else -1
-				var hand_clash_idx: int = hand_parry_idx
 
-				# 2. Bloqueo Perfecto (Parry) en Aro Blanco-Dorado (<= 0.12s): puño cerrado fresco sin embestida frontal fuerte
-				if not_locked_out and hand_parry_idx != -1 and absf(t_diff) <= 0.12:
-					var p_vec: Vector3 = def_left_velocity if hand_parry_idx == 0 else def_right_velocity
-					var fwd_to_atk: Vector3 = _duel_axis
-					var fwd_spd: float = p_vec.dot(fwd_to_atk.normalized()) if fwd_to_atk.length_squared() > 0.01 else 0.0
-					if fwd_spd < 1.65 and _is_defender_just_guard_active(hand_parry_idx):
-						_resolve_perfect_parry(active_note, active_zone)
-						return
-
-				# 3. Choque de Puños (puñetazo explosivo frontal hacia el rival >= 1.65 m/s, no aplica a Martillazo)
-				if not_locked_out and hand_clash_idx != -1 and not is_hammer and absf(t_diff) <= 0.22:
-					var clash_closed: bool = _is_defender_fist_closed(hand_clash_idx)
-					var clash_vec: Vector3 = def_left_velocity if hand_clash_idx == 0 else def_right_velocity
-					var fwd_clash_spd: float = clash_vec.dot(_duel_axis.normalized()) if _duel_axis.length_squared() > 0.01 else 0.0
-					if clash_closed and clash_vec.length() >= 1.65 and fwd_clash_spd >= 0.85:
-						_resolve_fist_clash(active_note, active_zone, hand_clash_idx)
-						return
-
-				# 4. Desvío con 1 Mano en Verde (<=0.18s y >=-0.16s) o Ámbar (0.18..0.30s): ESTRICTAMENTE Palma abierta
-				if not_locked_out and hand_parry_idx != -1 and t_diff <= 0.30 and t_diff >= -0.16:
-					var h_vel: float = (def_left_velocity if hand_parry_idx == 0 else def_right_velocity).length()
+				# 2-4. Bloqueo Perfecto (G+T Dorado <=0.12s), Choque de Puños (G+T frontal) y Bloqueo 1 Mano (Trigger fresco sin Grip)
+				if not_locked_out and hand_parry_idx != -1:
+					var h_vec: Vector3 = def_left_velocity if hand_parry_idx == 0 else def_right_velocity
+					var h_vel: float = h_vec.length()
+					var fwd_dir_def: Vector3 = _get_punch_forward_world()
+					var fwd_clash_spd: float = h_vec.dot(fwd_dir_def)
 					var h_trig: bool = def_trig_l if hand_parry_idx == 0 else def_trig_r
 					var h_grip: bool = def_grip_l if hand_parry_idx == 0 else def_grip_r
-					if (not h_grip) and (not h_trig) and h_vel >= 0.38:
-						var timing_grade: String = "GREEN" if (t_diff <= 0.18 and t_diff >= -0.16) else "YELLOW"
-						_resolve_hand_block(active_note, active_zone, hand_parry_idx, timing_grade)
-						if phase != DomePhase.DEFENSE_RHYTHM:
+					var h_trig_buf: bool = (buffer_trig_timer_l > 0.0) if hand_parry_idx == 0 else (buffer_trig_timer_r > 0.0)
+					var h_grip_buf: bool = (buffer_grip_timer_l > 0.0) if hand_parry_idx == 0 else (buffer_grip_timer_r > 0.0)
+					var h_trig_age: float = _trig_press_age_l if hand_parry_idx == 0 else _trig_press_age_r
+					var h_just_guard: bool = _is_defender_just_guard_active(hand_parry_idx)
+					var def_action: String = evaluate_one_hand_defense_input(t_diff, h_trig, h_grip, h_trig_buf, h_grip_buf, h_just_guard, h_trig_age, fwd_clash_spd, h_vel, is_hammer)
+					match def_action:
+						"PARRY":
+							_consume_defender_note_buffers()
+							_resolve_perfect_parry(active_note, active_zone)
 							return
+						"CLASH":
+							_consume_defender_note_buffers()
+							_resolve_fist_clash(active_note, active_zone, hand_parry_idx)
+							return
+						"BLOCK_GREEN", "BLOCK_YELLOW":
+							_consume_defender_note_buffers()
+							var timing_grade: String = "GREEN" if def_action == "BLOCK_GREEN" else "YELLOW"
+							_resolve_hand_block(active_note, active_zone, hand_parry_idx, timing_grade)
+							if phase != DomePhase.DEFENSE_RHYTHM:
+								return
 
 				# 5. Guardia Cruzada X
 				if crossing_now and absf(t_diff) <= 0.28:
+					_consume_defender_note_buffers()
 					_resolve_cross_arm_guard(active_note, active_zone)
 					if phase != DomePhase.DEFENSE_RHYTHM:
 						return
@@ -2018,12 +2118,15 @@ func _process_unblockable_ki_break(delta: float) -> void:
 	if winner_is_player:
 		_update_controller_velocities(delta)
 		_update_fist_states(delta, false)
+		var punch_fwd_kb: Vector3 = _get_punch_forward_world()
 		var zone_pos: Vector3 = target_zones[1]["node"].global_position if target_zones.size() > 1 else global_position
 		for h_idx in [0, 1]:
 			if is_fist_closed[h_idx]:
 				var ctrl: XRController3D = _get_controller("LeftHand" if h_idx == 0 else "RightHand")
-				var vel_len: float = (left_velocity if h_idx == 0 else right_velocity).length()
-				if ctrl and ctrl.global_position.distance_to(zone_pos) <= 0.34 and vel_len >= 0.70:
+				var vel_vec_kb: Vector3 = left_velocity if h_idx == 0 else right_velocity
+				var vel_len: float = vel_vec_kb.length()
+				var fwd_len_kb: float = vel_vec_kb.dot(punch_fwd_kb)
+				if ctrl and ctrl.global_position.distance_to(zone_pos) <= 0.34 and fwd_len_kb >= 0.85 and vel_len >= 1.10:
 					_execute_unblockable_ki_break_hit(vel_len)
 					return
 
@@ -2335,6 +2438,10 @@ func start_simultaneous_exchange() -> void:
 	_sim_duration = 12.0
 	_sim_hand_retract = [false, false]
 	_sim_last_hit_local = [Vector3.ZERO, Vector3.ZERO]
+	_sim_last_hit_depth = [0.0, 0.0]
+	_sim_origin_depth = [0.0, 0.0]
+	_sim_origin_local = [Vector3.ZERO, Vector3.ZERO]
+	_sim_origin_init = [false, false]
 	_sim_last_impact_zone = 1
 	_has_prev_def_local = false
 	def_left_velocity = Vector3.ZERO
@@ -2351,6 +2458,8 @@ func start_simultaneous_exchange() -> void:
 	buffer_grip_timer_r = 0.0
 	buffer_trig_timer_l = 0.0
 	buffer_trig_timer_r = 0.0
+	_trig_press_age_l = 0.0
+	_trig_press_age_r = 0.0
 	if pair[0].has_method("set"):
 		pair[0].set("is_blocking", false)
 	if pair[1].has_method("set"):
@@ -2362,7 +2471,7 @@ func start_simultaneous_exchange() -> void:
 		if _action_card_border_mat:
 			_action_card_border_mat.albedo_color = Color(1.0, 0.85, 0.18, 0.95)
 		_action_card_label.modulate = Color(1.0, 0.96, 0.72)
-		_action_card_label.text = "⚡ INTERCAMBIO SIMULTÁNEO ANIME\n• Golpea ⭕ con puño (G+T): -3 Ki\n• Si el rival golpea el mismo ⭕: 💥 ¡EXPLOSIÓN!\n• Bloquea ⬜ con Palma (Verde) o Parry Dorado (G+T)\n• Gana el primero en 4 golpes, Parry o dejar sin Ki!"
+		_action_card_label.text = "⚡ INTERCAMBIO SIMULTÁNEO ANIME\n• Golpea ⭕ con puño (G+T): -3 Ki\n• Si el rival golpea el mismo ⭕: 💥 ¡EXPLOSIÓN!\n• Bloquea ⬜ con Trigger (Verde) o Parry Dorado (G+T)\n• Gana el primero en 4 golpes, Parry o dejar sin Ki!"
 
 	_spawn_simultaneous_node("ATTACK")
 	_spawn_simultaneous_node("DEFEND")
@@ -2510,33 +2619,63 @@ func _process_simultaneous_exchange(delta: float) -> void:
 	_def_prev_r_local = r_loc
 	_has_prev_def_local = true
 
-	if l_ctrl:
-		if _sim_hand_retract[0] and l_ctrl.position.distance_to(_sim_last_hit_local[0]) >= 0.14:
-			_sim_hand_retract[0] = false
-		def_grip_l = _ctrl_float(l_ctrl, &"grip") > 0.50 or _ctrl_pressed(l_ctrl, &"grip_click")
-		def_trig_l = _ctrl_float(l_ctrl, &"trigger") > 0.50 or _ctrl_pressed(l_ctrl, &"trigger_click")
-		if def_grip_l and not prev_grip_l:
-			buffer_grip_timer_l = 0.15
-		if def_trig_l and not prev_trig_l:
-			buffer_trig_timer_l = 0.15
-		prev_grip_l = def_grip_l
-		prev_trig_l = def_trig_l
-	if r_ctrl:
-		if _sim_hand_retract[1] and r_ctrl.position.distance_to(_sim_last_hit_local[1]) >= 0.14:
-			_sim_hand_retract[1] = false
-		def_grip_r = _ctrl_float(r_ctrl, &"grip") > 0.50 or _ctrl_pressed(r_ctrl, &"grip_click")
-		def_trig_r = _ctrl_float(r_ctrl, &"trigger") > 0.50 or _ctrl_pressed(r_ctrl, &"trigger_click")
-		if def_grip_r and not prev_grip_r:
-			buffer_grip_timer_r = 0.15
-		if def_trig_r and not prev_trig_r:
-			buffer_trig_timer_r = 0.15
-		prev_grip_r = def_grip_r
-		prev_trig_r = def_trig_r
+	var punch_fwd_s: Vector3 = _get_punch_forward_world()
+	var l_depth_s: float = _get_hand_depth_local(l_ctrl) if l_ctrl else 0.0
+	var r_depth_s: float = _get_hand_depth_local(r_ctrl) if r_ctrl else 0.0
+	var l_fwd_vel_s: float = def_left_velocity.dot(punch_fwd_s)
+	var r_fwd_vel_s: float = def_right_velocity.dot(punch_fwd_s)
 
 	buffer_grip_timer_l = maxf(buffer_grip_timer_l - real_dt, 0.0)
 	buffer_grip_timer_r = maxf(buffer_grip_timer_r - real_dt, 0.0)
 	buffer_trig_timer_l = maxf(buffer_trig_timer_l - real_dt, 0.0)
 	buffer_trig_timer_r = maxf(buffer_trig_timer_r - real_dt, 0.0)
+
+	if l_ctrl:
+		if _sim_hand_retract[0] and should_release_punch_retraction(_sim_last_hit_depth[0], l_depth_s, l_fwd_vel_s):
+			_sim_hand_retract[0] = false
+			_sim_origin_local[0] = l_loc
+			_sim_origin_depth[0] = l_depth_s
+			_sim_origin_init[0] = true
+		if not _sim_hand_retract[0] and (not _sim_origin_init[0] or l_fwd_vel_s <= 0.15):
+			_sim_origin_local[0] = l_loc
+			_sim_origin_depth[0] = l_depth_s
+			_sim_origin_init[0] = true
+		def_grip_l = _ctrl_float(l_ctrl, &"grip") > 0.50 or _ctrl_pressed(l_ctrl, &"grip_click")
+		def_trig_l = _ctrl_float(l_ctrl, &"trigger") > 0.50 or _ctrl_pressed(l_ctrl, &"trigger_click")
+		if def_grip_l and not prev_grip_l:
+			buffer_grip_timer_l = 0.18
+		if def_trig_l and not prev_trig_l:
+			buffer_trig_timer_l = 0.20
+			_trig_press_age_l = 0.0
+		elif def_trig_l:
+			_trig_press_age_l += real_dt
+		else:
+			_trig_press_age_l = 0.0
+		prev_grip_l = def_grip_l
+		prev_trig_l = def_trig_l
+	if r_ctrl:
+		if _sim_hand_retract[1] and should_release_punch_retraction(_sim_last_hit_depth[1], r_depth_s, r_fwd_vel_s):
+			_sim_hand_retract[1] = false
+			_sim_origin_local[1] = r_loc
+			_sim_origin_depth[1] = r_depth_s
+			_sim_origin_init[1] = true
+		if not _sim_hand_retract[1] and (not _sim_origin_init[1] or r_fwd_vel_s <= 0.15):
+			_sim_origin_local[1] = r_loc
+			_sim_origin_depth[1] = r_depth_s
+			_sim_origin_init[1] = true
+		def_grip_r = _ctrl_float(r_ctrl, &"grip") > 0.50 or _ctrl_pressed(r_ctrl, &"grip_click")
+		def_trig_r = _ctrl_float(r_ctrl, &"trigger") > 0.50 or _ctrl_pressed(r_ctrl, &"trigger_click")
+		if def_grip_r and not prev_grip_r:
+			buffer_grip_timer_r = 0.18
+		if def_trig_r and not prev_trig_r:
+			buffer_trig_timer_r = 0.20
+			_trig_press_age_r = 0.0
+		elif def_trig_r:
+			_trig_press_age_r += real_dt
+		else:
+			_trig_press_age_r = 0.0
+		prev_grip_r = def_grip_r
+		prev_trig_r = def_trig_r
 
 	var crossing_now: bool = false
 	if l_ctrl and r_ctrl and def_grip_l and def_trig_l and def_grip_r and def_trig_r:
@@ -2563,14 +2702,23 @@ func _process_simultaneous_exchange(delta: float) -> void:
 				if _sim_hand_retract[hi]:
 					continue
 				var c_h: XRController3D = l_ctrl if hi == 0 else r_ctrl
-				var vel_h: float = (def_left_velocity if hi == 0 else def_right_velocity).length()
-				if c_h and _is_defender_fist_closed(hi) and c_h.global_position.distance_to(z_pos) <= 0.26 and vel_h >= 0.85:
+				if not c_h or not _is_defender_fist_closed(hi):
+					continue
+				if c_h.global_position.distance_to(z_pos) > 0.26:
+					continue
+				var v_vec_s: Vector3 = def_left_velocity if hi == 0 else def_right_velocity
+				var cur_d_s: float = l_depth_s if hi == 0 else r_depth_s
+				var stroke_s: float = c_h.position.distance_to(_sim_origin_local[hi]) if _sim_origin_init[hi] else 0.0
+				var fwd_s: float = (cur_d_s - _sim_origin_depth[hi]) if _sim_origin_init[hi] else 0.0
+				var eval_s: Dictionary = evaluate_real_punch_motion(v_vec_s, punch_fwd_s, stroke_s, fwd_s, true)
+				if bool(eval_s.get("valid", false)):
 					punched_h = hi
 					break
 			if punched_h != -1:
 				var c_hit: XRController3D = l_ctrl if punched_h == 0 else r_ctrl
 				_sim_hand_retract[punched_h] = true
 				_sim_last_hit_local[punched_h] = c_hit.position
+				_sim_last_hit_depth[punched_h] = l_depth_s if punched_h == 0 else r_depth_s
 				_sim_last_impact_zone = zid
 				_modify_fighter_ki(p_node, -cfg_s.melee_quick_cost)
 				if bool(slot["ai_claiming"]) and t_rem <= 0.55:
@@ -2632,12 +2780,15 @@ func _process_simultaneous_exchange(delta: float) -> void:
 				var e_hand: int = -1
 				for hi_e in [0, 1]:
 					var ch_e: XRController3D = l_ctrl if hi_e == 0 else r_ctrl
-					var vh_e: float = (def_left_velocity if hi_e == 0 else def_right_velocity).length()
-					if ch_e and ch_e.global_position.distance_to(z_pos) <= 0.24 and vh_e >= 0.55:
-						e_hand = hi_e
-						break
+					if ch_e and ch_e.global_position.distance_to(z_pos) <= 0.24:
+						var e_tb_s: bool = (buffer_trig_timer_l > 0.05) if hi_e == 0 else (buffer_trig_timer_r > 0.05)
+						var e_gb_s: bool = (buffer_grip_timer_l > 0.05) if hi_e == 0 else (buffer_grip_timer_r > 0.05)
+						if evaluate_one_hand_defense_input(t_rem, false, false, e_tb_s, e_gb_s, false, 0.0, 0.0, 0.0, false) == "EARLY_LOCKOUT":
+							e_hand = hi_e
+							break
 				if e_hand != -1:
 					slot["early_lockout"] = true
+					_consume_defender_hand_buffer(e_hand)
 					_spawn_impact_popup(z_pos, "❌ ¡MUY PRONTO!", Color(1.0, 0.15, 0.15))
 
 			var is_locked_s: bool = bool(slot["early_lockout"])
@@ -2654,33 +2805,40 @@ func _process_simultaneous_exchange(delta: float) -> void:
 						parry_h = 0
 					elif in_r_s:
 						parry_h = 1
-				if parry_h != -1 and absf(t_rem) <= 0.12 and _is_defender_just_guard_active(parry_h):
-					var parry_ki_s: float = float(cfg_s.melee_parry_ki_reward) if cfg_s.get("melee_parry_ki_reward") != null else 20.0
-					var parry_ai_drain: float = float(cfg_s.melee_parry_attacker_ki_drain) if cfg_s.get("melee_parry_attacker_ki_drain") != null else 10.0
-					_modify_fighter_ki(p_node, parry_ki_s, true)
-					_modify_fighter_ki(ai_node, -parry_ai_drain)
-					if p_node.has_method("increase_np"):
-						p_node.increase_np(450.0)
-					_spawn_parry_shockwave(z_pos)
-					_pulse_player_both_hands(250.0, 1.0, 0.24)
-					if audio_player:
-						audio_player.global_position = z_pos
-						audio_player.pitch_scale = 1.30
-						AudioActionManager.play_action("common.block_perfect", audio_player)
-					_sim_last_impact_zone = zid
-					_spawn_impact_popup(z_pos, "✨ ¡PARRY DECISIVO!", Color(1.0, 0.94, 0.22))
-					# GDD Canon: Parry Perfecto en Furia dispara Zenkai Comeback
-					if bool(p_node.get("is_in_furia")) and not bool(p_node.get("is_in_zenkai_state")) and p_node.has_method("trigger_comeback_zenkai"):
-						p_node.trigger_comeback_zenkai()
-					_finish_simultaneous_exchange(p_node, ai_node, true, true)
-					return
-
 				if parry_h != -1:
-					var h_vel_s: float = (def_left_velocity if parry_h == 0 else def_right_velocity).length()
+					var h_vec_s: Vector3 = def_left_velocity if parry_h == 0 else def_right_velocity
+					var h_vel_s: float = h_vec_s.length()
+					var fwd_clash_s: float = h_vec_s.dot(punch_fwd_s)
 					var h_grip_s: bool = def_grip_l if parry_h == 0 else def_grip_r
 					var h_trig_s: bool = def_trig_l if parry_h == 0 else def_trig_r
-					if not h_grip_s and not h_trig_s and h_vel_s >= 0.38:
-						if absf(t_rem) <= 0.16:
+					var h_tb_s: bool = (buffer_trig_timer_l > 0.0) if parry_h == 0 else (buffer_trig_timer_r > 0.0)
+					var h_gb_s: bool = (buffer_grip_timer_l > 0.0) if parry_h == 0 else (buffer_grip_timer_r > 0.0)
+					var h_age_s: float = _trig_press_age_l if parry_h == 0 else _trig_press_age_r
+					var s_act: String = evaluate_one_hand_defense_input(t_rem, h_trig_s, h_grip_s, h_tb_s, h_gb_s, _is_defender_just_guard_active(parry_h), h_age_s, fwd_clash_s, h_vel_s, false)
+					if s_act == "PARRY":
+						_consume_defender_note_buffers()
+						var parry_ki_s: float = float(cfg_s.melee_parry_ki_reward) if cfg_s.get("melee_parry_ki_reward") != null else 20.0
+						var parry_ai_drain: float = float(cfg_s.melee_parry_attacker_ki_drain) if cfg_s.get("melee_parry_attacker_ki_drain") != null else 10.0
+						_modify_fighter_ki(p_node, parry_ki_s, true)
+						_modify_fighter_ki(ai_node, -parry_ai_drain)
+						if p_node.has_method("increase_np"):
+							p_node.increase_np(450.0)
+						_spawn_parry_shockwave(z_pos)
+						_pulse_player_both_hands(250.0, 1.0, 0.24)
+						if audio_player:
+							audio_player.global_position = z_pos
+							audio_player.pitch_scale = 1.30
+							AudioActionManager.play_action("common.block_perfect", audio_player)
+						_sim_last_impact_zone = zid
+						_spawn_impact_popup(z_pos, "✨ ¡PARRY DECISIVO!", Color(1.0, 0.94, 0.22))
+						# GDD Canon: Parry Perfecto en Furia dispara Zenkai Comeback
+						if bool(p_node.get("is_in_furia")) and not bool(p_node.get("is_in_zenkai_state")) and p_node.has_method("trigger_comeback_zenkai"):
+							p_node.trigger_comeback_zenkai()
+						_finish_simultaneous_exchange(p_node, ai_node, true, true)
+						return
+					elif s_act == "BLOCK_GREEN" or s_act == "BLOCK_YELLOW":
+						_consume_defender_hand_buffer(parry_h)
+						if s_act == "BLOCK_GREEN":
 							var defl_sim: float = float(cfg_s.melee_deflect_ki_reward) if cfg_s.get("melee_deflect_ki_reward") != null else 16.0
 							_modify_fighter_ki(p_node, defl_sim, true)
 							_modify_fighter_ki(ai_node, -6.0)
@@ -2704,6 +2862,7 @@ func _process_simultaneous_exchange(delta: float) -> void:
 						continue
 
 				if crossing_now:
+					_consume_defender_note_buffers()
 					var gx_sim_cost: float = float(cfg_s.melee_sim_guard_x_cost) if cfg_s.get("melee_sim_guard_x_cost") != null else 6.0
 					_modify_fighter_ki(p_node, -gx_sim_cost)
 					if p_node.has_method("take_hit"):
@@ -2947,6 +3106,12 @@ func _update_defender_velocities(delta: float) -> void:
 func _update_defender_input_buffers(delta: float) -> void:
 	if not defender or not is_instance_valid(defender) or not defender.get("is_player"):
 		return
+	var real_dt: float = maxf(delta / maxf(Engine.time_scale, 0.01), 0.001)
+	buffer_grip_timer_l = maxf(buffer_grip_timer_l - real_dt, 0.0)
+	buffer_grip_timer_r = maxf(buffer_grip_timer_r - real_dt, 0.0)
+	buffer_trig_timer_l = maxf(buffer_trig_timer_l - real_dt, 0.0)
+	buffer_trig_timer_r = maxf(buffer_trig_timer_r - real_dt, 0.0)
+
 	var left_ctrl: XRController3D = _get_controller("LeftHand")
 	var right_ctrl: XRController3D = _get_controller("RightHand")
 
@@ -2954,9 +3119,14 @@ func _update_defender_input_buffers(delta: float) -> void:
 		def_grip_l = _ctrl_float(left_ctrl, &"grip") > 0.50 or _ctrl_pressed(left_ctrl, &"grip_click")
 		def_trig_l = _ctrl_float(left_ctrl, &"trigger") > 0.50 or _ctrl_pressed(left_ctrl, &"trigger_click")
 		if def_grip_l and not prev_grip_l:
-			buffer_grip_timer_l = 0.15
+			buffer_grip_timer_l = 0.18
 		if def_trig_l and not prev_trig_l:
-			buffer_trig_timer_l = 0.15
+			buffer_trig_timer_l = 0.20
+			_trig_press_age_l = 0.0
+		elif def_trig_l:
+			_trig_press_age_l += real_dt
+		else:
+			_trig_press_age_l = 0.0
 		prev_grip_l = def_grip_l
 		prev_trig_l = def_trig_l
 
@@ -2964,16 +3134,36 @@ func _update_defender_input_buffers(delta: float) -> void:
 		def_grip_r = _ctrl_float(right_ctrl, &"grip") > 0.50 or _ctrl_pressed(right_ctrl, &"grip_click")
 		def_trig_r = _ctrl_float(right_ctrl, &"trigger") > 0.50 or _ctrl_pressed(right_ctrl, &"trigger_click")
 		if def_grip_r and not prev_grip_r:
-			buffer_grip_timer_r = 0.15
+			buffer_grip_timer_r = 0.18
 		if def_trig_r and not prev_trig_r:
-			buffer_trig_timer_r = 0.15
+			buffer_trig_timer_r = 0.20
+			_trig_press_age_r = 0.0
+		elif def_trig_r:
+			_trig_press_age_r += real_dt
+		else:
+			_trig_press_age_r = 0.0
 		prev_grip_r = def_grip_r
 		prev_trig_r = def_trig_r
 
-	buffer_grip_timer_l = maxf(buffer_grip_timer_l - delta, 0.0)
-	buffer_grip_timer_r = maxf(buffer_grip_timer_r - delta, 0.0)
-	buffer_trig_timer_l = maxf(buffer_trig_timer_l - delta, 0.0)
-	buffer_trig_timer_r = maxf(buffer_trig_timer_r - delta, 0.0)
+
+func _consume_defender_note_buffers() -> void:
+	buffer_grip_timer_l = 0.0
+	buffer_grip_timer_r = 0.0
+	buffer_trig_timer_l = 0.0
+	buffer_trig_timer_r = 0.0
+	_trig_press_age_l = 0.0
+	_trig_press_age_r = 0.0
+
+
+func _consume_defender_hand_buffer(hand_idx: int) -> void:
+	if hand_idx == 0:
+		buffer_grip_timer_l = 0.0
+		buffer_trig_timer_l = 0.0
+		_trig_press_age_l = 0.0
+	elif hand_idx == 1:
+		buffer_grip_timer_r = 0.0
+		buffer_trig_timer_r = 0.0
+		_trig_press_age_r = 0.0
 
 
 func _is_defender_fist_closed(hand_idx: int) -> bool:
@@ -3709,8 +3899,7 @@ func _check_controller_punches() -> void:
 	if not origin:
 		return
 
-	var cam: Camera3D = _get_player_camera()
-	var cam_fwd: Vector3 = -cam.global_transform.basis.z.normalized() if (cam and is_instance_valid(cam)) else -global_transform.basis.z
+	var punch_fwd_w: Vector3 = _get_punch_forward_world()
 	var left_ctrl: XRController3D = _get_controller("LeftHand")
 	var right_ctrl: XRController3D = _get_controller("RightHand")
 
@@ -3730,39 +3919,30 @@ func _check_controller_punches() -> void:
 
 		var hand_pos: Vector3 = ctrl.global_position
 		var hand_loc: Vector3 = ctrl.position
+		var cur_depth: float = _get_hand_depth_local(ctrl)
 		var cur_vel: Vector3 = left_velocity if hand_idx == 0 else right_velocity
 		var v_mag: float = cur_vel.length()
+		var fwd_vel: float = cur_vel.dot(punch_fwd_w)
 
-		var min_dist_to_any_zone: float = 999.0
-		for zone in target_zones:
-			var z_node: Node3D = zone.get("node") as Node3D
-			if z_node and is_instance_valid(z_node):
-				var d_any: float = hand_pos.distance_to(z_node.global_position)
-				if d_any < min_dist_to_any_zone:
-					min_dist_to_any_zone = d_any
-
-		# Liberar retracción solo tras retirar físicamente >= 20cm desde el impacto o salir quieto fuera del rango
+		# Liberar retracción ÚNICAMENTE tras retirar el puño >= 13cm en profundidad o volver a guardia
 		if hand_must_retract[hand_idx]:
-			if hand_loc.distance_to(_last_hit_local[hand_idx]) >= 0.20 or (min_dist_to_any_zone > 0.32 and v_mag < 0.55):
+			if should_release_punch_retraction(_last_hit_depth[hand_idx], cur_depth, fwd_vel):
 				hand_must_retract[hand_idx] = false
 				_punch_origin_local[hand_idx] = hand_loc
+				_punch_origin_depth[hand_idx] = cur_depth
 				_punch_origin_init[hand_idx] = true
 
-		# Exigir puño cerrado (Grip+Trigger), no en retracción, y velocidad real de puñetazo
+		# Exigir puño cerrado (Grip+Trigger), no en retracción, y empuje real de jab/directo/gancho
 		if hand_must_retract[hand_idx] or not is_fist_closed[hand_idx]:
 			continue
 
 		var is_chg_ready: bool = fist_charge_times[hand_idx] >= 0.50
-		var min_vel: float = 1.35 if is_chg_ready else 1.55
-		if v_mag < min_vel:
-			continue
-
-		# Exigir recorrido real de brazo (>= 22cm desde el inicio del puñetazo) para evitar pasadas pasivas entre cajas
 		var stroke_dist: float = hand_loc.distance_to(_punch_origin_local[hand_idx]) if _punch_origin_init[hand_idx] else 0.0
-		if stroke_dist < 0.22:
+		var fwd_stroke: float = (cur_depth - _punch_origin_depth[hand_idx]) if _punch_origin_init[hand_idx] else 0.0
+		var punch_eval: Dictionary = evaluate_real_punch_motion(cur_vel, punch_fwd_w, stroke_dist, fwd_stroke, is_chg_ready)
+		if not bool(punch_eval.get("valid", false)):
 			continue
 
-		var vel_dir: Vector3 = cur_vel / v_mag
 		for zone in target_zones:
 			if zone.get("cooldown", 0.0) > 0.0:
 				continue
@@ -3771,10 +3951,6 @@ func _check_controller_punches() -> void:
 				continue
 			var d: float = hand_pos.distance_to(z_node.global_position)
 			if d <= 0.24 and d < best_dist:
-				var to_zone_dir: Vector3 = (z_node.global_position - hand_pos).normalized()
-				var fwd_ok: bool = (vel_dir.dot(to_zone_dir) >= 0.45) or (vel_dir.dot(cam_fwd) >= 0.55)
-				if not fwd_ok:
-					continue
 				best_dist = d
 				best_zone = zone
 				best_ctrl = ctrl
@@ -3787,6 +3963,7 @@ func _check_controller_punches() -> void:
 	if best_hand_idx != -1 and not best_zone.is_empty():
 		attack_step_cooldown = 0.16
 		_last_hit_local[best_hand_idx] = best_ctrl.position
+		_last_hit_depth[best_hand_idx] = _get_hand_depth_local(best_ctrl)
 		_register_hit(best_zone, best_ctrl, best_hand_name, best_hand_idx, best_vel, best_vmag, best_stroke_dist)
 		hand_must_retract[best_hand_idx] = true
 
@@ -4017,6 +4194,7 @@ func _check_hammer_finisher() -> bool:
 		fist_v3_locked_haptic = [false, false]
 		hand_must_retract = [true, true]
 		_last_hit_local = [left_ctrl.position, right_ctrl.position]
+		_last_hit_depth = [_get_hand_depth_local(left_ctrl), _get_hand_depth_local(right_ctrl)]
 		_hide_all_charge_spheres()
 		current_attack_step += 1
 		attack_step_cooldown = 0.16
@@ -4102,13 +4280,18 @@ func _update_controller_velocities(delta: float) -> void:
 	_prev_r_local = r_loc
 	_has_prev_atk_local = true
 
+	var punch_fwd_c: Vector3 = _get_punch_forward_world()
 	if left_ctrl:
-		if not _punch_origin_init[0] or (left_velocity.length() < 0.45 and not hand_must_retract[0]):
+		var l_fwd_v: float = left_velocity.dot(punch_fwd_c)
+		if not hand_must_retract[0] and (not _punch_origin_init[0] or l_fwd_v <= 0.15):
 			_punch_origin_local[0] = l_loc
+			_punch_origin_depth[0] = _get_hand_depth_local(left_ctrl)
 			_punch_origin_init[0] = true
 	if right_ctrl:
-		if not _punch_origin_init[1] or (right_velocity.length() < 0.45 and not hand_must_retract[1]):
+		var r_fwd_v: float = right_velocity.dot(punch_fwd_c)
+		if not hand_must_retract[1] and (not _punch_origin_init[1] or r_fwd_v <= 0.15):
 			_punch_origin_local[1] = r_loc
+			_punch_origin_depth[1] = _get_hand_depth_local(right_ctrl)
 			_punch_origin_init[1] = true
 
 
@@ -4119,11 +4302,6 @@ func _update_fist_states(delta: float, is_charging_hammer: bool) -> void:
 		if not c:
 			is_fist_closed[i] = false
 			continue
-
-		if hand_must_retract[i] and c.position.distance_to(_last_hit_local[i]) >= 0.14:
-			hand_must_retract[i] = false
-			_punch_origin_local[i] = c.position
-			_punch_origin_init[i] = true
 
 		var trig_val: float = _ctrl_float(c, &"trigger")
 		var grip_val: float = _ctrl_float(c, &"grip")
@@ -4157,6 +4335,7 @@ func _update_fist_states(delta: float, is_charging_hammer: bool) -> void:
 			fist_locked_haptic[i] = false
 			fist_v3_locked_haptic[i] = false
 			_punch_origin_local[i] = c.position
+			_punch_origin_depth[i] = _get_hand_depth_local(c)
 			_punch_origin_init[i] = true
 			_update_hand_charge_sphere(i, c, 0.0)
 		else:

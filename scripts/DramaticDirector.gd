@@ -459,6 +459,16 @@ func skip_dramatic_intro() -> void:
 	show_camera_banner("⚔️ ¡COMBATE! ⚔️", Color(1.0, 0.95, 0.3), 0.85)
 
 
+func _is_any_combat_sequence_active() -> bool:
+	for f_chk in [_player_char, _enemy_char]:
+		if f_chk and is_instance_valid(f_chk):
+			if f_chk.has_method("is_in_active_combat_sequence") and f_chk.is_in_active_combat_sequence():
+				return true
+			if bool(f_chk.get("is_in_bullet_time")) or bool(f_chk.get("is_in_followup_bullet_time")) or bool(f_chk.get("is_flying_to_opponent")) or bool(f_chk.get("is_in_beam_sequence")) or bool(f_chk.get("is_in_beam_clash")) or bool(f_chk.get("is_firing_beam")):
+				return true
+	return false
+
+
 # ==============================================================================
 # 2. TRANSFORMACIÓN DRAMÁTICA
 # ==============================================================================
@@ -469,38 +479,40 @@ func play_dramatic_transformation(fighter: Node3D, trans: Resource) -> void:
 	var aura_col: Color = trans.aura_color if "aura_color" in trans else Color(1.0, 0.85, 0.15)
 	var f_name: String = String(trans.form_name).to_upper() if "form_name" in trans else "SUPER SAIYAN"
 	var pos: Vector3 = fighter.get_parent().global_position if (bool(fighter.get("is_player")) and fighter.get_parent() is Node3D) else fighter.global_position
+	var in_seq: bool = _is_any_combat_sequence_active()
 
-	_set_atmosphere(aura_col, 0.48, 0.65, 1.35)
-	_levitate_center = pos
-	_levitation_active = true
-	if _rock_multimesh:
-		_rock_multimesh.visible = true
+	if not in_seq:
+		_set_atmosphere(aura_col, 0.48, 0.65, 1.35)
+		_levitate_center = pos
+		_levitation_active = true
+		if _rock_multimesh:
+			_rock_multimesh.visible = true
 
-	if _pillar_mesh and _pillar_mat:
-		_pillar_mat.set_shader_parameter("beam_color", Color(aura_col.r, aura_col.g, aura_col.b, 0.9))
-		_pillar_mesh.global_position = Vector3(pos.x, pos.y + 18.0, pos.z)
-		_pillar_mesh.scale = Vector3(0.85, 1.0, 0.85)
-		_pillar_mesh.visible = true
+		if _pillar_mesh and _pillar_mat:
+			_pillar_mat.set_shader_parameter("beam_color", Color(aura_col.r, aura_col.g, aura_col.b, 0.9))
+			_pillar_mesh.global_position = Vector3(pos.x, pos.y + 18.0, pos.z)
+			_pillar_mesh.scale = Vector3(0.85, 1.0, 0.85)
+			_pillar_mesh.visible = true
 
-	_spawn_shockwave_ring(pos + Vector3(0.0, 0.25, 0.0), aura_col, 4.5, 0.55)
-	_spawn_shockwave_ring(pos + Vector3(0.0, 0.90, 0.0), aura_col.lightened(0.25), 3.4, 0.45)
+		_spawn_shockwave_ring(pos + Vector3(0.0, 0.25, 0.0), aura_col, 4.5, 0.55)
+		_spawn_shockwave_ring(pos + Vector3(0.0, 0.90, 0.0), aura_col.lightened(0.25), 3.4, 0.45)
 
-	# Repulsión por presión de aura si el rival está a < 5.0m (sin daño directo)
-	var opp: Node3D = _enemy_char if fighter == _player_char else _player_char
-	if opp and is_instance_valid(opp):
-		var opp_pos: Vector3 = opp.get_parent().global_position if (bool(opp.get("is_player")) and opp.get_parent() is Node3D) else opp.global_position
-		if pos.distance_to(opp_pos) < 5.0 and opp.has_method("apply_knockback"):
-			var push_dir: Vector3 = (opp_pos - pos).normalized()
-			if push_dir.length_squared() < 0.01:
-				push_dir = Vector3.BACK
-			opp.apply_knockback(push_dir, 8.5)
+		# Repulsión por presión de aura si el rival está a < 5.0m (sin daño directo)
+		var opp: Node3D = _enemy_char if fighter == _player_char else _player_char
+		if opp and is_instance_valid(opp):
+			var opp_pos: Vector3 = opp.get_parent().global_position if (bool(opp.get("is_player")) and opp.get_parent() is Node3D) else opp.global_position
+			if pos.distance_to(opp_pos) < 5.0 and opp.has_method("apply_knockback"):
+				var push_dir: Vector3 = (opp_pos - pos).normalized()
+				if push_dir.length_squared() < 0.01:
+					push_dir = Vector3.BACK
+				opp.apply_knockback(push_dir, 8.5)
 
 	# Tintar cabello del rival NPC acorde a la transformación
 	if not bool(fighter.get("is_player")):
 		_apply_npc_hair_tint(fighter, aura_col)
 
-	# Micro slow-mo cinematográfico seguro (0.45s reales)
-	if not is_dramatic_pause_active and not _is_finish_playing:
+	# Micro slow-mo cinematográfico seguro (0.45s reales) — omitido dentro de secuencias activas
+	if not in_seq and not is_dramatic_pause_active and not _is_finish_playing:
 		Engine.time_scale = 0.40
 		_timescale_restore_timer = 0.45
 
@@ -516,23 +528,28 @@ func play_dramatic_limit_break_transformation(fighter: Node3D, trans: Resource) 
 	var lb_col: Color = Color(1.0, 0.38, 0.12, 1.0)
 	var f_name: String = String(trans.form_name).to_upper() if "form_name" in trans else "SSJ"
 	var pos: Vector3 = fighter.get_parent().global_position if (bool(fighter.get("is_player")) and fighter.get_parent() is Node3D) else fighter.global_position
+	var in_seq: bool = _is_any_combat_sequence_active()
 
-	_set_atmosphere(lb_col, 0.44, 0.62, 1.35)
-	_levitate_center = pos
-	_levitation_active = true
-	if _rock_multimesh:
-		_rock_multimesh.visible = true
-	if _pillar_mesh and _pillar_mat:
-		_pillar_mat.set_shader_parameter("beam_color", Color(lb_col.r, lb_col.g, lb_col.b, 0.92))
-		_pillar_mesh.global_position = Vector3(pos.x, pos.y + 18.0, pos.z)
-		_pillar_mesh.scale = Vector3(0.95, 1.0, 0.95)
-		_pillar_mesh.visible = true
-	if is_inside_tree() and get_tree():
-		ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), pos + Vector3(0.0, 0.95, 0.0), 4, lb_col, true)
-	_spawn_shockwave_ring(pos + Vector3(0.0, 0.30, 0.0), lb_col, 5.2, 0.55)
-	_spawn_shockwave_ring(pos + Vector3(0.0, 1.15, 0.0), lb_col.lightened(0.22), 4.2, 0.48)
+	if not in_seq:
+		_set_atmosphere(lb_col, 0.44, 0.62, 1.35)
+		_levitate_center = pos
+		_levitation_active = true
+		if _rock_multimesh:
+			_rock_multimesh.visible = true
+		if _pillar_mesh and _pillar_mat:
+			_pillar_mat.set_shader_parameter("beam_color", Color(lb_col.r, lb_col.g, lb_col.b, 0.92))
+			_pillar_mesh.global_position = Vector3(pos.x, pos.y + 18.0, pos.z)
+			_pillar_mesh.scale = Vector3(0.95, 1.0, 0.95)
+			_pillar_mesh.visible = true
+		if is_inside_tree() and get_tree():
+			ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), pos + Vector3(0.0, 0.95, 0.0), 4, lb_col, true)
+		_spawn_shockwave_ring(pos + Vector3(0.0, 0.30, 0.0), lb_col, 5.2, 0.55)
+		_spawn_shockwave_ring(pos + Vector3(0.0, 1.15, 0.0), lb_col.lightened(0.22), 4.2, 0.48)
 
-	if not is_dramatic_pause_active and not _is_finish_playing and Engine.time_scale >= 0.85:
+	if not bool(fighter.get("is_player")):
+		_apply_npc_hair_tint(fighter, lb_col)
+
+	if not in_seq and not is_dramatic_pause_active and not _is_finish_playing and Engine.time_scale >= 0.85:
 		Engine.time_scale = 0.32
 		_timescale_restore_timer = 0.55
 
@@ -549,46 +566,48 @@ func play_dramatic_zenkai_event(fighter: Node3D, source: String) -> void:
 	var is_comeback: bool = (source == "comeback")
 	var zenkai_col: Color = Color(1.0, 0.24, 0.12, 1.0) if is_comeback else Color(1.0, 0.86, 0.16, 1.0)
 	var pos: Vector3 = fighter.get_parent().global_position if (bool(fighter.get("is_player")) and fighter.get_parent() is Node3D) else fighter.global_position
+	var in_seq: bool = _is_any_combat_sequence_active()
 
-	_set_atmosphere(zenkai_col, 0.40, 0.58, 1.45)
-	_levitate_center = pos
-	_levitation_active = true
-	if _rock_multimesh:
-		_rock_multimesh.visible = true
-	if _speed_lines_mesh and is_instance_valid(_speed_lines_mesh):
-		_speed_lines_mesh.visible = true
+	if not in_seq:
+		_set_atmosphere(zenkai_col, 0.40, 0.58, 1.45)
+		_levitate_center = pos
+		_levitation_active = true
+		if _rock_multimesh:
+			_rock_multimesh.visible = true
+		if _speed_lines_mesh and is_instance_valid(_speed_lines_mesh):
+			_speed_lines_mesh.visible = true
 
-	if _pillar_mesh and _pillar_mat:
-		_pillar_mat.set_shader_parameter("beam_color", Color(zenkai_col.r, zenkai_col.g, zenkai_col.b, 0.92))
-		_pillar_mesh.global_position = Vector3(pos.x, pos.y + 18.0, pos.z)
-		_pillar_mesh.scale = Vector3(1.15, 1.0, 1.15)
-		_pillar_mesh.visible = true
+		if _pillar_mesh and _pillar_mat:
+			_pillar_mat.set_shader_parameter("beam_color", Color(zenkai_col.r, zenkai_col.g, zenkai_col.b, 0.92))
+			_pillar_mesh.global_position = Vector3(pos.x, pos.y + 18.0, pos.z)
+			_pillar_mesh.scale = Vector3(1.15, 1.0, 1.15)
+			_pillar_mesh.visible = true
 
-	if is_inside_tree() and get_tree():
-		ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), pos + Vector3(0.0, 0.95, 0.0), 4, zenkai_col, true)
-	_spawn_shockwave_ring(pos + Vector3(0.0, 0.30, 0.0), zenkai_col, 6.2, 0.65)
-	_spawn_shockwave_ring(pos + Vector3(0.0, 1.55, 0.0), zenkai_col.lightened(0.28), 7.5, 0.55)
+		if is_inside_tree() and get_tree():
+			ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), pos + Vector3(0.0, 0.95, 0.0), 4, zenkai_col, true)
+		_spawn_shockwave_ring(pos + Vector3(0.0, 0.30, 0.0), zenkai_col, 6.2, 0.65)
+		_spawn_shockwave_ring(pos + Vector3(0.0, 1.55, 0.0), zenkai_col.lightened(0.28), 7.5, 0.55)
 
-	# Repulsión de proyectiles menores en radio 8.0m
-	var scene_root: Node = get_tree().current_scene if (is_inside_tree() and get_tree()) else null
-	if scene_root:
-		for child in scene_root.get_children():
-			if child is Node3D and child.has_method("_trigger_explosion") and child.get("shooter_node") != fighter:
-				if (child as Node3D).global_position.distance_to(pos) <= 8.0:
-					child.queue_free()
+		# Repulsión de proyectiles menores en radio 8.0m
+		var scene_root: Node = get_tree().current_scene if (is_inside_tree() and get_tree()) else null
+		if scene_root:
+			for child in scene_root.get_children():
+				if child is Node3D and child.has_method("_trigger_explosion") and child.get("shooter_node") != fighter:
+					if (child as Node3D).global_position.distance_to(pos) <= 8.0:
+						child.queue_free()
 
-	# Presión de aura sobre el rival si está muy cerca
-	var opp: Node3D = _enemy_char if fighter == _player_char else _player_char
-	if opp and is_instance_valid(opp):
-		var opp_pos: Vector3 = opp.get_parent().global_position if (bool(opp.get("is_player")) and opp.get_parent() is Node3D) else opp.global_position
-		if pos.distance_to(opp_pos) < 5.5 and opp.has_method("apply_knockback"):
-			var push_dir: Vector3 = (opp_pos - pos).normalized()
-			if push_dir.length_squared() < 0.01:
-				push_dir = Vector3.BACK
-			opp.apply_knockback(push_dir, 9.5)
+		# Presión de aura sobre el rival si está muy cerca
+		var opp: Node3D = _enemy_char if fighter == _player_char else _player_char
+		if opp and is_instance_valid(opp):
+			var opp_pos: Vector3 = opp.get_parent().global_position if (bool(opp.get("is_player")) and opp.get_parent() is Node3D) else opp.global_position
+			if pos.distance_to(opp_pos) < 5.5 and opp.has_method("apply_knockback"):
+				var push_dir: Vector3 = (opp_pos - pos).normalized()
+				if push_dir.length_squared() < 0.01:
+					push_dir = Vector3.BACK
+				opp.apply_knockback(push_dir, 9.5)
 
 	# Micro slow-motion seguro (0.65s reales a 0.28x, restaurado automáticamente a 1.0)
-	if not is_dramatic_pause_active and not _is_finish_playing and Engine.time_scale >= 0.85:
+	if not in_seq and not is_dramatic_pause_active and not _is_finish_playing and Engine.time_scale >= 0.85:
 		Engine.time_scale = 0.28
 		_timescale_restore_timer = 0.65
 
