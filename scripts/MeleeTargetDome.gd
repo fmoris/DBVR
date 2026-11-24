@@ -95,6 +95,11 @@ var _skip_btn_prev: bool = false
 var _rounds_completed_in_dome: int = 0
 static var _sim_exchange_cooldown_melees: int = 0
 var _sim_used_this_dome: bool = false
+var _custom_separation_dist: float = -1.0
+var _custom_separation_reason: String = ""
+var _comeback_momentum_active: bool = false
+var _explosive_wave_used_this_dome: bool = false
+var _char_script_cache: GDScript = null
 var _sim_nodes: Array[Dictionary] = []
 var _sim_player_hits_taken: int = 0
 var _sim_enemy_hits_taken: int = 0
@@ -163,6 +168,9 @@ var _scenic_spot_idx: int = 0
 var hammer_ki_paid: bool = false
 static var _sonic_burst_cooldown_melees: int = 0
 static var _flurry_clash_cooldown_melees: int = 0
+static var _meteor_smash_cooldown_melees: int = 0
+static var _z_vanish_war_cooldown_melees: int = 0
+static var _guard_break_cooldown_melees: int = 0
 var _sonic_burst_used_this_dome: bool = false
 var _sonic_burst_rolled_this_round: bool = false
 var _declared_full_combo: bool = false
@@ -238,6 +246,9 @@ static func reset_match_static_state() -> void:
 	_sim_exchange_cooldown_melees = 0
 	_sonic_burst_cooldown_melees = 0
 	_flurry_clash_cooldown_melees = 0
+	_meteor_smash_cooldown_melees = 0
+	_z_vanish_war_cooldown_melees = 0
+	_guard_break_cooldown_melees = 0
 	_tutorial_controls_shown = false
 
 
@@ -361,10 +372,17 @@ func setup(p_attacker: Node3D, p_defender: Node3D, p_duration: float = -1.0, p_m
 	_last_def_hl_key = ""
 	_rounds_completed_in_dome = 0
 	_sim_used_this_dome = false
+	_custom_separation_dist = -1.0
+	_custom_separation_reason = ""
+	_comeback_momentum_active = false
+	_explosive_wave_used_this_dome = false
 	_sim_exchange_cooldown_melees = maxi(_sim_exchange_cooldown_melees - 1, 0)
 	_sonic_burst_used_this_dome = false
 	_sonic_burst_cooldown_melees = maxi(_sonic_burst_cooldown_melees - 1, 0)
 	_flurry_clash_cooldown_melees = maxi(_flurry_clash_cooldown_melees - 1, 0)
+	_meteor_smash_cooldown_melees = maxi(_meteor_smash_cooldown_melees - 1, 0)
+	_z_vanish_war_cooldown_melees = maxi(_z_vanish_war_cooldown_melees - 1, 0)
+	_guard_break_cooldown_melees = maxi(_guard_break_cooldown_melees - 1, 0)
 	if attacker and is_instance_valid(attacker) and attacker.has_method("set"):
 		attacker.set("is_blocking", false)
 	if defender and is_instance_valid(defender) and defender.has_method("set"):
@@ -463,6 +481,51 @@ static func should_trigger_individual_flurry_clash(roll: float, chance: float, c
 	if cooldown_melees > 0:
 		return false
 	return roll < clampf(chance, 0.0, 1.0)
+
+
+static func should_trigger_surprise_lore_event(roll: float, chance: float, cooldown_melees: int) -> bool:
+	if cooldown_melees > 0:
+		return false
+	return roll < clampf(chance, 0.0, 1.0)
+
+
+func _get_bp_profile(p_atk: Node3D, p_def: Node3D, is_heavy: bool = false) -> Dictionary:
+	var atk_bp: float = maxf(float(p_atk.get("current_np")) if (p_atk and is_instance_valid(p_atk) and p_atk.get("current_np") != null) else 10000.0, 100.0)
+	var def_bp: float = maxf(float(p_def.get("current_np")) if (p_def and is_instance_valid(p_def) and p_def.get("current_np") != null) else 10000.0, 100.0)
+	var atk_furia: bool = p_atk != null and is_instance_valid(p_atk) and bool(p_atk.get("is_in_furia"))
+	var atk_t: float = float(p_atk.call("get_transformation_multiplier")) if (p_atk and is_instance_valid(p_atk) and p_atk.has_method("get_transformation_multiplier")) else 1.0
+	var def_t: float = float(p_def.call("get_transformation_multiplier")) if (p_def and is_instance_valid(p_def) and p_def.has_method("get_transformation_multiplier")) else 1.0
+	var cm: bool = _comeback_momentum_active and (p_atk == attacker)
+	if _char_script_cache == null:
+		_char_script_cache = ResourceLoader.load("res://scripts/character_instance.gd") as GDScript
+	if _char_script_cache:
+		return _char_script_cache.call("compute_melee_bp_profile", atk_bp, def_bp, atk_furia, is_heavy, atk_t, def_t, cm) as Dictionary
+	return {
+		"raw_ratio": 1.0, "effective_ratio": 1.0, "match_trans_scale": 1.0,
+		"dmg_mult": 1.0, "damage_scale": 1.0, "def_time_mult": 1.0, "ki_mult": 1.0,
+		"bp_gain_mult": 1.0, "defender_underdog_bp_mult": 1.0, "attacker_underdog_bp_mult": 1.0,
+		"is_dominance": false
+	}
+
+
+func _resync_unresolved_defense_notes(min_lead_sec: float = 0.70) -> void:
+	var min_off: float = 999999.0
+	var found: bool = false
+	for h_chk in hits:
+		if not h_chk.get("resolved", false):
+			var toff: float = float(h_chk.get("time_offset", 0.0))
+			if toff < min_off:
+				min_off = toff
+				found = true
+	if not found:
+		return
+	var lead: float = min_off - defense_timer
+	if lead < min_lead_sec:
+		var shift: float = min_lead_sec - lead
+		for h_shift in hits:
+			if not h_shift.get("resolved", false):
+				h_shift["time_offset"] = float(h_shift.get("time_offset", 0.0)) + shift
+		defense_total_duration += shift
 
 
 static func should_trigger_sim_flurry_clash(clash_count: int, thresh: int, roll: float, base_chance: float, cooldown_melees: int) -> bool:
@@ -587,7 +650,7 @@ func start_attack_phase(p_attacker: Node3D, p_defender: Node3D, p_duration: floa
 	if p_max_hits > 0:
 		base_hits = p_max_hits
 	elif attacker and is_instance_valid(attacker) and attacker.has_method("calculate_melee_attack_count"):
-		base_hits = attacker.calculate_melee_attack_count(attacker, defender)
+		base_hits = attacker.calculate_melee_attack_count(attacker, defender, _comeback_momentum_active)
 
 	max_allowed_hits = clampi(base_hits - pending_attack_penalty, 1, 9)
 	pending_attack_penalty = 0
@@ -1132,10 +1195,10 @@ func _compute_note_prewarn_sec(note: Dictionary) -> float:
 	elif bool(note.get("is_charged", false)):
 		base_t = 1.22
 
-	var bp_atk: float = maxf(float(attacker.get("current_np")) if (attacker and is_instance_valid(attacker) and attacker.get("current_np") != null) else 10000.0, 100.0)
-	var bp_def: float = maxf(float(defender.get("current_np")) if (defender and is_instance_valid(defender) and defender.get("current_np") != null) else 10000.0, 100.0)
-	var bp_factor: float = clampf(pow(bp_def / bp_atk, 0.35), 0.70, 1.45)
-	return clampf(base_t * bp_factor, 0.50, 2.20)
+	var is_heavy_pw: bool = bool(note.get("is_charged", false)) or bool(note.get("is_charged_v3", false)) or bool(note.get("is_hammer", false))
+	var prof_pw: Dictionary = _get_bp_profile(attacker, defender, is_heavy_pw)
+	var bp_factor: float = clampf(float(prof_pw["def_time_mult"]), 0.78, 1.35)
+	return clampf(base_t * bp_factor, 0.55, 2.20)
 
 
 func start_defense_phase() -> void:
@@ -1243,8 +1306,8 @@ func _process_defense_rhythm(delta: float) -> void:
 	var is_def_crashed: bool = defender_is_defenseless or (defender != null and is_instance_valid(defender) and bool(defender.get("is_defenseless_crash")))
 	var defender_is_player: bool = (defender != null and is_instance_valid(defender) and bool(defender.get("is_player")))
 
-	# Onda Explosiva (Kiai de Emergencia) al recibir >= 2 golpes sin bloquear en la ronda
-	if defender_is_player and not is_def_crashed and _round_unblocked_hits_taken >= 2 and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")):
+	# Onda Explosiva (Kiai de Emergencia) al recibir >= 2 golpes sin bloquear en la ronda (máx. 1 por cúpula)
+	if defender_is_player and not is_def_crashed and not _explosive_wave_used_this_dome and _round_unblocked_hits_taken >= 2 and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")):
 		var l_c: XRController3D = _get_controller("LeftHand")
 		var r_c: XRController3D = _get_controller("RightHand")
 		if l_c and r_c and def_grip_l and def_grip_r and l_c.global_position.distance_to(r_c.global_position) >= 0.75:
@@ -1255,6 +1318,7 @@ func _process_defense_rhythm(delta: float) -> void:
 				"consecutive_hits_taken": _round_unblocked_hits_taken
 			})
 			if ew_ev == MeleeLoreEventScript.LoreEventType.EXPLOSIVE_WAVE:
+				_explosive_wave_used_this_dome = true
 				_start_lore_event(ew_ev, "explosive_wave")
 				return
 
@@ -1462,10 +1526,17 @@ func _resolve_perfect_parry(note: Dictionary, zone: Dictionary) -> void:
 	var cfg_pp: KiEconomyConfig = KiEconomyConfig.get_default()
 	var parry_ki: float = float(cfg_pp.melee_parry_ki_reward) if cfg_pp.get("melee_parry_ki_reward") != null else 20.0
 	var parry_atk_drain: float = float(cfg_pp.melee_parry_attacker_ki_drain) if cfg_pp.get("melee_parry_attacker_ki_drain") != null else 10.0
+	var prof_pp: Dictionary = _get_bp_profile(attacker, defender, true)
+	var def_was_furia_pp: bool = defender != null and is_instance_valid(defender) and bool(defender.get("is_in_furia"))
+	var pp_bp_gain: float = 400.0 * float(prof_pp["defender_underdog_bp_mult"])
+	var pp_underdog_comeback: bool = float(prof_pp["raw_ratio"]) > 1.15
 	_modify_fighter_ki(defender, parry_ki, true)
 	_modify_fighter_ki(attacker, -parry_atk_drain)
 	if defender and is_instance_valid(defender) and defender.has_method("increase_np"):
-		defender.increase_np(400.0)
+		defender.increase_np(pp_bp_gain)
+	if pp_underdog_comeback and attacker and is_instance_valid(attacker) and attacker.has_method("take_hit"):
+		var parry_punish_bp: float = lerpf(250.0, 400.0, clampf((float(prof_pp["raw_ratio"]) - 1.15) / 0.85, 0.0, 1.0))
+		attacker.take_hit(parry_punish_bp, Vector3.ZERO, false)
 
 	if audio_player:
 		audio_player.global_position = zone["node"].global_position
@@ -1481,14 +1552,14 @@ func _resolve_perfect_parry(note: Dictionary, zone: Dictionary) -> void:
 	last_action_feedback = "⚡ ¡PARRY PERFECTO! (+%d Ki)" % int(parry_ki)
 	pip_results.append("blocked")
 	_spawn_impact_popup(zone["node"].global_position, "✨ ¡PARRY!", Color(1.0, 0.92, 0.25))
-	emit_signal("defense_action_resolved", "perfect_parry", zone["id"], true, parry_ki, 400.0)
+	emit_signal("defense_action_resolved", "perfect_parry", zone["id"], true, parry_ki, pp_bp_gain)
 	_trigger_hit_stop(0.08)
 
 	for h in hits:
 		h["resolved"] = true
 
 	# GDD Canon: Parry Perfecto en estado Furia desata Comeback Zenkai en el defensor (antes del swap)
-	if defender and is_instance_valid(defender) and bool(defender.get("is_in_furia")) and not bool(defender.get("is_in_zenkai_state")) and defender.has_method("trigger_comeback_zenkai"):
+	if def_was_furia_pp and defender and is_instance_valid(defender) and not bool(defender.get("is_in_zenkai_state")) and defender.has_method("trigger_comeback_zenkai"):
 		defender.trigger_comeback_zenkai()
 
 	if _check_ki_break_after_note():
@@ -1503,7 +1574,9 @@ func _resolve_perfect_parry(note: Dictionary, zone: Dictionary) -> void:
 			return
 
 	pending_attack_penalty = 0
-	restart_as_attacker()
+	if pp_underdog_comeback:
+		_comeback_momentum_active = true
+	restart_as_attacker(pp_underdog_comeback)
 
 
 func _resolve_fist_clash(note: Dictionary, zone: Dictionary, hand_idx: int) -> void:
@@ -1517,6 +1590,7 @@ func _resolve_fist_clash(note: Dictionary, zone: Dictionary, hand_idx: int) -> v
 	var bp_def: float = maxf(float(defender.get("current_np")) if (defender and defender.get("current_np") != null) else 9000.0, 100.0)
 	var bp_atk: float = maxf(float(attacker.get("current_np")) if (attacker and attacker.get("current_np") != null) else 9000.0, 100.0)
 	var r_bp: float = bp_def / bp_atk
+	var prof_fc: Dictionary = _get_bp_profile(attacker, defender, true)
 	var cfg_fc: KiEconomyConfig = KiEconomyConfig.get_default()
 	var clash_cost: float = float(cfg_fc.melee_clash_cost) if cfg_fc.get("melee_clash_cost") != null else 3.0
 	var clash_even_reward: float = float(cfg_fc.melee_clash_even_ki_reward) if cfg_fc.get("melee_clash_even_ki_reward") != null else 6.0
@@ -1561,8 +1635,8 @@ func _resolve_fist_clash(note: Dictionary, zone: Dictionary, hand_idx: int) -> v
 
 		var def_ki_gain: float = clash_win if r_bp > 1.43 else clash_even_reward
 		var atk_ki_gain: float = -clash_cost if r_bp > 1.43 else 2.0
-		var def_bp_gain: float = 350.0 if r_bp > 1.43 else 300.0
-		var atk_bp_gain: float = 100.0 if r_bp > 1.43 else 250.0
+		var def_bp_gain: float = (350.0 if r_bp > 1.43 else 300.0) * float(prof_fc["defender_underdog_bp_mult"])
+		var atk_bp_gain: float = (100.0 if r_bp > 1.43 else 250.0) * float(prof_fc["bp_gain_mult"])
 		score = 1.00 if r_bp > 1.43 else 0.65
 
 		_modify_fighter_ki(defender, def_ki_gain, true)
@@ -1590,13 +1664,13 @@ func _resolve_fist_clash(note: Dictionary, zone: Dictionary, hand_idx: int) -> v
 		emit_signal("defense_action_resolved", "fist_clash", zone["id"], true, def_ki_gain, def_bp_gain)
 	else:
 		var raw_dmg: float = 360.0 if bool(note.get("is_charged_v3", false)) else (240.0 if bool(note.get("is_charged", false)) else 140.0)
-		var partial_dmg: float = raw_dmg * 0.50
+		var partial_dmg: float = raw_dmg * 0.50 * float(prof_fc["damage_scale"])
 		_modify_fighter_ki(defender, -clash_cost)
 		_modify_fighter_ki(attacker, 4.0)
 		if defender and defender.has_method("take_hit"):
 			defender.take_hit(partial_dmg, Vector3.ZERO)
 		if attacker and attacker.has_method("increase_np"):
-			attacker.increase_np(200.0)
+			attacker.increase_np(200.0 * float(prof_fc["bp_gain_mult"]))
 		if audio_player:
 			audio_player.global_position = zone_pos
 			audio_player.pitch_scale = 0.88
@@ -1627,7 +1701,11 @@ func _resolve_defensive_z_vanish(note: Dictionary, zone: Dictionary) -> void:
 	var zv_info: Dictionary = _get_vanish_cost_and_label(defender)
 	var vanish_cost: float = float(zv_info.get("cost", 10.0))
 	var vanish_lbl: String = String(zv_info.get("label", "💨 ¡Z-VANISH!"))
+	var prof_zv: Dictionary = _get_bp_profile(attacker, defender, true)
+	var zv_bp_reward: float = 120.0 * float(prof_zv["defender_underdog_bp_mult"])
 	_modify_fighter_ki(defender, -vanish_cost)
+	if defender and is_instance_valid(defender) and defender.has_method("increase_np"):
+		defender.increase_np(zv_bp_reward)
 	var zone_pos: Vector3 = zone["node"].global_position
 
 	if audio_player:
@@ -1639,25 +1717,31 @@ func _resolve_defensive_z_vanish(note: Dictionary, zone: Dictionary) -> void:
 
 	note["defense_score"] = 1.00
 	defense_score_sum += 1.00
-	last_action_feedback = "%s (-%d Ki)" % [vanish_lbl, int(vanish_cost)]
+	last_action_feedback = "%s (-%d Ki, +%d BP)" % [vanish_lbl, int(vanish_cost), int(roundf(zv_bp_reward))]
 	pip_results.append("blocked")
 	_spawn_impact_popup(zone_pos, vanish_lbl, Color(0.35, 0.96, 1.0))
-	emit_signal("defense_action_resolved", "z_vanish", zone["id"], true, -vanish_cost, 120.0)
+	emit_signal("defense_action_resolved", "z_vanish", zone["id"], true, -vanish_cost, zv_bp_reward)
 	if _check_ki_break_after_note():
 		return
 
-	# Evento Lore 3: Guerra de Z-Vanish si el atacante tiene Ki para perseguir
+	# Evento Lore 3: Guerra de Z-Vanish sorpresa si el atacante tiene Ki para perseguir
 	if phase == DomePhase.DEFENSE_RHYTHM and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")):
+		var cfg_zv2: KiEconomyConfig = KiEconomyConfig.get_default()
+		var zv_chance: float = float(cfg_zv2.melee_z_vanish_war_chance) if cfg_zv2.get("melee_z_vanish_war_chance") != null else 0.50
+		var zv_cd_cfg: int = int(cfg_zv2.melee_lore_event_cooldown_melees) if cfg_zv2.get("melee_lore_event_cooldown_melees") != null else 2
 		var atk_ki_zv: float = float(attacker.get("current_ki")) if (attacker and attacker.get("current_ki") != null) else 0.0
 		var bp_d: float = maxf(float(defender.get("current_np")) if (defender and defender.get("current_np") != null) else 10000.0, 100.0)
 		var bp_a: float = maxf(float(attacker.get("current_np")) if (attacker and attacker.get("current_np") != null) else 10000.0, 100.0)
+		var atk_zv_cost: float = float(_get_vanish_cost_and_label(attacker).get("cost", 10.0))
 		var zv_ev: int = MeleeLoreEventScript.evaluate_lore_event_trigger({
 			"trigger_source": "z_vanish",
 			"last_event_type": _last_lore_event_type,
 			"atk_ki": atk_ki_zv,
+			"vanish_cost": atk_zv_cost,
 			"bp_ratio": bp_a / bp_d
 		})
-		if zv_ev == MeleeLoreEventScript.LoreEventType.Z_VANISH_WAR:
+		if zv_ev == MeleeLoreEventScript.LoreEventType.Z_VANISH_WAR and should_trigger_surprise_lore_event(randf(), zv_chance, _z_vanish_war_cooldown_melees):
+			_z_vanish_war_cooldown_melees = zv_cd_cfg
 			_start_lore_event(zv_ev, "z_vanish_war")
 
 
@@ -1681,6 +1765,7 @@ func _resolve_hand_block(note: Dictionary, zone: Dictionary, hand_idx: int, timi
 	var zone_pos: Vector3 = zone["node"].global_position
 	var score: float = 1.0
 	var cfg_hb: KiEconomyConfig = KiEconomyConfig.get_default()
+	var prof_hb: Dictionary = _get_bp_profile(attacker, defender, is_charged)
 	var deflect_reward: float = float(cfg_hb.melee_deflect_ki_reward) if cfg_hb.get("melee_deflect_ki_reward") != null else 16.0
 	var atk_to_def_hb: Vector3 = (-_duel_axis if (defender and is_instance_valid(defender) and bool(defender.get("is_player"))) else _duel_axis)
 	if atk_to_def_hb.length_squared() < 0.01:
@@ -1688,14 +1773,16 @@ func _resolve_hand_block(note: Dictionary, zone: Dictionary, hand_idx: int, timi
 	atk_to_def_hb = atk_to_def_hb.normalized()
 
 	if is_charged:
-		# Cargado rompe el bloqueo de 1 Mano: 65% daño, coste broken_1hand y empuje fuerte (obliga a Guardia X o Parry)
-		var broken_dmg: float = 280.0 * 0.65 * attacker_damage_mult
-		var broken_cost: float = float(cfg_hb.melee_broken_1hand_ki_cost) if cfg_hb.get("melee_broken_1hand_ki_cost") != null else 10.0
+		# Cargado rompe el bloqueo de 1 Mano: 65% daño escalado, coste broken_1hand y empuje fuerte (obliga a Guardia X o Parry)
+		var broken_dmg: float = 280.0 * 0.65 * attacker_damage_mult * float(prof_hb["damage_scale"])
+		var broken_cost: float = clampf((float(cfg_hb.melee_broken_1hand_ki_cost) if cfg_hb.get("melee_broken_1hand_ki_cost") != null else 10.0) * float(prof_hb["ki_mult"]), 5.0, 18.0)
 		score = 0.0
 		_modify_fighter_ki(defender, -broken_cost)
 		_modify_fighter_ki(attacker, -1.0)
 		if defender and defender.has_method("take_hit"):
 			defender.take_hit(broken_dmg, Vector3.ZERO)
+		if attacker and is_instance_valid(attacker) and attacker.has_method("increase_np"):
+			attacker.increase_np(90.0 * float(prof_hb["bp_gain_mult"]))
 		if defender and defender.get("procedural_animator"):
 			defender.procedural_animator.trigger_hit_flinch(0.55, atk_to_def_hb)
 		if audio_player:
@@ -1708,13 +1795,15 @@ func _resolve_hand_block(note: Dictionary, zone: Dictionary, hand_idx: int, timi
 		_spawn_impact_popup(zone_pos, "💥 ¡1 MANO ROTA!", Color(1.0, 0.50, 0.15))
 		emit_signal("defense_action_resolved", "hand_block_broken", zone["id"], false, -broken_cost, 0.0)
 	elif timing_grade == "YELLOW":
-		# Bloqueo Amarillo (Parcial): reduce solo 55% (recibe 45% daño = 63 BP), -4 Ki, 0.45 pto
-		var partial_dmg: float = 140.0 * 0.45 * attacker_damage_mult
+		# Bloqueo Amarillo (Parcial): reduce solo 55% (recibe 45% daño escalado), -4 Ki, 0.45 pto
+		var partial_dmg: float = 140.0 * 0.45 * attacker_damage_mult * float(prof_hb["damage_scale"])
 		var yellow_cost: float = float(cfg_hb.melee_yellow_block_ki_cost) if cfg_hb.get("melee_yellow_block_ki_cost") != null else 4.0
 		score = 0.45
 		_modify_fighter_ki(defender, -yellow_cost)
 		if defender and defender.has_method("take_hit"):
 			defender.take_hit(partial_dmg, Vector3.ZERO)
+		if attacker and is_instance_valid(attacker) and attacker.has_method("increase_np"):
+			attacker.increase_np(40.0 * float(prof_hb["bp_gain_mult"]))
 		if audio_player:
 			audio_player.global_position = zone_pos
 			audio_player.pitch_scale = 1.0
@@ -1727,10 +1816,11 @@ func _resolve_hand_block(note: Dictionary, zone: Dictionary, hand_idx: int, timi
 	else:
 		score = 1.00
 		var defl_atk_drain: float = float(cfg_hb.melee_deflect_attacker_ki_drain) if cfg_hb.get("melee_deflect_attacker_ki_drain") != null else 4.0
+		var defl_bp_gain: float = 150.0 * float(prof_hb["defender_underdog_bp_mult"])
 		_modify_fighter_ki(defender, deflect_reward, true)
 		_modify_fighter_ki(attacker, -defl_atk_drain)
 		if defender and defender.has_method("increase_np"):
-			defender.increase_np(150.0)
+			defender.increase_np(defl_bp_gain)
 		if audio_player:
 			audio_player.global_position = zone_pos
 			audio_player.pitch_scale = 1.25
@@ -1739,7 +1829,7 @@ func _resolve_hand_block(note: Dictionary, zone: Dictionary, hand_idx: int, timi
 		last_action_feedback = "✋ ¡DESVÍO VERDE! (+%d Ki)" % int(deflect_reward)
 		pip_results.append("blocked")
 		_spawn_impact_popup(zone_pos, "✋ ¡DESVÍO (+%d Ki)!" % int(deflect_reward), Color(0.35, 1.0, 0.65))
-		emit_signal("defense_action_resolved", "hand_block", zone["id"], true, deflect_reward, 150.0)
+		emit_signal("defense_action_resolved", "hand_block", zone["id"], true, deflect_reward, defl_bp_gain)
 
 	if defender and is_instance_valid(defender) and defender.get("procedural_animator") and not is_charged:
 		defender.procedural_animator.trigger_melee_block(0)
@@ -1769,19 +1859,24 @@ func _resolve_cross_arm_guard(note: Dictionary, zone: Dictionary) -> void:
 	var dmg_pct: float = 0.60 if is_v3 else (0.35 if is_hammer else 0.15)
 	var final_dmg: float = raw_dmg * dmg_pct
 	var cfg_ki: KiEconomyConfig = KiEconomyConfig.get_default()
+	var prof_cg: Dictionary = _get_bp_profile(attacker, defender, is_charged or is_v3 or is_hammer)
 	var g_quick: float = float(cfg_ki.melee_guard_quick_cost) if cfg_ki.get("melee_guard_quick_cost") != null else cfg_ki.melee_quick_cost
 	var g_chg: float = float(cfg_ki.melee_guard_charged_cost) if cfg_ki.get("melee_guard_charged_cost") != null else cfg_ki.melee_charged_cost
 	var g_v3: float = float(cfg_ki.melee_guard_v3_cost) if cfg_ki.get("melee_guard_v3_cost") != null else cfg_ki.melee_v3_cost
 	var base_ki_cost: float = cfg_ki.melee_hammer_guard_cost if is_hammer else (g_v3 if is_v3 else (g_chg if is_charged else g_quick))
-	var ki_cost: float = base_ki_cost + float(consecutive_guard_hits - 1) * cfg_ki.melee_guard_escalation
+	var ki_cost: float = clampf((base_ki_cost + float(consecutive_guard_hits - 1) * cfg_ki.melee_guard_escalation) * float(prof_cg["ki_mult"]), 2.0, 28.0)
 
 	_modify_fighter_ki(defender, -ki_cost)
 	_modify_fighter_ki(attacker, 2.0)
-	var final_dmg_scaled: float = final_dmg * attacker_damage_mult
+	var final_dmg_scaled: float = final_dmg * attacker_damage_mult * float(prof_cg["damage_scale"])
 	if defender and defender.has_method("take_hit"):
 		defender.take_hit(final_dmg_scaled, Vector3.ZERO)
+	var cg_def_bp: float = 20.0 * float(prof_cg["defender_underdog_bp_mult"])
 	if not is_v3 and defender and defender.has_method("increase_np"):
-		defender.increase_np(20.0)
+		defender.increase_np(cg_def_bp)
+	if attacker and is_instance_valid(attacker) and attacker.has_method("increase_np"):
+		var press_bp: float = (70.0 if (is_charged or is_hammer or is_v3) else 50.0) * float(prof_cg["bp_gain_mult"])
+		attacker.increase_np(press_bp)
 
 	if audio_player:
 		audio_player.global_position = zone_pos
@@ -1828,7 +1923,7 @@ func _resolve_cross_arm_guard(note: Dictionary, zone: Dictionary) -> void:
 		last_action_feedback = "🔨 ¡MARTILLO APLASTA GUARDIA (-%d Ki)!" % int(ki_cost) if is_hammer else ("🛡️ ¡CARGADO ABSORBIDO! (-%d Ki)" % int(ki_cost) if is_charged else "🛡️ GUARDIA CRUZADA (-%d Ki)" % int(ki_cost))
 		pip_results.append("blocked")
 		_spawn_impact_popup(zone_pos, "🔨 ¡APLASTADO!" if is_hammer else "🛡️ ¡BLOQUEADO!", Color(0.95, 0.45, 0.95) if is_hammer else Color(0.30, 0.78, 1.0))
-		emit_signal("defense_action_resolved", "cross_arm_guard", zone["id"], true, -ki_cost, 20.0)
+		emit_signal("defense_action_resolved", "cross_arm_guard", zone["id"], true, -ki_cost, cg_def_bp)
 
 	if _check_ki_break_after_note():
 		return
@@ -1841,16 +1936,20 @@ func _resolve_cross_arm_guard(note: Dictionary, zone: Dictionary) -> void:
 			_cut_melee_hammer_defended(defender, attacker, final_dmg_scaled)
 			return
 
-	# Evento Lore 4: Desgarre de Guardia si abusa de Guardia Cruzada (2+ segundas notas) o Ki crítico
-	if phase == DomePhase.DEFENSE_RHYTHM and _has_unresolved_notes() and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")):
+	# Evento Lore 4: Desgarre de Guardia sorpresa (nunca tras V3 que ya rompió Guardia X)
+	if not is_v3 and phase == DomePhase.DEFENSE_RHYTHM and _has_unresolved_notes() and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")):
 		var def_ki_g: float = float(defender.get("current_ki")) if (defender and defender.get("current_ki") != null) else 50.0
+		var gb_chance: float = float(cfg_ki.melee_guard_break_chance) if cfg_ki.get("melee_guard_break_chance") != null else 0.55
+		var gb_cd_cfg: int = int(cfg_ki.melee_lore_event_cooldown_melees) if cfg_ki.get("melee_lore_event_cooldown_melees") != null else 2
 		var gb_ev: int = MeleeLoreEventScript.evaluate_lore_event_trigger({
 			"trigger_source": "guard_abuse",
 			"last_event_type": _last_lore_event_type,
 			"consecutive_guard_x": consecutive_guard_hits,
-			"def_ki": def_ki_g
+			"def_ki": def_ki_g,
+			"bp_ratio": float(prof_cg["raw_ratio"])
 		})
-		if gb_ev == MeleeLoreEventScript.LoreEventType.GUARD_PRESSURE_BREAK:
+		if gb_ev == MeleeLoreEventScript.LoreEventType.GUARD_PRESSURE_BREAK and should_trigger_surprise_lore_event(randf(), gb_chance, _guard_break_cooldown_melees):
+			_guard_break_cooldown_melees = gb_cd_cfg
 			_start_lore_event(gb_ev, "guard_break")
 
 
@@ -1870,6 +1969,8 @@ func _cut_melee_hammer_defended(p_def: Node3D, p_atk: Node3D, chip_dmg: float) -
 			f_cut.set("is_in_bullet_time", false)
 			f_cut.set("is_blocking", false)
 			f_cut.set("active_target_dome", null)
+	_custom_separation_dist = 8.5
+	_custom_separation_reason = "🛡️ Martillazo frenado: separación táctica."
 	_spawn_impact_popup(global_position, "🛡️ ¡MARTILLO FRENADO! (-%d BP)" % int(chip_dmg), Color(0.4, 0.9, 1.0), true)
 	emit_signal("bullet_time_completed", [], Vector3.ZERO)
 	queue_free()
@@ -1886,6 +1987,8 @@ func _resolve_unblocked_hit(note: Dictionary, zone: Dictionary, custom_popup: St
 	var is_hammer: bool = bool(note.get("is_hammer", false))
 	var is_v3: bool = bool(note.get("is_charged_v3", false))
 	var is_charged: bool = bool(note.get("is_charged", false))
+	var is_sonic_note: bool = String(note.get("tier", "")) == "SONICO"
+	var prof_uh: Dictionary = _get_bp_profile(attacker, defender, is_charged or is_v3 or is_hammer or is_sonic_note)
 	var tier_mult: float = float(note.get("tier_dmg_mult", 1.0))
 	var zone_pos: Vector3 = zone["node"].global_position
 	var base_dmg: float = 580.0 if is_hammer else (420.0 if is_v3 else (280.0 if is_charged else 140.0))
@@ -1894,13 +1997,14 @@ func _resolve_unblocked_hit(note: Dictionary, zone: Dictionary, custom_popup: St
 	var raw_dmg: float = base_dmg * clampf(note_power / charge_base_ref, 0.75, 1.55) * tier_mult
 
 	var cfg_uh: KiEconomyConfig = KiEconomyConfig.get_default()
-	var def_ki_loss: float = -float(cfg_uh.melee_hit_taken_heavy_ki_drain) if (is_v3 or is_hammer) else (-float(cfg_uh.melee_hit_taken_charged_ki_drain) if is_charged else -float(cfg_uh.melee_hit_taken_quick_ki_drain))
+	var base_def_ki_loss: float = float(cfg_uh.melee_hit_taken_heavy_ki_drain) if (is_v3 or is_hammer) else (float(cfg_uh.melee_hit_taken_charged_ki_drain) if is_charged else float(cfg_uh.melee_hit_taken_quick_ki_drain))
+	var def_ki_loss: float = -clampf(base_def_ki_loss * float(prof_uh["ki_mult"]), 3.0, 24.0)
 	_modify_fighter_ki(defender, def_ki_loss)
 	# Reembolso táctico diferido: se otorga al atacante ÚNICAMENTE cuando el golpe conecta limpio
 	var note_refund: float = float(note.get("ki_refund", 0.0))
 	if note_refund > 0.0:
 		_modify_fighter_ki(attacker, note_refund)
-	if String(note.get("tier", "")) == "SONICO":
+	if is_sonic_note:
 		_round_clean_sonic_hits += 1
 	if is_charged or is_v3:
 		_round_clean_charged_hits += 1
@@ -1917,14 +2021,15 @@ func _resolve_unblocked_hit(note: Dictionary, zone: Dictionary, custom_popup: St
 		atk_to_def_uh = -global_transform.basis.z
 	atk_to_def_uh = atk_to_def_uh.normalized()
 	if defender and is_instance_valid(defender):
-		var raw_dmg_scaled: float = raw_dmg * attacker_damage_mult
+		var raw_dmg_scaled: float = raw_dmg * attacker_damage_mult * float(prof_uh["damage_scale"])
 		if defender.has_method("take_hit"):
 			defender.take_hit(raw_dmg_scaled, atk_to_def_uh)
 		if defender.get("procedural_animator"):
 			defender.procedural_animator.trigger_hit_flinch(0.75 if (is_hammer or is_v3) else 0.45, atk_to_def_uh)
 
 	if attacker and is_instance_valid(attacker) and attacker.has_method("increase_np"):
-		attacker.increase_np(raw_dmg * 0.65)
+		# Ganancia ofensiva justa sobre daño BASE x freno anti-snowball (evita que el líder escale exponencialmente pero sienta avance)
+		attacker.increase_np(raw_dmg * 0.90 * float(prof_uh["bp_gain_mult"]))
 
 	if audio_player:
 		audio_player.global_position = zone_pos
@@ -1971,8 +2076,8 @@ func _resolve_unblocked_hit(note: Dictionary, zone: Dictionary, custom_popup: St
 	if _check_ki_break_after_note():
 		return
 
-	# Evento Lore 6: Intercambio Sónico Z-Burst solo tras CONECTAR golpes reales limpios (no al declararlos)
-	if has_remaining_notes and not is_hammer and attacker and is_instance_valid(attacker) and bool(attacker.get("is_player")):
+	# Evento Lore 6: Intercambio Sónico Z-Burst habilitado para ambos (jugador e IA) tras CONECTAR golpes reales limpios
+	if has_remaining_notes and not is_hammer and attacker and is_instance_valid(attacker):
 		var atk_ki_sb: float = float(attacker.get("current_ki")) if attacker.get("current_ki") != null else 0.0
 		if not _sonic_burst_used_this_dome and not _sonic_burst_rolled_this_round and _sonic_burst_cooldown_melees <= 0 and _round_unblocked_hits_taken >= 3 and atk_ki_sb >= 18.0 and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")):
 			var is_fur_t: bool = bool(attacker.get("is_in_furia")) or (int(attacker.get("current_transformation_index")) if attacker.get("current_transformation_index") != null else -1) >= 0
@@ -2015,14 +2120,15 @@ func _resolve_ai_defense(note: Dictionary, zone: Dictionary) -> void:
 	var vanish_cost: float = float(_get_vanish_cost_and_label(defender).get("cost", cfg_ai_d.melee_vanish_cost))
 	var guard_cost: float = float(cfg_ai_d.melee_hammer_guard_cost) if is_hammer else (float(cfg_ai_d.melee_guard_charged_cost) if is_charged else float(cfg_ai_d.melee_guard_quick_cost))
 
-	# Onda Kiai de emergencia disponible también para la IA si recibe 2+ golpes limpios con Ki suficiente
-	if _round_unblocked_hits_taken >= 2 and def_ki >= kiai_cost and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")) and randf() < 0.35:
+	# Onda Kiai de emergencia disponible también para la IA si recibe 2+ golpes limpios con Ki suficiente (máx. 1 por cúpula)
+	if not _explosive_wave_used_this_dome and _round_unblocked_hits_taken >= 2 and def_ki >= kiai_cost and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")) and randf() < 0.35:
 		var ew_ai: int = MeleeLoreEventScript.evaluate_lore_event_trigger({
 			"trigger_source": "explosive_wave_input",
 			"def_ki": def_ki,
 			"consecutive_hits_taken": _round_unblocked_hits_taken
 		})
 		if ew_ai == MeleeLoreEventScript.LoreEventType.EXPLOSIVE_WAVE:
+			_explosive_wave_used_this_dome = true
 			_start_lore_event(ew_ai, "explosive_wave")
 			return
 
@@ -2192,14 +2298,15 @@ func _execute_unblockable_ki_break_hit(swing_vel: float) -> void:
 	attacker = ki_break_attacker
 	defender = ki_break_victim
 	last_impact_vector = _compute_zone_launch_vector(1, false, 13.0)
+	var prof_kb: Dictionary = _get_bp_profile(ki_break_attacker, ki_break_victim, true)
 	var atk_to_def_kb: Vector3 = (-_duel_axis if (ki_break_victim and is_instance_valid(ki_break_victim) and bool(ki_break_victim.get("is_player"))) else _duel_axis)
 	if atk_to_def_kb.length_squared() < 0.01:
 		atk_to_def_kb = Vector3.BACK
 	atk_to_def_kb = atk_to_def_kb.normalized()
 	if ki_break_victim and is_instance_valid(ki_break_victim) and ki_break_victim.has_method("take_hit"):
-		ki_break_victim.take_hit(500.0, atk_to_def_kb)
+		ki_break_victim.take_hit(500.0 * float(prof_kb["damage_scale"]), atk_to_def_kb)
 	if ki_break_attacker and is_instance_valid(ki_break_attacker) and ki_break_attacker.has_method("increase_np"):
-		ki_break_attacker.increase_np(250.0)
+		ki_break_attacker.increase_np(250.0 * float(prof_kb["bp_gain_mult"]))
 	if target_zones.size() > 1:
 		_spawn_hit_spark(target_zones[1]["node"].global_position)
 
@@ -2293,9 +2400,11 @@ func _process_lore_event(delta: float) -> void:
 		_lore_ctrl.call("process_event", delta, l_ctrl, r_ctrl, def_left_velocity, def_right_velocity)
 
 
-func _close_dome_with_separation(_sep_dist: float) -> void:
+func _close_dome_with_separation(sep_dist: float, reason_msg: String = "") -> void:
 	if not is_active:
 		return
+	_custom_separation_dist = clampf(sep_dist, 4.5, 16.0)
+	_custom_separation_reason = reason_msg
 	is_active = false
 	_kill_surge_tween()
 	_hitstop_end_msec = 0
@@ -2329,6 +2438,8 @@ func _on_lore_event_finished(event_type: int, outcome: Dictionary) -> void:
 		var win_m: Node3D = outcome.get("winner", attacker) as Node3D
 		var vic_m: Node3D = outcome.get("victim", defender) as Node3D
 		var c_pos: Vector3 = outcome.get("crater_pos", global_position)
+		if win_m and is_instance_valid(win_m) and outcome.has("crater_stun"):
+			win_m.set_meta("pending_meteor_crater_stun", float(outcome.get("crater_stun", 3.5)))
 		emit_signal("meteor_smash_completed", win_m, vic_m, c_pos)
 		queue_free()
 		return
@@ -2345,6 +2456,7 @@ func _on_lore_event_finished(event_type: int, outcome: Dictionary) -> void:
 		if winner and is_instance_valid(winner) and loser and is_instance_valid(loser):
 			attacker = winner
 			defender = loser
+		_comeback_momentum_active = bool(outcome.get("comeback_momentum", false))
 		var bonus_h: int = int(outcome.get("bonus_hits", 0))
 		pending_attack_penalty = -bonus_h
 		var w_is_p: bool = attacker != null and bool(attacker.get("is_player"))
@@ -2352,7 +2464,7 @@ func _on_lore_event_finished(event_type: int, outcome: Dictionary) -> void:
 		_begin_phase_transition("continue_offense", 0.45, init_msg, Color(1.0, 0.78, 0.20))
 		return
 	elif act == "separate":
-		_close_dome_with_separation(float(outcome.get("distance", 9.0)))
+		_close_dome_with_separation(float(outcome.get("distance", 9.0)), String(outcome.get("reason", "")))
 		return
 	elif act == "launch":
 		var victim: Node3D = outcome.get("victim") as Node3D
@@ -2360,8 +2472,18 @@ func _on_lore_event_finished(event_type: int, outcome: Dictionary) -> void:
 			var tmp_a: Node3D = attacker
 			attacker = defender
 			defender = tmp_a
+		var launch_vel: float = 4.0
+		if event_type == MeleeLoreEventScript.LoreEventType.SONIC_Z_BURST:
+			var burst_hits: int = int(outcome.get("hits", 0))
+			if burst_hits >= 3 and attacker and is_instance_valid(attacker):
+				var prof_sb_fin: Dictionary = _get_bp_profile(attacker, defender, true)
+				_modify_fighter_ki(attacker, 10.0)
+				if attacker.has_method("increase_np"):
+					attacker.increase_np(200.0 * float(prof_sb_fin["bp_gain_mult"]))
+				_spawn_impact_popup(global_position, "🔥 ¡Z-BURST 3/3 PERFECTO! (+10 Ki)", Color(1.0, 0.90, 0.22), true)
+				launch_vel = 4.6
 		last_impact_vector = _compute_zone_launch_vector(1, false, 12.0)
-		_trigger_finisher_and_close("charged_v3_back", 4.0)
+		_trigger_finisher_and_close("charged_v3_back", launch_vel)
 		return
 
 	# Caso complete_normal
@@ -2373,6 +2495,7 @@ func _on_lore_event_finished(event_type: int, outcome: Dictionary) -> void:
 	if action_card_anchor and is_instance_valid(action_card_anchor):
 		action_card_anchor.visible = true
 	if _lore_return_mode in ["combo_mid", "guard_break", "z_vanish_war"] and _has_unresolved_notes():
+		_resync_unresolved_defense_notes(0.70)
 		phase = DomePhase.DEFENSE_RHYTHM
 	else:
 		evaluate_round_outcome()
@@ -2383,6 +2506,7 @@ func evaluate_round_outcome() -> void:
 	if not is_active:
 		return
 	_tutorial_controls_shown = true
+	_comeback_momentum_active = false
 	if _check_ki_break_after_note():
 		_declared_full_combo = false
 		return
@@ -2418,8 +2542,11 @@ func evaluate_round_outcome() -> void:
 		_modify_fighter_ki(attacker, momentum_bonus)
 		_spawn_impact_popup(global_position, "⚡ +%d KI MOMENTUM!" % int(momentum_bonus), Color(0.35, 0.96, 1.0))
 
-	# Evento Lore 2: Caída del Meteoro (antes de _pending_finisher_mode V3 para no bloquear V3 UP, excluyendo Martillazo)
+	# Evento Lore 2: Caída del Meteoro sorpresa (excluyendo Martillazo; si no dispara, respeta _pending_finisher_mode V3)
 	if _pending_finisher_mode != "hammer_strike" and _last_lore_event_type != MeleeLoreEventScript.LoreEventType.METEOR_SMASH and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")):
+		var cfg_ms: KiEconomyConfig = KiEconomyConfig.get_default()
+		var ms_chance: float = (float(cfg_ms.melee_meteor_smash_v3_chance) if cfg_ms.get("melee_meteor_smash_v3_chance") != null else 0.75) if has_v3_up else (float(cfg_ms.melee_meteor_smash_chance) if cfg_ms.get("melee_meteor_smash_chance") != null else 0.55)
+		var ms_cd_cfg: int = int(cfg_ms.melee_lore_event_cooldown_melees) if cfg_ms.get("melee_lore_event_cooldown_melees") != null else 2
 		var atk_ki_end: float = float(attacker.get("current_ki")) if (attacker and attacker.get("current_ki") != null) else 0.0
 		var m_ev: int = MeleeLoreEventScript.evaluate_lore_event_trigger({
 			"trigger_source": "combo_end",
@@ -2429,7 +2556,8 @@ func evaluate_round_outcome() -> void:
 			"hits_landed": clean_hits,
 			"atk_ki": atk_ki_end
 		})
-		if m_ev == MeleeLoreEventScript.LoreEventType.METEOR_SMASH:
+		if m_ev == MeleeLoreEventScript.LoreEventType.METEOR_SMASH and should_trigger_surprise_lore_event(randf(), ms_chance, _meteor_smash_cooldown_melees):
+			_meteor_smash_cooldown_melees = ms_cd_cfg
 			_pending_finisher_mode = ""
 			_start_lore_event(m_ev, "combo_end")
 			return
@@ -2580,7 +2708,11 @@ func _spawn_simultaneous_node(forced_role: String = "") -> void:
 		var cfg_sn: KiEconomyConfig = KiEconomyConfig.get_default()
 		if ai_sn and is_instance_valid(ai_sn):
 			_modify_fighter_ki(ai_sn, -float(cfg_sn.melee_quick_cost))
-	var max_t: float = 1.15 if role == "DEFEND" else 1.55
+	var max_t: float = 1.55
+	if role == "DEFEND":
+		var pair_sn: Array[Node3D] = _get_player_and_ai()
+		var prof_sn: Dictionary = _get_bp_profile(pair_sn[1], pair_sn[0], false)
+		max_t = clampf(1.15 * float(prof_sn["def_time_mult"]), 0.78, 1.55)
 	var ai_cl: bool = (role == "ATTACK" and randf() < 0.48)
 	_sim_nodes.append({
 		"zone_id": chosen_id,
@@ -2835,13 +2967,14 @@ func _process_simultaneous_exchange(delta: float) -> void:
 					if _resolve_simultaneous_clash(p_node, ai_node, z_pos):
 						return
 				else:
+					var prof_pa: Dictionary = _get_bp_profile(p_node, ai_node, false)
 					_modify_fighter_ki(p_node, -cfg_s.melee_quick_cost)
 					_sim_enemy_hits_taken += 1
-					_modify_fighter_ki(ai_node, -6.0)
+					_modify_fighter_ki(ai_node, -6.0 * float(prof_pa["ki_mult"]))
 					if ai_node.has_method("take_hit"):
-						ai_node.take_hit(220.0, _duel_axis)
+						ai_node.take_hit(220.0 * float(prof_pa["damage_scale"]), _duel_axis)
 					if p_node.has_method("increase_np"):
-						p_node.increase_np(140.0)
+						p_node.increase_np(200.0 * float(prof_pa["bp_gain_mult"]))
 					if ai_node.get("procedural_animator"):
 						ai_node.procedural_animator.trigger_hit_flinch(0.65, _duel_axis)
 					_spawn_hit_spark(z_pos)
@@ -2857,12 +2990,15 @@ func _process_simultaneous_exchange(delta: float) -> void:
 				remove_indices.append(idx)
 			elif t_rem <= -0.25:
 				if bool(slot["ai_claiming"]):
+					var prof_ap: Dictionary = _get_bp_profile(ai_node, p_node, false)
 					_sim_player_hits_taken += 1
 					_sim_last_impact_zone = zid
-					_modify_fighter_ki(p_node, -6.0)
+					_modify_fighter_ki(p_node, -6.0 * float(prof_ap["ki_mult"]))
 					_modify_fighter_ki(ai_node, -cfg_s.melee_quick_cost)
 					if p_node.has_method("take_hit"):
-						p_node.take_hit(160.0, -_duel_axis)
+						p_node.take_hit(160.0 * float(prof_ap["damage_scale"]), -_duel_axis)
+					if ai_node.has_method("increase_np"):
+						ai_node.increase_np(144.0 * float(prof_ap["bp_gain_mult"]))
 					if ai_node.get("procedural_animator"):
 						ai_node.procedural_animator.trigger_melee_strike(randi() % 4)
 					_pulse_player_both_hands(170.0, 0.80, 0.10)
@@ -2952,10 +3088,13 @@ func _process_simultaneous_exchange(delta: float) -> void:
 						continue
 					elif s_act == "BLOCK_GREEN" or s_act == "BLOCK_YELLOW":
 						_consume_defender_hand_buffer(parry_h)
+						var prof_sim_b: Dictionary = _get_bp_profile(ai_node, p_node, false)
 						if s_act == "BLOCK_GREEN":
 							var defl_sim: float = float(cfg_s.melee_deflect_ki_reward) if cfg_s.get("melee_deflect_ki_reward") != null else 16.0
 							_modify_fighter_ki(p_node, defl_sim, true)
 							_modify_fighter_ki(ai_node, -6.0)
+							if p_node.has_method("increase_np"):
+								p_node.increase_np(100.0 * float(prof_sim_b["defender_underdog_bp_mult"]))
 							_spawn_block_spark(z_pos, Color(0.25, 1.0, 0.50))
 							if ai_node.get("procedural_animator"):
 								ai_node.procedural_animator.trigger_hit_flinch(0.35, _duel_axis)
@@ -2969,7 +3108,7 @@ func _process_simultaneous_exchange(delta: float) -> void:
 							var y_sim_cost: float = float(cfg_s.melee_yellow_block_ki_cost) if cfg_s.get("melee_yellow_block_ki_cost") != null else 4.0
 							_modify_fighter_ki(p_node, -y_sim_cost)
 							if p_node.has_method("take_hit"):
-								p_node.take_hit(99.0, -_duel_axis)
+								p_node.take_hit(99.0 * float(prof_sim_b["damage_scale"]), -_duel_axis)
 							last_action_feedback = "⚠️ ¡AMARILLO! (-%d Ki)" % int(y_sim_cost)
 							_spawn_impact_popup(z_pos, "⚠️ ¡AMARILLO!", Color(1.0, 0.85, 0.18))
 						remove_indices.append(idx)
@@ -2977,21 +3116,27 @@ func _process_simultaneous_exchange(delta: float) -> void:
 
 				if crossing_now:
 					_consume_defender_note_buffers()
-					var gx_sim_cost: float = float(cfg_s.melee_sim_guard_x_cost) if cfg_s.get("melee_sim_guard_x_cost") != null else 6.0
+					var prof_sim_x: Dictionary = _get_bp_profile(ai_node, p_node, false)
+					var gx_sim_cost: float = clampf((float(cfg_s.melee_sim_guard_x_cost) if cfg_s.get("melee_sim_guard_x_cost") != null else 6.0) * float(prof_sim_x["ki_mult"]), 3.0, 12.0)
 					_modify_fighter_ki(p_node, -gx_sim_cost)
 					if p_node.has_method("take_hit"):
-						p_node.take_hit(45.0, -_duel_axis)
+						p_node.take_hit(45.0 * float(prof_sim_x["damage_scale"]), -_duel_axis)
+					if ai_node.has_method("increase_np"):
+						ai_node.increase_np(35.0 * float(prof_sim_x["bp_gain_mult"]))
 					_spawn_block_spark(z_pos, Color(0.25, 0.78, 1.0))
 					last_action_feedback = "🛡️ ¡GUARDIA X! (-%d Ki)" % int(gx_sim_cost)
 					remove_indices.append(idx)
 					continue
 
 			if (is_locked_s and t_rem <= 0.0) or t_rem <= -0.18:
+				var prof_sim_h: Dictionary = _get_bp_profile(ai_node, p_node, false)
 				_sim_player_hits_taken += 1
 				_sim_last_impact_zone = zid
-				_modify_fighter_ki(p_node, -8.0)
+				_modify_fighter_ki(p_node, -8.0 * float(prof_sim_h["ki_mult"]))
 				if p_node.has_method("take_hit"):
-					p_node.take_hit(220.0, -_duel_axis)
+					p_node.take_hit(220.0 * float(prof_sim_h["damage_scale"]), -_duel_axis)
+				if ai_node.has_method("increase_np"):
+					ai_node.increase_np(198.0 * float(prof_sim_h["bp_gain_mult"]))
 				if ai_node.get("procedural_animator"):
 					ai_node.procedural_animator.trigger_melee_strike(randi() % 4)
 				_trigger_dynamic_melee_mobility(1.5, true, false, false, ai_node, p_node, -_duel_axis * 4.5 + Vector3.UP * 0.6, 0.18, false)
@@ -3030,7 +3175,8 @@ func _finish_simultaneous_exchange(winner: Node3D, loser: Node3D, player_won: bo
 	attacker = winner
 	defender = loser
 	last_impact_vector = _compute_zone_launch_vector(_sim_last_impact_zone, false, 12.5)
-	var bp_bonus_s: float = 150.0 + float(_sim_clash_count) * 50.0
+	var prof_sfin: Dictionary = _get_bp_profile(winner, loser, true)
+	var bp_bonus_s: float = (150.0 + float(_sim_clash_count) * 50.0) * float(prof_sfin["bp_gain_mult"]) * float(prof_sfin["attacker_underdog_bp_mult"])
 	if winner and is_instance_valid(winner) and winner.has_method("increase_np"):
 		winner.increase_np(bp_bonus_s)
 	var dd_sim: DramaticDirector = DramaticDirector.get_active(get_tree())
@@ -3136,12 +3282,14 @@ func generate_ai_attack_sequence() -> void:
 # INVERSIÓN DE ROLES (TURNOVER) Y FINALIZACIÓN
 # ==============================================================================
 
-func restart_as_attacker() -> void:
+func restart_as_attacker(keep_comeback_momentum: bool = false) -> void:
 	var temp: Node3D = attacker
 	attacker = defender
 	defender = temp
 	defender_is_defenseless = false
 	attacker_damage_mult = 1.0
+	if not keep_comeback_momentum:
+		_comeback_momentum_active = false
 	last_action_feedback = ""
 
 	emit_signal("perfect_parry_triggered", attacker, defender)

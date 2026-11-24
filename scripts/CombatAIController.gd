@@ -740,8 +740,8 @@ func _check_ai_transformation() -> void:
 	var player_np: float = float(player.current_np) if (player and is_instance_valid(player)) else host.current_np
 	var behind_ratio: float = (player_np - host.current_np) / maxf(maxf(player_np, host.current_np), 1.0)
 
-	# Si el jugador saca gran ventaja (>= 38%), disparar el Evento Dramático Despertar Límite sin superar al jugador
-	if behind_ratio >= 0.38 and host.has_method("trigger_limit_break_transformation"):
+	# Si el jugador saca gran ventaja (>= 40%), disparar Despertar Límite (sujeto a candado de tier del líder)
+	if behind_ratio >= 0.40 and host.has_method("trigger_limit_break_transformation"):
 		if host.trigger_limit_break_transformation(player):
 			_play_ai_sfx("aura")
 			return
@@ -758,7 +758,7 @@ func _check_ai_transformation() -> void:
 		var form_cand: TransformationData = host.character_data.transformations[i]
 		if not form_cand:
 			continue
-		var climb_trigger: bool = (i == 0 and climb_ratio >= 0.75) or (i == 1 and current_idx >= 0 and climb_ratio >= 0.85) or (i >= 2 and current_idx >= 1 and bool(host.get("is_in_zenkai_state")))
+		var climb_trigger: bool = (i == 0 and climb_ratio >= 0.70) or (i == 1 and current_idx >= 0 and climb_ratio >= 0.80) or (i >= 2 and current_idx >= 1 and bool(host.get("is_in_zenkai_state")))
 		var match_player: bool = (player_trans != null and form_cand.np_multiplier <= player_mult + 0.1)
 		if i > desired_idx and (climb_trigger or match_player):
 			desired_idx = i

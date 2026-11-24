@@ -66,6 +66,11 @@ static var _cached: KiEconomyConfig = null
 @export_range(0.0, 1.0) var melee_sim_clash_flurry_chance: float = 0.45
 @export_range(0.0, 1.0) var melee_flurry_clash_trigger_chance: float = 0.45
 @export var melee_sim_guard_x_cost: float = 6.0
+@export_range(0.0, 1.0) var melee_meteor_smash_chance: float = 0.55
+@export_range(0.0, 1.0) var melee_meteor_smash_v3_chance: float = 0.75
+@export_range(0.0, 1.0) var melee_z_vanish_war_chance: float = 0.50
+@export_range(0.0, 1.0) var melee_guard_break_chance: float = 0.55
+@export var melee_lore_event_cooldown_melees: int = 2
 
 @export_group("Ki Blast Tactical Overhaul")
 @export var ki_blast_deflect_ki_reward: float = 16.0

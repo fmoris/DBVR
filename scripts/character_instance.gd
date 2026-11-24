@@ -1476,6 +1476,76 @@ static func compute_ki_blast_bp_profile(atk_bp: float, def_bp: float, is_charged
 	}
 
 
+static func compute_melee_bp_profile(
+	atk_bp: float,
+	def_bp: float,
+	atk_in_furia: bool = false,
+	is_heavy: bool = false,
+	atk_trans_mult: float = 1.0,
+	def_trans_mult: float = 1.0,
+	comeback_momentum: bool = false
+) -> Dictionary:
+	var raw_r: float = maxf(atk_bp, 100.0) / maxf(def_bp, 100.0)
+	var eff_r: float = raw_r + (0.30 if (atk_in_furia and is_heavy) else 0.0)
+	if comeback_momentum:
+		eff_r = maxf(eff_r, 0.95)
+
+	var gm_trans: float = sqrt(maxf(atk_trans_mult, 1.0) * maxf(def_trans_mult, 1.0))
+	var match_trans_scale: float = 1.0 + (gm_trans - 1.0) * 0.45
+
+	var dmg_mult: float = 1.0
+	var def_time_mult: float = 1.0
+	var ki_mult: float = 1.0
+	var bp_gain_mult: float = 1.0
+
+	if eff_r <= 0.55:
+		dmg_mult = 0.70 if is_heavy else 0.40
+		def_time_mult = 1.35
+		ki_mult = 0.85
+		bp_gain_mult = 1.55
+	elif eff_r < 0.75:
+		var t_dis: float = clampf((eff_r - 0.55) / 0.20, 0.0, 1.0)
+		dmg_mult = lerpf(0.75, 0.92, t_dis)
+		def_time_mult = lerpf(1.30, 1.12, t_dis)
+		ki_mult = 0.90
+		bp_gain_mult = lerpf(1.45, 1.25, t_dis)
+	elif eff_r <= 1.35:
+		var t_eq: float = clampf((eff_r - 0.75) / 0.60, 0.0, 1.0)
+		dmg_mult = lerpf(0.92, 1.08, t_eq)
+		def_time_mult = lerpf(1.12, 0.92, t_eq)
+		ki_mult = 1.00
+		bp_gain_mult = 1.00
+	elif eff_r < 1.80:
+		var t_sup: float = clampf((eff_r - 1.35) / 0.45, 0.0, 1.0)
+		dmg_mult = lerpf(1.12, 1.30, t_sup)
+		def_time_mult = lerpf(0.92, 0.84, t_sup)
+		ki_mult = 1.10
+		bp_gain_mult = 0.85
+	else:
+		var t_dom: float = clampf((eff_r - 1.80) / 1.20, 0.0, 1.0)
+		dmg_mult = lerpf(1.30, 1.45, t_dom)
+		def_time_mult = 0.78
+		ki_mult = 1.15
+		bp_gain_mult = 0.60
+
+	var defender_underdog_bp_mult: float = clampf(pow(raw_r, 0.35), 1.00, 1.35) if raw_r > 1.15 else 1.00
+	var attacker_underdog_bp_mult: float = clampf(pow(1.0 / maxf(raw_r, 0.1), 0.35), 1.00, 1.35) if raw_r < 0.85 else 1.00
+
+	return {
+		"raw_ratio": raw_r,
+		"effective_ratio": eff_r,
+		"match_trans_scale": match_trans_scale,
+		"dmg_mult": dmg_mult,
+		"damage_scale": dmg_mult * match_trans_scale,
+		"def_time_mult": def_time_mult,
+		"ki_mult": ki_mult,
+		"bp_gain_mult": bp_gain_mult,
+		"defender_underdog_bp_mult": defender_underdog_bp_mult,
+		"attacker_underdog_bp_mult": attacker_underdog_bp_mult,
+		"is_dominance": raw_r >= 1.80
+	}
+
+
 func apply_ki_blast_pressure(attacker: Node, is_charged: bool, was_blocked: bool, profile: Dictionary, impact_pos: Vector3, extra_stacks: float = 0.0) -> bool:
 	last_blast_ratio = float(profile.get("effective_ratio", 1.0))
 	blast_pressure_required = maxf(float(profile.get("stacks_required", 3.0)), 1.0)
@@ -1818,7 +1888,13 @@ func _process_passive_ki_regen(delta: float) -> void:
 func _regen_ki_from_damage(bp_lost: float) -> void:
 	if bp_lost <= 0.0 or not character_data:
 		return
-	current_ki = minf(current_ki + bp_lost * KiEconomyConfig.get_default().ki_regen_per_bp_lost, character_data.base_ki)
+	var res_mult: float = 1.0
+	var opp_rk: Node3D = _get_opponent()
+	if opp_rk != null and is_instance_valid(opp_rk) and opp_rk.get("current_np") != null:
+		var opp_bp_rk: float = maxf(float(opp_rk.get("current_np")), 100.0)
+		if current_np < opp_bp_rk * 0.85:
+			res_mult = 1.35
+	current_ki = minf(current_ki + bp_lost * KiEconomyConfig.get_default().ki_regen_per_bp_lost * res_mult, character_data.base_ki)
 
 
 ## Ganancia de BP por recarga de Ki: solo sube hasta el techo de carga (60% del máximo activo).
@@ -1944,6 +2020,12 @@ func trigger_limit_break_transformation(leader: Node3D, allow_during_sequence: b
 	var next_idx: int = current_transformation_index + 1
 	if next_idx < 0 or next_idx >= character_data.transformations.size():
 		return false
+	# Candado de tier: quien va perdiendo nunca despierta gratis una transformación superior a la del líder
+	var leader_t_idx: int = -1
+	if leader and is_instance_valid(leader) and leader.get("current_transformation_index") != null:
+		leader_t_idx = int(leader.get("current_transformation_index"))
+	if next_idx > leader_t_idx:
+		return false
 	var trans: TransformationData = character_data.transformations[next_idx]
 	if trans == null or trans.tier_level > 2:
 		return false
@@ -1959,22 +2041,22 @@ func trigger_limit_break_transformation(leader: Node3D, allow_during_sequence: b
 		unlock_transformation(trans.form_name)
 	transform_to(next_idx, allow_during_sequence)
 
-	# Regla anti-injusticia: el desfavorecido despierta su forma pero NUNCA sobrepasa al líder
+	# Regla anti-injusticia: el desfavorecido despierta su forma pero NUNCA alcanza ni sobrepasa al líder (tope 78%)
 	if leader and is_instance_valid(leader) and leader.get("current_np") != null:
 		var leader_np: float = float(leader.get("current_np"))
 		if leader_np > 0.0:
-			var max_catchup_np: float = maxf(leader_np * 0.90, 1000.0)
+			var max_catchup_np: float = maxf(leader_np * 0.78, 1000.0)
 			if current_np > max_catchup_np:
 				current_np = max_catchup_np
 				secured_np_threshold_ratio = minf(secured_np_threshold_ratio, clampf((current_np * 0.70) / maxf(get_active_max_np(), 1.0), 0.10, 0.50))
 
-	current_ki = minf(current_ki + 25.0, character_data.base_ki)
+	current_ki = minf(current_ki + 10.0, character_data.base_ki)
 	_notify_stats()
 	var dd_lb: DramaticDirector = DramaticDirector.get_active(get_tree())
 	if dd_lb and dd_lb.has_method("play_dramatic_limit_break_transformation"):
 		dd_lb.play_dramatic_limit_break_transformation(self, trans)
 	var c_lbl: String = character_data.character_name if character_data else name
-	_log_combat_event("🔥 ¡DESPERTAR LÍMITE! %s activa %s por brecha de poder (+25 Ki)" % [c_lbl, trans.form_name], "warning")
+	_log_combat_event("🔥 ¡DESPERTAR LÍMITE! %s activa %s por brecha de poder (+10 Ki)" % [c_lbl, trans.form_name], "warning")
 	_is_limit_break_running = false
 	return true
 
@@ -2301,9 +2383,9 @@ func get_next_transformation_status() -> Dictionary:
 	var req_text: String = "LISTO: Pulsa [A / X] o Puños a la Cintura (1.2s)"
 	if not unlocked:
 		if next_idx == 0:
-			req_text = "Alcanza 75% BP, baja a 78% BP base o entra en Furia"
+			req_text = "Alcanza 68% BP en combate o iguala transformación rival en Furia"
 		elif next_idx == 1:
-			req_text = "En Fase 1: alcanza 85% BP, baja a 68% BP o entra en Furia"
+			req_text = "En Fase 1: alcanza 78% BP o iguala Fase 2 rival en Furia"
 		elif next_idx == 2:
 			req_text = "Alcanza Estado Zenkai (Dominio o Comeback)"
 		else:
@@ -2327,20 +2409,21 @@ func _check_transformation_unlocks() -> void:
 	
 	var opp = _get_opponent()
 	var opp_np: float = opp.get("current_np") if (opp and is_instance_valid(opp) and opp.get("current_np") != null) else current_np
+	var opp_t_idx: int = int(opp.get("current_transformation_index")) if (opp and is_instance_valid(opp) and opp.get("current_transformation_index") != null) else -1
 	var behind_ratio: float = (opp_np - current_np) / maxf(maxf(opp_np, current_np), 1.0)
-	var is_lagging_behind: bool = is_in_furia or (behind_ratio >= 0.38)
+	var is_lagging_behind: bool = is_in_furia or (behind_ratio >= 0.40)
 	
-	# Desbloqueo Fase 1 (SSJ): por escalar NP combatiente (>= 72% máx) o Despertar Límite en desventaja real (>= 38%)
+	# Desbloqueo Fase 1 (SSJ): por escalar NP combatiente (>= 68% máx) o Despertar Límite si el rival ya transformó
 	var form_1: String = character_data.transformations[0].form_name
 	if not is_transformation_unlocked(form_1):
-		if climb_ratio >= 0.72 or is_lagging_behind:
+		if climb_ratio >= 0.68 or (is_lagging_behind and opp_t_idx >= 0):
 			unlock_transformation(form_1)
 	
-	# Desbloqueo Fase 2 (Super Vegeta / SSJ2): escalando en Fase 1+ (>= 82%) o desventaja extrema (>= 38%)
+	# Desbloqueo Fase 2 (Super Vegeta / SSJ2): escalando en Fase 1+ (>= 78%) o Despertar Límite si el rival ya alcanzó Fase 2
 	if character_data.transformations.size() > 1:
 		var form_2: String = character_data.transformations[1].form_name
 		if not is_transformation_unlocked(form_2):
-			if current_transformation != null and (climb_ratio >= 0.82 or is_lagging_behind):
+			if current_transformation != null and (climb_ratio >= 0.78 or (is_lagging_behind and opp_t_idx >= 1)):
 				unlock_transformation(form_2)
 				
 	# Desbloqueo Fase 3 (SSB / Forma Divina):
@@ -4415,7 +4498,7 @@ func _process_mutual_body_collision() -> void:
 
 
 ## Calcula la cantidad estratégica de golpes permitidos según Transformación y Ratio de BP (Base 4..7, tope 8 con emboscada)
-func calculate_melee_attack_count(p_attacker: Node3D, p_defender: Node3D) -> int:
+func calculate_melee_attack_count(p_attacker: Node3D, p_defender: Node3D, ignore_underdog_penalty: bool = false) -> int:
 	var count: int = 4
 	if p_attacker and is_instance_valid(p_attacker):
 		var t_idx_val: Variant = p_attacker.get("current_transformation_index")
@@ -4431,7 +4514,7 @@ func calculate_melee_attack_count(p_attacker: Node3D, p_defender: Node3D) -> int
 	var ratio: float = atk_bp / maxf(def_bp, 100.0)
 	if ratio >= 1.35:
 		count += 1
-	elif ratio < 0.75:
+	elif not ignore_underdog_penalty and ratio < 0.75:
 		count -= 1
 	var ambush_bonus: int = int(p_attacker.get("pending_ambush_bonus_hits")) if (p_attacker and is_instance_valid(p_attacker) and p_attacker.get("pending_ambush_bonus_hits") != null) else 0
 	if ambush_bonus > 0:
@@ -4607,7 +4690,15 @@ func _on_perfect_parry_turnover(new_attacker: Node3D, new_defender: Node3D) -> v
 func _on_bullet_time_completed(recorded_hits: Array, _launch_vector: Vector3, opponent: Node3D) -> void:
 	var final_atk: Node3D = self
 	var final_def: Node3D = opponent
+	var custom_sep_dist: float = -1.0
+	var custom_sep_reason: String = ""
 	if active_target_dome and is_instance_valid(active_target_dome):
+		var c_sep_v: Variant = active_target_dome.get("_custom_separation_dist")
+		if c_sep_v != null:
+			custom_sep_dist = float(c_sep_v)
+		var c_reason_v: Variant = active_target_dome.get("_custom_separation_reason")
+		if c_reason_v != null:
+			custom_sep_reason = String(c_reason_v)
 		var d_atk: Variant = active_target_dome.get("attacker")
 		var d_def: Variant = active_target_dome.get("defender")
 		if d_atk is Node3D and is_instance_valid(d_atk) and d_def is Node3D and is_instance_valid(d_def):
@@ -4630,8 +4721,13 @@ func _on_bullet_time_completed(recorded_hits: Array, _launch_vector: Vector3, op
 			fighter_r.set("is_knocked_back", false)
 
 	if recorded_hits.is_empty():
-		final_atk._log_combat_event("↩️ Secuencia melee cancelada o sin impactos. Retornando a distancia táctica.", "info")
-		final_atk._separate_fighters_to_canonical_distance(final_def, 8.0)
+		if custom_sep_dist > 0.0:
+			var sep_msg: String = custom_sep_reason if custom_sep_reason != "" else "↩️ Intercambio melee finalizado. Separación táctica."
+			final_atk._log_combat_event(sep_msg, "info")
+			final_atk._separate_fighters_to_canonical_distance(final_def, custom_sep_dist)
+		else:
+			final_atk._log_combat_event("↩️ Secuencia melee cancelada o sin impactos. Retornando a distancia táctica.", "info")
+			final_atk._separate_fighters_to_canonical_distance(final_def, 8.0)
 	elif not is_match_over and final_atk and is_instance_valid(final_atk) and float(final_atk.get("current_ki")) >= 10.0 and final_def and is_instance_valid(final_def):
 		final_atk._log_combat_event("⚔️ Intercambio melee concluido (%d acciones). ¡Iniciando Bullet-Time de seguimiento!" % recorded_hits.size(), "success")
 		var fu_vec: Vector3 = _launch_vector if _launch_vector.length_squared() > 0.1 else (final_def.global_position - final_atk.global_position).normalized() * 18.0 + Vector3.UP * 5.0
@@ -4718,9 +4814,13 @@ func apply_meteor_crater_setup(victim: Node3D, crater_pos: Vector3) -> void:
 	victim.set("is_knocked_back", false)
 	victim.set("is_blocking", false)
 	victim.set("is_in_bullet_time", false)
-	victim.set("ground_crater_stun_timer", 3.5)
+	var stun_sec: float = 3.5
+	if has_meta("pending_meteor_crater_stun"):
+		stun_sec = clampf(float(get_meta("pending_meteor_crater_stun")), 2.8, 4.0)
+		remove_meta("pending_meteor_crater_stun")
+	victim.set("ground_crater_stun_timer", stun_sec)
 	victim.set("is_staggered", true)
-	victim.set("stagger_timer", maxf(float(victim.get("stagger_timer")) if victim.get("stagger_timer") != null else 0.0, 3.5))
+	victim.set("stagger_timer", maxf(float(victim.get("stagger_timer")) if victim.get("stagger_timer") != null else 0.0, stun_sec))
 	if victim.get("procedural_animator"):
 		victim.procedural_animator.trigger_hit_flinch(1.4, Vector3.UP)
 
