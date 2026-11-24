@@ -476,7 +476,7 @@ func _update_debug_hud_text() -> void:
 		return
 	var ply: Node = gesture_tree._get_player_instance() if (gesture_tree and gesture_tree.has_method("_get_player_instance")) else null
 	var ki_txt: String = "%.0f" % float(ply.get("current_ki")) if (ply and ply.get("current_ki") != null) else "N/A"
-	var np_txt: String = "%.0f" % float(ply.get("current_bp")) if (ply and ply.get("current_bp") != null) else "N/A"
+	var np_txt: String = "%.0f" % float(ply.get("current_np")) if (ply and ply.get("current_np") != null) else "N/A"
 	var blk_txt: String = "SI" if (ply and bool(ply.get("is_blocking"))) else "NO"
 	_hud_label.text = (
 		"[DBVR DESKTOP SIMULATOR | F1: Ocultar | Tab: Mouse (%s)]\n" % ("CAPTURADO" if _mouse_captured else "LIBRE")

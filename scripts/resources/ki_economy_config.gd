@@ -62,7 +62,9 @@ static var _cached: KiEconomyConfig = null
 @export var melee_flurry_clash_win_ki_reward: float = 18.0
 @export var melee_sonic_burst_hop_cost: float = 6.0
 @export var melee_sim_clash_ki_reward: float = 8.0
-@export var melee_sim_clashes_to_flurry: int = 2
+@export var melee_sim_clashes_to_flurry: int = 3
+@export_range(0.0, 1.0) var melee_sim_clash_flurry_chance: float = 0.45
+@export_range(0.0, 1.0) var melee_flurry_clash_trigger_chance: float = 0.45
 @export var melee_sim_guard_x_cost: float = 6.0
 
 @export_group("Ki Blast Tactical Overhaul")

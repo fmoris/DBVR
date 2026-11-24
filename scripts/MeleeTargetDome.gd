@@ -162,6 +162,7 @@ var _lore_return_mode: String = ""
 var _scenic_spot_idx: int = 0
 var hammer_ki_paid: bool = false
 static var _sonic_burst_cooldown_melees: int = 0
+static var _flurry_clash_cooldown_melees: int = 0
 var _sonic_burst_used_this_dome: bool = false
 var _sonic_burst_rolled_this_round: bool = false
 var _declared_full_combo: bool = false
@@ -236,6 +237,7 @@ const ZONE_DEFINITIONS = [
 static func reset_match_static_state() -> void:
 	_sim_exchange_cooldown_melees = 0
 	_sonic_burst_cooldown_melees = 0
+	_flurry_clash_cooldown_melees = 0
 	_tutorial_controls_shown = false
 
 
@@ -362,6 +364,7 @@ func setup(p_attacker: Node3D, p_defender: Node3D, p_duration: float = -1.0, p_m
 	_sim_exchange_cooldown_melees = maxi(_sim_exchange_cooldown_melees - 1, 0)
 	_sonic_burst_used_this_dome = false
 	_sonic_burst_cooldown_melees = maxi(_sonic_burst_cooldown_melees - 1, 0)
+	_flurry_clash_cooldown_melees = maxi(_flurry_clash_cooldown_melees - 1, 0)
 	if attacker and is_instance_valid(attacker) and attacker.has_method("set"):
 		attacker.set("is_blocking", false)
 	if defender and is_instance_valid(defender) and defender.has_method("set"):
@@ -454,6 +457,19 @@ static func evaluate_real_punch_motion(vel: Vector3, punch_fwd: Vector3, stroke_
 
 static func should_release_punch_retraction(last_hit_depth: float, cur_depth: float, cur_fwd_vel: float) -> bool:
 	return (last_hit_depth - cur_depth) >= 0.13 or (cur_depth <= 0.24 and cur_fwd_vel <= 0.25)
+
+
+static func should_trigger_individual_flurry_clash(roll: float, chance: float, cooldown_melees: int) -> bool:
+	if cooldown_melees > 0:
+		return false
+	return roll < clampf(chance, 0.0, 1.0)
+
+
+static func should_trigger_sim_flurry_clash(clash_count: int, thresh: int, roll: float, base_chance: float, cooldown_melees: int) -> bool:
+	if cooldown_melees > 0 or clash_count < thresh:
+		return false
+	var effective_chance: float = clampf(base_chance + float(clash_count - thresh) * 0.25, 0.0, 0.85)
+	return roll < effective_chance
 
 
 static func is_hand_winding_clash_in_red(grip_held: bool, trig_held: bool, dist_to_zone: float, fwd_vel: float, is_hammer: bool) -> bool:
@@ -1510,7 +1526,8 @@ func _resolve_fist_clash(note: Dictionary, zone: Dictionary, hand_idx: int) -> v
 	if r_bp >= 0.70:
 		clash_penalty_hits += 1
 		var fc_ev: int = MeleeLoreEventScript.LoreEventType.NONE
-		if phase == DomePhase.DEFENSE_RHYTHM and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")):
+		var flurry_chance: float = float(cfg_fc.melee_flurry_clash_trigger_chance) if cfg_fc.get("melee_flurry_clash_trigger_chance") != null else 0.45
+		if phase == DomePhase.DEFENSE_RHYTHM and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")) and should_trigger_individual_flurry_clash(randf(), flurry_chance, _flurry_clash_cooldown_melees):
 			var atk_ki_fc: float = float(attacker.get("current_ki")) if (attacker and attacker.get("current_ki") != null) else 0.0
 			var def_ki_fc: float = float(defender.get("current_ki")) if (defender and defender.get("current_ki") != null) else 0.0
 			fc_ev = MeleeLoreEventScript.evaluate_lore_event_trigger({
@@ -2258,6 +2275,8 @@ func _start_lore_event(event_type: int, return_mode: String) -> void:
 			header_label.visible = true
 		if action_card_anchor and is_instance_valid(action_card_anchor):
 			action_card_anchor.visible = true
+	elif event_type == MeleeLoreEventScript.LoreEventType.FIST_FLURRY_CLASH:
+		_flurry_clash_cooldown_melees = 2
 
 
 func _process_lore_event(delta: float) -> void:
@@ -2521,11 +2540,10 @@ func start_simultaneous_exchange() -> void:
 		var cfg_sim_card: KiEconomyConfig = KiEconomyConfig.get_default()
 		var sim_q_cost: int = int(cfg_sim_card.melee_quick_cost) if cfg_sim_card.get("melee_quick_cost") != null else 3
 		var sim_cl_ki: int = int(cfg_sim_card.melee_sim_clash_ki_reward) if cfg_sim_card.get("melee_sim_clash_ki_reward") != null else 8
-		var sim_flurry_n: int = int(cfg_sim_card.melee_sim_clashes_to_flurry) if cfg_sim_card.get("melee_sim_clashes_to_flurry") != null else 2
 		if _action_card_border_mat:
 			_action_card_border_mat.albedo_color = Color(1.0, 0.85, 0.18, 0.95)
 		_action_card_label.modulate = Color(1.0, 0.96, 0.72)
-		_action_card_label.text = "⚡ INTERCAMBIO SIMULTÁNEO ANIME\n• Golpea ⭕/💥 con puño (G+T): -%d Ki | 💥 Choque = +%d Ki ambos (%d = ¡Ráfaga!)\n• Bloquea ⬜ con Trigger (Verde) o G+T rápido (¡CHOQUE!) / Dorado (¡PARRY!)\n• Gana el primero en 4 golpes, Parry o dejar sin Ki!" % [sim_q_cost, sim_cl_ki, sim_flurry_n]
+		_action_card_label.text = "⚡ INTERCAMBIO SIMULTÁNEO ANIME\n• Golpea ⭕/💥 con puño (G+T): -%d Ki | 💥 Choque = +%d Ki ambos (¡puede desatar Ráfaga!)\n• Bloquea ⬜ con Trigger (Verde) o G+T rápido (¡CHOQUE!) / Dorado (¡PARRY!)\n• Gana el primero en 4 golpes, Parry o dejar sin Ki!" % [sim_q_cost, sim_cl_ki]
 
 	_spawn_simultaneous_node("ATTACK")
 	_spawn_simultaneous_node("DEFEND")
@@ -2641,11 +2659,12 @@ func _sync_simultaneous_zone_visuals() -> void:
 				step_lbl.visible = true
 
 
-func _resolve_simultaneous_clash(p_node: Node3D, ai_node: Node3D, z_pos: Vector3) -> bool:
+func _resolve_simultaneous_clash(p_node: Node3D, ai_node: Node3D, z_pos: Vector3, forced_roll: float = -1.0) -> bool:
 	_sim_clash_count += 1
 	var cfg_sc: KiEconomyConfig = KiEconomyConfig.get_default()
 	var sim_clash_ki: float = float(cfg_sc.melee_sim_clash_ki_reward) if cfg_sc.get("melee_sim_clash_ki_reward") != null else 8.0
-	var clash_thresh: int = int(cfg_sc.melee_sim_clashes_to_flurry) if cfg_sc.get("melee_sim_clashes_to_flurry") != null else 2
+	var clash_thresh: int = int(cfg_sc.melee_sim_clashes_to_flurry) if cfg_sc.get("melee_sim_clashes_to_flurry") != null else 3
+	var sim_flurry_chance: float = float(cfg_sc.melee_sim_clash_flurry_chance) if cfg_sc.get("melee_sim_clash_flurry_chance") != null else 0.45
 	_modify_fighter_ki(p_node, sim_clash_ki)
 	_modify_fighter_ki(ai_node, sim_clash_ki)
 	if p_node and is_instance_valid(p_node) and p_node.has_method("increase_np"):
@@ -2669,7 +2688,8 @@ func _resolve_simultaneous_clash(p_node: Node3D, ai_node: Node3D, z_pos: Vector3
 
 	var p_ki_chk: float = float(p_node.get("current_ki")) if (p_node and is_instance_valid(p_node) and p_node.get("current_ki") != null) else 0.0
 	var ai_ki_chk: float = float(ai_node.get("current_ki")) if (ai_node and is_instance_valid(ai_node) and ai_node.get("current_ki") != null) else 0.0
-	if p_ki_chk >= 16.0 and ai_ki_chk >= 16.0 and _sim_clash_count >= clash_thresh and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")):
+	var roll_sc: float = forced_roll if forced_roll >= 0.0 else randf()
+	if p_ki_chk >= 16.0 and ai_ki_chk >= 16.0 and _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")) and should_trigger_sim_flurry_clash(_sim_clash_count, clash_thresh, roll_sc, sim_flurry_chance, _flurry_clash_cooldown_melees):
 		attacker = p_node
 		defender = ai_node
 		_sim_nodes.clear()
