@@ -15,24 +15,19 @@ static var _smoke_mat: StandardMaterial3D = null
 
 static func _ensure_assets() -> void:
 	if _smoke_mat == null:
-		var grad := Gradient.new()
-		grad.colors = PackedColorArray([Color(1.0, 1.0, 1.0, 0.85), Color(0.9, 0.9, 0.9, 0.35), Color(0.8, 0.8, 0.8, 0.0)])
-		grad.offsets = PackedFloat32Array([0.0, 0.55, 1.0])
-		var tex := GradientTexture2D.new()
-		tex.width = 64
-		tex.height = 64
-		tex.fill = GradientTexture2D.FILL_RADIAL
-		tex.fill_from = Vector2(0.5, 0.5)
-		tex.fill_to = Vector2(0.5, 0.0)
-		tex.gradient = grad
-
 		_smoke_mat = StandardMaterial3D.new()
 		_smoke_mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
 		_smoke_mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
 		_smoke_mat.vertex_color_use_as_albedo = true
 		_smoke_mat.billboard_mode = StandardMaterial3D.BILLBOARD_PARTICLES
+		_smoke_mat.billboard_keep_scale = true
 		_smoke_mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
-		_smoke_mat.albedo_texture = tex
+		_smoke_mat.particles_anim_h_frames = 4
+		_smoke_mat.particles_anim_v_frames = 4
+		_smoke_mat.particles_anim_loop = false
+		var z_smoke: Texture2D = ZenkaiVFXManager.get_tex("smoke_white_4x4")
+		if z_smoke != null:
+			_smoke_mat.albedo_texture = z_smoke
 
 	if _smoke_mesh == null:
 		_smoke_mesh = QuadMesh.new()
@@ -60,6 +55,8 @@ static func _acquire_emitter(scene_root: Node) -> CPUParticles3D:
 		p.gravity = Vector3(0.0, 0.45, 0.0)
 		p.damping_min = 1.6
 		p.damping_max = 2.8
+		p.anim_speed_min = 0.85
+		p.anim_speed_max = 1.25
 		var col_ramp := Gradient.new()
 		col_ramp.colors = PackedColorArray([Color(1.0, 1.0, 1.0, 0.0), Color(0.9, 0.9, 0.9, 0.65), Color(0.75, 0.75, 0.75, 0.0)])
 		col_ramp.offsets = PackedFloat32Array([0.0, 0.18, 1.0])
@@ -118,6 +115,8 @@ static func _acquire_screen_emitter(scene_root: Node) -> CPUParticles3D:
 		p.gravity = Vector3(0.0, 0.18, 0.0)
 		p.damping_min = 2.2
 		p.damping_max = 3.5
+		p.anim_speed_min = 0.75
+		p.anim_speed_max = 1.15
 		var col_ramp := Gradient.new()
 		col_ramp.colors = PackedColorArray([Color(0.95, 0.95, 0.95, 0.0), Color(0.85, 0.85, 0.85, 0.78), Color(0.68, 0.68, 0.68, 0.0)])
 		col_ramp.offsets = PackedFloat32Array([0.0, 0.12, 1.0])

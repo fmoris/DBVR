@@ -5,8 +5,9 @@ import os
 import re
 from datetime import datetime
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SFX_DIR = os.path.normpath(os.path.join(BASE_DIR, "..", "sfx"))
+ROOT_DIR = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+BASE_DIR = os.path.join(ROOT_DIR, "assets", "audio")
+SFX_DIR = os.path.join(ROOT_DIR, "assets", "sfx")
 AUDIO_EXTS = {".wav", ".ogg", ".mp3", ".flac"}
 
 
@@ -51,10 +52,11 @@ def main() -> None:
         "folders": folders,
     }
 
-    with open(os.path.join(BASE_DIR, "audio_manifest.json"), "w", encoding="utf-8") as f:
+    out_dir = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(out_dir, "audio_manifest.json"), "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
 
-    with open(os.path.join(BASE_DIR, "audio_manifest.js"), "w", encoding="utf-8") as f:
+    with open(os.path.join(out_dir, "audio_manifest.js"), "w", encoding="utf-8") as f:
         f.write("// Auto-generated fallback for file:// protocol (CORS-free)\n")
         f.write("window.AUDIO_MANIFEST = ")
         json.dump(manifest, f, ensure_ascii=False)

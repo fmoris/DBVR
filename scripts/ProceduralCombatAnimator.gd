@@ -21,6 +21,19 @@ var skeleton: Skeleton3D = null
 var character_instance: Node3D = null
 var enabled: bool = true
 var is_vegeta_char: bool = false
+var zenkai_anim_loader: ZenkaiAnimationLoader = null
+var zenkai_overlay_weight: float = 0.45
+var use_pure_zenkai_spa: bool = false
+var spa_compose_mode: int = 4
+var spa_axis_signs: Vector3 = Vector3(1.0, 1.0, 1.0)
+var spa_swap_lr: bool = false
+var spa_enable_torso: bool = true
+var spa_enable_arms: bool = true
+var spa_enable_legs: bool = true
+var spa_enable_head: bool = false
+var spa_forced_clip: String = ""
+var spa_forced_u: float = -1.0
+var _zenkai_bone_quats: Dictionary = {}
 
 # Diccionario de huesos cacheados con sus transformaciones originales de reposo
 var bone_indices: Dictionary = {}
@@ -99,6 +112,27 @@ const TARGET_BONES: Array[String] = [
 	"LeftUpLeg", "LeftLeg", "RightUpLeg", "RightLeg", "Hips"
 ]
 
+const BONE_ALIASES: Dictionary = {
+	"Hips": ["Hips", "WAIST"],
+	"Spine": ["Spine", "SPINE1"],
+	"Chest": ["Chest", "SPINE2"],
+	"UpperChest": ["UpperChest", "SPINE3"],
+	"Neck": ["Neck", "NECK"],
+	"Head": ["Head", "HEAD"],
+	"LeftShoulder": ["LeftShoulder", "CLAVICLE_R"],
+	"LeftArm": ["LeftArm", "SHOULDER_R"],
+	"LeftForeArm": ["LeftForeArm", "ELBOW_R"],
+	"LeftHand": ["LeftHand", "WRIST_R"],
+	"RightShoulder": ["RightShoulder", "CLAVICLE_L"],
+	"RightArm": ["RightArm", "SHOULDER_L"],
+	"RightForeArm": ["RightForeArm", "ELBOW_L"],
+	"RightHand": ["RightHand", "WRIST_L"],
+	"LeftUpLeg": ["LeftUpLeg", "THIGH_R"],
+	"LeftLeg": ["LeftLeg", "CLANK_R"],
+	"RightUpLeg": ["RightUpLeg", "THIGH_L"],
+	"RightLeg": ["RightLeg", "CLANK_L"],
+}
+
 
 func setup(p_skeleton: Skeleton3D, p_character: Node3D) -> void:
 	skeleton = p_skeleton
@@ -116,22 +150,53 @@ func setup(p_skeleton: Skeleton3D, p_character: Node3D) -> void:
 		return
 
 	for target in TARGET_BONES:
-		var idx: int = skeleton.find_bone(target)
-		if idx == -1:
-			idx = skeleton.find_bone(target.to_lower())
-		if idx == -1:
-			for b in range(skeleton.get_bone_count()):
-				var b_name: String = skeleton.get_bone_name(b)
-				if b_name.nocasecmp_to(target) == 0:
-					idx = b
-					break
+		var idx: int = _find_bone_with_aliases(target)
 		if idx != -1:
 			bone_indices[target] = idx
 			bone_rest_rotations[target] = skeleton.get_bone_rest(idx).basis.get_rotation_quaternion()
 
+	zenkai_anim_loader = ZenkaiAnimationLoader.new()
+	var active_form: String = ""
+	var custom_lib: String = ""
+	if character_instance and character_instance.get("current_transformation") != null:
+		var tr_res: Resource = character_instance.get("current_transformation")
+		if tr_res and "form_name" in tr_res:
+			active_form = String(tr_res.get("form_name"))
+		if tr_res and "anim_library_path" in tr_res:
+			custom_lib = String(tr_res.get("anim_library_path"))
+	if not custom_lib.is_empty():
+		zenkai_anim_loader.load_library(custom_lib)
+	else:
+		zenkai_anim_loader.load_default_for_character(is_vegeta_char, active_form)
+
 	print("[ProceduralCombatAnimator] Configurado para %s. Huesos mapeados: %d/%d" % [
 		character_instance.name, bone_indices.size(), TARGET_BONES.size()
 	])
+
+
+func set_transformation_form(form_name: String, custom_library_path: String = "") -> void:
+	if zenkai_anim_loader == null:
+		zenkai_anim_loader = ZenkaiAnimationLoader.new()
+	if not custom_library_path.is_empty():
+		zenkai_anim_loader.load_library(custom_library_path)
+	else:
+		zenkai_anim_loader.load_default_for_character(is_vegeta_char, form_name)
+
+
+func _find_bone_with_aliases(target: String) -> int:
+	var candidates: Array = BONE_ALIASES.get(target, [target])
+	for cand in candidates:
+		var cand_str: String = String(cand)
+		var idx: int = skeleton.find_bone(cand_str)
+		if idx != -1:
+			return idx
+		idx = skeleton.find_bone(cand_str.to_lower())
+		if idx != -1:
+			return idx
+		for b in range(skeleton.get_bone_count()):
+			if skeleton.get_bone_name(b).nocasecmp_to(cand_str) == 0:
+				return b
+	return -1
 
 
 func trigger_hit_flinch(intensity: float, hit_dir: Vector3) -> void:
@@ -184,17 +249,22 @@ func trigger_melee_strike(strike_type: int = -1) -> void:
 		melee_anim_type = melee_combo_counter % 4
 		melee_combo_counter += 1
 	else:
-		melee_anim_type = clampi(strike_type, 0, 4)
-	melee_anim_duration = 0.34 if melee_anim_type == 4 else 0.24
+		melee_anim_type = clampi(strike_type, 0, 5)
+	if melee_anim_type == 5:
+		melee_anim_duration = 0.42
+	elif melee_anim_type == 4:
+		melee_anim_duration = 0.38
+	else:
+		melee_anim_duration = 0.24
 	melee_anim_timer = melee_anim_duration
 
 
 var melee_block_timer: float = 0.0
 var melee_block_type: int = 0
 
-func trigger_melee_block(block_type: int = 0) -> void:
+func trigger_melee_block(block_type: int = 0, duration: float = 0.28) -> void:
 	melee_block_type = clampi(block_type, 0, 3)
-	melee_block_timer = 0.28
+	melee_block_timer = maxf(duration, 0.1)
 
 
 func trigger_getup_recovery(duration: float = 0.45) -> void:
@@ -233,6 +303,12 @@ func update(delta: float, target_look_pos: Vector3, is_charging_ki: bool, is_blo
 
 	# 3. Aplicar animación corporal completa sobre los 18 huesos
 	_apply_body_hover_and_trajectory(delta)
+	if use_pure_zenkai_spa and zenkai_anim_loader != null:
+		var z_clip: String = spa_forced_clip if not spa_forced_clip.is_empty() else _get_active_zenkai_clip_name()
+		if not z_clip.is_empty() and zenkai_anim_loader.has_clip(z_clip):
+			var z_u: float = spa_forced_u if spa_forced_u >= 0.0 else _get_active_zenkai_clip_u()
+			_apply_pure_zenkai_full_body(delta, z_clip, z_u)
+			return
 	_apply_hips_spine_and_chest(delta)
 	_apply_legs_pose(delta)
 	_apply_look_at(delta, target_look_pos)
@@ -403,6 +479,17 @@ func _apply_hips_spine_and_chest(delta: float) -> void:
 					var s: float = minf((_st_melee_u - 0.35) / 0.35, 1.0)
 					spine_target = Vector3(deg_to_rad(24.0 * s), 0.0, 0.0)
 					chest_target = Vector3(deg_to_rad(18.0 * s), 0.0, 0.0)
+			5: # Golpe Cargado (windup atrás -> estallido frontal)
+				if _st_melee_u < 0.42:
+					var w: float = _st_melee_u / 0.42
+					hips_target = Vector3(0.0, deg_to_rad(-24.0 * w), 0.0)
+					spine_target = Vector3(deg_to_rad(-8.0 * w), 0.0, 0.0)
+					chest_target = Vector3(deg_to_rad(-6.0 * w), deg_to_rad(-32.0 * w), 0.0)
+				else:
+					var s: float = minf((_st_melee_u - 0.42) / 0.28, 1.0)
+					hips_target = Vector3(0.0, deg_to_rad(lerpf(-24.0, 28.0, s)), 0.0)
+					spine_target = Vector3(deg_to_rad(lerpf(-8.0, 14.0, s)), 0.0, 0.0)
+					chest_target = Vector3(deg_to_rad(lerpf(-6.0, 16.0, s)), deg_to_rad(lerpf(-32.0, 38.0, s)), 0.0)
 	elif _st_super_phase == 2:
 		var beam_vib: float = sin(anim_time * 58.0) * 0.02
 		match _st_super_tech:
@@ -488,6 +575,19 @@ func _apply_hips_spine_and_chest(delta: float) -> void:
 		var flinch_roll: float = -0.18 * _st_flinch_factor * _st_flinch_local_dir.x
 		spine_target += Vector3(flinch_pitch, flinch_yaw * 0.4, flinch_roll * 0.5)
 		chest_target += Vector3(flinch_pitch * 0.6, flinch_yaw * 0.6, flinch_roll * 0.5)
+
+	if zenkai_anim_loader != null and zenkai_overlay_weight > 0.001:
+		var z_clip: String = _get_active_zenkai_clip_name()
+		if not z_clip.is_empty() and zenkai_anim_loader.has_clip(z_clip):
+			var z_u: float = _get_active_zenkai_clip_u()
+			var d_hips: Vector3 = zenkai_anim_loader.sample_clip_bone_delta_euler(z_clip, "Hips", z_u)
+			var d_spine: Vector3 = zenkai_anim_loader.sample_clip_bone_delta_euler(z_clip, "Spine", z_u)
+			var d_chest: Vector3 = zenkai_anim_loader.sample_clip_bone_delta_euler(z_clip, "Chest", z_u)
+			var d_upper: Vector3 = zenkai_anim_loader.sample_clip_bone_delta_euler(z_clip, "UpperChest", z_u)
+			hips_target += d_hips * (zenkai_overlay_weight * 0.65)
+			spine_target += d_spine * zenkai_overlay_weight
+			chest_target += d_chest * zenkai_overlay_weight
+			upper_target += d_upper * (zenkai_overlay_weight * 0.75)
 
 	var blend: float = clampf(16.0 * delta, 0.0, 1.0)
 	current_hips_euler = current_hips_euler.lerp(hips_target, blend)
@@ -604,6 +704,16 @@ func _apply_legs_pose(delta: float) -> void:
 		l_knee = Vector3(deg_to_rad(24.0) - sway * 0.6, 0.0, 0.0)
 		r_up = Vector3(deg_to_rad(14.0) - sway, 0.0, deg_to_rad(-10.0))
 		r_knee = Vector3(deg_to_rad(18.0) + sway * 0.6, 0.0, 0.0)
+
+	if zenkai_anim_loader != null and zenkai_overlay_weight > 0.001:
+		var z_clip_legs: String = _get_active_zenkai_clip_name()
+		if not z_clip_legs.is_empty() and zenkai_anim_loader.has_clip(z_clip_legs):
+			var z_u_legs: float = _get_active_zenkai_clip_u()
+			var leg_w: float = zenkai_overlay_weight * 0.60
+			l_up += zenkai_anim_loader.sample_clip_bone_delta_euler(z_clip_legs, "LeftUpLeg", z_u_legs) * leg_w
+			l_knee += zenkai_anim_loader.sample_clip_bone_delta_euler(z_clip_legs, "LeftLeg", z_u_legs) * leg_w
+			r_up += zenkai_anim_loader.sample_clip_bone_delta_euler(z_clip_legs, "RightUpLeg", z_u_legs) * leg_w
+			r_knee += zenkai_anim_loader.sample_clip_bone_delta_euler(z_clip_legs, "RightLeg", z_u_legs) * leg_w
 
 	var blend: float = clampf(14.0 * delta, 0.0, 1.0)
 	current_l_upleg_euler = current_l_upleg_euler.lerp(l_up, blend)
@@ -752,12 +862,21 @@ func _apply_arms_pose(delta: float) -> void:
 			4: # Martillazo DBZ 2 Manos (arriba -> abajo)
 				if _st_melee_u < 0.35:
 					var w: float = _st_melee_u / 0.35
-					des_pos_l = Vector3(-0.06, lerpf(0.0, 0.42, w), 0.22)
-					des_pos_r = Vector3(0.06, lerpf(0.0, 0.42, w), 0.22)
+					des_pos_l = Vector3(0.06, lerpf(0.0, 0.48, w), 0.18)
+					des_pos_r = Vector3(-0.06, lerpf(0.0, 0.48, w), 0.18)
 				else:
 					var s: float = minf((_st_melee_u - 0.35) / 0.35, 1.0)
-					des_pos_l = Vector3(-0.06, lerpf(0.42, -0.28, s), lerpf(0.22, 0.44, s))
-					des_pos_r = Vector3(0.06, lerpf(0.42, -0.28, s), lerpf(0.22, 0.44, s))
+					des_pos_l = Vector3(0.06, lerpf(0.48, -0.32, s), lerpf(0.18, 0.46, s))
+					des_pos_r = Vector3(-0.06, lerpf(0.48, -0.32, s), lerpf(0.18, 0.46, s))
+			5: # Golpe Cargado (windup atrás en cadera -> puñetazo explosivo a máxima extensión)
+				if _st_melee_u < 0.42:
+					var w: float = _st_melee_u / 0.42
+					des_pos_l = Vector3(0.06, 0.04, lerpf(0.28, 0.36, w))
+					des_pos_r = Vector3(lerpf(0.0, -0.18, w), lerpf(-0.08, -0.14, w), lerpf(0.20, -0.14, w))
+				else:
+					var s: float = minf((_st_melee_u - 0.42) / 0.25, 1.0)
+					des_pos_l = Vector3(lerpf(0.06, 0.14, s), lerpf(0.04, -0.10, s), lerpf(0.36, 0.14, s))
+					des_pos_r = Vector3(lerpf(-0.18, -0.02, s), lerpf(-0.14, 0.04, s), lerpf(-0.14, 0.56, s))
 		grip_l = 1.0
 		trig_l = 1.0
 		grip_r = 1.0
@@ -796,14 +915,14 @@ func _apply_arms_pose(delta: float) -> void:
 		var sv: float = sin(anim_time * 47.0) * 0.010
 		match _st_super_tech:
 			"kamehameha":
-				des_pos_l = Vector3(-0.28, -0.22 + sv, 0.14)
-				des_pos_r = Vector3(-0.06, -0.22 - sv, 0.08)
-				des_basis_l = palm_fwd_l
-				des_basis_r = palm_fwd_r
-				grip_l = 0.30
-				trig_l = 0.30
-				grip_r = 0.30
-				trig_r = 0.30
+				des_pos_l = Vector3(-0.42, -0.14 + sv, 0.22)
+				des_pos_r = Vector3(0.02, -0.28 - sv, 0.22)
+				des_basis_l = Basis.looking_at(Vector3(-0.35, -0.10, 0.93).normalized(), Vector3(-0.93, 0.0, -0.35).normalized())
+				des_basis_r = Basis.looking_at(Vector3(-0.35, 0.10, 0.93).normalized(), Vector3(-0.93, 0.0, -0.35).normalized())
+				grip_l = 0.35
+				trig_l = 0.35
+				grip_r = 0.35
+				trig_r = 0.35
 			"galick_ho":
 				des_pos_l = Vector3(-0.30, -0.04 + sv, 0.10)
 				des_pos_r = Vector3(-0.08, -0.02 - sv, 0.06)
@@ -847,23 +966,25 @@ func _apply_arms_pose(delta: float) -> void:
 				des_basis_r = palm_fwd_r
 				grip_l = 0.85; trig_l = 0.85; grip_r = 0.05; trig_r = 0.15
 			1: # Guardia Cruzada en X
-				des_pos_l = Vector3(-0.08, 0.10, 0.32)
-				des_pos_r = Vector3(0.08, 0.06, 0.30)
+				des_pos_l = Vector3(-0.14, 0.12, 0.30)
+				des_pos_r = Vector3(0.14, 0.08, 0.26)
+				des_basis_l = Basis.looking_at(Vector3(-0.42, 0.82, 0.38).normalized(), Vector3(0.0, 0.35, -0.94).normalized())
+				des_basis_r = Basis.looking_at(Vector3(0.42, 0.82, 0.38).normalized(), Vector3(0.0, 0.35, -0.94).normalized())
 				grip_l = 0.95; trig_l = 0.95; grip_r = 0.95; trig_r = 0.95
 			2: # Choque de Puños (puño derecho extendido al impacto)
 				des_pos_l = Vector3(-0.10, -0.06, 0.18)
 				des_pos_r = Vector3(0.0, 0.04, 0.52)
 				grip_l = 0.95; trig_l = 0.95; grip_r = 1.0; trig_r = 1.0
-			3: # Parry Perfecto (barrido lateral amplio)
-				des_pos_l = Vector3(0.26, 0.14, 0.34)
-				des_pos_r = Vector3(-0.22, 0.08, 0.30)
-				des_basis_l = palm_fwd_l; des_basis_r = palm_fwd_r
-				grip_l = 0.10; trig_l = 0.10; grip_r = 0.10; trig_r = 0.10
+			3: # Bloqueo Perfecto (parada/desvío firme con una mano al frente y la otra en guardia baja)
+				des_pos_l = Vector3(0.10, -0.10, 0.16)
+				des_pos_r = Vector3(-0.02, 0.18, 0.44)
+				des_basis_r = palm_fwd_r
+				grip_l = 0.90; trig_l = 0.90; grip_r = 0.05; trig_r = 0.10
 	elif _st_is_blocking:
-		des_pos_l = Vector3(-0.08, 0.10, 0.30)
-		des_pos_r = Vector3(0.08, 0.06, 0.28)
-		des_basis_l = Basis.looking_at(Vector3(-0.35, 0.85, 0.38).normalized(), Vector3(0.0, 0.35, -0.94).normalized())
-		des_basis_r = Basis.looking_at(Vector3(0.35, 0.85, 0.38).normalized(), Vector3(0.0, 0.35, -0.94).normalized())
+		des_pos_l = Vector3(-0.14, 0.12, 0.30)
+		des_pos_r = Vector3(0.14, 0.08, 0.26)
+		des_basis_l = Basis.looking_at(Vector3(-0.42, 0.82, 0.38).normalized(), Vector3(0.0, 0.35, -0.94).normalized())
+		des_basis_r = Basis.looking_at(Vector3(0.42, 0.82, 0.38).normalized(), Vector3(0.0, 0.35, -0.94).normalized())
 		grip_l = 0.90
 		trig_l = 0.85
 		grip_r = 0.90
@@ -974,3 +1095,198 @@ func _set_bone_rot_relative(bone_name: String, offset_euler_char: Vector3) -> vo
 	var rest_quat: Quaternion = bone_rest_rotations[bone_name]
 	var offset_quat: Quaternion = Quaternion.from_euler(offset_euler_char)
 	skeleton.set_bone_pose_rotation(idx, (offset_quat * rest_quat).normalized())
+
+
+func _is_bone_group_enabled(bone_alias: String) -> bool:
+	if bone_alias in ["Hips", "Spine", "Chest", "UpperChest"]:
+		return spa_enable_torso
+	if bone_alias in ["Neck", "Head"]:
+		return spa_enable_head
+	if bone_alias in ["LeftShoulder", "LeftArm", "LeftForeArm", "LeftHand", "RightShoulder", "RightArm", "RightForeArm", "RightHand"]:
+		return spa_enable_arms
+	if bone_alias in ["LeftUpLeg", "LeftLeg", "RightUpLeg", "RightLeg"]:
+		return spa_enable_legs
+	return true
+
+
+func _swap_lr_alias(bone_alias: String) -> String:
+	if not spa_swap_lr:
+		return bone_alias
+	if bone_alias.begins_with("Left"):
+		return "Right" + bone_alias.substr(4)
+	if bone_alias.begins_with("Right"):
+		return "Left" + bone_alias.substr(5)
+	return bone_alias
+
+
+func _apply_spa_axis_signs(q: Quaternion) -> Quaternion:
+	return Quaternion(q.x * spa_axis_signs.x, q.y * spa_axis_signs.y, q.z * spa_axis_signs.z, q.w).normalized()
+
+
+func _apply_pure_zenkai_full_body(delta: float, clip_name: String, u: float) -> void:
+	var blend: float = clampf(18.0 * delta, 0.0, 1.0)
+	for bone_alias in TARGET_BONES:
+		var idx: int = int(bone_indices.get(bone_alias, -1))
+		if idx == -1:
+			continue
+		var rest_q: Quaternion = bone_rest_rotations.get(bone_alias, Quaternion.IDENTITY)
+		if not _is_bone_group_enabled(bone_alias):
+			_zenkai_bone_quats[bone_alias] = rest_q
+			skeleton.set_bone_pose_rotation(idx, rest_q)
+			continue
+		var sample_alias: String = _swap_lr_alias(bone_alias)
+		var raw_q: Quaternion = zenkai_anim_loader.sample_clip_bone_rotation(clip_name, sample_alias, u, Quaternion.IDENTITY)
+		var spa_q: Quaternion = _apply_spa_axis_signs(raw_q)
+		var target_q: Quaternion = rest_q
+		if bone_alias == "Hips" or bone_alias == "Neck" or bone_alias == "Head":
+			var raw_q0: Quaternion = zenkai_anim_loader.sample_clip_bone_rotation(clip_name, sample_alias, 0.0, Quaternion.IDENTITY)
+			var spa_q0: Quaternion = _apply_spa_axis_signs(raw_q0)
+			var delta_q: Quaternion = (spa_q0.inverse() * spa_q).normalized()
+			target_q = (delta_q * rest_q).normalized()
+		else:
+			match spa_compose_mode:
+				0:
+					target_q = (rest_q * spa_q).normalized()
+				1:
+					target_q = (spa_q * rest_q).normalized()
+				2:
+					target_q = (rest_q * spa_q.inverse()).normalized()
+				3:
+					target_q = spa_q
+				_:
+					target_q = _map_calibrated_spa_bone(bone_alias, rest_q, spa_q)
+		var cur_q: Quaternion = _zenkai_bone_quats.get(bone_alias, rest_q)
+		var next_q: Quaternion = cur_q.slerp(target_q, blend).normalized()
+		_zenkai_bone_quats[bone_alias] = next_q
+		skeleton.set_bone_pose_rotation(idx, next_q)
+
+
+func _map_calibrated_spa_bone(bone_alias: String, rest_q: Quaternion, spa_q: Quaternion) -> Quaternion:
+	# Base empírica de skeleton_axis_calibration.json (21_goku1_body.glb):
+	# Hombros: -Y adelante, -Z abajo | Codos: -Y flexión sin pellizco | Muslos: -Y adelante | Rodillas: +Y flexión atrás
+	if bone_alias == "LeftForeArm" or bone_alias == "RightForeArm":
+		var flex_rad: float = clampf(2.0 * acos(clampf(absf(spa_q.w), 0.0, 1.0)), 0.0, deg_to_rad(120.0))
+		var mapped_q: Quaternion = Quaternion.from_euler(Vector3(0.0, -flex_rad, 0.0))
+		return (rest_q * mapped_q).normalized()
+	if bone_alias == "LeftUpLeg" or bone_alias == "RightUpLeg":
+		# Escala 0.45 en flexión -Y para evitar postura "sentado" (-60° -> -27°)
+		var e: Vector3 = spa_q.get_euler()
+		var mapped_leg: Quaternion = Quaternion.from_euler(Vector3(
+			clampf(e.x * 0.40, deg_to_rad(-20.0), deg_to_rad(20.0)),
+			clampf(e.y * 0.48, deg_to_rad(-55.0), deg_to_rad(25.0)),
+			clampf(-e.z * 0.65, deg_to_rad(-22.0), deg_to_rad(22.0))
+		))
+		return (rest_q * mapped_leg).normalized()
+	if bone_alias == "LeftLeg" or bone_alias == "RightLeg":
+		var knee_y: float = clampf(spa_q.y * 0.48, 0.0, 0.52)
+		var knee_w: float = sqrt(maxf(0.01, 1.0 - knee_y * knee_y))
+		var knee_q: Quaternion = Quaternion(0.0, knee_y, 0.0, knee_w).normalized()
+		return (rest_q * knee_q).normalized()
+	if bone_alias == "LeftArm":
+		# Base calibrada: brazos al frente (-Y) y altura de guardia en pecho (-Z acotado a -48°)
+		var e_l: Vector3 = spa_q.get_euler()
+		var arm_l: Quaternion = Quaternion.from_euler(Vector3(
+			clampf(e_l.x * 0.35, deg_to_rad(-40.0), deg_to_rad(40.0)),
+			clampf(-absf(e_l.y) - deg_to_rad(22.0), deg_to_rad(-95.0), deg_to_rad(15.0)),
+			clampf(-absf(e_l.z) * 0.55 - deg_to_rad(12.0), deg_to_rad(-48.0), deg_to_rad(25.0))
+		))
+		return (rest_q * arm_l).normalized()
+	if bone_alias == "RightArm":
+		var e_r: Vector3 = spa_q.get_euler()
+		var arm_r: Quaternion = Quaternion.from_euler(Vector3(
+			clampf(e_r.x * 0.35, deg_to_rad(-40.0), deg_to_rad(40.0)),
+			clampf(-absf(e_r.y) - deg_to_rad(25.0), deg_to_rad(-95.0), deg_to_rad(15.0)),
+			clampf(-absf(e_r.z) * 0.55 - deg_to_rad(10.0), deg_to_rad(-48.0), deg_to_rad(25.0))
+		))
+		return (rest_q * arm_r).normalized()
+	if bone_alias == "LeftHand" or bone_alias == "RightHand":
+		var e_h: Vector3 = spa_q.get_euler()
+		var hand_q: Quaternion = Quaternion.from_euler(Vector3(
+			clampf(e_h.x, deg_to_rad(-140.0), deg_to_rad(40.0)),
+			clampf(e_h.y * 0.4, deg_to_rad(-30.0), deg_to_rad(30.0)),
+			clampf(e_h.z * 0.4, deg_to_rad(-30.0), deg_to_rad(30.0))
+		))
+		return (rest_q * hand_q).normalized()
+	return (rest_q * spa_q).normalized()
+
+
+func get_spa_debug_summary() -> String:
+	var clip: String = spa_forced_clip if not spa_forced_clip.is_empty() else _get_active_zenkai_clip_name()
+	var u: float = spa_forced_u if spa_forced_u >= 0.0 else _get_active_zenkai_clip_u()
+	var comp_names: Array[String] = ["0:rest*spa", "1:spa*rest", "2:rest*inv", "3:direct", "4:calibrado"]
+	var cname: String = comp_names[clampi(spa_compose_mode, 0, 4)]
+	var lines: PackedStringArray = PackedStringArray()
+	lines.append("SPA=%s | clip=%s | u=%.2f | comp=%s" % ["ON" if use_pure_zenkai_spa else "OFF", clip, u, cname])
+	lines.append("signs=(%+.0f,%+.0f,%+.0f) | swapLR=%s | T:%d A:%d L:%d H:%d" % [
+		spa_axis_signs.x, spa_axis_signs.y, spa_axis_signs.z,
+		"ON" if spa_swap_lr else "OFF",
+		1 if spa_enable_torso else 0,
+		1 if spa_enable_arms else 0,
+		1 if spa_enable_legs else 0,
+		1 if spa_enable_head else 0
+	])
+	if skeleton != null and is_instance_valid(skeleton):
+		for b_alias in ["LeftArm", "LeftForeArm", "RightArm", "RightForeArm", "LeftUpLeg", "LeftLeg"]:
+			var idx: int = int(bone_indices.get(b_alias, -1))
+			if idx == -1:
+				continue
+			var rest_q: Quaternion = bone_rest_rotations.get(b_alias, Quaternion.IDENTITY)
+			var pose_q: Quaternion = skeleton.get_bone_pose_rotation(idx)
+			var rel_q: Quaternion = (rest_q.inverse() * pose_q).normalized()
+			var e: Vector3 = rel_q.get_euler() * (180.0 / PI)
+			lines.append("%-11s: (%+5.0f, %+5.0f, %+5.0f)" % [b_alias, e.x, e.y, e.z])
+	return "\n".join(lines)
+
+
+func _get_active_zenkai_clip_name() -> String:
+	if _st_is_transforming:
+		return "aura_burst_loop"
+	if _st_is_guard_broken:
+		return "guard_break"
+	if _st_flinch_factor > 0.25:
+		return "damage_heavy" if hit_flinch_intensity >= 0.8 else "damage_light"
+	if _st_super_phase == 2:
+		if _st_super_tech == "big_bang" or _st_super_tech == "genkidama":
+			return "hissatsu2_fire"
+		return "hissatsu1_fire"
+	if _st_super_phase == 1:
+		if _st_super_tech == "big_bang" or _st_super_tech == "genkidama":
+			return "hissatsu2_charge"
+		return "hissatsu1_charge"
+	if _st_is_melee_active:
+		match melee_anim_type:
+			0: return "rush_1"
+			1: return "rush_2"
+			2: return "rush_3"
+			3: return "rush_4"
+			4: return "rush_5"
+			_: return "heavy_smash"
+	if _st_is_ki_blast:
+		return "ki_blast_left" if ki_blast_hand == 0 else "ki_blast_right"
+	if _st_is_blocking:
+		return "guard_active"
+	if _st_ki_phase > 0:
+		return "ki_charge_loop"
+	if _st_is_flying:
+		return "dash_loop"
+	if _st_is_launching_air:
+		return "blow_spiral"
+	if _st_is_getup:
+		return "recover_kipup"
+	return "idle_ground"
+
+
+func _get_active_zenkai_clip_u() -> float:
+	if _st_is_transforming:
+		return _st_transform_u
+	if _st_is_melee_active:
+		return _st_melee_u
+	if _st_is_ki_blast:
+		return _st_ki_blast_u
+	if _st_is_getup:
+		return _st_getup_u
+	if _st_flinch_factor > 0.25:
+		return clampf(1.0 - (hit_flinch_timer / 0.35), 0.0, 1.0)
+	var clip: String = _get_active_zenkai_clip_name()
+	var dur: float = zenkai_anim_loader.get_clip_duration(clip, 0.85) if zenkai_anim_loader != null else 0.85
+	return fmod(anim_time / maxf(dur, 0.15), 1.0)

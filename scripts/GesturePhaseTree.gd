@@ -2,8 +2,6 @@ extends Node
 
 # --- Precarga Estática de Recursos (Ch 9 - Optimización Quest 3) ---
 const ProceduralKiProjectileScript = preload("res://scripts/ProceduralKiProjectile.gd")
-const KiSphereShader = preload("res://ki_sphere.gdshader")
-const KiCoronaShader = preload("res://shaders/ki_corona.gdshader")
 const HybridCombatControllerScript = preload("res://scripts/HybridCombatController.gd")
 
 # Flag de modo híbrido (Auto-switching con mandos Meta Quest 3)
@@ -123,11 +121,11 @@ var current_aim_locked: bool = false
 var last_super_launch_dir: Vector3 = Vector3.ZERO
 
 # --- Esferas Visuales de Carga de Ki Blast en la Palma ---
-var ki_blast_sphere_left: MeshInstance3D = null
+var ki_blast_sphere_left: Node3D = null
 var ki_blast_corona_left: MeshInstance3D = null
 var ki_blast_light_left: OmniLight3D = null
 
-var ki_blast_sphere_right: MeshInstance3D = null
+var ki_blast_sphere_right: Node3D = null
 var ki_blast_corona_right: MeshInstance3D = null
 var ki_blast_light_right: OmniLight3D = null
 
@@ -135,7 +133,7 @@ var ki_blast_light_right: OmniLight3D = null
 var melee_cheek_hand: int = -1
 
 # --- Esferas Visuales de Carga Especial ---
-var special_charge_sphere: MeshInstance3D = null
+var special_charge_sphere: Node3D = null
 var special_charge_corona: MeshInstance3D = null
 var special_charge_light: OmniLight3D = null
 
@@ -970,6 +968,19 @@ func _get_player_instance() -> Node3D:
 	return player_instance
 
 
+func _notify_power_blocked(player: Node3D, power: Resource, fallback_msg: String) -> void:
+	var reason: String = fallback_msg
+	if player and player.has_method("get_power_block_reason"):
+		var r_str: String = String(player.get_power_block_reason(power))
+		if r_str != "":
+			reason = r_str
+	emit_signal("phase_changed", reason)
+	emit_signal("gesture_logged", reason, "warning")
+	for ctrl in [left_controller_node, right_controller_node]:
+		if ctrl and is_instance_valid(ctrl) and ctrl.has_method("trigger_haptic_pulse"):
+			ctrl.trigger_haptic_pulse("haptic", 120.0, 0.55, 0.08, 0.0)
+
+
 func _feed_trie(gesture_name: String) -> void:
 	if gesture_name in current_node:
 		current_node = current_node[gesture_name]
@@ -1006,7 +1017,7 @@ func _feed_trie(gesture_name: String) -> void:
 					_cancel_action("Kamehameha cancelado")
 					return
 			else:
-				emit_signal("gesture_logged", "Kamehameha bloqueado o no disponible en este estado.", "error")
+				_notify_power_blocked(player, power, "Kamehameha no disponible en este estado.")
 				_cancel_action("Kamehameha no disponible")
 				return
 		elif gesture_name == "GENKIDAMA_CHARGE":
@@ -1030,7 +1041,7 @@ func _feed_trie(gesture_name: String) -> void:
 					_cancel_action("Genkidama cancelada")
 					return
 			else:
-				emit_signal("gesture_logged", "Genkidama bloqueada o no disponible en este estado.", "error")
+				_notify_power_blocked(player, power, "Genkidama no disponible en este estado.")
 				_cancel_action("Genkidama no disponible")
 				return
 		elif gesture_name == "GALICK_HO_CHARGE":
@@ -1054,7 +1065,7 @@ func _feed_trie(gesture_name: String) -> void:
 					_cancel_action("Galick Ho cancelado")
 					return
 			else:
-				emit_signal("gesture_logged", "Galick Ho bloqueado o no disponible.", "error")
+				_notify_power_blocked(player, power, "Galick Ho no disponible.")
 				_cancel_action("Galick Ho no disponible")
 				return
 		elif gesture_name == "FINAL_FLASH_CHARGE":
@@ -1078,7 +1089,7 @@ func _feed_trie(gesture_name: String) -> void:
 					_cancel_action("Final Flash cancelado")
 					return
 			else:
-				emit_signal("gesture_logged", "Final Flash requiere transformación SSJ o Zenkai.", "error")
+				_notify_power_blocked(player, power, "Final Flash requiere transformación SSJ o Zenkai.")
 				_cancel_action("Final Flash bloqueado")
 				return
 		elif gesture_name == "BIG_BANG_CHARGE":
@@ -1102,7 +1113,7 @@ func _feed_trie(gesture_name: String) -> void:
 					_cancel_action("Big Bang Attack cancelado")
 					return
 			else:
-				emit_signal("gesture_logged", "Big Bang Attack requiere transformación SSJ.", "error")
+				_notify_power_blocked(player, power, "Big Bang Attack no disponible.")
 				_cancel_action("Big Bang Attack bloqueado")
 				return
 		elif gesture_name == "ARM_STRETCHED_OPEN_LEFT":
@@ -1506,45 +1517,10 @@ func _spawn_ki_blast_projectile(hand_side: int, is_charged: bool) -> void:
 	var projectile_radius: float = 0.18 if is_charged else 0.05
 	var speed: float = float(kb_profile.get("projectile_speed", 22.0 if is_charged else 28.0))
 		
-	# Crear el nodo principal del proyectil
 	var projectile = Node3D.new()
 	projectile.name = "ProceduralKiProjectile_" + str(hand_side) + "_" + str(Time.get_ticks_msec())
+	ZenkaiVFXManager.build_zenkai_orb_visual(projectile, projectile_radius, energy_color, is_charged, is_charged)
 	
-	# 1. Malla visual del Núcleo (Core)
-	var mesh_core = MeshInstance3D.new()
-	mesh_core.name = "CoreMesh"
-	var sphere_core = SphereMesh.new()
-	sphere_core.radius = projectile_radius
-	sphere_core.height = projectile_radius * 2.0
-	sphere_core.radial_segments = 16
-	sphere_core.rings = 8
-	mesh_core.mesh = sphere_core
-	
-	var mat_core = ShaderMaterial.new()
-	mat_core.shader = KiSphereShader
-	mat_core.set_shader_parameter("base_color", Color(energy_color.r, energy_color.g, energy_color.b, 0.95))
-	mat_core.set_shader_parameter("core_glow", 4.5)
-	mesh_core.material_override = mat_core
-	projectile.add_child(mesh_core)
-	
-	# 2. Malla visual de la Corona de Rayos
-	var mesh_corona = MeshInstance3D.new()
-	mesh_corona.name = "CoronaMesh"
-	var sphere_corona = SphereMesh.new()
-	sphere_corona.radius = projectile_radius * 1.15
-	sphere_corona.height = projectile_radius * 2.30
-	sphere_corona.radial_segments = 16
-	sphere_corona.rings = 8
-	mesh_corona.mesh = sphere_corona
-	
-	var mat_corona = ShaderMaterial.new()
-	mat_corona.shader = KiCoronaShader
-	mat_corona.set_shader_parameter("base_color", Color(energy_color.r, energy_color.g, energy_color.b, 0.85))
-	mat_corona.set_shader_parameter("vertex_displacement", 0.04)
-	mesh_corona.material_override = mat_corona
-	projectile.add_child(mesh_corona)
-	
-	# Luz dinámica omnidireccional asociada (solo para ataques cargados para mantener 90 FPS en Quest 3)
 	if is_charged:
 		var light = OmniLight3D.new()
 		light.light_color = energy_color
@@ -1689,56 +1665,8 @@ func _spawn_special_projectile(power: Resource) -> void:
 	
 	var projectile = Node3D.new()
 	projectile.name = "ProceduralKiProjectile_" + power.power_name.replace(" ", "") + "_" + str(Time.get_ticks_msec())
-	
-	# 1. Malla del núcleo (Core) con KiSphereShader
-	var mesh_core = MeshInstance3D.new()
-	mesh_core.name = "CoreMesh"
-	var sphere_core = SphereMesh.new()
-	sphere_core.radius = projectile_radius
-	sphere_core.height = projectile_radius * 2.0
-	sphere_core.radial_segments = 24
-	sphere_core.rings = 12
-	mesh_core.mesh = sphere_core
-	
-	var mat_core = ShaderMaterial.new()
-	mat_core.shader = KiSphereShader
-	mat_core.set_shader_parameter("base_color", Color(energy_color.r, energy_color.g, energy_color.b, 0.95))
-	mat_core.set_shader_parameter("core_glow", 5.5 if is_big_bang else 4.5)
-	mesh_core.material_override = mat_core
-	projectile.add_child(mesh_core)
-	
-	# 1.1 Núcleo blanco incandescente interno (White-Hot Inner Core)
-	var mesh_inner = MeshInstance3D.new()
-	mesh_inner.name = "InnerWhiteCore"
-	var sphere_inner = SphereMesh.new()
-	sphere_inner.radius = projectile_radius * 0.65
-	sphere_inner.height = projectile_radius * 1.30
-	sphere_inner.radial_segments = 16
-	sphere_inner.rings = 8
-	mesh_inner.mesh = sphere_inner
-	var mat_inner = StandardMaterial3D.new()
-	mat_inner.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
-	mat_inner.albedo_color = Color(1.0, 1.0, 1.0, 1.0)
-	mesh_inner.material_override = mat_inner
-	projectile.add_child(mesh_inner)
+	ZenkaiVFXManager.build_zenkai_orb_visual(projectile, projectile_radius, energy_color, true, true)
 
-	# 1.2 Malla de corona exterior de plasma
-	var mesh_corona = MeshInstance3D.new()
-	mesh_corona.name = "CoronaMesh"
-	var sphere_corona = SphereMesh.new()
-	sphere_corona.radius = projectile_radius * 1.25
-	sphere_corona.height = projectile_radius * 2.50
-	sphere_corona.radial_segments = 20
-	sphere_corona.rings = 10
-	mesh_corona.mesh = sphere_corona
-	var mat_corona = ShaderMaterial.new()
-	mat_corona.shader = KiCoronaShader
-	mat_corona.set_shader_parameter("base_color", Color(energy_color.r, energy_color.g, energy_color.b, 0.85))
-	mat_corona.set_shader_parameter("vertex_displacement", 0.08 if is_big_bang else 0.04)
-	mesh_corona.material_override = mat_corona
-	projectile.add_child(mesh_corona)
-
-	# 2. Luz dinámica interna
 	var light = OmniLight3D.new()
 	light.name = "ProjectileLight"
 	light.light_color = energy_color
@@ -2079,34 +2007,8 @@ func _update_ki_blast_charge_sphere(hand_side: int, charge_time: float, _delta: 
 	
 	if hand_side == 0:
 		if not ki_blast_sphere_left or not is_instance_valid(ki_blast_sphere_left):
-			ki_blast_sphere_left = MeshInstance3D.new()
+			ki_blast_sphere_left = ZenkaiVFXManager.build_zenkai_orb_visual(get_tree().current_scene, current_radius, energy_color, norm_charge >= 0.45, norm_charge >= 0.65)
 			ki_blast_sphere_left.name = "KiBlastChargeSphere_Left"
-			var sphere_mesh = SphereMesh.new()
-			sphere_mesh.radial_segments = 16
-			sphere_mesh.rings = 8
-			ki_blast_sphere_left.mesh = sphere_mesh
-			var mat = ShaderMaterial.new()
-			mat.shader = KiSphereShader
-			mat.set_shader_parameter("base_color", energy_color)
-			mat.set_shader_parameter("core_glow", 4.0)
-			ki_blast_sphere_left.material_override = mat
-			get_tree().current_scene.add_child(ki_blast_sphere_left)
-			
-		if not ki_blast_corona_left or not is_instance_valid(ki_blast_corona_left):
-			ki_blast_corona_left = MeshInstance3D.new()
-			ki_blast_corona_left.name = "KiBlastChargeCorona_Left"
-			var corona_mesh = SphereMesh.new()
-			corona_mesh.radial_segments = 16
-			corona_mesh.rings = 8
-			ki_blast_corona_left.mesh = corona_mesh
-			var mat = ShaderMaterial.new()
-			mat.shader = KiCoronaShader
-			mat.set_shader_parameter("base_color", energy_color)
-			mat.set_shader_parameter("speed", 5.0)
-			mat.set_shader_parameter("scale", 6.0)
-			ki_blast_corona_left.material_override = mat
-			get_tree().current_scene.add_child(ki_blast_corona_left)
-			
 		if not ki_blast_light_left or not is_instance_valid(ki_blast_light_left):
 			ki_blast_light_left = OmniLight3D.new()
 			ki_blast_light_left.name = "KiBlastChargeLight_Left"
@@ -2114,45 +2016,14 @@ func _update_ki_blast_charge_sphere(hand_side: int, charge_time: float, _delta: 
 			get_tree().current_scene.add_child(ki_blast_light_left)
 			
 		ki_blast_sphere_left.global_position = target_pos
-		ki_blast_corona_left.global_position = target_pos
+		ki_blast_sphere_left.scale = Vector3.ONE * current_radius
 		ki_blast_light_left.global_position = target_pos
-		
-		ki_blast_sphere_left.mesh.radius = current_radius
-		ki_blast_sphere_left.mesh.height = current_radius * 2.0
-		ki_blast_corona_left.mesh.radius = current_radius * 1.25
-		ki_blast_corona_left.mesh.height = current_radius * 1.25 * 2.0
 		ki_blast_light_left.light_energy = 3.0 + norm_charge * 5.0
 		ki_blast_light_left.omni_range = current_radius * 8.0
 	else:
 		if not ki_blast_sphere_right or not is_instance_valid(ki_blast_sphere_right):
-			ki_blast_sphere_right = MeshInstance3D.new()
+			ki_blast_sphere_right = ZenkaiVFXManager.build_zenkai_orb_visual(get_tree().current_scene, current_radius, energy_color, norm_charge >= 0.45, norm_charge >= 0.65)
 			ki_blast_sphere_right.name = "KiBlastChargeSphere_Right"
-			var sphere_mesh = SphereMesh.new()
-			sphere_mesh.radial_segments = 16
-			sphere_mesh.rings = 8
-			ki_blast_sphere_right.mesh = sphere_mesh
-			var mat = ShaderMaterial.new()
-			mat.shader = KiSphereShader
-			mat.set_shader_parameter("base_color", energy_color)
-			mat.set_shader_parameter("core_glow", 4.0)
-			ki_blast_sphere_right.material_override = mat
-			get_tree().current_scene.add_child(ki_blast_sphere_right)
-			
-		if not ki_blast_corona_right or not is_instance_valid(ki_blast_corona_right):
-			ki_blast_corona_right = MeshInstance3D.new()
-			ki_blast_corona_right.name = "KiBlastChargeCorona_Right"
-			var corona_mesh = SphereMesh.new()
-			corona_mesh.radial_segments = 16
-			corona_mesh.rings = 8
-			ki_blast_corona_right.mesh = corona_mesh
-			var mat = ShaderMaterial.new()
-			mat.shader = KiCoronaShader
-			mat.set_shader_parameter("base_color", energy_color)
-			mat.set_shader_parameter("speed", 5.0)
-			mat.set_shader_parameter("scale", 6.0)
-			ki_blast_corona_right.material_override = mat
-			get_tree().current_scene.add_child(ki_blast_corona_right)
-			
 		if not ki_blast_light_right or not is_instance_valid(ki_blast_light_right):
 			ki_blast_light_right = OmniLight3D.new()
 			ki_blast_light_right.name = "KiBlastChargeLight_Right"
@@ -2160,13 +2031,8 @@ func _update_ki_blast_charge_sphere(hand_side: int, charge_time: float, _delta: 
 			get_tree().current_scene.add_child(ki_blast_light_right)
 			
 		ki_blast_sphere_right.global_position = target_pos
-		ki_blast_corona_right.global_position = target_pos
+		ki_blast_sphere_right.scale = Vector3.ONE * current_radius
 		ki_blast_light_right.global_position = target_pos
-		
-		ki_blast_sphere_right.mesh.radius = current_radius
-		ki_blast_sphere_right.mesh.height = current_radius * 2.0
-		ki_blast_corona_right.mesh.radius = current_radius * 1.25
-		ki_blast_corona_right.mesh.height = current_radius * 1.25 * 2.0
 		ki_blast_light_right.light_energy = 3.0 + norm_charge * 5.0
 		ki_blast_light_right.omni_range = current_radius * 8.0
 
@@ -2302,36 +2168,10 @@ func _update_special_charge_sphere(delta: float) -> void:
 		if power:
 			energy_color = power.energy_color
 			
+	var current_radius = base_radius * scale_multiplier
 	if not special_charge_sphere or not is_instance_valid(special_charge_sphere):
-		special_charge_sphere = MeshInstance3D.new()
+		special_charge_sphere = ZenkaiVFXManager.build_zenkai_orb_visual(get_tree().current_scene, current_radius, energy_color, true, true)
 		special_charge_sphere.name = "SpecialChargeSphere"
-		var sphere_mesh = SphereMesh.new()
-		sphere_mesh.radial_segments = 24
-		sphere_mesh.rings = 12
-		special_charge_sphere.mesh = sphere_mesh
-		
-		var mat = ShaderMaterial.new()
-		mat.shader = KiSphereShader
-		mat.set_shader_parameter("base_color", energy_color)
-		mat.set_shader_parameter("core_glow", 4.0)
-		special_charge_sphere.material_override = mat
-		get_tree().current_scene.add_child(special_charge_sphere)
-		
-	if not special_charge_corona or not is_instance_valid(special_charge_corona):
-		special_charge_corona = MeshInstance3D.new()
-		special_charge_corona.name = "SpecialChargeCorona"
-		var corona_mesh = SphereMesh.new()
-		corona_mesh.radial_segments = 24
-		corona_mesh.rings = 12
-		special_charge_corona.mesh = corona_mesh
-		
-		var mat = ShaderMaterial.new()
-		mat.shader = KiCoronaShader
-		mat.set_shader_parameter("base_color", energy_color)
-		mat.set_shader_parameter("speed", 5.0)
-		mat.set_shader_parameter("scale", 6.0)
-		special_charge_corona.material_override = mat
-		get_tree().current_scene.add_child(special_charge_corona)
 		
 	if not special_charge_light or not is_instance_valid(special_charge_light):
 		special_charge_light = OmniLight3D.new()
@@ -2341,16 +2181,8 @@ func _update_special_charge_sphere(delta: float) -> void:
 		get_tree().current_scene.add_child(special_charge_light)
 		
 	special_charge_sphere.global_position = target_pos
-	special_charge_corona.global_position = target_pos
+	special_charge_sphere.scale = Vector3.ONE * current_radius
 	special_charge_light.global_position = target_pos
-	
-	var current_radius = base_radius * scale_multiplier
-	special_charge_sphere.mesh.radius = current_radius
-	special_charge_sphere.mesh.height = current_radius * 2.0
-	
-	special_charge_corona.mesh.radius = current_radius * 1.25
-	special_charge_corona.mesh.height = current_radius * 1.25 * 2.0
-	
 	special_charge_light.light_energy = 5.0 + charge_time * 2.0
 	special_charge_light.omni_range = current_radius * 10.0
 

@@ -1,81 +1,50 @@
-# AGENTS.md - Godot VR Game Studio Workspace
+# AGENTS.md - DBZVR Godot VR Game Studio Workspace
 
 ## Motor y Entorno
-- **Motor:** Godot 4.3+ (Mobile / Compatibility)
-- **Target:** Meta Quest OpenXR VR (90 FPS estables)
-- **Tracking:** OpenXR Hand Tracking (26 huesos) vía XRHandModifier3D
+- **Motor:** Godot 4.3+ / 4.8 (Mobile / Compatibility)
+- **Target:** Meta Quest 3 OpenXR VR (90 FPS estables)
+- **Tracking:** OpenXR Hand Tracking (26 huesos) vía `XRHandModifier3D`
+- **Godot CLI Headless:** siempre pasar `--xr-mode off` (`--headless --xr-mode off --path "d:\Mis Documentos\dbzvr" --quit-after 3`)
 
 ---
 
 ## 🚨 REGLAS CRÍTICAS DE EJECUCIÓN
 - **SIEMPRE INSPECCIONAR CONSOLA Y LOGS TRAS CADA EDICIÓN:**
-  - Tras modificar código GDScript, shaders o escenas, inspeccionar activamente la consola de Godot (vía headless check `--check-only` o logs) para confirmar que **NO existen errores de compilación, de parsing ni excepciones en consola**.
-  - Nunca dar por terminada una tarea sin haber verificado empíricamente la consola de Godot.
+  - Tras modificar código GDScript, shaders o escenas, inspeccionar activamente la consola de Godot (`--headless --xr-mode off` / `--check-only`) para confirmar **0 errores de compilación, parsing ni runtime**.
+- **Protocolo Anti-Iteración (Menos Vueltas, Cero Regresiones):**
+  - **Enrutamiento obligatorio por Squad:** antes de editar cualquier archivo, identificar el Squad dueño en la tabla inferior y leer su ficha en `.agents/squads/<squad>.md`. Respetar estrictamente sus fronteras de archivos.
+  - **Preview de escritorio antes que APK:** todo ajuste visual, de animaciones, de rigging o de UI debe probarse primero en escritorio con `& "d:\Mis Documentos\dbzvr\run_desktop_preview.ps1"` (`zenkai_showcase.tscn` o `-Arena`) antes de compilar un APK de 175 MB.
+  - **Cero soluciones inventadas/híbridas:** si un asset, extractor o formato binario está incompleto o falla, **detenerse, reportar el estado exacto y preguntar al usuario cómo continuar**. Prohibido mezclar silenciosamente código procedural viejo con assets nuevos.
 - **Flujo Git-Flow Estricto:**
   - `main`: **SOLO código probado y validado empíricamente en el visor VR**.
-  - `develop`: Rama base para integración continua y desarrollo de nuevas funcionalidades.
-  - Ramas `feature/*` o `fix/*`: **SIEMPRE** crear o trabajar sobre una rama `feature/*` / `fix/*` desde `develop` antes de editar archivos (nunca acumular cambios sin commitear en `develop` ni ejecutar `git checkout` / `git restore` sobre archivos sucios sin respaldo).
-  - **Commit, Push y PR obligatorios:** Al terminar y verificar cada tarea/ciclo, hacer **siempre** `git add` + `git commit` + `git push` a `origin` y abrir/actualizar el PR hacia `develop`.
-  - Al terminar una tarea, se prueba y valida en APK antes de promocionar o mergear a `main`.
-- **Tipado Estático Estricto:** Siempre tipar variables y retornos en GDScript 2.0 (`func test() -> void:`).
-- **Delta en Física:** Multiplicar por delta en `_physics_process(delta)`.
-- **Rutas OpenXR:** Rutas canónicas `/user/hand_tracker/left` y `/user/hand_tracker/right`.
-- **Modelos GLB y Escala:** Huesos con nombres OpenXR estándar (`LeftWrist`, etc.) y escala métrica 1.0 en runtime.
-- **Zero Allocations en Hot Paths:** Prohibido instanciar arrays/diccionarios en `_process` o `_physics_process`.
-- **Generación Automática del APK y Autorización Obligatoria para Envío a los Lentes:**
-  - **SIEMPRE** generar/compilar el APK (`d:\Mis Documentos\dbzvr\builds\dbzvr.apk`) automáticamente al terminar cualquier tarea o ciclo de cambios.
-  - **Evitar cuelgues del Gradle Daemon al exportar:** Ejecutar siempre el export con `org.gradle.daemon=false` (ya configurado en `android/build/gradle.properties`) o envolverlo con `Start-Process -Wait` + `android\build\gradlew.bat --stop` para que el proceso hijo de Java no mantenga abiertos los pipes de consola tras `[ DONE ] export`.
-  - **NUNCA** desplegar, instalar ni ejecutar automáticamente el APK en los lentes VR tras compilarlo: **SIEMPRE preguntar primero al usuario** si desea enviarlo a los lentes o no y esperar su confirmación explícita.
-  - Cuando el usuario autorice el envío, verificar primero si el dispositivo está conectado (`adb devices`). Si **NO se detecta ningún visor** conectado, omitir el envío automáticamente, avisar que el APK ya está compilado y listo, y esperar conexión.
-- **Informe Final Obligatorio al Completar Tareas:**
-  - Al finalizar cualquier tarea o ciclo de cambios, **SIEMPRE concluir con un informe final detallado** explicando cómo y dónde se aplicaron los cambios, por qué se resolvieron de esa forma y la validación realizada.
+  - `develop`: Rama base para integración continua y desarrollo.
+  - Ramas `feature/*` o `fix/*`: trabajar siempre sobre rama dedicada desde `develop`. Al terminar y verificar un ciclo, hacer `git add` + `git commit` + `git push` a `origin`.
+- **Calidad GDScript 2.0:**
+  - Tipado estático estricto (`func test() -> void:`), multiplicar física por `delta` en `_physics_process(delta)` y **zero allocations** en hot paths.
+  - Rutas OpenXR canónicas: `/user/hand_tracker/left` y `/user/hand_tracker/right`. Escala métrica 1:1 en runtime.
+- **Compilación APK y Autorización Obligatoria para Envío a los Lentes:**
+  - Al cerrar un ciclo listo para probar en visor, compilar `d:\Mis Documentos\dbzvr\builds\dbzvr.apk` con `Start-Process -Wait` + `android\build\gradlew.bat --stop` (salvo que el usuario pida explícitamente trabajar sin APK en escritorio).
+  - **NUNCA** desplegar ni instalar el APK en los lentes sin autorización explícita del usuario. Cuando autorice, verificar `adb devices` primero.
+- **Informe Final Obligatorio:** concluir cada ciclo explicando qué cambió, dónde, por qué y la validación empírica realizada.
 
 ---
 
-## 🎭 MATRIZ CANÓNICA DE ROLES Y SKILLS ASIGNADAS
+## 🎯 ROUTER CANÓNICO DE SQUADS ESPECIALIZADOS (`.agents/squads/`)
 
-Cada rol del estudio tiene asignado un núcleo de skills especializadas que debe cargar y consultar activamente antes de diseñar, programar o auditar código:
+Cada dominio del juego tiene un Squad dueño de sus archivos y sus skills (curadas a 51 skills activas en `.agents/skills/`; las no aplicables están archivadas en `.agents/skills_archive/`):
 
-### 1. `/godot-engine-specialist` (Godot & OpenXR Architect)
-* **Misión:** Arquitectura del motor, ciclo de vida de nodos, hand tracking y despliegue en Quest.
-* **Skills Asignadas:**
-  - `xr-development`: OpenXR, XROrigin3D, Hand Tracking (26 joints), Meta Quest passthrough.
-  - `godot-platform-vr`: Reglas para 90 FPS estables, foveated rendering y prevención de cinetosis.
-  - `mobile-development`: Exportación APK, ASTC compresión y optimización de batería en Quest.
-  - `3d-essentials` & `physics-system`: Colisiones 3D, CharacterBody3D y queries de raycasting.
-  - `gdscript-advanced` & `gdscript-mastery`: GDScript 2.0 estático, Callable binds y zero-allocations.
-  - `godot-meta-toolkit`: Integración de plataforma Meta Quest (si aplica).
+| ID | Squad | Ficha | Dominio / Archivos Propios | Skills Clave |
+|---|---|---|---|---|
+| **1A** | `melee-squad` | [1a-melee-sequences.md](squads/1a-melee-sequences.md) | `MeleeTargetDome.gd`, `MeleeLoreEventController.gd`, `HybridCombatController.gd` (melee/desvío/dash) | `godot-genre-fighting`, `godot-combat-system`, `state-machine`, `physics-system` |
+| **1B** | `super-beam-squad` | [1b-super-beams.md](squads/1b-super-beams.md) | `SuperBeamSequenceController.gd`, `BeamClashController.gd`, `ProceduralKiProjectile.gd` | `godot-combat-system`, `godot-signal-architecture`, `tween-animation`, `godot-raycasting-queries` |
+| **2** | `ki-bp-systems` | [2-ki-bp-systems.md](squads/2-ki-bp-systems.md) | `character_instance.gd` (Ki/NP/Furia/Zenkai), `CombatAIController.gd`, `DramaticDirector.gd`, `vr_hud.gd` | `godot-state-machine-advanced`, `godot-signal-architecture`, `godot-gdscript-mastery`, `game-ui-specialist` |
+| **3A** | `xr-gestures` | [3a-xr-gestures.md](squads/3a-xr-gestures.md) | `GesturePhaseTree.gd`, `xr_setup.gd`, `ki_sense_and_lockon.gd`, OpenXR 26 joints | `xr-development`, `godot-platform-vr`, `gdscript-advanced` |
+| **3B** | `character-animations` | [3b-character-animations.md](squads/3b-character-animations.md) | `ProceduralCombatAnimator.gd`, `ZenkaiAnimationLoader.gd`, `runtime_ragdoll_generator.gd`, `skeleton_axis_calibration.json` | `animation-system`, `godot-animation`, `godot-physics-3d`, `godot-gdscript-mastery` |
+| **4A** | `vfx-shaders` | [4a-vfx-shaders.md](squads/4a-vfx-shaders.md) | `ZenkaiVFXManager.gd`, `KiSmokeFX.gd`, `shaders/*.gdshader`, `assets/vfx_zenkai/`, aura | `godot-shader-vfx-library`, `shader-basics`, `particles-vfx`, `rendering-pipeline`, `godot-polish` |
+| **4B** | `audio-voices` | [4b-audio-voices.md](squads/4b-audio-voices.md) | `AudioActionManager.gd`, `assets/audio/audio_actions.json`, bancos Zenkai | `audio-system`, `godot-audio`, `gdscript-advanced` |
+| **5** | `environment-arena` | [5-environment-arena.md](squads/5-environment-arena.md) | `cell_games_arena.tscn`, `build_arena.gd`, `ArenaDestructionManager.gd` | `3d-essentials`, `rendering-pipeline`, `physics-system`, `godot-performance-optimization` |
+| **6** | `lore-balance` | [6-lore-balance.md](squads/6-lore-balance.md) | `resources/*.tres`, `scripts/resources/*.gd` (Goku/Vegeta canon, NP, transformaciones) | `resource-pattern`, `godot-resource-data-patterns`, `godot-director`, `godot-distiller` |
+| **7** | `qa-release-ops` | [7-qa-release-ops.md](squads/7-qa-release-ops.md) | `zenkai_showcase.tscn`, `ZenkaiShowcaseViewer.gd`, `run_desktop_preview.ps1`, `CombatSequenceRunner.gd`, `FEATURE_MAP.md` | `godot-headless-workflow`, `godot-auditor`, `godot-code-review`, `mobile-development`, `export-pipeline` |
 
-### 2. `/technical-artist` (Shaders, Materiales Anime & VFX)
-* **Misión:** Cel-shading anime de Dragon Ball, auras de Ki, partículas GPU y estética visual fiel al manga/anime sin penalizar el framerate.
-* **Skills Asignadas:**
-  - `godot-shader-vfx-library`: Shaders listos para Cel-Shading, contornos 3D, shockwaves, auras y hologramas.
-  - `shader-basics` & `godot-shaders-vfx`: Shaders espaciales y canvas para renderizador Compatibility/Mobile.
-  - `particles-vfx`: GPUParticles3D, pooling y optimización para la GPU Adreno de Meta Quest.
-  - `rendering-pipeline`: Balance de MSAA, resolución dinámica y budget de dibujo por ojo.
-  - `godot-effects` & `godot-polish`: Feedback visual de impactos, distorsión de aire y destellos.
-
-### 3. `/game-design-system` & `/gameplay-programmer` (Combate & Mecánicas Canon)
-* **Misión:** Implementación de mecánicas gestuales, árbol de combos, Nivel de Poder (NP) y combate biométrico 1v1.
-* **Skills Asignadas:**
-  - `godot-genre-fighting`: Lógica de combate 1v1, hitboxes/hurtboxes, frames de invencibilidad y buffers de reacción.
-  - `godot-combat-system`: Sistemas de cálculo de daño, estados de aturdimiento y cadenas de golpes.
-  - `state-machine` & `godot-state-machine-advanced`: FSM jerárquica (Fase Libre vs Fase de Cadena, Furia, Zenkai).
-  - `resource-pattern`: Custom Resources para técnicas, multiplicadores de daño y umbrales de NP.
-  - `godot-signal-architecture`: Arquitectura desacoplada ("Signal Up, Call Down").
-  - `godot-xr-gesture-trie`: Motor gestual Trie para reconocimiento de gestos (Kamehameha, Ki Blast, Recarga de Ki).
-
-### 4. `/game-code-review` / `godot-auditor` (QA, Profiling & Headless Checks)
-* **Misión:** Inspección continua de consola, erradicación de fugas de memoria y garantía de estabilidad.
-* **Skills Asignadas:**
-  - `godot-headless-workflow`: Validación CLI con `--check-only` sin abrir GUI tras cada edición de código.
-  - `godot-auditor`: Detección de fugas (`queue_free()` vs `free()`), señales huérfanas y anti-patrones.
-  - `godot-debugging` & `godot-performance`: Profiling de frametime, reducción de draw calls y diagnóstico de excepciones.
-  - `godot-performance-optimization`: Optimizaciones extremas de memoria y mallas.
-
-### 5. `/game-studio-director` (Director Creativo & Scaffolding)
-* **Misión:** Planificación de hitos, alcance de sesiones y generación asistida de escenas.
-* **Skills Asignadas:**
-  - `godot-director` & `godot-distiller`: Desglose del GDD y acotación de entregables por sesión.
-  - `godot-builder` & `godot-scene-arch`: Scaffolding y composición limpia de escenas.
-  - `godot-analyst`: Scoring de salud de proyecto y grafo de dependencias de escenas.
+### Coordinación entre Squads
+- Si una tarea cruza dos dominios (por ejemplo, un nuevo Súper Ataque requiere secuencia en `1B`, VFX en `4A` y sonido en `4B`), definir primero el **contrato de interfaz** (nombre de método/señal o `action_id`) y ejecutar cada Squad sobre sus propios archivos (en serie o en paralelo con `/teamwork`).

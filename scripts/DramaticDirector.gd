@@ -161,22 +161,24 @@ func _build_audio_players() -> void:
 
 func _build_pools() -> void:
 	# 1. Pool de 6 cráteres persistentes (anillo oscuro con relieve limpio para Quest 3)
-	var shared_crater_mesh := CylinderMesh.new()
-	shared_crater_mesh.top_radius = 2.6
-	shared_crater_mesh.bottom_radius = 1.9
-	shared_crater_mesh.height = 0.08
-	shared_crater_mesh.radial_segments = 16
+	var shared_crater_mesh := QuadMesh.new()
+	shared_crater_mesh.size = Vector2(5.2, 5.2)
 
 	var shared_crater_mat := StandardMaterial3D.new()
-	shared_crater_mat.albedo_color = Color(0.16, 0.13, 0.11, 0.92)
-	shared_crater_mat.roughness = 0.98
+	shared_crater_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	shared_crater_mat.albedo_color = Color(0.92, 0.84, 0.72, 0.92)
 	shared_crater_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	shared_crater_mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	var z_crater_tex: Texture2D = ZenkaiVFXManager.get_tex("crater_cracks")
+	if z_crater_tex != null:
+		shared_crater_mat.albedo_texture = z_crater_tex
 
 	_crater_pool.clear()
 	for i in range(MAX_CRATERS):
 		var cr := MeshInstance3D.new()
 		cr.name = "DramaticCrater_%d" % i
 		cr.mesh = shared_crater_mesh
+		cr.rotation_degrees.x = -90.0
 		cr.material_override = shared_crater_mat
 		cr.visible = false
 		add_child(cr)
@@ -309,6 +311,7 @@ func reset_for_new_match() -> void:
 			cr.visible = false
 	if mini_scene_controller:
 		mini_scene_controller.reset_match_state()
+	MeleeTargetDome.reset_match_static_state()
 
 
 func _process(delta: float) -> void:
@@ -352,6 +355,7 @@ func _process(delta: float) -> void:
 		_banner_timer -= real_delta
 		if _banner_timer <= 0.0 and _banner_label and is_instance_valid(_banner_label):
 			_banner_label.visible = false
+			_banner_label.scale = Vector3.ONE
 
 	if _levitation_active and _rock_multimesh and _rock_multimesh.visible:
 		_levitate_timer += real_delta
@@ -379,6 +383,7 @@ func show_camera_banner(text_val: String, color: Color, duration_sec: float) -> 
 	if not _banner_label or not is_instance_valid(_banner_label):
 		_build_camera_overlays()
 	if _banner_label and is_instance_valid(_banner_label):
+		_banner_label.scale = Vector3.ONE
 		_banner_label.text = text_val
 		_banner_label.modulate = color
 		_banner_label.visible = true
@@ -454,6 +459,16 @@ func skip_dramatic_intro() -> void:
 	show_camera_banner("⚔️ ¡COMBATE! ⚔️", Color(1.0, 0.95, 0.3), 0.85)
 
 
+func _is_any_combat_sequence_active() -> bool:
+	for f_chk in [_player_char, _enemy_char]:
+		if f_chk and is_instance_valid(f_chk):
+			if f_chk.has_method("is_in_active_combat_sequence") and f_chk.is_in_active_combat_sequence():
+				return true
+			if bool(f_chk.get("is_in_bullet_time")) or bool(f_chk.get("is_in_followup_bullet_time")) or bool(f_chk.get("is_flying_to_opponent")) or bool(f_chk.get("is_in_beam_sequence")) or bool(f_chk.get("is_in_beam_clash")) or bool(f_chk.get("is_firing_beam")):
+				return true
+	return false
+
+
 # ==============================================================================
 # 2. TRANSFORMACIÓN DRAMÁTICA
 # ==============================================================================
@@ -464,38 +479,40 @@ func play_dramatic_transformation(fighter: Node3D, trans: Resource) -> void:
 	var aura_col: Color = trans.aura_color if "aura_color" in trans else Color(1.0, 0.85, 0.15)
 	var f_name: String = String(trans.form_name).to_upper() if "form_name" in trans else "SUPER SAIYAN"
 	var pos: Vector3 = fighter.get_parent().global_position if (bool(fighter.get("is_player")) and fighter.get_parent() is Node3D) else fighter.global_position
+	var in_seq: bool = _is_any_combat_sequence_active()
 
-	_set_atmosphere(aura_col, 0.48, 0.65, 1.35)
-	_levitate_center = pos
-	_levitation_active = true
-	if _rock_multimesh:
-		_rock_multimesh.visible = true
+	if not in_seq:
+		_set_atmosphere(aura_col, 0.48, 0.65, 1.35)
+		_levitate_center = pos
+		_levitation_active = true
+		if _rock_multimesh:
+			_rock_multimesh.visible = true
 
-	if _pillar_mesh and _pillar_mat:
-		_pillar_mat.set_shader_parameter("beam_color", Color(aura_col.r, aura_col.g, aura_col.b, 0.9))
-		_pillar_mesh.global_position = Vector3(pos.x, pos.y + 18.0, pos.z)
-		_pillar_mesh.scale = Vector3(0.85, 1.0, 0.85)
-		_pillar_mesh.visible = true
+		if _pillar_mesh and _pillar_mat:
+			_pillar_mat.set_shader_parameter("beam_color", Color(aura_col.r, aura_col.g, aura_col.b, 0.9))
+			_pillar_mesh.global_position = Vector3(pos.x, pos.y + 18.0, pos.z)
+			_pillar_mesh.scale = Vector3(0.85, 1.0, 0.85)
+			_pillar_mesh.visible = true
 
-	_spawn_shockwave_ring(pos + Vector3(0.0, 0.25, 0.0), aura_col, 4.5, 0.55)
-	_spawn_shockwave_ring(pos + Vector3(0.0, 0.90, 0.0), aura_col.lightened(0.25), 3.4, 0.45)
+		_spawn_shockwave_ring(pos + Vector3(0.0, 0.25, 0.0), aura_col, 4.5, 0.55)
+		_spawn_shockwave_ring(pos + Vector3(0.0, 0.90, 0.0), aura_col.lightened(0.25), 3.4, 0.45)
 
-	# Repulsión por presión de aura si el rival está a < 5.0m (sin daño directo)
-	var opp: Node3D = _enemy_char if fighter == _player_char else _player_char
-	if opp and is_instance_valid(opp):
-		var opp_pos: Vector3 = opp.get_parent().global_position if (bool(opp.get("is_player")) and opp.get_parent() is Node3D) else opp.global_position
-		if pos.distance_to(opp_pos) < 5.0 and opp.has_method("apply_knockback"):
-			var push_dir: Vector3 = (opp_pos - pos).normalized()
-			if push_dir.length_squared() < 0.01:
-				push_dir = Vector3.BACK
-			opp.apply_knockback(push_dir, 8.5)
+		# Repulsión por presión de aura si el rival está a < 5.0m (sin daño directo)
+		var opp: Node3D = _enemy_char if fighter == _player_char else _player_char
+		if opp and is_instance_valid(opp):
+			var opp_pos: Vector3 = opp.get_parent().global_position if (bool(opp.get("is_player")) and opp.get_parent() is Node3D) else opp.global_position
+			if pos.distance_to(opp_pos) < 5.0 and opp.has_method("apply_knockback"):
+				var push_dir: Vector3 = (opp_pos - pos).normalized()
+				if push_dir.length_squared() < 0.01:
+					push_dir = Vector3.BACK
+				opp.apply_knockback(push_dir, 8.5)
 
 	# Tintar cabello del rival NPC acorde a la transformación
 	if not bool(fighter.get("is_player")):
 		_apply_npc_hair_tint(fighter, aura_col)
 
-	# Micro slow-mo cinematográfico seguro (0.45s reales)
-	if not is_dramatic_pause_active and not _is_finish_playing:
+	# Micro slow-mo cinematográfico seguro (0.45s reales) — omitido dentro de secuencias activas
+	if not in_seq and not is_dramatic_pause_active and not _is_finish_playing:
 		Engine.time_scale = 0.40
 		_timescale_restore_timer = 0.45
 
@@ -503,6 +520,103 @@ func play_dramatic_transformation(fighter: Node3D, trans: Resource) -> void:
 	var c_data: Variant = fighter.get("character_data")
 	var char_lbl: String = String(c_data.character_name).to_upper() if (c_data and "character_name" in c_data) else "SAIYAN"
 	show_camera_banner("⚡ ¡%s DESPIERTA %s! ⚡" % [char_lbl, f_name], aura_col.lightened(0.2), 1.45)
+
+
+func play_dramatic_limit_break_transformation(fighter: Node3D, trans: Resource) -> void:
+	if not fighter or not is_instance_valid(fighter) or not trans:
+		return
+	var lb_col: Color = Color(1.0, 0.38, 0.12, 1.0)
+	var f_name: String = String(trans.form_name).to_upper() if "form_name" in trans else "SSJ"
+	var pos: Vector3 = fighter.get_parent().global_position if (bool(fighter.get("is_player")) and fighter.get_parent() is Node3D) else fighter.global_position
+	var in_seq: bool = _is_any_combat_sequence_active()
+
+	if not in_seq:
+		_set_atmosphere(lb_col, 0.44, 0.62, 1.35)
+		_levitate_center = pos
+		_levitation_active = true
+		if _rock_multimesh:
+			_rock_multimesh.visible = true
+		if _pillar_mesh and _pillar_mat:
+			_pillar_mat.set_shader_parameter("beam_color", Color(lb_col.r, lb_col.g, lb_col.b, 0.92))
+			_pillar_mesh.global_position = Vector3(pos.x, pos.y + 18.0, pos.z)
+			_pillar_mesh.scale = Vector3(0.95, 1.0, 0.95)
+			_pillar_mesh.visible = true
+		if is_inside_tree() and get_tree():
+			ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), pos + Vector3(0.0, 0.95, 0.0), 4, lb_col, true)
+		_spawn_shockwave_ring(pos + Vector3(0.0, 0.30, 0.0), lb_col, 5.2, 0.55)
+		_spawn_shockwave_ring(pos + Vector3(0.0, 1.15, 0.0), lb_col.lightened(0.22), 4.2, 0.48)
+
+	if not bool(fighter.get("is_player")):
+		_apply_npc_hair_tint(fighter, lb_col)
+
+	if not in_seq and not is_dramatic_pause_active and not _is_finish_playing and Engine.time_scale >= 0.85:
+		Engine.time_scale = 0.32
+		_timescale_restore_timer = 0.55
+
+	play_character_dramatic_voice(fighter, "transform_ssj", "ki_charge")
+	play_dramatic_sfx("dramatic.transform_buildup", "common.aura_burst")
+	var c_data: Variant = fighter.get("character_data")
+	var char_lbl: String = String(c_data.character_name).to_upper() if (c_data and "character_name" in c_data) else "SAIYAN"
+	show_camera_banner("🔥 ¡DESPERTAR LÍMITE! %s ACTIVA %s POR DESVENTAJA 🔥" % [char_lbl, f_name], lb_col.lightened(0.22), 1.85)
+
+
+func play_dramatic_zenkai_event(fighter: Node3D, source: String) -> void:
+	if not fighter or not is_instance_valid(fighter):
+		return
+	var is_comeback: bool = (source == "comeback")
+	var zenkai_col: Color = Color(1.0, 0.24, 0.12, 1.0) if is_comeback else Color(1.0, 0.86, 0.16, 1.0)
+	var pos: Vector3 = fighter.get_parent().global_position if (bool(fighter.get("is_player")) and fighter.get_parent() is Node3D) else fighter.global_position
+	var in_seq: bool = _is_any_combat_sequence_active()
+
+	if not in_seq:
+		_set_atmosphere(zenkai_col, 0.40, 0.58, 1.45)
+		_levitate_center = pos
+		_levitation_active = true
+		if _rock_multimesh:
+			_rock_multimesh.visible = true
+		if _speed_lines_mesh and is_instance_valid(_speed_lines_mesh):
+			_speed_lines_mesh.visible = true
+
+		if _pillar_mesh and _pillar_mat:
+			_pillar_mat.set_shader_parameter("beam_color", Color(zenkai_col.r, zenkai_col.g, zenkai_col.b, 0.92))
+			_pillar_mesh.global_position = Vector3(pos.x, pos.y + 18.0, pos.z)
+			_pillar_mesh.scale = Vector3(1.15, 1.0, 1.15)
+			_pillar_mesh.visible = true
+
+		if is_inside_tree() and get_tree():
+			ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), pos + Vector3(0.0, 0.95, 0.0), 4, zenkai_col, true)
+		_spawn_shockwave_ring(pos + Vector3(0.0, 0.30, 0.0), zenkai_col, 6.2, 0.65)
+		_spawn_shockwave_ring(pos + Vector3(0.0, 1.55, 0.0), zenkai_col.lightened(0.28), 7.5, 0.55)
+
+		# Repulsión de proyectiles menores en radio 8.0m
+		var scene_root: Node = get_tree().current_scene if (is_inside_tree() and get_tree()) else null
+		if scene_root:
+			for child in scene_root.get_children():
+				if child is Node3D and child.has_method("_trigger_explosion") and child.get("shooter_node") != fighter:
+					if (child as Node3D).global_position.distance_to(pos) <= 8.0:
+						child.queue_free()
+
+		# Presión de aura sobre el rival si está muy cerca
+		var opp: Node3D = _enemy_char if fighter == _player_char else _player_char
+		if opp and is_instance_valid(opp):
+			var opp_pos: Vector3 = opp.get_parent().global_position if (bool(opp.get("is_player")) and opp.get_parent() is Node3D) else opp.global_position
+			if pos.distance_to(opp_pos) < 5.5 and opp.has_method("apply_knockback"):
+				var push_dir: Vector3 = (opp_pos - pos).normalized()
+				if push_dir.length_squared() < 0.01:
+					push_dir = Vector3.BACK
+				opp.apply_knockback(push_dir, 9.5)
+
+	# Micro slow-motion seguro (0.65s reales a 0.28x, restaurado automáticamente a 1.0)
+	if not in_seq and not is_dramatic_pause_active and not _is_finish_playing and Engine.time_scale >= 0.85:
+		Engine.time_scale = 0.28
+		_timescale_restore_timer = 0.65
+
+	play_character_dramatic_voice(fighter, "transform_ssj", "ki_charge")
+	play_dramatic_sfx("common.furia_activate" if is_comeback else "common.zenkai_activate", "common.aura_burst")
+	var banner_txt: String = "🔥 ¡FURIA ZENKAI COMEBACK! 🔥\nREMONTADA LISTA (+35 KI)" if is_comeback else "⚡ ¡MODO ZENKAI ACTIVO! ⚡\nFINISHER LISTO (+35 KI)"
+	show_camera_banner(banner_txt, zenkai_col.lightened(0.22), 2.2)
+	if _banner_label and is_instance_valid(_banner_label):
+		_banner_label.scale = Vector3.ONE * 1.28
 
 
 func _apply_npc_hair_tint(fighter: Node3D, col: Color) -> void:

@@ -1,0 +1,53 @@
+{
+  "model": "res://assets/models/goku_zenkai/21_goku1_body.glb",
+  "compose_mode": "rest_q * offset_q",
+  "verified_poses": {
+    "arms_forward": {
+      "LeftArm": [0.0, -90.0, 0.0],
+      "RightArm": [0.0, -90.0, 0.0]
+    },
+    "arms_down": {
+      "LeftArm": [0.0, -10.0, -75.0],
+      "RightArm": [5.0, -15.0, -75.0]
+    },
+    "arms_up": {
+      "LeftArm": [-180.0, 0.0, -75.0],
+      "RightArm": [-180.0, 0.0, -75.0]
+    },
+    "elbows_flex": {
+      "LeftArm": [0.0, -90.0, 0.0],
+      "LeftForeArm": [0.0, -180.0, 85.0],
+      "RightArm": [0.0, -90.0, 0.0],
+      "RightForeArm": [-180.0, 0.0, -90.0]
+    },
+    "wrists_flex": {
+      "LeftArm": [0.0, -10.0, -75.0],
+      "LeftHand": [-100.0, 0.0, 0.0],
+      "RightArm": [5.0, -15.0, -75.0],
+      "RightHand": [-100.0, 0.0, 0.0]
+    },
+    "wrists_palms_up": {
+      "LeftArm": [0.0, -90.0, 0.0],
+      "LeftHand": [-180.0, 0.0, 0.0],
+      "RightArm": [0.0, -90.0, 0.0],
+      "RightHand": [-180.0, 0.0, 0.0]
+    },
+    "legs_forward": {
+      "LeftUpLeg": [-5.0, -95.0, 15.0],
+      "RightUpLeg": [0.0, -100.0, 5.0]
+    },
+    "legs_knees_flex": {
+      "LeftUpLeg": [0.0, -100.0, 5.0],
+      "LeftLeg": [0.0, 90.0, 0.0],
+      "RightUpLeg": [0.0, -100.0, 5.0],
+      "RightLeg": [-15.0, 100.0, 0.0]
+    }
+  },
+  "axis_notes": {
+    "arms": "LeftArm and RightArm share identical local axis signs (-Y = forward, -Z = down, (-180, 0, -75) = up)",
+    "elbows": "LeftForeArm=(0,-180,85) and RightForeArm=(-180,0,-90) flex both forearms 90deg up with palms facing head",
+    "wrists": "LeftHand=(-100,0,0) and RightHand=(-100,0,0) rotate both palms forward; (-180,0,0) palms up when arms forward",
+    "thighs": "LeftUpLeg/RightUpLeg raise forward with -Y (-95..-100). Note: alias LeftUpLeg maps to character right thigh (THIGH_R) and RightUpLeg to character left thigh (THIGH_L)",
+    "knees": "LeftLeg=(0,90,0) and RightLeg=(-15,100,0) flex both knees backward with +Y"
+  }
+}
