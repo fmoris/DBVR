@@ -61,6 +61,7 @@ var air_brake_difficulty_label: String = "NORMAL"
 var _last_hit_damage_np: float = 0.0
 var _last_hit_attacker_bp: float = 10000.0
 var _proximity_repulsion_cooldown: float = 0.0
+var _tactical_separation_timer: float = 0.0
 var arena_half_limit: float = 92.0 # Límite en las faldas del cañón de Akira Toriyama
 const RING_HALF_SIZE: float = 16.0 # Límite del cuadrilátero de piedra de Cell (32x32m)
 var wall_stick_timer: float = 0.0 # Efecto de quedar incrustado en la roca de la montaña (Toriyama canon)
@@ -866,6 +867,8 @@ func _physics_process(delta: float) -> void:
 	# 3. Colisión mutua de cuerpos anti-clipping (No atravesar al rival) y rebote de Ki por cercanía
 	if _proximity_repulsion_cooldown > 0.0:
 		_proximity_repulsion_cooldown -= delta
+	if _tactical_separation_timer > 0.0:
+		_tactical_separation_timer = maxf(_tactical_separation_timer - delta, 0.0)
 	_process_mutual_body_collision()
 
 	# 4. Temporizador de rotura de guardia
@@ -4460,7 +4463,9 @@ func _process_mutual_body_collision() -> void:
 	# Punto 4: Rebote de Ki por cercanía extrema fuera del melee (< 1.8m) y mantenimiento de distancia táctica (>= 5.5m)
 	var in_melee_seq: bool = is_in_bullet_time or is_flying_to_opponent or bool(opponent.get("is_in_bullet_time")) or bool(opponent.get("is_flying_to_opponent"))
 	var in_knockback_or_beam: bool = is_knocked_back or bool(opponent.get("is_knocked_back")) or is_in_beam_sequence or bool(opponent.get("is_in_beam_sequence"))
-	if not in_melee_seq and not in_knockback_or_beam and not is_match_over:
+	var opp_sep_v: Variant = opponent.get("_tactical_separation_timer")
+	var in_tactical_sep: bool = _tactical_separation_timer > 0.0 or (opp_sep_v != null and float(opp_sep_v) > 0.0)
+	if not in_melee_seq and not in_knockback_or_beam and not in_tactical_sep and not is_match_over:
 		var push_dir: Vector3 = diff.normalized() if dist > 0.001 else Vector3.BACK
 		if dist < 1.80:
 			if _proximity_repulsion_cooldown <= 0.0:
@@ -5096,10 +5101,28 @@ func _execute_charged_v3_or_ki_break_finisher(opponent: Node3D, mode: String, sw
 				gss.emit_signal("phase_changed", "⚠️ ¡SALISTE VOLANDO! ¡AGITA PARA FRENAR!")
 
 
-## Separa a los combatientes garantizando la distancia canónica de combate (8.0m)
+## Separa a los combatientes garantizando la distancia canónica de combate (8.0m) sin disparar knockback ni repulsión
 func _separate_fighters_to_canonical_distance(opponent: Node3D, target_distance: float = 8.0) -> void:
 	if not opponent or not is_instance_valid(opponent):
 		return
+
+	# Blindaje físico durante el Desenganche Z para que _process_mutual_body_collision no aplique empuje de 9 m/s encima del Tween
+	_tactical_separation_timer = 0.75
+	_proximity_repulsion_cooldown = maxf(_proximity_repulsion_cooldown, 0.90)
+	if opponent.has_method("set"):
+		opponent.set("_tactical_separation_timer", 0.75)
+		var opp_rc: Variant = opponent.get("_proximity_repulsion_cooldown")
+		opponent.set("_proximity_repulsion_cooldown", maxf(float(opp_rc) if opp_rc != null else 0.0, 0.90))
+	velocity = Vector3.ZERO
+	is_knocked_back = false
+	is_ballistic_launch = false
+	ballistic_elapsed = 0.0
+	is_flying_to_opponent = false
+	opponent.set("velocity", Vector3.ZERO)
+	opponent.set("is_knocked_back", false)
+	opponent.set("is_ballistic_launch", false)
+	opponent.set("ballistic_elapsed", 0.0)
+	opponent.set("is_flying_to_opponent", false)
 
 	# Si la IA es quien ejecutó la acción, la IA retrocede respecto al jugador para mantener el espacio de combate
 	if not is_player:
@@ -5118,10 +5141,12 @@ func _separate_fighters_to_canonical_distance(opponent: Node3D, target_distance:
 			away_dir = away_dir.normalized() if away_dir.length_squared() > 0.01 else Vector3.FORWARD
 		var target_ai_pos = p_h + away_dir * target_distance
 		target_ai_pos.y = get_ground_elevation(target_ai_pos)
-		
-		velocity = Vector3.ZERO
-		is_knocked_back = false
-		is_flying_to_opponent = false
+
+		if is_inside_tree() and get_tree():
+			KiSmokeFX.spawn_smoke(get_tree(), global_position + Vector3(0.0, 0.25, 0.0), 0.90)
+		play_character_action_audio("common.dodge_vanish", false)
+		if procedural_animator and procedural_animator.has_method("trigger_melee_block"):
+			procedural_animator.trigger_melee_block(1)
 		var tw_self = create_tween()
 		tw_self.tween_property(self, "global_position", target_ai_pos, 0.35).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 		tw_self.tween_callback(func(): _clamp_to_arena(self))
@@ -5151,17 +5176,13 @@ func _separate_fighters_to_canonical_distance(opponent: Node3D, target_distance:
 	var target_opp_pos = p_h + fwd_dir * target_distance
 	target_opp_pos.y = get_ground_elevation(target_opp_pos)
 
-	# Frenar velocidades físicas
-	velocity = Vector3.ZERO
-	is_knocked_back = false
-	is_ballistic_launch = false
-	ballistic_elapsed = 0.0
-	is_flying_to_opponent = false
-	opponent.set("velocity", Vector3.ZERO)
-	opponent.set("is_knocked_back", false)
-	opponent.set("is_ballistic_launch", false)
-	opponent.set("ballistic_elapsed", 0.0)
-	opponent.set("is_flying_to_opponent", false)
+	if opponent.is_inside_tree() and opponent.get_tree():
+		KiSmokeFX.spawn_smoke(opponent.get_tree(), opponent.global_position + Vector3(0.0, 0.25, 0.0), 0.90)
+	if opponent.has_method("play_character_action_audio"):
+		opponent.play_character_action_audio("common.dodge_vanish", false)
+	var opp_anim: Variant = opponent.get("procedural_animator")
+	if opp_anim and opp_anim.has_method("trigger_melee_block"):
+		opp_anim.trigger_melee_block(1)
 
 	# Desplazamiento limpio y suave del oponente IA hacia la distancia canónica (0.35s)
 	var tw_opp = opponent.create_tween()

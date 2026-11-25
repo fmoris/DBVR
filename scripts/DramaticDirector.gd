@@ -500,8 +500,10 @@ func play_dramatic_transformation(fighter: Node3D, trans: Resource) -> void:
 		# Repulsión por presión de aura si el rival está a < 5.0m (sin daño directo)
 		var opp: Node3D = _enemy_char if fighter == _player_char else _player_char
 		if opp and is_instance_valid(opp):
+			var opp_sep_t: float = float(opp.get("_tactical_separation_timer")) if opp.get("_tactical_separation_timer") != null else 0.0
+			var fig_sep_t: float = float(fighter.get("_tactical_separation_timer")) if fighter.get("_tactical_separation_timer") != null else 0.0
 			var opp_pos: Vector3 = opp.get_parent().global_position if (bool(opp.get("is_player")) and opp.get_parent() is Node3D) else opp.global_position
-			if pos.distance_to(opp_pos) < 5.0 and opp.has_method("apply_knockback"):
+			if pos.distance_to(opp_pos) < 5.0 and opp_sep_t <= 0.0 and fig_sep_t <= 0.0 and opp.has_method("apply_knockback"):
 				var push_dir: Vector3 = (opp_pos - pos).normalized()
 				if push_dir.length_squared() < 0.01:
 					push_dir = Vector3.BACK
@@ -599,8 +601,10 @@ func play_dramatic_zenkai_event(fighter: Node3D, source: String) -> void:
 		# Presión de aura sobre el rival si está muy cerca
 		var opp: Node3D = _enemy_char if fighter == _player_char else _player_char
 		if opp and is_instance_valid(opp):
+			var opp_sep_z: float = float(opp.get("_tactical_separation_timer")) if opp.get("_tactical_separation_timer") != null else 0.0
+			var fig_sep_z: float = float(fighter.get("_tactical_separation_timer")) if fighter.get("_tactical_separation_timer") != null else 0.0
 			var opp_pos: Vector3 = opp.get_parent().global_position if (bool(opp.get("is_player")) and opp.get_parent() is Node3D) else opp.global_position
-			if pos.distance_to(opp_pos) < 5.5 and opp.has_method("apply_knockback"):
+			if pos.distance_to(opp_pos) < 5.5 and opp_sep_z <= 0.0 and fig_sep_z <= 0.0 and opp.has_method("apply_knockback"):
 				var push_dir: Vector3 = (opp_pos - pos).normalized()
 				if push_dir.length_squared() < 0.01:
 					push_dir = Vector3.BACK

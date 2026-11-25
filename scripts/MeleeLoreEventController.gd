@@ -2,13 +2,14 @@ class_name MeleeLoreEventController
 extends Node3D
 
 ## MeleeLoreEventController (Godot 4.3+ / 4.8 VR)
-## Orquesta los 6 Eventos Dinámicos del Lore de Dragon Ball Z dentro de la fase Melee:
+## Orquesta los 7 Eventos Dinámicos del Lore de Dragon Ball Z dentro de la fase Melee:
 ## 1. FIST_FLURRY_CLASH (Ataque simultáneo de ráfaga con tira y afloja)
 ## 2. METEOR_SMASH (Lanzar al aire, Z-Vanish arriba y estrellar en cráter -> listo para Super)
 ## 3. Z_VANISH_WAR (Cadena de teletransportes tácticos quemando Ki)
 ## 4. GUARD_PRESSURE_BREAK (Presión contra Guardia Cruzada / Onda de defensa)
 ## 5. EXPLOSIVE_WAVE (Kiai explosivo de emergencia para cortar combos a costa de Ki)
 ## 6. SONIC_Z_BURST (Persecución aérea en 3 saltos tras múltiples golpes sónicos)
+## 7. TACTICAL_STANDOFF (Desenganche Z / salto atrás neutro al agotar Ki, cancelar o empatar)
 
 enum LoreEventType {
 	NONE = 0,
@@ -17,7 +18,8 @@ enum LoreEventType {
 	Z_VANISH_WAR = 3,
 	GUARD_PRESSURE_BREAK = 4,
 	EXPLOSIVE_WAVE = 5,
-	SONIC_Z_BURST = 6
+	SONIC_Z_BURST = 6,
+	TACTICAL_STANDOFF = 7
 }
 
 signal lore_event_started(event_type: int, title: String)
@@ -50,6 +52,9 @@ var _vanish_hop_grace: float = 0.0
 var _burst_hop_window: float = 1.05
 var _burst_guard_hold_cd: float = 0.0
 var _char_script_cache_lore: GDScript = null
+var _standoff_mode: String = "cancel"
+var _standoff_sep_dist: float = 8.5
+var _standoff_reason: String = ""
 
 # Nodos visuales reutilizables (cero alocaciones por frame)
 var _hud_root: Node3D = null
@@ -188,6 +193,77 @@ static func compute_meteor_smash_positions(crater_pos: Vector3, duel_axis: Vecto
 		"crater_ground_pos": Vector3(crater_x, ground_y, crater_z),
 		"post_slam_attacker_pos": Vector3(px, ground_y + 5.2, pz)
 	}
+
+
+func configure_standoff(mode: String) -> void:
+	_standoff_mode = mode
+
+
+static func get_standoff_preset(mode: String) -> Dictionary:
+	match mode:
+		"mutual_exhaustion":
+			return {
+				"title": "😤 ¡AGOTAMIENTO MUTUO — RESPIRO Z!",
+				"prompt": "Ambos al límite de Ki — salto atrás sincronizado (+10 Ki)",
+				"color": Color(0.55, 0.88, 1.0),
+				"distance": 9.5,
+				"ki_recovery": 10.0,
+				"reason": "😤 Agotamiento mutuo: Respiro Z y separación táctica (9.5m)."
+			}
+		"sim_draw":
+			return {
+				"title": "⚡ ¡TABLAS EN EL INTERCAMBIO!",
+				"prompt": "Nadie rompió la guardia — Desenganche Z táctico",
+				"color": Color(1.0, 0.88, 0.25),
+				"distance": 9.0,
+				"ki_recovery": 0.0,
+				"reason": "⚡ Tablas defensivas en el intercambio: Desenganche Z (9.0m)."
+			}
+		"no_ki_turnover":
+			return {
+				"title": "💨 ¡SIN KI PARA CONTRAATACAR!",
+				"prompt": "Desenganche Z — distancia para recargar Ki",
+				"color": Color(0.35, 0.92, 1.0),
+				"distance": 8.5,
+				"ki_recovery": 0.0,
+				"reason": "💨 Sin Ki suficiente para continuar ofensiva: Desenganche Z (8.5m)."
+			}
+		"ki_break_pass":
+			return {
+				"title": "💨 ¡DESENGANCHE Z!",
+				"prompt": "Rival exhausto se recompone — reposicionamiento",
+				"color": Color(0.45, 0.95, 0.85),
+				"distance": 8.0,
+				"ki_recovery": 0.0,
+				"reason": "💨 Oportunidad expirada: Desenganche Z limpio (8.0m)."
+			}
+		_:
+			return {
+				"title": "💨 ¡DESENGANCHE Z — REPOSICIONAMIENTO!",
+				"prompt": "Salto atrás táctico (Kensēi) — midiendo distancia",
+				"color": Color(0.35, 0.92, 1.0),
+				"distance": 8.5,
+				"ki_recovery": 0.0,
+				"reason": "💨 Desenganche Z táctico: separación limpia (8.5m)."
+			}
+
+
+static func evaluate_flurry_clash_resolution(p_ki: float, e_ki: float, tug_progress: float, p_punches: int, timer_left: float) -> String:
+	if p_ki <= 0.0 and e_ki <= 0.0:
+		return "standoff_mutual"
+	if e_ki <= 0.0 and p_punches <= 0:
+		return "standoff_draw"
+	if p_ki <= 0.0:
+		return "enemy_win"
+	if e_ki <= 0.0 or tug_progress >= 0.98:
+		return "player_win"
+	if tug_progress <= 0.02:
+		return "enemy_win"
+	if timer_left <= 0.0:
+		if p_punches <= 0 and tug_progress >= 0.45 and tug_progress <= 0.55:
+			return "standoff_draw"
+		return "player_win" if tug_progress >= 0.50 else "enemy_win"
+	return "continue"
 
 
 func start_event(event_type: int, p_dome: Node3D, p_attacker: Node3D, p_defender: Node3D) -> bool:
@@ -393,6 +469,33 @@ func start_event(event_type: int, p_dome: Node3D, p_attacker: Node3D, p_defender
 			if _dome and _dome.has_method("perform_z_blink_relocation"):
 				_dome.perform_z_blink_relocation(Vector3(clampf(vic_origin.x + 10.0, -60.0, 60.0), gy + 9.0, clampf(vic_origin.z - 8.0, -60.0, 60.0)))
 
+		LoreEventType.TACTICAL_STANDOFF:
+			var preset_st: Dictionary = get_standoff_preset(_standoff_mode)
+			_event_timer = 0.65
+			_standoff_sep_dist = float(preset_st["distance"])
+			_standoff_reason = String(preset_st["reason"])
+			_base_title_txt = String(preset_st["title"])
+			title_txt = _base_title_txt
+			var ki_rec_st: float = float(preset_st["ki_recovery"])
+			if ki_rec_st > 0.0:
+				_modify_ki(_player_char, ki_rec_st)
+				_modify_ki(_enemy_char, ki_rec_st)
+			if _hud_root:
+				_hud_root.visible = true
+			if _title_label:
+				_title_label.text = _base_title_txt
+				_title_label.modulate = preset_st["color"] as Color
+			if _prompt_label:
+				_prompt_label.text = String(preset_st["prompt"])
+			_play_event_sfx("common.dodge_vanish", 1.05)
+			_pulse_player_haptics(145.0, 0.50, 0.08)
+			if is_inside_tree() and get_tree():
+				if _enemy_char and is_instance_valid(_enemy_char):
+					KiSmokeFX.spawn_smoke(get_tree(), _enemy_char.global_position + Vector3(0.0, 0.35, 0.0), 1.1)
+				var dd_st: DramaticDirector = DramaticDirector.get_active(get_tree())
+				if dd_st:
+					dd_st.show_camera_banner(_base_title_txt, preset_st["color"] as Color, 1.30)
+
 	_sync_event_orb_world_pos()
 	emit_signal("lore_event_started", event_type, title_txt)
 	return true
@@ -435,6 +538,9 @@ func process_event(delta: float, l_ctrl: XRController3D, r_ctrl: XRController3D,
 				_finish_event({ "action": "separate", "distance": _kiai_sep_dist, "reason": "🛡️ ¡Onda Explosiva (Kiai)! Separación %.1fm." % _kiai_sep_dist })
 		LoreEventType.SONIC_Z_BURST:
 			_process_sonic_z_burst(delta, l_ctrl, r_ctrl, l_vel, r_vel, l_closed, r_closed, stick_l, stick_r)
+		LoreEventType.TACTICAL_STANDOFF:
+			if _event_timer <= 0.0:
+				_finish_event({ "action": "separate", "distance": _standoff_sep_dist, "reason": _standoff_reason })
 
 
 func inject_virtual_clash_punch() -> void:
@@ -538,16 +644,16 @@ func _process_fist_clash(delta: float, l_ctrl: XRController3D, r_ctrl: XRControl
 		var e_pct: int = 100 - p_pct
 		_prompt_label.text = "¡PUÑO FRONTAL (G+T)! TÚ %d%% ⚔️ %d%% RIVAL  |  ⏱ %.1fs%s" % [p_pct, e_pct, maxf(_event_timer, 0.0), passive_tag]
 
-	if p_ki <= 0.0:
-		_resolve_fist_clash_winner(_enemy_char, _player_char, 1.0 - _tug_progress)
-	elif e_ki <= 0.0 or _tug_progress >= 0.98:
-		_resolve_fist_clash_winner(_player_char, _enemy_char, _tug_progress)
-	elif _tug_progress <= 0.02:
-		_resolve_fist_clash_winner(_enemy_char, _player_char, 1.0 - _tug_progress)
-	elif _event_timer <= 0.0:
-		if _tug_progress >= 0.50:
+	match evaluate_flurry_clash_resolution(p_ki, e_ki, _tug_progress, _clash_punch_count, _event_timer):
+		"standoff_mutual":
+			_modify_ki(_player_char, 10.0)
+			_modify_ki(_enemy_char, 10.0)
+			_finish_event({ "action": "separate", "distance": 9.5, "reason": "😤 Agotamiento mutuo en Choque de Puños: Respiro Z (+10 Ki)." })
+		"standoff_draw":
+			_finish_event({ "action": "separate", "distance": 9.0, "reason": "⚡ Tablas en Choque de Puños sin golpe decisivo: Desenganche Z." })
+		"player_win":
 			_resolve_fist_clash_winner(_player_char, _enemy_char, _tug_progress)
-		else:
+		"enemy_win":
 			_resolve_fist_clash_winner(_enemy_char, _player_char, 1.0 - _tug_progress)
 
 
@@ -557,6 +663,9 @@ func _resolve_fist_clash_winner(win_node: Node3D, lose_node: Node3D, win_prog: f
 	var prof_fcw: Dictionary = _get_bp_profile_for(win_node, lose_node, true)
 	var dmg: float = lerpf(900.0, 1300.0, margin) * float(prof_fcw["damage_scale"])
 	var win_is_p: bool = win_node != null and is_instance_valid(win_node) and bool(win_node.get("is_player"))
+	if win_is_p and _clash_punch_count <= 0 and win_prog <= 0.55:
+		_finish_event({ "action": "separate", "distance": 8.5, "reason": "⚡ Empuje contenido sin ráfaga: Desenganche Z." })
+		return
 	var exp_pos: Vector3 = _event_orb.global_position if (_event_orb and is_instance_valid(_event_orb)) else global_position
 
 	if lose_node and is_instance_valid(lose_node) and lose_node.has_method("take_hit"):
@@ -586,7 +695,7 @@ func _resolve_fist_clash_winner(win_node: Node3D, lose_node: Node3D, win_prog: f
 	_play_event_sfx("common.melee_hit_heavy", 0.90)
 
 	var lose_ki: float = float(lose_node.get("current_ki")) if (lose_node and is_instance_valid(lose_node) and lose_node.get("current_ki") != null) else 50.0
-	if win_prog >= 0.72 or lose_ki < 10.0:
+	if (win_prog >= 0.72 or lose_ki < 10.0) and (not win_is_p or _clash_punch_count >= 2):
 		_finish_event({
 			"action": "launch",
 			"victim": lose_node

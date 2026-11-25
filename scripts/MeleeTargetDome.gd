@@ -65,6 +65,11 @@ var pip_results: Array[String] = []
 var ki_break_attacker: Node3D = null
 var ki_break_victim: Node3D = null
 var ki_break_timer: float = 0.0
+var _ki_break_grace_timer: float = 0.0
+var _ki_break_must_release_guard: bool = false
+var _kb_origin_local: Array[Vector3] = [Vector3.ZERO, Vector3.ZERO]
+var _kb_origin_depth: Array[float] = [0.0, 0.0]
+var _kb_origin_init: Array[bool] = [false, false]
 var last_finisher_attacker: Node3D = null
 var last_finisher_victim: Node3D = null
 
@@ -756,9 +761,7 @@ func start_attack_phase(p_attacker: Node3D, p_defender: Node3D, p_duration: floa
 	_def_stick_used_for_note_idx = -1
 	_def_stick_prev = false
 	_def_stick_diag_str = ""
-	_declared_ki_reserved = 0.0
 	_last_def_hl_key = ""
-	_declared_ki_reserved = 0.0
 	_set_target_zones_visible(true)
 	_hide_all_charge_spheres()
 	_refresh_melee_ki_bar()
@@ -766,6 +769,15 @@ func start_attack_phase(p_attacker: Node3D, p_defender: Node3D, p_duration: floa
 		attacker.set("is_blocking", false)
 	if defender and is_instance_valid(defender) and defender.has_method("set"):
 		defender.set("is_blocking", false)
+
+	var cfg_atk_min: KiEconomyConfig = KiEconomyConfig.get_default()
+	var min_q_ki: float = float(cfg_atk_min.melee_quick_cost) if cfg_atk_min.get("melee_quick_cost") != null else 3.0
+	var atk_cur_ki: float = float(attacker.get("current_ki")) if (attacker and attacker.get("current_ki") != null) else 50.0
+	var def_cur_ki: float = float(defender.get("current_ki")) if (defender and defender.get("current_ki") != null) else 50.0
+	if atk_cur_ki < min_q_ki:
+		is_active = true
+		_trigger_tactical_standoff("mutual_exhaustion" if def_cur_ki < min_q_ki else "no_ki_turnover")
+		return
 
 	var base_hits: int = 3
 	if p_max_hits > 0:
@@ -791,6 +803,9 @@ func start_attack_phase(p_attacker: Node3D, p_defender: Node3D, p_duration: floa
 	if attacker and not attacker.get("is_player"):
 		_apply_role_dome_tint(false)
 		generate_ai_attack_sequence()
+		if hits.is_empty():
+			_trigger_tactical_standoff("mutual_exhaustion" if def_cur_ki < min_q_ki else "no_ki_turnover")
+			return
 		_begin_phase_transition("start_defense", 0.55, "🛡️ ¡TURNO DE DEFENSA! (%d GOLPES)" % hits.size(), Color(0.25, 0.88, 1.0))
 	else:
 		_apply_role_dome_tint(true)
@@ -1350,7 +1365,6 @@ func start_defense_phase() -> void:
 	_round_clean_sonic_hits = 0
 	_round_clean_charged_hits = 0
 	_last_def_hl_key = ""
-	_declared_ki_reserved = 0.0
 	defense_score_sum = 0.0
 	defense_round_total_hits = hits.size()
 	def_left_velocity = Vector3.ZERO
@@ -2490,8 +2504,8 @@ func _check_ki_break_after_note() -> bool:
 		_start_unblockable_ki_break(defender, attacker)
 		return true
 	elif def_ki <= 0.0 and atk_ki <= 0.0:
-		# Doble agotamiento simultáneo: el duelo se separa por falta de energía
-		finish_without_hits()
+		# Doble agotamiento simultáneo: Desenganche Z con Respiro (+10 Ki) y separación limpia
+		_trigger_tactical_standoff("mutual_exhaustion")
 		return true
 	return false
 
@@ -2529,48 +2543,69 @@ func _start_unblockable_ki_break(p_winner: Node3D, p_victim: Node3D) -> void:
 
 	var winner_is_player: bool = bool(p_winner.get("is_player")) if p_winner else false
 	ki_break_timer = 3.5 if winner_is_player else 0.90
+	_ki_break_grace_timer = 0.45 if winner_is_player else 0.0
+	_ki_break_must_release_guard = winner_is_player and (_is_defender_crossing_arms() or (is_fist_closed[0] and is_fist_closed[1]))
+	_kb_origin_init = [false, false]
+	_kb_origin_local = [Vector3.ZERO, Vector3.ZERO]
+	_kb_origin_depth = [0.0, 0.0]
 	if header_label and is_instance_valid(header_label):
 		header_label.modulate = Color(1.0, 0.25, 0.15)
 		if winner_is_player:
-			header_label.text = "💥 ¡RIVAL SIN KI! ¡INDEFENSO!\n¡GOLPEA EL CÍRCULO CENTRAL (Grip+Trigger) PARA LANZARLO!"
+			header_label.text = "💥 ¡RIVAL SIN KI! ¡INDEFENSO!\n¡SUELTA GUARDIA Y GOLPEA EL CÍRCULO CENTRAL (G+T) O STICK ↓ = DESENGANCHE Z!"
 		else:
 			header_label.text = "⚠️ ¡TE QUEDASTE SIN KI! ¡GUARDIA ROTA!\n¡ATAQUE FUERTE IMBLOQUEABLE ENTRANTE!"
 
 
-static func can_player_trigger_ki_break_punch(is_crossing_arms: bool, hands_dist: float, fist_closed: bool, dist_to_zone: float, fwd_vel: float, vel_mag: float) -> bool:
+static func can_player_trigger_ki_break_punch(is_crossing_arms: bool, hands_dist: float, fist_closed: bool, dist_to_zone: float, fwd_vel: float, vel_mag: float, grace_timer: float = 0.0, must_release_guard: bool = false, stroke_len: float = 0.25, fwd_delta: float = 0.14) -> bool:
+	if grace_timer > 0.0 or must_release_guard:
+		return false
 	if is_crossing_arms or hands_dist < 0.36:
 		return false
-	return fist_closed and dist_to_zone <= 0.34 and fwd_vel >= 1.20 and vel_mag >= 1.50
+	return fist_closed and dist_to_zone <= 0.34 and fwd_vel >= 1.25 and vel_mag >= 1.55 and stroke_len >= 0.12 and fwd_delta >= 0.08
 
 
 func _process_unblockable_ki_break(delta: float) -> void:
 	_update_dome_transform()
 	ki_break_timer -= delta
+	_ki_break_grace_timer = maxf(_ki_break_grace_timer - delta, 0.0)
 
 	var winner_is_player: bool = bool(ki_break_attacker.get("is_player")) if (ki_break_attacker and is_instance_valid(ki_break_attacker)) else false
 	if winner_is_player:
+		var r_kb_skip: XRController3D = _get_controller("RightHand")
+		if r_kb_skip and _ctrl_vec2(r_kb_skip, &"primary").y <= -0.55:
+			_trigger_tactical_standoff("ki_break_pass")
+			return
 		_update_controller_velocities(delta)
 		_update_fist_states(delta, false)
 		var l_kb: XRController3D = _get_controller("LeftHand")
 		var r_kb: XRController3D = _get_controller("RightHand")
 		var hands_dist_kb: float = l_kb.global_position.distance_to(r_kb.global_position) if (l_kb and r_kb) else 1.0
 		var crossing_kb: bool = _is_defender_crossing_arms() or (is_fist_closed[0] and is_fist_closed[1] and hands_dist_kb < 0.36)
+		if _ki_break_must_release_guard and not crossing_kb and hands_dist_kb >= 0.42 and (not is_fist_closed[0] or not is_fist_closed[1]):
+			_ki_break_must_release_guard = false
 		var punch_fwd_kb: Vector3 = _get_punch_forward_world()
 		var zone_pos: Vector3 = target_zones[1]["node"].global_position if target_zones.size() > 1 else global_position
 		for h_idx in [0, 1]:
+			var ctrl_kb: XRController3D = l_kb if h_idx == 0 else r_kb
+			var vel_vec_kb: Vector3 = left_velocity if h_idx == 0 else right_velocity
+			var fwd_len_kb: float = vel_vec_kb.dot(punch_fwd_kb)
+			var d_kb_depth: float = _get_hand_depth_local(ctrl_kb) if ctrl_kb else 0.0
+			if ctrl_kb and (not _kb_origin_init[h_idx] or not is_fist_closed[h_idx] or fwd_len_kb <= 0.15):
+				_kb_origin_local[h_idx] = ctrl_kb.position
+				_kb_origin_depth[h_idx] = d_kb_depth
+				_kb_origin_init[h_idx] = true
 			if is_fist_closed[h_idx]:
-				var ctrl: XRController3D = l_kb if h_idx == 0 else r_kb
-				var vel_vec_kb: Vector3 = left_velocity if h_idx == 0 else right_velocity
 				var vel_len: float = vel_vec_kb.length()
-				var fwd_len_kb: float = vel_vec_kb.dot(punch_fwd_kb)
-				var d_kb: float = ctrl.global_position.distance_to(zone_pos) if ctrl else 999.0
-				if can_player_trigger_ki_break_punch(crossing_kb, hands_dist_kb, is_fist_closed[h_idx], d_kb, fwd_len_kb, vel_len):
+				var d_kb: float = ctrl_kb.global_position.distance_to(zone_pos) if ctrl_kb else 999.0
+				var stroke_kb: float = ctrl_kb.position.distance_to(_kb_origin_local[h_idx]) if (ctrl_kb and _kb_origin_init[h_idx]) else 0.0
+				var fwd_delta_kb: float = (d_kb_depth - _kb_origin_depth[h_idx]) if (ctrl_kb and _kb_origin_init[h_idx]) else 0.0
+				if can_player_trigger_ki_break_punch(crossing_kb, hands_dist_kb, is_fist_closed[h_idx], d_kb, fwd_len_kb, vel_len, _ki_break_grace_timer, _ki_break_must_release_guard, stroke_kb, fwd_delta_kb):
 					_execute_unblockable_ki_break_hit(vel_len)
 					return
 
 	if ki_break_timer <= 0.0:
 		if winner_is_player:
-			_close_dome_with_separation(6.5, "⚡ Rival exhausto — oportunidad de remate expirada")
+			_trigger_tactical_standoff("ki_break_pass")
 			return
 		_execute_unblockable_ki_break_hit(4.2)
 
@@ -2679,6 +2714,23 @@ func _process_lore_event(delta: float) -> void:
 	else:
 		_update_defender_velocities(delta)
 		_lore_ctrl.call("process_event", delta, l_ctrl, r_ctrl, def_left_velocity, def_right_velocity)
+
+
+func _trigger_tactical_standoff(mode: String) -> void:
+	if not is_active:
+		return
+	_declared_full_combo = false
+	_declared_ki_reserved = 0.0
+	var preset: Dictionary = MeleeLoreEventScript.get_standoff_preset(mode)
+	if _lore_ctrl and not bool(_lore_ctrl.get("is_event_active")):
+		_lore_ctrl.call("configure_standoff", mode)
+		_start_lore_event(MeleeLoreEventScript.LoreEventType.TACTICAL_STANDOFF, "standoff")
+		return
+	var ki_rec: float = float(preset.get("ki_recovery", 0.0))
+	if ki_rec > 0.0:
+		_modify_fighter_ki(attacker, ki_rec)
+		_modify_fighter_ki(defender, ki_rec)
+	_close_dome_with_separation(float(preset.get("distance", 8.5)), String(preset.get("reason", "💨 Desenganche Z táctico.")))
 
 
 func _close_dome_with_separation(sep_dist: float, reason_msg: String = "") -> void:
@@ -3124,6 +3176,30 @@ func _resolve_simultaneous_clash(p_node: Node3D, ai_node: Node3D, z_pos: Vector3
 	return false
 
 
+static func evaluate_simultaneous_exchange_end(p_hits: int, e_hits: int, p_ki: float, e_ki: float, time_left_s: float) -> Dictionary:
+	if p_hits >= 4:
+		return { "state": "launch", "winner": "player" }
+	if e_hits >= 4:
+		return { "state": "launch", "winner": "enemy" }
+	if p_ki <= 2.0 and e_ki <= 2.0:
+		return { "state": "standoff", "mode": "mutual_exhaustion" }
+	if e_ki <= 2.0:
+		if p_hits >= 1:
+			return { "state": "launch", "winner": "player" }
+		return { "state": "standoff", "mode": "sim_draw" }
+	if p_ki <= 2.0:
+		if e_hits >= 1:
+			return { "state": "launch", "winner": "enemy" }
+		return { "state": "standoff", "mode": "sim_draw" }
+	if time_left_s <= 0.0:
+		if p_hits > e_hits and p_hits >= 1:
+			return { "state": "launch", "winner": "player" }
+		if e_hits > p_hits and e_hits >= 1:
+			return { "state": "launch", "winner": "enemy" }
+		return { "state": "standoff", "mode": "sim_draw" }
+	return { "state": "continue" }
+
+
 func _process_simultaneous_exchange(delta: float) -> void:
 	var pair: Array[Node3D] = _get_player_and_ai()
 	var p_node: Node3D = pair[0]
@@ -3454,15 +3530,16 @@ func _process_simultaneous_exchange(delta: float) -> void:
 
 	var p_ki_s: float = float(p_node.get("current_ki")) if p_node.get("current_ki") != null else 0.0
 	var e_ki_s: float = float(ai_node.get("current_ki")) if ai_node.get("current_ki") != null else 0.0
-	if _sim_enemy_hits_taken >= 4:
-		_finish_simultaneous_exchange(p_node, ai_node, true)
-	elif p_ki_s <= 2.0 or _sim_player_hits_taken >= 4:
-		_finish_simultaneous_exchange(ai_node, p_node, false)
-	elif e_ki_s <= 2.0:
-		_finish_simultaneous_exchange(p_node, ai_node, true)
-	elif _sim_duration <= 0.0:
-		var p_won: bool = (_sim_enemy_hits_taken > _sim_player_hits_taken) or (_sim_enemy_hits_taken == _sim_player_hits_taken and p_ki_s >= e_ki_s)
-		_finish_simultaneous_exchange(p_node if p_won else ai_node, ai_node if p_won else p_node, p_won)
+	var sim_end: Dictionary = evaluate_simultaneous_exchange_end(_sim_enemy_hits_taken, _sim_player_hits_taken, p_ki_s, e_ki_s, _sim_duration)
+	var sim_state: String = String(sim_end.get("state", "continue"))
+	if sim_state == "launch":
+		var p_won_sim: bool = String(sim_end.get("winner", "player")) == "player"
+		_finish_simultaneous_exchange(p_node if p_won_sim else ai_node, ai_node if p_won_sim else p_node, p_won_sim)
+	elif sim_state == "standoff":
+		_sim_nodes.clear()
+		if p_ki_s > e_ki_s and p_node and is_instance_valid(p_node) and p_node.has_method("increase_np"):
+			p_node.increase_np(120.0)
+		_trigger_tactical_standoff(String(sim_end.get("mode", "sim_draw")))
 
 
 func _finish_simultaneous_exchange(winner: Node3D, loser: Node3D, player_won: bool, from_parry: bool = false) -> void:
@@ -3502,7 +3579,7 @@ func generate_ai_attack_sequence() -> void:
 
 	var sim_ai_ki: float = float(attacker.get("current_ki")) if (attacker and attacker.get("current_ki") != null) else 50.0
 	for i in range(num_hits):
-		if i > 0 and sim_ai_ki < q_cost:
+		if sim_ai_ki < q_cost:
 			break
 		var zone_id: int = randi() % ZONE_DEFINITIONS.size()
 		if zone_id == last_zone:
@@ -3602,26 +3679,14 @@ func restart_as_attacker(keep_comeback_momentum: bool = false) -> void:
 func finish_without_hits(_is_manual_cancel: bool = false) -> void:
 	if not is_active:
 		return
-	is_active = false
 	_declared_full_combo = false
 	_declared_ki_reserved = 0.0
-	_kill_surge_tween()
-	_hitstop_end_msec = 0
-	if Engine.time_scale < 1.0:
-		Engine.time_scale = 1.0
-	phase = DomePhase.COMPLETED
 	var cfg_fw: KiEconomyConfig = KiEconomyConfig.get_default()
 	var cancel_cost: float = float(cfg_fw.melee_cancel_cost) if cfg_fw.get("melee_cancel_cost") != null else 6.0
 	_modify_fighter_ki(attacker, -cancel_cost)
-	_hide_all_charge_spheres()
-	_reset_all_timing_rings()
-	emit_signal("bullet_time_completed", [], Vector3.ZERO)
-	if dome_mesh and is_instance_valid(dome_mesh):
-		var tw := create_tween()
-		tw.tween_property(dome_mesh, "scale", Vector3.ZERO, 0.12).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
-		tw.tween_callback(queue_free)
-	else:
-		queue_free()
+	var atk_ki_after: float = float(attacker.get("current_ki")) if (attacker and is_instance_valid(attacker) and attacker.get("current_ki") != null) else 50.0
+	var def_ki_after: float = float(defender.get("current_ki")) if (defender and is_instance_valid(defender) and defender.get("current_ki") != null) else 50.0
+	_trigger_tactical_standoff("mutual_exhaustion" if (atk_ki_after <= 0.0 and def_ki_after <= 0.0) else "cancel")
 
 
 # ==============================================================================
