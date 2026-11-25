@@ -143,6 +143,7 @@ var target_zones: Array = []
 var dome_mesh: MeshInstance3D = null
 var header_label: Label3D = null
 var melee_hud_anchor: Node3D = null
+var melee_visor_anchor: Node3D = null
 var melee_boxes_anchor: Node3D = null
 var action_card_anchor: Node3D = null
 var _action_card_label: Label3D = null
@@ -885,7 +886,7 @@ func _set_single_zone_shape(zone: Dictionary, role: String) -> void:
 	if box_m and is_instance_valid(box_m):
 		box_m.visible = show_box
 	if inner_m and is_instance_valid(inner_m):
-		inner_m.visible = show_box
+		inner_m.visible = false
 	if circ_m and is_instance_valid(circ_m):
 		circ_m.visible = show_circ
 	if ring_m and is_instance_valid(ring_m):
@@ -901,7 +902,7 @@ func _apply_zone_role_shapes(is_attack_mode: bool) -> void:
 		if box_m and is_instance_valid(box_m):
 			box_m.visible = not is_attack_mode
 		if inner_m and is_instance_valid(inner_m):
-			inner_m.visible = not is_attack_mode
+			inner_m.visible = false
 		if circ_m and is_instance_valid(circ_m):
 			circ_m.visible = is_attack_mode
 		if ring_m and is_instance_valid(ring_m):
@@ -1125,8 +1126,6 @@ func _update_defense_zone_highlights(active_zone_id: int, step_num: int, next_zo
 	if hl_key == _last_def_hl_key:
 		return
 	_last_def_hl_key = hl_key
-	var fight_tex: Texture2D = _get_ui_tex("target_fight.png")
-	var normal_tex: Texture2D = _get_ui_tex("target_normal.png")
 	var hi_col: Color = Color(0.95, 0.2, 1.0, 0.95) if is_hammer_note else (Color(1.0, 0.24, 0.10, 0.95) if is_v3_note else (Color(1.0, 0.55, 0.12, 0.95) if is_heavy_note else Color(0.2, 0.92, 1.0, 0.95)))
 	var hi_scale: float = 1.28 if is_hammer_note else (1.24 if is_v3_note else (1.18 if is_heavy_note else (1.08 if icon_str == "~👊" else 1.14)))
 	var lbl_col: Color = Color(1.0, 0.92, 0.30, 1.0) if is_hammer_note else (Color(1.0, 0.62, 0.25, 1.0) if is_v3_note else (Color(1.0, 0.88, 0.35, 1.0) if is_heavy_note else Color(0.30, 0.95, 1.0, 1.0)))
@@ -1134,24 +1133,22 @@ func _update_defense_zone_highlights(active_zone_id: int, step_num: int, next_zo
 		var z_id: int = int(zone["id"])
 		var z_node: Node3D = zone["node"] as Node3D
 		var step_lbl: Label3D = zone.get("step_label") as Label3D
-		var inner_m: StandardMaterial3D = zone.get("inner_mat") as StandardMaterial3D
+		var inner_m: MeshInstance3D = zone.get("inner_mesh") as MeshInstance3D
 		var orig_col: Color = zone["color"] as Color
+		if inner_m and is_instance_valid(inner_m):
+			inner_m.visible = false
 		if z_node and is_instance_valid(z_node):
 			z_node.visible = true
 
 		if z_id == active_zone_id:
-			if inner_m and fight_tex:
-				inner_m.albedo_texture = fight_tex
 			if z_node and is_instance_valid(z_node):
 				z_node.scale = Vector3.ONE * hi_scale
 			_tint_zone_shapes(zone, Color(hi_col.r, hi_col.g, hi_col.b, 0.32), Color(hi_col.r, hi_col.g, hi_col.b), 2.0, Color(1.0, 0.96, 0.94, 0.98))
 			if step_lbl and is_instance_valid(step_lbl):
-				step_lbl.text = "%s%d" % [icon_str, step_num]
+				step_lbl.text = icon_str
 				step_lbl.modulate = lbl_col
 				step_lbl.visible = true
 		elif z_id == next_zone_id:
-			if inner_m and normal_tex:
-				inner_m.albedo_texture = normal_tex
 			if z_node and is_instance_valid(z_node):
 				z_node.scale = Vector3.ONE * 0.86
 			_tint_zone_shapes(zone, Color(0.55, 0.45, 0.95, 0.22), Color(0.55, 0.45, 0.95), 0.45, Color(0.75, 0.95, 1.0, 0.42))
@@ -1160,8 +1157,6 @@ func _update_defense_zone_highlights(active_zone_id: int, step_num: int, next_zo
 				step_lbl.modulate = Color(0.75, 0.85, 1.0, 0.85)
 				step_lbl.visible = true
 		else:
-			if inner_m and normal_tex:
-				inner_m.albedo_texture = normal_tex
 			if z_node and is_instance_valid(z_node):
 				z_node.scale = Vector3.ONE * 0.70
 			_tint_zone_shapes(zone, Color(orig_col.r, orig_col.g, orig_col.b, 0.08), Color(orig_col.r, orig_col.g, orig_col.b), 0.12, Color(1.0, 1.0, 1.0, 0.14))
@@ -3988,6 +3983,7 @@ func _build_target_boxes() -> void:
 		mat_quad.no_depth_test = true
 		mat_quad.render_priority = 116
 		inner_quad.material_override = mat_quad
+		inner_quad.visible = false
 		zone_node.add_child(inner_quad)
 
 		var circle_mesh_inst := MeshInstance3D.new()
@@ -4127,6 +4123,11 @@ func _build_header_hud() -> void:
 
 	var cam: Camera3D = _get_player_camera()
 	if cam and is_instance_valid(cam):
+		melee_visor_anchor = Node3D.new()
+		melee_visor_anchor.name = "MeleeVisorAnchor"
+		melee_visor_anchor.position = Vector3.ZERO
+		cam.add_child(melee_visor_anchor)
+
 		melee_hud_anchor = Node3D.new()
 		melee_hud_anchor.name = "MeleeHUDAnchor"
 		# Cine Anime Minimalista: callout puntual ligeramente más bajo para no exigir levantar la vista
@@ -4147,15 +4148,21 @@ func _build_header_hud() -> void:
 
 
 func _build_cine_anime_flanks() -> void:
-	var fixed_parent: Node3D = melee_boxes_anchor if (melee_boxes_anchor and is_instance_valid(melee_boxes_anchor)) else self
+	var use_visor: bool = melee_visor_anchor != null and is_instance_valid(melee_visor_anchor)
+	var hud_parent: Node3D = melee_visor_anchor if use_visor else (melee_boxes_anchor if (melee_boxes_anchor and is_instance_valid(melee_boxes_anchor)) else self)
 
-	# Flanco Izquierdo [FIJO]: triángulos oficiales Zenkai + Pips de resultados (máx. 6 reutilizables)
+	# Flanco Izquierdo [VISOR]: triángulos oficiales Zenkai + Pips de resultados (máx. 6 reutilizables)
 	if not _flank_pips_root or not is_instance_valid(_flank_pips_root):
 		_flank_pips_root = Node3D.new()
 		_flank_pips_root.name = "MeleeFlankPipsFixed"
-		_flank_pips_root.position = Vector3(-0.39, 0.01, 0.02)
-		_flank_pips_root.rotation_degrees = Vector3(0.0, 14.0, 0.0)
-		fixed_parent.add_child(_flank_pips_root)
+		if use_visor:
+			_flank_pips_root.position = Vector3(-0.44, 0.03, -1.06)
+			_flank_pips_root.rotation_degrees = Vector3(0.0, 12.0, 0.0)
+			_flank_pips_root.scale = Vector3.ONE * 1.35
+		else:
+			_flank_pips_root.position = Vector3(-0.35, 0.01, 0.02)
+			_flank_pips_root.rotation_degrees = Vector3(0.0, 14.0, 0.0)
+		hud_parent.add_child(_flank_pips_root)
 		_pip_slot_mats.clear()
 		_pip_slot_labels.clear()
 		var tri_q := QuadMesh.new()
@@ -4170,7 +4177,7 @@ func _build_cine_anime_flanks() -> void:
 			t_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 			t_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 			t_mat.no_depth_test = true
-			t_mat.render_priority = 116
+			t_mat.render_priority = 121
 			if base_b_tex:
 				t_mat.albedo_texture = base_b_tex
 			t_mat.albedo_color = Color(1.0, 1.0, 1.0, 0.35)
@@ -4185,18 +4192,23 @@ func _build_cine_anime_flanks() -> void:
 			plbl.outline_size = 6
 			plbl.outline_modulate = Color(0.0, 0.0, 0.0, 0.96)
 			plbl.no_depth_test = true
-			plbl.render_priority = 118
+			plbl.render_priority = 123
 			plbl.position = Vector3(0.016, y_off, 0.002)
 			_flank_pips_root.add_child(plbl)
 			_pip_slot_labels.append(plbl)
 
-	# Flanco Derecho [FIJO]: retícula target_fight + icono Zenkai + sello compacto de acción
+	# Flanco Derecho [VISOR]: retícula target_fight + icono Zenkai + sello compacto de acción
 	if not _flank_stamp_root or not is_instance_valid(_flank_stamp_root):
 		_flank_stamp_root = Node3D.new()
 		_flank_stamp_root.name = "MeleeFlankActionFixed"
-		_flank_stamp_root.position = Vector3(0.40, 0.01, 0.02)
-		_flank_stamp_root.rotation_degrees = Vector3(0.0, -14.0, 0.0)
-		fixed_parent.add_child(_flank_stamp_root)
+		if use_visor:
+			_flank_stamp_root.position = Vector3(0.45, 0.03, -1.06)
+			_flank_stamp_root.rotation_degrees = Vector3(0.0, -12.0, 0.0)
+			_flank_stamp_root.scale = Vector3.ONE * 1.35
+		else:
+			_flank_stamp_root.position = Vector3(0.36, 0.01, 0.02)
+			_flank_stamp_root.rotation_degrees = Vector3(0.0, -14.0, 0.0)
+		hud_parent.add_child(_flank_stamp_root)
 
 		var ret_q := QuadMesh.new()
 		ret_q.size = Vector2(0.115, 0.115)
@@ -4207,7 +4219,7 @@ func _build_cine_anime_flanks() -> void:
 		_flank_reticle_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		_flank_reticle_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		_flank_reticle_mat.no_depth_test = true
-		_flank_reticle_mat.render_priority = 115
+		_flank_reticle_mat.render_priority = 121
 		var tf_tex: Texture2D = _get_ui_tex("target_fight.png")
 		if tf_tex:
 			_flank_reticle_mat.albedo_texture = tf_tex
@@ -4223,7 +4235,7 @@ func _build_cine_anime_flanks() -> void:
 		_flank_icon_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		_flank_icon_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 		_flank_icon_mat.no_depth_test = true
-		_flank_icon_mat.render_priority = 117
+		_flank_icon_mat.render_priority = 123
 		var fist_tex: Texture2D = _get_ui_tex("icon_fist.png")
 		if fist_tex:
 			_flank_icon_mat.albedo_texture = fist_tex
@@ -4237,7 +4249,7 @@ func _build_cine_anime_flanks() -> void:
 		_flank_stamp_label.outline_size = 7
 		_flank_stamp_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.96)
 		_flank_stamp_label.no_depth_test = true
-		_flank_stamp_label.render_priority = 119
+		_flank_stamp_label.render_priority = 125
 		_flank_stamp_label.position = Vector3(0.0, -0.055, 0.003)
 		_flank_stamp_root.add_child(_flank_stamp_label)
 
@@ -4364,15 +4376,21 @@ func _refresh_phase_timer(rem: float, total: float) -> void:
 func _build_melee_ki_bar() -> void:
 	if _ki_bar_root and is_instance_valid(_ki_bar_root):
 		return
-	# Cine Anime Minimalista: barra Ki frente-a-frente FIJA debajo de las cajas del combate (con retratos hexagonales)
-	var hud_parent: Node3D = melee_boxes_anchor if (melee_boxes_anchor and is_instance_valid(melee_boxes_anchor)) else self
+	# Cine Anime Minimalista: barra Ki frente-a-frente fija al visor (visible a simple vista en Quest 3)
+	var use_visor: bool = melee_visor_anchor != null and is_instance_valid(melee_visor_anchor)
+	var hud_parent: Node3D = melee_visor_anchor if use_visor else (melee_boxes_anchor if (melee_boxes_anchor and is_instance_valid(melee_boxes_anchor)) else self)
 	if not hud_parent or not is_instance_valid(hud_parent):
 		return
 
 	_ki_bar_root = Node3D.new()
 	_ki_bar_root.name = "MeleeDoubleKiBar"
-	_ki_bar_root.position = Vector3(0.0, -0.33, 0.03)
-	_ki_bar_root.rotation_degrees = Vector3(-14.0, 0.0, 0.0)
+	if use_visor:
+		_ki_bar_root.position = Vector3(0.0, -0.32, -1.06)
+		_ki_bar_root.rotation_degrees = Vector3(-10.0, 0.0, 0.0)
+		_ki_bar_root.scale = Vector3.ONE * 1.30
+	else:
+		_ki_bar_root.position = Vector3(0.0, -0.26, 0.03)
+		_ki_bar_root.rotation_degrees = Vector3(-12.0, 0.0, 0.0)
 	hud_parent.add_child(_ki_bar_root)
 
 	var bg := MeshInstance3D.new()
@@ -5439,9 +5457,14 @@ func _exit_tree() -> void:
 			charge_spheres[i].queue_free()
 			charge_spheres[i] = null
 	_lore_ctrl = null
+	_flank_pips_root = null
+	_flank_stamp_root = null
 	if _ki_bar_root and is_instance_valid(_ki_bar_root):
 		_ki_bar_root.queue_free()
 		_ki_bar_root = null
+	if melee_visor_anchor and is_instance_valid(melee_visor_anchor):
+		melee_visor_anchor.queue_free()
+		melee_visor_anchor = null
 	if melee_hud_anchor and is_instance_valid(melee_hud_anchor):
 		melee_hud_anchor.queue_free()
 		melee_hud_anchor = null

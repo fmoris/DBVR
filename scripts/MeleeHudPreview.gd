@@ -542,33 +542,36 @@ func _build_alt3_anime_cinema() -> void:
 	_alt_world_roots.append(w_root)
 	_alt_head_roots.append(h_root)
 
-	# FIJO IZQUIERDA: Triángulos de alerta flotantes sin recuadro
+	# VISOR IZQUIERDA [CABEZA]: Triángulos de alerta flotantes visibles a simple vista
 	var p_left_anchor := Node3D.new()
-	p_left_anchor.position = Vector3(-0.39, -0.01, 0.03)
-	p_left_anchor.rotation_degrees = Vector3(0.0, 14.0, 0.0)
-	w_root.add_child(p_left_anchor)
+	p_left_anchor.position = Vector3(-0.44, 0.03, -1.06)
+	p_left_anchor.rotation_degrees = Vector3(0.0, 12.0, 0.0)
+	p_left_anchor.scale = Vector3.ONE * 1.35
+	h_root.add_child(p_left_anchor)
 	var a_texs3: Array[String] = ["alert_base_g.png", "alert_base_r.png", "alert_base_y.png", "alert_base_b.png"]
 	for i in range(4):
 		_make_tex_quad(p_left_anchor, Vector2(0.038, 0.062), a_texs3[i], Color(1.0, 1.0, 1.0, 0.85 if i < 3 else 0.30), Vector3(-0.028, 0.090 - float(i) * 0.060, 0.002), 114)
 	_alt3_pips_lbl = _make_label(p_left_anchor, "🛡\n💥\n⚡\n○", 28, Color.WHITE, Vector3(0.022, 0.0, 0.003))
-	_add_anchor_tag(p_left_anchor, false, Vector3(0.0, 0.165, 0.004))
+	_add_anchor_tag(p_left_anchor, true, Vector3(0.0, 0.165, 0.004))
 
-	# FIJO DERECHA: Retícula target_fight + icono Zenkai flotante
+	# VISOR DERECHA [CABEZA]: Retícula target_fight + icono Zenkai visible a simple vista
 	var stamp_anchor := Node3D.new()
-	stamp_anchor.position = Vector3(0.40, -0.01, 0.03)
-	stamp_anchor.rotation_degrees = Vector3(0.0, -14.0, 0.0)
-	w_root.add_child(stamp_anchor)
+	stamp_anchor.position = Vector3(0.45, 0.03, -1.06)
+	stamp_anchor.rotation_degrees = Vector3(0.0, -12.0, 0.0)
+	stamp_anchor.scale = Vector3.ONE * 1.35
+	h_root.add_child(stamp_anchor)
 	_make_tex_quad(stamp_anchor, Vector2(0.115, 0.115), "target_fight.png", Color(1.0, 0.90, 0.82, 0.95), Vector3(0.0, 0.035, 0.002), 114)
 	var s3_m: Dictionary = _make_tex_quad(stamp_anchor, Vector2(0.052, 0.052), "icon_burst.png", Color(1.0, 0.88, 0.25), Vector3(0.0, 0.035, 0.003), 116)
 	_alt3_stamp_mat = s3_m["mat"] as StandardMaterial3D
 	_alt3_stamp_lbl = _make_label(stamp_anchor, "V3 · 🕹️/G+T", 18, Color(1.0, 0.90, 0.35), Vector3(0.0, -0.055, 0.004))
-	_add_anchor_tag(stamp_anchor, false, Vector3(0.0, 0.120, 0.004))
+	_add_anchor_tag(stamp_anchor, true, Vector3(0.0, 0.120, 0.004))
 
-	# FIJO INFERIOR: CharaChips + Barra Ki anime frente a frente debajo del domo
-	var p_bot: Dictionary = _make_panel(w_root, Vector2(0.62, 0.095), Color(0.02, 0.04, 0.08, 0.78), Color(0.35, 0.88, 1.0, 0.78))
+	# VISOR INFERIOR [CABEZA]: CharaChips + Barra Ki anime frente a frente en FOV cómodo
+	var p_bot: Dictionary = _make_panel(h_root, Vector2(0.62, 0.095), Color(0.02, 0.04, 0.08, 0.78), Color(0.35, 0.88, 1.0, 0.78))
 	var br: Node3D = p_bot["root"] as Node3D
-	br.position = Vector3(0.0, -0.33, 0.04)
-	br.rotation_degrees = Vector3(-14.0, 0.0, 0.0)
+	br.position = Vector3(0.0, -0.32, -1.06)
+	br.rotation_degrees = Vector3(-10.0, 0.0, 0.0)
+	br.scale = Vector3.ONE * 1.30
 	var a3_p_hex: Dictionary = _make_tex_quad(br, Vector2(0.095, 0.095), "hex_vegeta_base.png", Color.WHITE, Vector3(-0.265, 0.004, 0.003), 115)
 	var a3_e_hex: Dictionary = _make_tex_quad(br, Vector2(0.095, 0.095), "hex_goku_base.png", Color.WHITE, Vector3(0.265, 0.004, 0.003), 115)
 	_p_hex_mats.append(a3_p_hex["mat"] as StandardMaterial3D)
@@ -583,7 +586,7 @@ func _build_alt3_anime_cinema() -> void:
 	_alt3_e_ki_fill.position = Vector3(0.092, 0.010, 0.003)
 	_alt3_timer_fill = _make_bar_fill(br, Vector3(0.38, 0.007, 0.005), Color(1.0, 0.90, 0.24, 0.95), 115)
 	_alt3_timer_fill.position = Vector3(0.0, -0.026, 0.003)
-	_add_anchor_tag(br, false, Vector3(0.0, -0.072, 0.004))
+	_add_anchor_tag(br, true, Vector3(0.0, -0.072, 0.004))
 
 	# CABEZA SOLO EN CALLOUT: Cinta oficial info_obi + texto grande
 	_alt3_callout_root = Node3D.new()
@@ -731,7 +734,7 @@ func _update_description_text() -> void:
 		HudAlt.SCOUTER_DUAL_ARC:
 			detail = "ALT 2 (Zenkai) — [FIJO Izq/Der] Arcos verticales de Ki + Retratos | [CABEZA Ojo Der] Lente oficial 20_scouter_radar."
 		HudAlt.ANIME_CINEMA:
-			detail = "ALT 3 ACTIVA (Cine Anime) — [FIJO Izq/Der/Abajo] Pips + Sello + Barra Ki con Retratos Hex | [CABEZA] Cinta info_obi solo en callout."
+			detail = "ALT 3 ACTIVA (Cine Anime) — [CABEZA / VISOR] Izq + Der + Barra Ki + info_obi fijos en tu campo visual sin girar la cabeza."
 	_desc_label.text = "%s\nArrastra el mouse (o WASD/Flechas) para girar la cabeza VR y comparar FIJO vs CABEZA." % detail
 
 
@@ -745,12 +748,14 @@ func _refresh_scenario_visuals() -> void:
 		var zd: Dictionary = _zones[i]
 		var z_node: Node3D = zd["node"] as Node3D
 		var box_m: MeshInstance3D = zd["box"] as MeshInstance3D
+		var ring_m: MeshInstance3D = zd["ring"] as MeshInstance3D
 		var b_mat: StandardMaterial3D = zd["box_mat"] as StandardMaterial3D
 		var r_mat: StandardMaterial3D = zd["ring_mat"] as StandardMaterial3D
 		var ic: Label3D = zd["icon"] as Label3D
 		z_node.visible = not is_lore
 		if _active_scenario == Scenario.ATTACK:
 			box_m.visible = false
+			ring_m.visible = true
 			if fight_tex:
 				r_mat.albedo_texture = fight_tex
 			r_mat.albedo_color = Color(1.0, 0.72, 0.25, 0.95)
@@ -758,18 +763,17 @@ func _refresh_scenario_visuals() -> void:
 			ic.modulate = Color(1.0, 0.85, 0.35)
 		elif _active_scenario == Scenario.DEFENSE:
 			box_m.visible = true
+			ring_m.visible = false
 			var hot: bool = (i == 1)
-			if fight_tex and normal_tex:
-				r_mat.albedo_texture = fight_tex if hot else normal_tex
 			b_mat.albedo_color = Color(1.0, 0.25, 0.10, 0.28) if hot else Color(0.18, 0.78, 1.0, 0.12)
-			r_mat.albedo_color = Color(1.0, 0.92, 0.88, 1.0) if hot else Color(0.55, 1.0, 0.75, 0.65)
 			ic.text = "🔥" if hot else "·"
 			ic.modulate = Color(1.0, 0.78, 0.25) if hot else Color(0.70, 0.90, 1.0)
 		elif _active_scenario == Scenario.SIMULTANEOUS:
 			box_m.visible = (i % 2 == 1)
 			var is_atk_slot: bool = (i % 2 == 0)
-			if fight_tex and normal_tex:
-				r_mat.albedo_texture = fight_tex if (i == 2 or is_atk_slot) else normal_tex
+			ring_m.visible = is_atk_slot
+			if fight_tex and normal_tex and is_atk_slot:
+				r_mat.albedo_texture = fight_tex if i == 2 else normal_tex
 			b_mat.albedo_color = Color(0.20, 0.88, 1.0, 0.22)
 			r_mat.albedo_color = Color(1.0, 0.78, 0.25, 0.95) if is_atk_slot else Color(0.35, 1.0, 0.65, 0.95)
 			ic.text = "💥" if i == 2 else ("⭕" if is_atk_slot else "⬜")
