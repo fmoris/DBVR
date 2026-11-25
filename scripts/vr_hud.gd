@@ -11,13 +11,22 @@ extends Node3D
 @onready var sub_viewport: SubViewport = $SubViewport
 @onready var hud_mesh: MeshInstance3D = $HUDMesh
 
-# --- Elementos de la Interfaz Canónica de Dragon Ball (Micro-HUD Scouter) ---
+# --- Elementos de la Interfaz Canónica de Dragon Ball (Micro-HUD Scouter Zenkai) ---
+const ZENKAI_UI_DIR: String = "res://assets/ui_zenkai/"
+var _ui_tex_cache: Dictionary = {}
+
 var scouter_panel: Panel = null
+var _player_hex_rect: TextureRect = null
+var _player_hex_halo: TextureRect = null
+var _enemy_hex_rect: TextureRect = null
+var _enemy_hex_halo: TextureRect = null
+var _rival_form_label: Label = null
 var player_badge_label: Label = null
 var rival_scouter_label: Label = null
 var bp_title_label: Label = null
 var bp_value_label: Label = null
 var threshold_labels: Array[Label] = []
+var _threshold_icons: Array[TextureRect] = []
 var ki_text_label: Label = null
 var ki_cost_label: Label = null
 var ki_progress_bar: ProgressBar = null
@@ -29,7 +38,10 @@ var status_pill_label: Label = null
 var status_pill_style: StyleBoxFlat = null
 var dramatic_bonus_panel: PanelContainer = null
 var dramatic_bonus_label: Label = null
+var _cooldowns_panel: PanelContainer = null
 var super_cooldowns_label: Label = null
+var _transform_hint_panel: PanelContainer = null
+var _transform_hint_style: StyleBoxFlat = null
 var transform_hint_label: Label = null
 var _scouter_panel_style: StyleBoxFlat = null
 
@@ -108,6 +120,9 @@ var _last_cooldowns_hud_text: String = ""
 var _cd_hud_timer: float = 0.0
 var _last_transform_hint_text: String = ""
 var _last_status_override_active: bool = false
+var _last_player_hex_path: String = ""
+var _last_enemy_hex_path: String = ""
+var _last_rival_form_text: String = ""
 
 func _ready() -> void:
 	if not sub_viewport or not hud_mesh:
@@ -123,11 +138,11 @@ func _ready() -> void:
 	mat.render_priority = 110
 	hud_mesh.material_override = mat
 
-	# Redimensionar la malla del HUD a formato Micro-HUD Scouter compacto (con cooldowns y guía de transformación)
+	# Redimensionar con relación cuadrada 1:1 para evitar distorsión en los retratos hexagonales Zenkai
 	if sub_viewport:
-		sub_viewport.size = Vector2i(720, 480)
+		sub_viewport.size = Vector2i(780, 480)
 	if hud_mesh.mesh is QuadMesh:
-		hud_mesh.mesh.size = Vector2(0.15, 0.092)
+		hud_mesh.mesh.size = Vector2(0.178, 0.110)
 
 	# Construir la interfaz Dragon Ball Sci-Fi / Scouter procedimentalmente
 	_build_dragon_ball_hud()
@@ -232,8 +247,43 @@ func _reparent_to_camera_fallback() -> void:
 		print("[VRHUD] Fallback: HUD Dragon Ball Scouter asignado frente a la Cámara.")
 
 
+func _get_ui_tex(fn: String) -> Texture2D:
+	if fn.is_empty():
+		return null
+	if _ui_tex_cache.has(fn):
+		return _ui_tex_cache[fn] as Texture2D
+	var path: String = fn if fn.begins_with("res://") else (ZENKAI_UI_DIR + fn)
+	var tex: Texture2D = ResourceLoader.load(path) as Texture2D if ResourceLoader.exists(path) else null
+	_ui_tex_cache[fn] = tex
+	return tex
+
+
+static func resolve_hex_portrait_path(char_name: String, form_name: String = "") -> String:
+	var c_up: String = char_name.to_upper()
+	var f_up: String = form_name.to_upper()
+	if "VEGETA" in c_up:
+		if "EGO" in f_up or "UE" in f_up:
+			return ZENKAI_UI_DIR + "hex_vegeta_ue.png"
+		if "SSB" in f_up or "BLUE" in f_up:
+			return ZENKAI_UI_DIR + "hex_vegeta_ssb.png"
+		if "SUPER" in f_up or "SSJ2" in f_up or "2" in f_up:
+			return ZENKAI_UI_DIR + "hex_vegeta_super.png"
+		if "SSJ" in f_up:
+			return ZENKAI_UI_DIR + "hex_vegeta_ssj.png"
+		return ZENKAI_UI_DIR + "hex_vegeta_base.png"
+	if "SSB" in f_up or "BLUE" in f_up:
+		return ZENKAI_UI_DIR + "hex_goku_ssb.png"
+	if "SSJ3" in f_up or "3" in f_up:
+		return ZENKAI_UI_DIR + "hex_goku_ssj3.png"
+	if "SSG" in f_up or "GOD" in f_up:
+		return ZENKAI_UI_DIR + "hex_goku_ssg.png"
+	if "SSJ" in f_up:
+		return ZENKAI_UI_DIR + "hex_goku_ssj.png"
+	return ZENKAI_UI_DIR + "hex_goku_base.png"
+
+
 # -----------------------------------------------------------------
-# CONSTRUCCIÓN DEL MICRO-HUD MINIMALISTA DRAGON BALL (3 BLOQUES)
+# CONSTRUCCIÓN DEL MICRO-HUD SCOUTER ZENKAI CON RETRATOS HEXAGONALES
 # -----------------------------------------------------------------
 func _build_dragon_ball_hud() -> void:
 	var hud_layout = sub_viewport.get_node_or_null("HUDLayout")
@@ -249,8 +299,17 @@ func _build_dragon_ball_hud() -> void:
 	guard_badge_label = null
 	zenkai_badge_label = null
 	action_status_label = null
+	_player_hex_rect = null
+	_player_hex_halo = null
+	_enemy_hex_rect = null
+	_enemy_hex_halo = null
+	_rival_form_label = null
+	_cooldowns_panel = null
+	_transform_hint_panel = null
+	_transform_hint_style = null
+	_threshold_icons.clear()
 
-	# 1. Panel Principal de Cristal Scouter Compacto (720x326)
+	# 1. Panel Principal de Cristal Scouter Zenkai (780x480)
 	scouter_panel = Panel.new()
 	scouter_panel.name = "ScouterGlassPanel"
 	scouter_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -260,73 +319,209 @@ func _build_dragon_ball_hud() -> void:
 	scouter_panel.offset_bottom = -10
 
 	var panel_style := StyleBoxFlat.new()
-	panel_style.bg_color = Color(0.015, 0.045, 0.045, 0.84)
+	panel_style.bg_color = Color(0.014, 0.036, 0.068, 0.90)
 	panel_style.border_width_left = 3
 	panel_style.border_width_top = 3
 	panel_style.border_width_right = 3
 	panel_style.border_width_bottom = 3
 	panel_style.border_color = Color(0.0, 0.92, 0.68, 0.90)
-	panel_style.corner_radius_top_left = 18
-	panel_style.corner_radius_top_right = 18
-	panel_style.corner_radius_bottom_left = 18
-	panel_style.corner_radius_bottom_right = 18
-	panel_style.set_content_margin_all(18)
+	panel_style.corner_radius_top_left = 22
+	panel_style.corner_radius_top_right = 22
+	panel_style.corner_radius_bottom_left = 22
+	panel_style.corner_radius_bottom_right = 22
+	panel_style.shadow_size = 10
+	panel_style.shadow_color = Color(0.0, 0.72, 1.0, 0.35)
+	panel_style.set_content_margin_all(16)
 	_scouter_panel_style = panel_style
 	scouter_panel.add_theme_stylebox_override("panel", panel_style)
 	hud_layout.add_child(scouter_panel)
 
+	var radar_bg := TextureRect.new()
+	radar_bg.name = "ScouterRadarWatermark"
+	radar_bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	radar_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	radar_bg.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	radar_bg.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	radar_bg.texture = _get_ui_tex("scouter_radar.png")
+	radar_bg.modulate = Color(0.18, 0.95, 0.74, 0.13)
+	scouter_panel.add_child(radar_bg)
+
 	var main_vbox := VBoxContainer.new()
 	main_vbox.set_anchors_preset(Control.PRESET_FULL_RECT)
 	main_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	main_vbox.add_theme_constant_override("separation", 10)
+	main_vbox.add_theme_constant_override("separation", 8)
 	scouter_panel.add_child(main_vbox)
 
-	# BLOQUE 1: Cabecera compacta -> Jugador/Forma + BP compacto + Diff rival
+	# BLOQUE 1: Cabecera Scouter con retratos hexagonales (Jugador Izq | BP Central | Rival Der)
+	var header_plate := Control.new()
+	header_plate.name = "BattleHeaderPlate"
+	header_plate.custom_minimum_size = Vector2(0, 106)
+	main_vbox.add_child(header_plate)
+
+	var header_obi := TextureRect.new()
+	header_obi.name = "HeaderObiAccent"
+	header_obi.set_anchors_preset(Control.PRESET_FULL_RECT)
+	header_obi.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	header_obi.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	header_obi.stretch_mode = TextureRect.STRETCH_SCALE
+	header_obi.texture = _get_ui_tex("info_obi.png")
+	header_obi.modulate = Color(0.20, 0.72, 1.0, 0.24)
+	header_plate.add_child(header_obi)
+
 	var header_hbox := HBoxContainer.new()
-	header_hbox.alignment = BoxContainer.ALIGNMENT_BEGIN
-	header_hbox.add_theme_constant_override("separation", 10)
-	main_vbox.add_child(header_hbox)
+	header_hbox.set_anchors_preset(Control.PRESET_FULL_RECT)
+	header_hbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	header_hbox.add_theme_constant_override("separation", 12)
+	header_plate.add_child(header_hbox)
+
+	var p_hex_stack := Control.new()
+	p_hex_stack.name = "PlayerHexStack"
+	p_hex_stack.custom_minimum_size = Vector2(102, 102)
+	header_hbox.add_child(p_hex_stack)
+
+	_player_hex_halo = TextureRect.new()
+	_player_hex_halo.name = "PlayerHexHalo"
+	_player_hex_halo.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_player_hex_halo.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_player_hex_halo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_player_hex_halo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_player_hex_halo.texture = _get_ui_tex("target_normal.png")
+	_player_hex_halo.modulate = Color(0.10, 0.92, 1.0, 0.72)
+	p_hex_stack.add_child(_player_hex_halo)
+
+	_player_hex_rect = TextureRect.new()
+	_player_hex_rect.name = "PlayerHexPortrait"
+	_player_hex_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_player_hex_rect.offset_left = 8
+	_player_hex_rect.offset_top = 8
+	_player_hex_rect.offset_right = -8
+	_player_hex_rect.offset_bottom = -8
+	_player_hex_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_player_hex_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_player_hex_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_player_hex_rect.texture = _get_ui_tex("hex_vegeta_base.png")
+	p_hex_stack.add_child(_player_hex_rect)
+
+	var center_vbox := VBoxContainer.new()
+	center_vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	center_vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	center_vbox.add_theme_constant_override("separation", 2)
+	header_hbox.add_child(center_vbox)
+
+	var center_top := HBoxContainer.new()
+	center_top.add_theme_constant_override("separation", 8)
+	center_vbox.add_child(center_top)
 
 	player_badge_label = Label.new()
 	player_badge_label.text = "VEGETA · BASE"
 	var p_settings := LabelSettings.new()
-	p_settings.font_size = 28
+	p_settings.font_size = 24
 	p_settings.font_color = Color(0.0, 0.92, 1.0)
-	p_settings.shadow_size = 4
+	p_settings.outline_size = 4
+	p_settings.outline_color = Color(0.0, 0.0, 0.0, 0.95)
+	p_settings.shadow_size = 3
 	p_settings.shadow_color = Color(0, 0, 0, 0.95)
 	player_badge_label.label_settings = p_settings
 	player_badge_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	header_hbox.add_child(player_badge_label)
+	center_top.add_child(player_badge_label)
 
 	var header_spacer := Control.new()
 	header_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header_hbox.add_child(header_spacer)
+	center_top.add_child(header_spacer)
 
-	bp_value_label = Label.new()
-	bp_value_label.text = "BP 10.0K"
-	var bp_v_settings := LabelSettings.new()
-	bp_v_settings.font_size = 44
-	bp_v_settings.font_color = Color(0.18, 1.0, 0.48)
-	bp_v_settings.shadow_size = 6
-	bp_v_settings.shadow_color = Color(0, 0, 0, 0.98)
-	bp_value_label.label_settings = bp_v_settings
-	bp_value_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	header_hbox.add_child(bp_value_label)
+	var diff_pill := PanelContainer.new()
+	var diff_style := StyleBoxFlat.new()
+	diff_style.bg_color = Color(0.03, 0.08, 0.12, 0.85)
+	diff_style.border_width_left = 1
+	diff_style.border_width_top = 1
+	diff_style.border_width_right = 1
+	diff_style.border_width_bottom = 1
+	diff_style.border_color = Color(0.22, 0.72, 0.88, 0.55)
+	diff_style.corner_radius_top_left = 8
+	diff_style.corner_radius_top_right = 8
+	diff_style.corner_radius_bottom_left = 8
+	diff_style.corner_radius_bottom_right = 8
+	diff_style.content_margin_left = 8
+	diff_style.content_margin_right = 8
+	diff_style.content_margin_top = 2
+	diff_style.content_margin_bottom = 2
+	diff_pill.add_theme_stylebox_override("panel", diff_style)
+	center_top.add_child(diff_pill)
 
 	rival_scouter_label = Label.new()
 	rival_scouter_label.text = "+1.0K"
 	var r_settings := LabelSettings.new()
-	r_settings.font_size = 28
+	r_settings.font_size = 24
 	r_settings.font_color = Color(0.25, 1.0, 0.45)
-	r_settings.shadow_size = 4
+	r_settings.outline_size = 4
+	r_settings.outline_color = Color(0.0, 0.0, 0.0, 0.95)
+	r_settings.shadow_size = 3
 	r_settings.shadow_color = Color(0, 0, 0, 0.95)
 	rival_scouter_label.label_settings = r_settings
 	rival_scouter_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	header_hbox.add_child(rival_scouter_label)
+	diff_pill.add_child(rival_scouter_label)
 
-	# BLOQUE 2: Barra de Ki limpia con marcas de corte táctica (15% Z-Vanish / 30% Super)
+	bp_value_label = Label.new()
+	bp_value_label.text = "BP 10.0K"
+	var bp_v_settings := LabelSettings.new()
+	bp_v_settings.font_size = 46
+	bp_v_settings.font_color = Color(0.18, 1.0, 0.48)
+	bp_v_settings.outline_size = 5
+	bp_v_settings.outline_color = Color(0.0, 0.0, 0.0, 0.95)
+	bp_v_settings.shadow_size = 5
+	bp_v_settings.shadow_color = Color(0, 0, 0, 0.98)
+	bp_value_label.label_settings = bp_v_settings
+	bp_value_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	center_vbox.add_child(bp_value_label)
+
+	var rival_col := VBoxContainer.new()
+	rival_col.alignment = BoxContainer.ALIGNMENT_CENTER
+	rival_col.add_theme_constant_override("separation", 2)
+	header_hbox.add_child(rival_col)
+
+	var e_hex_stack := Control.new()
+	e_hex_stack.name = "EnemyHexStack"
+	e_hex_stack.custom_minimum_size = Vector2(78, 78)
+	rival_col.add_child(e_hex_stack)
+
+	_enemy_hex_halo = TextureRect.new()
+	_enemy_hex_halo.name = "EnemyHexHalo"
+	_enemy_hex_halo.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_enemy_hex_halo.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_enemy_hex_halo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_enemy_hex_halo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_enemy_hex_halo.texture = _get_ui_tex("target_fight.png")
+	_enemy_hex_halo.modulate = Color(1.0, 0.34, 0.22, 0.70)
+	e_hex_stack.add_child(_enemy_hex_halo)
+
+	_enemy_hex_rect = TextureRect.new()
+	_enemy_hex_rect.name = "EnemyHexPortrait"
+	_enemy_hex_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_enemy_hex_rect.offset_left = 6
+	_enemy_hex_rect.offset_top = 6
+	_enemy_hex_rect.offset_right = -6
+	_enemy_hex_rect.offset_bottom = -6
+	_enemy_hex_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_enemy_hex_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_enemy_hex_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_enemy_hex_rect.texture = _get_ui_tex("hex_goku_base.png")
+	e_hex_stack.add_child(_enemy_hex_rect)
+
+	_rival_form_label = Label.new()
+	_rival_form_label.name = "RivalFormLabel"
+	_rival_form_label.text = "GOKU · BASE"
+	_rival_form_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var rf_set := LabelSettings.new()
+	rf_set.font_size = 15
+	rf_set.font_color = Color(1.0, 0.78, 0.62)
+	rf_set.outline_size = 3
+	rf_set.outline_color = Color(0.0, 0.0, 0.0, 0.95)
+	_rival_form_label.label_settings = rf_set
+	rival_col.add_child(_rival_form_label)
+
+	# BLOQUE 2: Tubo de Energía Ki estilo Zenkai con indicador, brillo e ícono oficial
 	var ki_overlay := Control.new()
-	ki_overlay.custom_minimum_size = Vector2(0, 64)
+	ki_overlay.custom_minimum_size = Vector2(0, 62)
 	main_vbox.add_child(ki_overlay)
 
 	ki_progress_bar = ProgressBar.new()
@@ -336,26 +531,59 @@ func _build_dragon_ball_hud() -> void:
 	ki_progress_bar.show_percentage = false
 
 	var bg_bar := StyleBoxFlat.new()
-	bg_bar.bg_color = Color(0.02, 0.05, 0.08, 0.90)
+	bg_bar.bg_color = Color(0.02, 0.05, 0.09, 0.92)
 	bg_bar.border_width_left = 2
 	bg_bar.border_width_top = 2
 	bg_bar.border_width_right = 2
 	bg_bar.border_width_bottom = 2
-	bg_bar.border_color = Color(0.12, 0.45, 0.55, 0.85)
-	bg_bar.corner_radius_top_left = 10
-	bg_bar.corner_radius_top_right = 10
-	bg_bar.corner_radius_bottom_left = 10
-	bg_bar.corner_radius_bottom_right = 10
+	bg_bar.border_color = Color(0.18, 0.72, 0.92, 0.90)
+	bg_bar.corner_radius_top_left = 12
+	bg_bar.corner_radius_top_right = 12
+	bg_bar.corner_radius_bottom_left = 12
+	bg_bar.corner_radius_bottom_right = 12
 	ki_progress_bar.add_theme_stylebox_override("background", bg_bar)
 
 	var fill_bar := StyleBoxFlat.new()
 	fill_bar.bg_color = Color(0.0, 0.86, 1.0, 0.95)
-	fill_bar.corner_radius_top_left = 10
-	fill_bar.corner_radius_top_right = 10
-	fill_bar.corner_radius_bottom_left = 10
-	fill_bar.corner_radius_bottom_right = 10
+	fill_bar.corner_radius_top_left = 12
+	fill_bar.corner_radius_top_right = 12
+	fill_bar.corner_radius_bottom_left = 12
+	fill_bar.corner_radius_bottom_right = 12
 	ki_progress_bar.add_theme_stylebox_override("fill", fill_bar)
 	ki_overlay.add_child(ki_progress_bar)
+
+	var ind_rect := TextureRect.new()
+	ind_rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	ind_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ind_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	ind_rect.stretch_mode = TextureRect.STRETCH_SCALE
+	ind_rect.texture = _get_ui_tex("indicator_base.png")
+	ind_rect.modulate = Color(0.35, 0.68, 0.90, 0.22)
+	ki_overlay.add_child(ind_rect)
+
+	var specular_strip := ColorRect.new()
+	specular_strip.anchor_left = 0.01
+	specular_strip.anchor_right = 0.99
+	specular_strip.anchor_top = 0.06
+	specular_strip.anchor_bottom = 0.28
+	specular_strip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	specular_strip.color = Color(1.0, 1.0, 1.0, 0.14)
+	ki_overlay.add_child(specular_strip)
+
+	var ki_icon := TextureRect.new()
+	ki_icon.name = "KiTubeIcon"
+	ki_icon.anchor_top = 0.5
+	ki_icon.anchor_bottom = 0.5
+	ki_icon.offset_left = 10.0
+	ki_icon.offset_top = -14.0
+	ki_icon.offset_right = 38.0
+	ki_icon.offset_bottom = 14.0
+	ki_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ki_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	ki_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	ki_icon.texture = _get_ui_tex("icon_ki_blast.png")
+	ki_icon.modulate = Color(0.75, 0.98, 1.0, 0.95)
+	ki_overlay.add_child(ki_icon)
 
 	# Marca de corte 15 Ki (Z-Vanish)
 	var tick_vanish := ColorRect.new()
@@ -391,29 +619,56 @@ func _build_dragon_ball_hud() -> void:
 	var ki_t_settings := LabelSettings.new()
 	ki_t_settings.font_size = 30
 	ki_t_settings.font_color = Color(1.0, 1.0, 1.0)
-	ki_t_settings.outline_size = 4
-	ki_t_settings.outline_color = Color(0.0, 0.0, 0.0, 0.92)
+	ki_t_settings.outline_size = 5
+	ki_t_settings.outline_color = Color(0.0, 0.0, 0.0, 0.94)
 	ki_t_settings.shadow_size = 4
 	ki_t_settings.shadow_color = Color(0.0, 0.0, 0.0, 0.95)
 	ki_text_label.label_settings = ki_t_settings
 	ki_overlay.add_child(ki_text_label)
 
-	# BLOQUE 3: Fila inferior -> 4 pips de umbral (25/50/75/100%) + 1 solo pill dinámico
+	# BLOQUE 3: Fila inferior -> 4 insignias triangulares de umbral (25/50/75/MAX) + pill dinámico
 	var bottom_hbox := HBoxContainer.new()
-	bottom_hbox.add_theme_constant_override("separation", 10)
-	bottom_hbox.custom_minimum_size = Vector2(0, 48)
+	bottom_hbox.add_theme_constant_override("separation", 8)
+	bottom_hbox.custom_minimum_size = Vector2(0, 50)
 	main_vbox.add_child(bottom_hbox)
 
+	var thresh_texts: Array[String] = ["25", "50", "75", "MAX"]
+	var base_b_tex: Texture2D = _get_ui_tex("alert_base_b.png")
 	threshold_labels.clear()
 	for i in range(4):
+		var slot := Control.new()
+		slot.custom_minimum_size = Vector2(42, 44)
+		bottom_hbox.add_child(slot)
+
+		var t_ico := TextureRect.new()
+		t_ico.anchor_left = 0.5
+		t_ico.anchor_right = 0.5
+		t_ico.anchor_top = 0.5
+		t_ico.anchor_bottom = 0.5
+		t_ico.offset_left = -13.0
+		t_ico.offset_top = -17.0
+		t_ico.offset_right = 13.0
+		t_ico.offset_bottom = 17.0
+		t_ico.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		t_ico.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		t_ico.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		t_ico.texture = base_b_tex
+		t_ico.modulate = Color(0.75, 0.85, 0.95, 0.42)
+		slot.add_child(t_ico)
+		_threshold_icons.append(t_ico)
+
 		var t_lbl := Label.new()
-		t_lbl.text = "○"
-		var t_set := LabelSettings.new()
-		t_set.font_size = 30
-		t_set.font_color = Color(0.45, 0.60, 0.60, 0.55)
-		t_lbl.label_settings = t_set
+		t_lbl.set_anchors_preset(Control.PRESET_FULL_RECT)
+		t_lbl.text = thresh_texts[i]
+		t_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		t_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		bottom_hbox.add_child(t_lbl)
+		var t_set := LabelSettings.new()
+		t_set.font_size = 15
+		t_set.font_color = Color(0.75, 0.88, 0.95, 0.85)
+		t_set.outline_size = 3
+		t_set.outline_color = Color(0.0, 0.0, 0.0, 0.95)
+		t_lbl.label_settings = t_set
+		slot.add_child(t_lbl)
 		threshold_labels.append(t_lbl)
 
 	var bottom_spacer := Control.new()
@@ -429,10 +684,10 @@ func _build_dragon_ball_hud() -> void:
 	status_pill_style.border_width_right = 2
 	status_pill_style.border_width_bottom = 2
 	status_pill_style.border_color = Color(1.0, 0.85, 0.2, 0.9)
-	status_pill_style.corner_radius_top_left = 12
-	status_pill_style.corner_radius_top_right = 12
-	status_pill_style.corner_radius_bottom_left = 12
-	status_pill_style.corner_radius_bottom_right = 12
+	status_pill_style.corner_radius_top_left = 14
+	status_pill_style.corner_radius_top_right = 14
+	status_pill_style.corner_radius_bottom_left = 14
+	status_pill_style.corner_radius_bottom_right = 14
 	status_pill_style.content_margin_left = 14
 	status_pill_style.content_margin_right = 14
 	status_pill_style.content_margin_top = 4
@@ -446,13 +701,15 @@ func _build_dragon_ball_hud() -> void:
 	var pill_set := LabelSettings.new()
 	pill_set.font_size = 24
 	pill_set.font_color = Color(1.0, 0.90, 0.25)
+	pill_set.outline_size = 3
+	pill_set.outline_color = Color(0.0, 0.0, 0.0, 0.95)
 	pill_set.shadow_size = 3
 	pill_set.shadow_color = Color(0.0, 0.0, 0.0, 0.95)
 	status_pill_label.label_settings = pill_set
 	status_pill_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	status_pill_panel.add_child(status_pill_label)
 
-	# BLOQUE 4: Franja dedicada de Bonos Dramáticos Activos / Permanentes (nunca tapada por Furia/Zenkai/Guardia)
+	# BLOQUE 4: Franja dedicada de Bonos Dramáticos Activos / Permanentes
 	dramatic_bonus_panel = PanelContainer.new()
 	dramatic_bonus_panel.name = "DramaticBonusPanel"
 	var d_style := StyleBoxFlat.new()
@@ -481,24 +738,69 @@ func _build_dragon_ball_hud() -> void:
 	var db_set := LabelSettings.new()
 	db_set.font_size = 20
 	db_set.font_color = Color(1.0, 0.93, 0.45)
+	db_set.outline_size = 2
+	db_set.outline_color = Color(0.0, 0.0, 0.0, 0.95)
 	db_set.shadow_size = 3
 	db_set.shadow_color = Color(0.0, 0.0, 0.0, 0.95)
 	dramatic_bonus_label.label_settings = db_set
 	dramatic_bonus_panel.add_child(dramatic_bonus_label)
 
-	# BLOQUE 4.5: Indicador compacto de Cooldowns de Súper Poderes
+	# BLOQUE 4.5: Cápsula de Cooldowns de Súper Poderes
+	_cooldowns_panel = PanelContainer.new()
+	_cooldowns_panel.name = "CooldownsPanel"
+	var cd_style := StyleBoxFlat.new()
+	cd_style.bg_color = Color(0.03, 0.06, 0.11, 0.84)
+	cd_style.border_width_left = 1
+	cd_style.border_width_top = 1
+	cd_style.border_width_right = 1
+	cd_style.border_width_bottom = 1
+	cd_style.border_color = Color(0.24, 0.72, 0.95, 0.55)
+	cd_style.corner_radius_top_left = 10
+	cd_style.corner_radius_top_right = 10
+	cd_style.corner_radius_bottom_left = 10
+	cd_style.corner_radius_bottom_right = 10
+	cd_style.content_margin_left = 10
+	cd_style.content_margin_right = 10
+	cd_style.content_margin_top = 3
+	cd_style.content_margin_bottom = 3
+	_cooldowns_panel.add_theme_stylebox_override("panel", cd_style)
+	_cooldowns_panel.visible = false
+	main_vbox.add_child(_cooldowns_panel)
+
 	super_cooldowns_label = Label.new()
 	super_cooldowns_label.name = "SuperCooldownsLabel"
 	super_cooldowns_label.text = ""
 	var scd_set := LabelSettings.new()
 	scd_set.font_size = 19
 	scd_set.font_color = Color(0.42, 0.92, 1.0)
+	scd_set.outline_size = 2
+	scd_set.outline_color = Color(0.0, 0.0, 0.0, 0.95)
 	scd_set.shadow_size = 3
 	scd_set.shadow_color = Color(0.0, 0.0, 0.0, 0.95)
 	super_cooldowns_label.label_settings = scd_set
-	main_vbox.add_child(super_cooldowns_label)
+	_cooldowns_panel.add_child(super_cooldowns_label)
 
-	# BLOQUE 5: Pista persistente de Transformación (bloqueo / requisito o cómo activarla al instante)
+	# BLOQUE 5: Cápsula de Transformación (bloqueo / desbloqueo al instante / forma máxima)
+	_transform_hint_panel = PanelContainer.new()
+	_transform_hint_panel.name = "TransformHintPanel"
+	_transform_hint_style = StyleBoxFlat.new()
+	_transform_hint_style.bg_color = Color(0.03, 0.07, 0.12, 0.84)
+	_transform_hint_style.border_width_left = 1
+	_transform_hint_style.border_width_top = 1
+	_transform_hint_style.border_width_right = 1
+	_transform_hint_style.border_width_bottom = 1
+	_transform_hint_style.border_color = Color(0.45, 0.62, 0.80, 0.55)
+	_transform_hint_style.corner_radius_top_left = 10
+	_transform_hint_style.corner_radius_top_right = 10
+	_transform_hint_style.corner_radius_bottom_left = 10
+	_transform_hint_style.corner_radius_bottom_right = 10
+	_transform_hint_style.content_margin_left = 10
+	_transform_hint_style.content_margin_right = 10
+	_transform_hint_style.content_margin_top = 3
+	_transform_hint_style.content_margin_bottom = 3
+	_transform_hint_panel.add_theme_stylebox_override("panel", _transform_hint_style)
+	main_vbox.add_child(_transform_hint_panel)
+
 	transform_hint_label = Label.new()
 	transform_hint_label.name = "TransformHintLabel"
 	transform_hint_label.text = ""
@@ -506,10 +808,12 @@ func _build_dragon_ball_hud() -> void:
 	var th_set := LabelSettings.new()
 	th_set.font_size = 20
 	th_set.font_color = Color(0.72, 0.80, 0.92)
+	th_set.outline_size = 2
+	th_set.outline_color = Color(0.0, 0.0, 0.0, 0.95)
 	th_set.shadow_size = 3
 	th_set.shadow_color = Color(0.0, 0.0, 0.0, 0.95)
 	transform_hint_label.label_settings = th_set
-	main_vbox.add_child(transform_hint_label)
+	_transform_hint_panel.add_child(transform_hint_label)
 
 
 func _connect_gesture_signals() -> void:
@@ -747,7 +1051,58 @@ func _apply_pill_appearance(text_val: String, col: Color, border_col: Color) -> 
 		_hud_dirty = true
 
 
+func _refresh_hex_portraits() -> void:
+	if player_instance and is_instance_valid(player_instance) and player_instance.get("character_data") != null:
+		var p_cd: Resource = player_instance.character_data
+		var p_name: String = String(p_cd.character_name)
+		var p_tr: Resource = player_instance.get("current_transformation")
+		var p_form: String = String(p_tr.form_name) if (p_tr and "form_name" in p_tr) else ""
+		var p_hex: String = resolve_hex_portrait_path(p_name, p_form)
+		if p_hex != _last_player_hex_path:
+			_last_player_hex_path = p_hex
+			if _player_hex_rect:
+				_player_hex_rect.texture = _get_ui_tex(p_hex)
+			_hud_dirty = true
+		if _player_hex_halo:
+			var p_halo_col := Color(0.10, 0.92, 1.0, 0.72)
+			if p_tr and "aura_color" in p_tr:
+				var ac: Color = p_tr.aura_color
+				p_halo_col = Color(ac.r, ac.g, ac.b, 0.86)
+			if _player_hex_halo.modulate != p_halo_col:
+				_player_hex_halo.modulate = p_halo_col
+				_hud_dirty = true
+
+	if enemy_instance and is_instance_valid(enemy_instance) and enemy_instance.get("character_data") != null:
+		var e_cd: Resource = enemy_instance.character_data
+		var e_name: String = String(e_cd.character_name)
+		var e_tr: Resource = enemy_instance.get("current_transformation")
+		var e_form: String = String(e_tr.form_name) if (e_tr and "form_name" in e_tr) else ""
+		var e_hex: String = resolve_hex_portrait_path(e_name, e_form)
+		if e_hex != _last_enemy_hex_path:
+			_last_enemy_hex_path = e_hex
+			if _enemy_hex_rect:
+				_enemy_hex_rect.texture = _get_ui_tex(e_hex)
+			_hud_dirty = true
+		var short_e: String = "GOKU" if "GOKU" in e_name.to_upper() else ("VEGETA" if "VEGETA" in e_name.to_upper() else e_name.to_upper().left(8))
+		var rf_txt: String = "%s · %s" % [short_e, e_form.to_upper() if not e_form.is_empty() else "BASE"]
+		if rf_txt != _last_rival_form_text:
+			_last_rival_form_text = rf_txt
+			if _rival_form_label:
+				_rival_form_label.text = rf_txt
+			_hud_dirty = true
+		if _enemy_hex_halo:
+			var e_halo_col := Color(1.0, 0.34, 0.22, 0.70)
+			if e_tr and "aura_color" in e_tr:
+				var eac: Color = e_tr.aura_color
+				e_halo_col = Color(eac.r, eac.g, eac.b, 0.84)
+			if _enemy_hex_halo.modulate != e_halo_col:
+				_enemy_hex_halo.modulate = e_halo_col
+				_hud_dirty = true
+
+
 func _update_dbz_hud_elements(delta: float) -> void:
+	_refresh_hex_portraits()
+
 	# 1. Actualizar diferencia compacta del Rival en el Scouter (dirty check)
 	if enemy_instance and is_instance_valid(enemy_instance) and rival_scouter_label:
 		var e_np: int = int(enemy_instance.current_np)
@@ -848,12 +1203,23 @@ func _update_dbz_hud_elements(delta: float) -> void:
 				dramatic_bonus_label.text = dram_text
 			_hud_dirty = true
 
-		# Borde dorado pulsante del panel completo al activar Zenkai
+		# Borde dinámico del Scouter: Zenkai (oro pulsante) > Furia (naranja/rojo) > Forma > Base
 		if _scouter_panel_style:
-			var target_border := Color(1.0, 0.85, 0.15, 0.96) if z_active else Color(0.0, 0.92, 0.68, 0.90)
-			if z_active and hud_mesh and hud_mesh.visible:
-				var p_z: float = (sin(zenkai_pulse_timer) + 1.0) * 0.5
-				target_border = Color(1.0, 0.65 + p_z * 0.30, 0.10, 0.98)
+			var target_border := Color(0.0, 0.92, 0.68, 0.90)
+			var p_tr_b: Resource = player_instance.get("current_transformation")
+			if z_active:
+				target_border = Color(1.0, 0.85, 0.15, 0.96)
+				if hud_mesh and hud_mesh.visible:
+					var p_z: float = (sin(zenkai_pulse_timer) + 1.0) * 0.5
+					target_border = Color(1.0, 0.65 + p_z * 0.30, 0.10, 0.98)
+			elif f_active:
+				target_border = Color(1.0, 0.42, 0.12, 0.94)
+				if hud_mesh and hud_mesh.visible:
+					var p_f: float = (sin(zenkai_pulse_timer) + 1.0) * 0.5
+					target_border = Color(1.0, 0.32 + p_f * 0.32, 0.08, 0.96)
+			elif p_tr_b and "aura_color" in p_tr_b:
+				var ac_b: Color = p_tr_b.aura_color
+				target_border = Color(ac_b.r, ac_b.g, ac_b.b, 0.92)
 			if _scouter_panel_style.border_color != target_border:
 				_scouter_panel_style.border_color = target_border
 				_hud_dirty = true
@@ -866,6 +1232,8 @@ func _update_dbz_hud_elements(delta: float) -> void:
 			if cd_txt != _last_cooldowns_hud_text:
 				_last_cooldowns_hud_text = cd_txt
 				super_cooldowns_label.text = cd_txt
+				if _cooldowns_panel:
+					_cooldowns_panel.visible = (cd_txt != "")
 				if super_cooldowns_label.label_settings:
 					super_cooldowns_label.label_settings.font_color = Color(1.0, 0.72, 0.22) if ("⏳" in cd_txt or "⌛" in cd_txt) else Color(0.42, 0.92, 1.0)
 				_hud_dirty = true
@@ -891,6 +1259,8 @@ func _update_dbz_hud_elements(delta: float) -> void:
 				transform_hint_label.text = hint_str
 				if transform_hint_label.label_settings:
 					transform_hint_label.label_settings.font_color = hint_col
+				if _transform_hint_style:
+					_transform_hint_style.border_color = Color(hint_col.r, hint_col.g, hint_col.b, 0.72)
 				_hud_dirty = true
 
 
@@ -926,6 +1296,7 @@ func _on_player_stats_changed(ki: float, np: float, _is_zenkai: bool) -> void:
 		if player_badge_label.label_settings and player_badge_label.label_settings.font_color != form_col:
 			player_badge_label.label_settings.font_color = form_col
 			_hud_dirty = true
+	_refresh_hex_portraits()
 
 
 func _on_player_furia_changed(active: bool) -> void:
@@ -1046,16 +1417,23 @@ func update_power_level(current: float, max_val: float) -> void:
 	if bp_value_label:
 		bp_value_label.text = "BP %s%s" % [_format_compact_bp(cur_int), delta_dir]
 
-	# Actualizar pips luminosos de umbrales irreversibles (25%, 50%, 75%, 100%)
+	# Actualizar insignias triangulares Zenkai de umbrales irreversibles (25%, 50%, 75%, MAX)
 	var thresh_pcts: Array[float] = [25.0, 50.0, 75.0, 100.0]
+	var tex_y: Texture2D = _get_ui_tex("alert_base_y.png")
+	var tex_b: Texture2D = _get_ui_tex("alert_base_b.png")
 	for i in range(threshold_labels.size()):
 		var lbl: Label = threshold_labels[i]
-		if percent >= thresh_pcts[i]:
-			lbl.text = "●"
-			lbl.label_settings.font_color = Color(1.0, 0.88, 0.18, 1.0)
-		else:
-			lbl.text = "○"
-			lbl.label_settings.font_color = Color(0.45, 0.60, 0.60, 0.55)
+		var unlocked: bool = percent >= thresh_pcts[i]
+		if lbl.label_settings:
+			lbl.label_settings.font_color = Color(1.0, 0.95, 0.40, 1.0) if unlocked else Color(0.75, 0.88, 0.95, 0.85)
+		if i < _threshold_icons.size() and _threshold_icons[i]:
+			var ico: TextureRect = _threshold_icons[i]
+			if unlocked and tex_y:
+				ico.texture = tex_y
+				ico.modulate = Color(1.0, 1.0, 1.0, 0.96)
+			elif not unlocked and tex_b:
+				ico.texture = tex_b
+				ico.modulate = Color(0.75, 0.85, 0.95, 0.42)
 
 
 func update_status_text(text: String, color: Color = Color(0.9, 0.9, 0.9)) -> void:
@@ -1448,6 +1826,9 @@ func refresh_for_character_swap() -> void:
 	_last_zenkai_state = false
 	_last_furia_state = false
 	_last_status_override_active = false
+	_last_player_hex_path = ""
+	_last_enemy_hex_path = ""
+	_last_rival_form_text = ""
 	_was_low_ki = false
 	_status_override_timer = 0.0
 	_status_override_text = ""
@@ -1455,6 +1836,7 @@ func refresh_for_character_swap() -> void:
 	if player_instance and is_instance_valid(player_instance):
 		_refresh_ki_cost_label()
 		_on_player_stats_changed(player_instance.current_ki, player_instance.current_np, player_instance.is_in_zenkai_state)
+	_refresh_hex_portraits()
 	_update_moves_guide_text(current_controller_mode)
 	if sub_viewport and is_instance_valid(sub_viewport):
 		sub_viewport.render_target_update_mode = SubViewport.UPDATE_ONCE
