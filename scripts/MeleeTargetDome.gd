@@ -174,6 +174,7 @@ static var _guard_break_cooldown_melees: int = 0
 var _sonic_burst_used_this_dome: bool = false
 var _sonic_burst_rolled_this_round: bool = false
 var _declared_full_combo: bool = false
+var _declared_ki_reserved: float = 0.0
 var _round_sonic_hits: int = 0
 var _round_charged_hits: int = 0
 var _round_clean_sonic_hits: int = 0
@@ -372,6 +373,7 @@ func setup(p_attacker: Node3D, p_defender: Node3D, p_duration: float = -1.0, p_m
 	_last_header_text = ""
 	_last_header_col = Color(-1.0, -1.0, -1.0, -1.0)
 	_last_def_hl_key = ""
+	_declared_ki_reserved = 0.0
 	_rounds_completed_in_dome = 0
 	_sim_used_this_dome = false
 	_custom_separation_dist = -1.0
@@ -743,6 +745,7 @@ func start_attack_phase(p_attacker: Node3D, p_defender: Node3D, p_duration: floa
 	hammer_locked_haptic = false
 	hammer_ki_paid = false
 	_declared_full_combo = false
+	_declared_ki_reserved = 0.0
 	_round_sonic_hits = 0
 	_round_charged_hits = 0
 	_round_clean_sonic_hits = 0
@@ -753,7 +756,9 @@ func start_attack_phase(p_attacker: Node3D, p_defender: Node3D, p_duration: floa
 	_def_stick_used_for_note_idx = -1
 	_def_stick_prev = false
 	_def_stick_diag_str = ""
+	_declared_ki_reserved = 0.0
 	_last_def_hl_key = ""
+	_declared_ki_reserved = 0.0
 	_set_target_zones_visible(true)
 	_hide_all_charge_spheres()
 	_refresh_melee_ki_bar()
@@ -1340,10 +1345,12 @@ func start_defense_phase() -> void:
 	_def_stick_used_for_note_idx = -1
 	_def_stick_prev = false
 	_def_stick_diag_str = ""
+	_declared_ki_reserved = 0.0
 	_round_unblocked_hits_taken = 0
 	_round_clean_sonic_hits = 0
 	_round_clean_charged_hits = 0
 	_last_def_hl_key = ""
+	_declared_ki_reserved = 0.0
 	defense_score_sum = 0.0
 	defense_round_total_hits = hits.size()
 	def_left_velocity = Vector3.ZERO
@@ -1738,6 +1745,7 @@ func _process_defense_rhythm(delta: float) -> void:
 
 
 func _resolve_perfect_parry(note: Dictionary, zone: Dictionary) -> void:
+	_pay_attack_note_ki_if_needed(note)
 	note["resolved"] = true
 	consecutive_guard_hits = 0
 	var ring: MeshInstance3D = zone.get("timing_ring") as MeshInstance3D
@@ -1800,7 +1808,18 @@ func _resolve_perfect_parry(note: Dictionary, zone: Dictionary) -> void:
 	restart_as_attacker(pp_underdog_comeback)
 
 
+func _pay_attack_note_ki_if_needed(note: Dictionary) -> float:
+	if bool(note.get("ki_cost_paid", false)):
+		return 0.0
+	note["ki_cost_paid"] = true
+	var cost: float = float(note.get("ki_cost", 0.0))
+	if cost > 0.0 and attacker and is_instance_valid(attacker):
+		_modify_fighter_ki(attacker, -cost)
+	return cost
+
+
 func _resolve_fist_clash(note: Dictionary, zone: Dictionary, hand_idx: int) -> void:
+	_pay_attack_note_ki_if_needed(note)
 	note["resolved"] = true
 	consecutive_guard_hits = 0
 	var ring: MeshInstance3D = zone.get("timing_ring") as MeshInstance3D
@@ -1913,6 +1932,7 @@ func _resolve_fist_clash(note: Dictionary, zone: Dictionary, hand_idx: int) -> v
 
 
 func _resolve_defensive_z_vanish(note: Dictionary, zone: Dictionary) -> void:
+	_pay_attack_note_ki_if_needed(note)
 	note["resolved"] = true
 	consecutive_guard_hits = 0
 	var ring: MeshInstance3D = zone.get("timing_ring") as MeshInstance3D
@@ -1999,6 +2019,7 @@ func _resolve_hand_block(note: Dictionary, zone: Dictionary, hand_idx: int, timi
 		_resolve_unblocked_hit(note, zone, "🔥 ¡1 MANO ROTA POR V3!")
 		return
 
+	_pay_attack_note_ki_if_needed(note)
 	note["resolved"] = true
 	consecutive_guard_hits = 0
 	var ring: MeshInstance3D = zone.get("timing_ring") as MeshInstance3D
@@ -2093,6 +2114,7 @@ func _resolve_cross_arm_guard(note: Dictionary, zone: Dictionary) -> void:
 		_resolve_unblocked_hit(note, zone, "🔨 ¡MARTILLO ATRAVIESA GUARDIA X!")
 		return
 
+	_pay_attack_note_ki_if_needed(note)
 	note["resolved"] = true
 	consecutive_guard_hits += 1
 	var ring: MeshInstance3D = zone.get("timing_ring") as MeshInstance3D
@@ -2215,6 +2237,7 @@ func _cut_melee_hammer_defended(p_def: Node3D, p_atk: Node3D, chip_dmg: float) -
 
 
 func _resolve_unblocked_hit(note: Dictionary, zone: Dictionary, custom_popup: String = "") -> void:
+	_pay_attack_note_ki_if_needed(note)
 	note["resolved"] = true
 	consecutive_guard_hits = 0
 	_round_unblocked_hits_taken += 1
@@ -2514,6 +2537,12 @@ func _start_unblockable_ki_break(p_winner: Node3D, p_victim: Node3D) -> void:
 			header_label.text = "⚠️ ¡TE QUEDASTE SIN KI! ¡GUARDIA ROTA!\n¡ATAQUE FUERTE IMBLOQUEABLE ENTRANTE!"
 
 
+static func can_player_trigger_ki_break_punch(is_crossing_arms: bool, hands_dist: float, fist_closed: bool, dist_to_zone: float, fwd_vel: float, vel_mag: float) -> bool:
+	if is_crossing_arms or hands_dist < 0.36:
+		return false
+	return fist_closed and dist_to_zone <= 0.34 and fwd_vel >= 1.20 and vel_mag >= 1.50
+
+
 func _process_unblockable_ki_break(delta: float) -> void:
 	_update_dome_transform()
 	ki_break_timer -= delta
@@ -2522,19 +2551,27 @@ func _process_unblockable_ki_break(delta: float) -> void:
 	if winner_is_player:
 		_update_controller_velocities(delta)
 		_update_fist_states(delta, false)
+		var l_kb: XRController3D = _get_controller("LeftHand")
+		var r_kb: XRController3D = _get_controller("RightHand")
+		var hands_dist_kb: float = l_kb.global_position.distance_to(r_kb.global_position) if (l_kb and r_kb) else 1.0
+		var crossing_kb: bool = _is_defender_crossing_arms() or (is_fist_closed[0] and is_fist_closed[1] and hands_dist_kb < 0.36)
 		var punch_fwd_kb: Vector3 = _get_punch_forward_world()
 		var zone_pos: Vector3 = target_zones[1]["node"].global_position if target_zones.size() > 1 else global_position
 		for h_idx in [0, 1]:
 			if is_fist_closed[h_idx]:
-				var ctrl: XRController3D = _get_controller("LeftHand" if h_idx == 0 else "RightHand")
+				var ctrl: XRController3D = l_kb if h_idx == 0 else r_kb
 				var vel_vec_kb: Vector3 = left_velocity if h_idx == 0 else right_velocity
 				var vel_len: float = vel_vec_kb.length()
 				var fwd_len_kb: float = vel_vec_kb.dot(punch_fwd_kb)
-				if ctrl and ctrl.global_position.distance_to(zone_pos) <= 0.34 and fwd_len_kb >= 0.85 and vel_len >= 1.10:
+				var d_kb: float = ctrl.global_position.distance_to(zone_pos) if ctrl else 999.0
+				if can_player_trigger_ki_break_punch(crossing_kb, hands_dist_kb, is_fist_closed[h_idx], d_kb, fwd_len_kb, vel_len):
 					_execute_unblockable_ki_break_hit(vel_len)
 					return
 
 	if ki_break_timer <= 0.0:
+		if winner_is_player:
+			_close_dome_with_separation(6.5, "⚡ Rival exhausto — oportunidad de remate expirada")
+			return
 		_execute_unblockable_ki_break_hit(4.2)
 
 
@@ -2753,10 +2790,12 @@ func evaluate_round_outcome() -> void:
 	_comeback_momentum_active = false
 	if _check_ki_break_after_note():
 		_declared_full_combo = false
+		_declared_ki_reserved = 0.0
 		return
 
 	var was_full_combo: bool = _declared_full_combo
 	_declared_full_combo = false
+	_declared_ki_reserved = 0.0
 
 	var n_hits_chk: int = maxi(defense_round_total_hits, hits.size())
 	var scores: Array[float] = []
@@ -3461,9 +3500,9 @@ func generate_ai_attack_sequence() -> void:
 	var v3_cost: float = float(cfg_ai_a.melee_v3_cost) if cfg_ai_a.get("melee_v3_cost") != null else 11.0
 	var hm_cost: float = float(cfg_ai_a.melee_hammer_cost) if cfg_ai_a.get("melee_hammer_cost") != null else 15.0
 
+	var sim_ai_ki: float = float(attacker.get("current_ki")) if (attacker and attacker.get("current_ki") != null) else 50.0
 	for i in range(num_hits):
-		var ai_ki_now: float = float(attacker.get("current_ki")) if (attacker and attacker.get("current_ki") != null) else 50.0
-		if i > 0 and ai_ki_now < q_cost:
+		if i > 0 and sim_ai_ki < q_cost:
 			break
 		var zone_id: int = randi() % ZONE_DEFINITIONS.size()
 		if zone_id == last_zone:
@@ -3478,30 +3517,32 @@ func generate_ai_attack_sequence() -> void:
 		var v3_mode: String = "BACK"
 		var hit_cost: float = q_cost
 
-		if is_last and (ai_in_zenkai or ai_ki_now >= chg_cost):
+		if is_last and (ai_in_zenkai or sim_ai_ki >= chg_cost):
 			var r: float = randf()
-			if r < 0.26 and ai_ki_now >= hm_cost:
+			if r < 0.26 and sim_ai_ki >= hm_cost:
 				is_hammer = true
 				is_charged = true
 				power = 4.5
 				zone_id = 1
 				hit_cost = hm_cost
-			elif r < 0.60 and ai_ki_now >= v3_cost:
+			elif r < 0.60 and sim_ai_ki >= v3_cost:
 				is_v3 = true
 				is_charged = true
 				power = 3.0
 				v3_mode = "UP" if zone_id == 0 else "BACK"
 				hit_cost = v3_cost
-			elif ai_ki_now >= chg_cost:
+			elif sim_ai_ki >= chg_cost:
 				is_charged = true
 				power = 2.0
 				hit_cost = chg_cost
-		elif i >= 1 and not is_last and ai_ki_now >= chg_cost + q_cost and randf() < 0.28:
+		elif i >= 1 and not is_last and sim_ai_ki >= chg_cost + q_cost and randf() < 0.28:
 			is_charged = true
 			power = 2.0
 			hit_cost = chg_cost
 
-		_modify_fighter_ki(attacker, -minf(hit_cost, ai_ki_now))
+		var actual_hit_cost: float = minf(hit_cost, sim_ai_ki)
+		sim_ai_ki = maxf(sim_ai_ki - actual_hit_cost, 0.0)
+		_declared_ki_reserved += actual_hit_cost
 		var is_sonic_ai: bool = is_hammer or is_v3 or ai_in_zenkai or (is_charged and randf() < 0.45) or (randf() < 0.25)
 		var ai_tier: String = "SONICO" if is_sonic_ai else "SOLIDO"
 		var ai_tier_mult: float = 1.35 if is_sonic_ai else 1.0
@@ -3522,6 +3563,8 @@ func generate_ai_attack_sequence() -> void:
 			"power": power,
 			"tier": ai_tier,
 			"tier_dmg_mult": ai_tier_mult,
+			"ki_cost": actual_hit_cost,
+			"ki_cost_paid": false,
 			"ki_refund": ai_refund,
 			"is_charged": is_charged,
 			"is_charged_v3": is_v3,
@@ -3561,6 +3604,7 @@ func finish_without_hits(_is_manual_cancel: bool = false) -> void:
 		return
 	is_active = false
 	_declared_full_combo = false
+	_declared_ki_reserved = 0.0
 	_kill_surge_tween()
 	_hitstop_end_msec = 0
 	if Engine.time_scale < 1.0:
@@ -4534,17 +4578,18 @@ func _register_hit(zone: Dictionary, ctrl_node: XRController3D, hand_name: Strin
 	var chg_cost: float = float(cfg_ki.melee_charged_cost)
 	var v3_cost: float = float(cfg_ki.melee_v3_cost)
 	var atk_ki: float = float(attacker.get("current_ki")) if (attacker and attacker.get("current_ki") != null) else 50.0
+	var avail_ki: float = maxf(atk_ki - _declared_ki_reserved, 0.0)
 
-	if is_v3 and atk_ki < v3_cost:
+	if is_v3 and avail_ki < v3_cost:
 		is_v3 = false
-		if atk_ki < chg_cost:
+		if avail_ki < chg_cost:
 			is_charged = false
 		_spawn_impact_popup(hit_pos, "⚠️ ¡KI INSUFICIENTE PARA V3!", Color(1.0, 0.55, 0.15))
-	elif is_charged and atk_ki < chg_cost:
+	elif is_charged and avail_ki < chg_cost:
 		is_charged = false
 		_spawn_impact_popup(hit_pos, "⚠️ ¡KI INSUFICIENTE PARA CARGADO!", Color(1.0, 0.55, 0.15))
 
-	if atk_ki < q_cost:
+	if avail_ki < q_cost:
 		fist_charge_times[hand_idx] = 0.0
 		fist_locked_haptic[hand_idx] = false
 		fist_v3_locked_haptic[hand_idx] = false
@@ -4561,7 +4606,7 @@ func _register_hit(zone: Dictionary, ctrl_node: XRController3D, hand_name: Strin
 	var tier_refund: float = 0.0 if is_v3 else float(tier_info.get("ki_refund", 0.0))
 
 	var ki_cost: float = v3_cost if is_v3 else (chg_cost if is_charged else q_cost)
-	_modify_fighter_ki(attacker, -ki_cost)
+	_declared_ki_reserved += ki_cost
 
 	var swing_dir: Vector3 = cur_vel.normalized() if cur_vel.length_squared() > 0.01 else -global_transform.basis.z
 	var z_id: int = int(zone["id"])
@@ -4582,6 +4627,8 @@ func _register_hit(zone: Dictionary, ctrl_node: XRController3D, hand_name: Strin
 		"stroke_dist": stroke_dist,
 		"tier": tier_name,
 		"tier_dmg_mult": tier_dmg_mult,
+		"ki_cost": ki_cost,
+		"ki_cost_paid": false,
 		"ki_refund": tier_refund,
 		"is_charged": is_charged,
 		"is_charged_v3": is_v3,
@@ -4643,7 +4690,7 @@ func _register_hit(zone: Dictionary, ctrl_node: XRController3D, hand_name: Strin
 	_update_sequential_target_highlights(z_id)
 
 	# Auto-cierre inteligente si el Ki restante ya no alcanza para otro golpe rápido, o al completar el combo
-	var atk_ki_left: float = float(attacker.get("current_ki")) if (attacker and attacker.get("current_ki") != null) else 50.0
+	var atk_ki_left: float = maxf((float(attacker.get("current_ki")) if (attacker and attacker.get("current_ki") != null) else 50.0) - _declared_ki_reserved, 0.0)
 	if atk_ki_left < q_cost or current_attack_step >= max_allowed_hits:
 		var msg_tag: String = "🔥 ¡CARGADO V3 EN COMBO!" if is_v3 else "💥 ¡SECUENCIA REGISTRADA!"
 		if atk_ki_left < q_cost and current_attack_step < max_allowed_hits:
@@ -4676,14 +4723,15 @@ func _check_hammer_finisher() -> bool:
 		var cfg_hm: KiEconomyConfig = KiEconomyConfig.get_default()
 		var hm_cost: float = float(cfg_hm.melee_hammer_cost) if cfg_hm.get("melee_hammer_cost") != null else 15.0
 		var atk_ki_before: float = float(attacker.get("current_ki")) if (attacker and attacker.get("current_ki") != null) else 0.0
-		if atk_ki_before < hm_cost:
+		var avail_hm_ki: float = maxf(atk_ki_before - _declared_ki_reserved, 0.0)
+		if avail_hm_ki < hm_cost:
 			hammer_charge_time = 0.0
 			hammer_primed = false
 			hammer_locked_haptic = false
 			_spawn_impact_popup(target_zones[1]["node"].global_position, "⚠️ ¡KI INSUFICIENTE (-%d Ki)!" % int(hm_cost), Color(1.0, 0.35, 0.25))
 			return false
 		hammer_ki_paid = true
-		_modify_fighter_ki(attacker, -hm_cost)
+		_declared_ki_reserved += hm_cost
 
 		var hammer_pos: Vector3 = target_zones[1]["node"].global_position
 		var hm_launch: Vector3 = _compute_zone_launch_vector(1, true, 13.0)
@@ -4697,6 +4745,8 @@ func _check_hammer_finisher() -> bool:
 			"hand": "BothHands",
 			"time_offset": clean_time_offset,
 			"power": 4.5,
+			"ki_cost": hm_cost,
+			"ki_cost_paid": false,
 			"ki_refund": 0.0,
 			"is_charged": true,
 			"is_charged_v3": false,
@@ -4731,7 +4781,7 @@ func _check_hammer_finisher() -> bool:
 		emit_signal("target_hit", hits.size(), "Martillazo DBZ", hammer_pos, true, 4.5)
 		var atk_ki_hm: float = float(attacker.get("current_ki")) if (attacker and attacker.get("current_ki") != null) else 50.0
 		var min_q_hm: float = float(cfg_hm.melee_quick_cost) if cfg_hm.get("melee_quick_cost") != null else 3.0
-		if current_attack_step >= max_allowed_hits or atk_ki_hm < min_q_hm:
+		if current_attack_step >= max_allowed_hits or maxf(atk_ki_hm - _declared_ki_reserved, 0.0) < min_q_hm:
 			var msg_hm: String = "🔨 ¡MARTILLAZO DBZ LISTO!"
 			if current_attack_step >= max_allowed_hits and hits.size() >= max_allowed_hits:
 				_declared_full_combo = true
