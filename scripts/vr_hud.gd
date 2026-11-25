@@ -1355,7 +1355,7 @@ func _update_moves_guide_text(is_controller: bool) -> void:
 			text += "• [color=#00e5ff]Guardia Cruzada (-85%% BP | -7~20 Ki):[/color] Ambos Puños (Grip+Gatillo) al pecho en 'X'\n"
 			text += "• [color=#00e5ff]Semáforo / Desvío / Parry:[/color] Aro Verde = Desvío (+5 Ki) | Aro Dorado = Parry (+14 Ki)\n"
 			text += "• [color=#00e5ff]Melee Táctico (4-7 Golpes):[/color] Rápido -5 | Cargado -11 | V3 -16 | Sónico +1.5 Ki\n"
-			text += "• [color=#ffcc00]Z-Vanish / Onda Kiai (Melee):[/color] Stick [-14 Ki] | Abre brazos + 2 Grips [-22 Ki]\n"
+			text += "• [color=#ffcc00]Z-Vanish / Onda Kiai (Melee):[/color] Stick o Click Stick (vs ⚡/🔥/🔨) [-%d Ki] | Abre brazos + 2 Grips [-%d Ki]\n" % [int(cfg.melee_vanish_cost), int(cfg.melee_explosive_wave_cost)]
 			text += "• [color=#ffcc00]Eventos DBZ (Choque/Meteoro):[/color] Estrellar en Cráter = ¡Super +35%% Vel. Carga!\n"
 			text += "• [color=#00e5ff]Melee Dash [%d Ki]:[/color] Puño cerrado (Grip+Gatillo) al frente | Stick Atrás = Cancelar\n" % int(cfg.melee_dash_cost)
 			text += "• [color=#00e5ff]Frenado Aéreo:[/color] Agita ambos controles físicos rápido al salir lanzado\n"
@@ -1376,7 +1376,7 @@ func _update_moves_guide_text(is_controller: bool) -> void:
 			text += "• [color=#00e5ff]Guardia Cruzada (-85%% BP | -7~20 Ki):[/color] Ambos Puños (Grip+Gatillo) al pecho en 'X'\n"
 			text += "• [color=#00e5ff]Semáforo / Desvío / Parry:[/color] Aro Verde = Desvío (+5 Ki) | Aro Dorado = Parry (+14 Ki)\n"
 			text += "• [color=#00e5ff]Melee Táctico (4-7 Golpes):[/color] Rápido -5 | Cargado -11 | V3 -16 | Sónico +1.5 Ki\n"
-			text += "• [color=#ffcc00]Z-Vanish / Onda Kiai (Melee):[/color] Stick [-14 Ki] | Abre brazos + 2 Grips [-22 Ki]\n"
+			text += "• [color=#ffcc00]Z-Vanish / Onda Kiai (Melee):[/color] Stick o Click Stick (vs ⚡/🔥/🔨) [-%d Ki] | Abre brazos + 2 Grips [-%d Ki]\n" % [int(cfg.melee_vanish_cost), int(cfg.melee_explosive_wave_cost)]
 			text += "• [color=#ffcc00]Eventos DBZ (Choque/Meteoro):[/color] Estrellar en Cráter = ¡Super +35%% Vel. Carga!\n"
 			text += "• [color=#00e5ff]Melee Dash [%d Ki]:[/color] Puño cerrado (Grip+Gatillo) al frente | Stick Atrás = Cancelar\n" % int(cfg.melee_dash_cost)
 			text += "• [color=#00e5ff]Frenado Aéreo:[/color] Agita ambos controles físicos rápido al salir lanzado\n"

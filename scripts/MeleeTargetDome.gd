@@ -182,6 +182,8 @@ var _round_unblocked_hits_taken: int = 0
 var _surge_active_timer: float = 0.0
 var _timing_cue_note_idx: int = -1
 var _def_stick_used_for_note_idx: int = -1
+var _def_stick_prev: bool = false
+var _def_stick_buffer_timer: float = 0.0
 var _hitstop_end_msec: int = 0
 var _ki_bar_root: Node3D = null
 var _player_ki_fill: MeshInstance3D = null
@@ -461,6 +463,28 @@ static func can_z_vanish_attack(is_charged: bool, is_v3: bool, is_hammer: bool) 
 	return is_hammer or is_v3 or is_charged
 
 
+static func evaluate_defensive_z_vanish_input(
+	t_diff: float,
+	note_prewarn: float,
+	stick_mag: float,
+	stick_clicked: bool,
+	is_charged: bool,
+	is_v3: bool,
+	is_hammer: bool,
+	cur_ki: float,
+	vanish_cost: float
+) -> String:
+	var triggered: bool = stick_clicked or stick_mag >= 0.50
+	if not triggered or t_diff > note_prewarn or t_diff < -0.22:
+		return "NONE"
+	if not can_z_vanish_attack(is_charged, is_v3, is_hammer):
+		return "BLOCKED_QUICK"
+	var zv_max_t: float = 0.85 if is_hammer else 0.65
+	if t_diff <= zv_max_t:
+		return "EXECUTE" if cur_ki >= vanish_cost else "NO_KI"
+	return "TOO_EARLY"
+
+
 static func get_attack_visual_meta(note: Dictionary) -> Dictionary:
 	var is_hammer: bool = bool(note.get("is_hammer", false))
 	var is_v3: bool = bool(note.get("is_charged_v3", false))
@@ -719,6 +743,8 @@ func start_attack_phase(p_attacker: Node3D, p_defender: Node3D, p_duration: floa
 	_round_unblocked_hits_taken = 0
 	_timing_cue_note_idx = -1
 	_def_stick_used_for_note_idx = -1
+	_def_stick_prev = false
+	_def_stick_buffer_timer = 0.0
 	_last_def_hl_key = ""
 	_set_target_zones_visible(true)
 	_hide_all_charge_spheres()
@@ -1304,6 +1330,8 @@ func start_defense_phase() -> void:
 	last_animated_note_idx = -1
 	_timing_cue_note_idx = -1
 	_def_stick_used_for_note_idx = -1
+	_def_stick_prev = false
+	_def_stick_buffer_timer = 0.0
 	_round_unblocked_hits_taken = 0
 	_round_clean_sonic_hits = 0
 	_round_clean_charged_hits = 0
@@ -1383,6 +1411,7 @@ func start_defense_phase() -> void:
 
 func _process_defense_rhythm(delta: float) -> void:
 	defense_timer += delta
+	_def_stick_buffer_timer = maxf(_def_stick_buffer_timer - delta, 0.0)
 	_update_dome_transform_for_defender()
 	_update_defender_velocities(delta)
 	_update_defender_input_buffers(delta)
@@ -1489,6 +1518,61 @@ func _process_defense_rhythm(delta: float) -> void:
 		elif t_diff > note_prewarn and active_ring and is_instance_valid(active_ring):
 			active_ring.visible = false
 
+		# 1. Z-Vanish Defensivo responsivo con Stick (>=0.50) o Click de Stick en ambos mandos, independiente de early_lockout
+		if defender_is_player and not is_def_crashed and t_diff <= note_prewarn and t_diff >= -0.22:
+			var l_zv: XRController3D = _get_controller("LeftHand")
+			var r_zv: XRController3D = _get_controller("RightHand")
+			var st_l: Vector2 = _ctrl_vec2(l_zv, &"primary") if l_zv else Vector2.ZERO
+			var st_r: Vector2 = _ctrl_vec2(r_zv, &"primary") if r_zv else Vector2.ZERO
+			var stick_mag_now: float = maxf(st_l.length(), st_r.length())
+			var stick_clicked_now: bool = (l_zv != null and _ctrl_pressed(l_zv, &"primary_click")) or (r_zv != null and _ctrl_pressed(r_zv, &"primary_click"))
+			var stick_active_now: bool = stick_clicked_now or stick_mag_now >= 0.50
+			var stick_fresh_now: bool = stick_active_now and not _def_stick_prev
+			_def_stick_prev = stick_active_now
+			if stick_fresh_now:
+				_def_stick_buffer_timer = 0.28
+			if _def_stick_used_for_note_idx != first_unresolved_idx:
+				var eff_stick_mag: float = maxf(stick_mag_now, 0.55 if _def_stick_buffer_timer > 0.0 else 0.0)
+				var zv_info: Dictionary = _get_vanish_cost_and_label(defender)
+				var vanish_cost: float = float(zv_info.get("cost", 10.0))
+				var cur_def_ki: float = float(defender.get("current_ki")) if defender.get("current_ki") != null else 0.0
+				var zv_res: String = evaluate_defensive_z_vanish_input(
+					t_diff,
+					note_prewarn,
+					eff_stick_mag,
+					stick_clicked_now,
+					bool(active_note.get("is_charged", false)),
+					bool(active_note.get("is_charged_v3", false)),
+					is_hammer,
+					cur_def_ki,
+					vanish_cost
+				)
+				var zone_pos_zv: Vector3 = active_zone["node"].global_position
+				match zv_res:
+					"EXECUTE":
+						_def_stick_used_for_note_idx = first_unresolved_idx
+						_consume_defender_note_buffers()
+						_resolve_defensive_z_vanish(active_note, active_zone)
+						return
+					"NO_KI":
+						if stick_fresh_now and not bool(active_note.get("zv_noki_hint_shown", false)):
+							active_note["zv_noki_hint_shown"] = true
+							last_action_feedback = "⚠️ ¡SIN KI PARA Z-VANISH! (%d/%d Ki)" % [int(cur_def_ki), int(vanish_cost)]
+							_spawn_impact_popup(zone_pos_zv, "⚠️ ¡SIN KI PARA Z-VANISH! (%d/%d)" % [int(cur_def_ki), int(vanish_cost)], Color(1.0, 0.35, 0.15))
+							_pulse_defender_both_hands(110.0, 0.55, 0.08)
+					"BLOCKED_QUICK":
+						if stick_fresh_now and not bool(active_note.get("zv_quick_hint_shown", false)):
+							active_note["zv_quick_hint_shown"] = true
+							last_action_feedback = "👊 ¡Z-VANISH NO SIRVE VS RÁPIDO! Usa Trigger o X"
+							_spawn_impact_popup(zone_pos_zv, "👊 ¡Z-VANISH NO SIRVE VS RÁPIDO! Usa Trigger o X", Color(1.0, 0.55, 0.15))
+							_pulse_defender_both_hands(90.0, 0.35, 0.06)
+					"TOO_EARLY":
+						var zv_max_w: float = 0.85 if is_hammer else 0.65
+						if stick_fresh_now and t_diff > zv_max_w + 0.28 and not bool(active_note.get("zv_early_hint_shown", false)):
+							active_note["zv_early_hint_shown"] = true
+							_spawn_impact_popup(zone_pos_zv, "⏳ ¡ESPERA EL ARO PARA Z-VANISH!", Color(0.95, 0.82, 0.25))
+							_pulse_defender_both_hands(85.0, 0.30, 0.05)
+
 		# Castigo estricto por pulsar defensa ANTES de Ámbar/Verde (>0.30s), sin penalizar Guardia X/Kiai ni preparar puño de Choque
 		var is_heavy_atk: bool = is_heavy or is_hammer
 		if defender_is_player and not is_def_crashed and t_diff > 0.30 and not crossing_now and not is_early_locked:
@@ -1533,29 +1617,9 @@ func _process_defense_rhythm(delta: float) -> void:
 
 		# Ventana de resolución defensiva (hasta ±0.30s incluyendo Ámbar 0.18..0.30s, Verde <=0.18s, Dorado <=0.12s)
 		if not is_def_crashed and t_diff <= 0.30 and t_diff >= -0.22:
-			var zone_pos: Vector3 = active_zone["node"].global_position
 			if defender_is_player:
 				var not_locked_out: bool = not is_early_locked
-				# 1. Z-Vanish Defensivo real con Stick en timing (solo contra Cargado Nv2/V3 o Martillo)
-				var l_zv: XRController3D = _get_controller("LeftHand")
-				var r_zv: XRController3D = _get_controller("RightHand")
-				if not_locked_out and (l_zv or r_zv) and _def_stick_used_for_note_idx != first_unresolved_idx:
-					var st_l: Vector2 = _ctrl_vec2(l_zv, &"primary") if l_zv else Vector2.ZERO
-					var st_r: Vector2 = _ctrl_vec2(r_zv, &"primary") if r_zv else Vector2.ZERO
-					if st_l.length() >= 0.72 or st_r.length() >= 0.72:
-						_def_stick_used_for_note_idx = first_unresolved_idx
-						if can_z_vanish_attack(bool(active_note.get("is_charged", false)), bool(active_note.get("is_charged_v3", false)), is_hammer):
-							var zv_info: Dictionary = _get_vanish_cost_and_label(defender)
-							var vanish_cost: float = float(zv_info.get("cost", 10.0))
-							var cur_def_ki: float = float(defender.get("current_ki")) if defender.get("current_ki") != null else 0.0
-							if cur_def_ki >= vanish_cost:
-								_consume_defender_note_buffers()
-								_resolve_defensive_z_vanish(active_note, active_zone)
-								return
-						else:
-							_spawn_impact_popup(zone_pos, "👊 ¡Z-VANISH NO SIRVE VS RÁPIDO! Usa Trigger o X", Color(1.0, 0.55, 0.15))
-							_pulse_defender_both_hands(90.0, 0.35, 0.06)
-
+				var zone_pos: Vector3 = active_zone["node"].global_position
 				var hand_parry_idx: int = _get_defender_hand_near_zone(zone_pos, 0.28) if not crossing_now else -1
 
 				# 2-4. Bloqueo Perfecto (G+T Dorado <=0.12s), Choque de Puños (G+T frontal) y Bloqueo 1 Mano (Trigger fresco sin Grip)
@@ -1822,14 +1886,19 @@ func _resolve_defensive_z_vanish(note: Dictionary, zone: Dictionary) -> void:
 		audio_player.global_position = zone_pos
 		audio_player.pitch_scale = 1.15
 		AudioActionManager.play_action("common.dodge_vanish", audio_player)
-	_pulse_defender_both_hands(190.0, 0.70, 0.10)
+	_pulse_defender_both_hands(210.0, 0.90, 0.14)
+	_spawn_parry_shockwave(zone_pos)
 	perform_z_blink_relocation()
+	if attacker and is_instance_valid(attacker) and attacker.get("procedural_animator"):
+		var opp_dir_zv: Vector3 = _duel_axis if (defender and is_instance_valid(defender) and bool(defender.get("is_player"))) else -_duel_axis
+		attacker.procedural_animator.trigger_hit_flinch(0.35, opp_dir_zv.normalized() if opp_dir_zv.length_squared() > 0.01 else Vector3.FORWARD)
 
 	note["defense_score"] = 1.00
 	defense_score_sum += 1.00
 	last_action_feedback = "%s (-%d Ki, +%d BP)" % [vanish_lbl, int(vanish_cost), int(roundf(zv_bp_reward))]
 	pip_results.append("blocked")
-	_spawn_impact_popup(zone_pos, vanish_lbl, Color(0.35, 0.96, 1.0))
+	_spawn_impact_popup(zone_pos, vanish_lbl, Color(0.25, 0.98, 1.0))
+	_spawn_impact_popup(global_position, "%s (-%d Ki)" % [vanish_lbl, int(vanish_cost)], Color(0.25, 0.98, 1.0), true)
 	emit_signal("defense_action_resolved", "z_vanish", zone["id"], true, -vanish_cost, zv_bp_reward)
 	if _check_ki_break_after_note():
 		return
@@ -3347,22 +3416,26 @@ func generate_ai_attack_sequence() -> void:
 
 		if is_last and (ai_in_zenkai or ai_ki_now >= chg_cost):
 			var r: float = randf()
-			if r < 0.22 and ai_ki_now >= hm_cost:
+			if r < 0.26 and ai_ki_now >= hm_cost:
 				is_hammer = true
 				is_charged = true
 				power = 4.5
 				zone_id = 1
 				hit_cost = hm_cost
-			elif r < 0.48 and ai_ki_now >= v3_cost:
+			elif r < 0.60 and ai_ki_now >= v3_cost:
 				is_v3 = true
 				is_charged = true
 				power = 3.0
 				v3_mode = "UP" if zone_id == 0 else "BACK"
 				hit_cost = v3_cost
-			elif r < 0.78 and ai_ki_now >= chg_cost:
+			elif ai_ki_now >= chg_cost:
 				is_charged = true
 				power = 2.0
 				hit_cost = chg_cost
+		elif i >= 1 and not is_last and ai_ki_now >= chg_cost + q_cost and randf() < 0.28:
+			is_charged = true
+			power = 2.0
+			hit_cost = chg_cost
 
 		_modify_fighter_ki(attacker, -minf(hit_cost, ai_ki_now))
 		var is_sonic_ai: bool = is_hammer or is_v3 or ai_in_zenkai or (is_charged and randf() < 0.45) or (randf() < 0.25)
@@ -3538,6 +3611,7 @@ func _consume_defender_note_buffers() -> void:
 	buffer_trig_timer_r = 0.0
 	_trig_press_age_l = 0.0
 	_trig_press_age_r = 0.0
+	_def_stick_buffer_timer = 0.0
 
 
 func _consume_defender_hand_buffer(hand_idx: int) -> void:

@@ -788,7 +788,8 @@ func _process_z_vanish_war(_delta: float, l_ctrl: XRController3D, r_ctrl: XRCont
 	var prof_zv: Dictionary = _get_bp_profile_for(chaser, reactor, true)
 
 	if _vanish_defender_is_player:
-		var stick_flick: bool = _stick_debounce <= 0.0 and (stick_l.length() >= 0.65 or stick_r.length() >= 0.65)
+		var stick_clicked_zw: bool = (l_ctrl != null and _ctrl_pressed(l_ctrl, &"primary_click")) or (r_ctrl != null and _ctrl_pressed(r_ctrl, &"primary_click"))
+		var stick_flick: bool = _stick_debounce <= 0.0 and (stick_clicked_zw or stick_l.length() >= 0.50 or stick_r.length() >= 0.50)
 		var guard_x: bool = _vanish_hop_grace <= 0.0 and l_closed and r_closed and l_ctrl != null and r_ctrl != null and l_ctrl.global_position.distance_to(r_ctrl.global_position) < 0.34
 		var r_ki: float = float(reactor.get("current_ki")) if reactor and reactor.get("current_ki") != null else 0.0
 		if stick_flick and r_ki >= hop_cost:

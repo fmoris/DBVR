@@ -2078,7 +2078,7 @@ func _process_grid_step_movement(delta: float) -> void:
 		# Shunkan Idō (Teletransportación táctica en Fase Libre): Grip sostenido (sin gatillo) + flick fuerte de stick
 		var l_g_tp: bool = left_controller != null and (_ctrl_float(left_controller, &"grip") > 0.55 or _ctrl_pressed(left_controller, &"grip_click")) and not (_ctrl_float(left_controller, &"trigger") > 0.45)
 		var r_g_tp: bool = right_controller != null and (_ctrl_float(right_controller, &"grip") > 0.55 or _ctrl_pressed(right_controller, &"grip_click")) and not (_ctrl_float(right_controller, &"trigger") > 0.45)
-		if (l_g_tp or r_g_tp) and stick_len >= 0.78 and player and player.has_method("execute_shunkan_ido_flank"):
+		if (l_g_tp or r_g_tp) and stick_len >= 0.60 and player and player.has_method("execute_shunkan_ido_flank"):
 			if player.execute_shunkan_ido_flank():
 				step_cooldown = 0.45
 				_pulse_haptic(left_controller, 180.0, 0.85, 0.14)
