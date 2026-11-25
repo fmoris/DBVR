@@ -29,8 +29,17 @@ const ZONE_OFFSETS: Array[Vector3] = [
 
 const UI_PATH: String = "res://assets/ui_zenkai/"
 
-var _active_alt: int = HudAlt.TACTICAL_FLANKS
+const HEX_FORMS: Array[Dictionary] = [
+	{ "label": "Base", "goku": "hex_goku_base.png", "vegeta": "hex_vegeta_base.png" },
+	{ "label": "SSJ", "goku": "hex_goku_ssj.png", "vegeta": "hex_vegeta_ssj.png" },
+	{ "label": "SSG / Super", "goku": "hex_goku_ssg.png", "vegeta": "hex_vegeta_super.png" },
+	{ "label": "SSJ3 / SSB", "goku": "hex_goku_ssj3.png", "vegeta": "hex_vegeta_ssb.png" },
+	{ "label": "SSB / UE", "goku": "hex_goku_ssb.png", "vegeta": "hex_vegeta_ue.png" }
+]
+
+var _active_alt: int = HudAlt.ANIME_CINEMA
 var _active_scenario: int = Scenario.DEFENSE
+var _form_idx: int = 0
 var _auto_sweep: bool = false
 var _show_anchor_tags: bool = true
 
@@ -92,10 +101,14 @@ var _alt3_stamp_mat: StandardMaterial3D = null
 var _alt3_callout_root: Node3D = null
 var _alt3_flash_lbl: Label3D = null
 
+var _p_hex_mats: Array[StandardMaterial3D] = []
+var _e_hex_mats: Array[StandardMaterial3D] = []
+
 var _alt_buttons: Array[Button] = []
 var _scen_buttons: Array[Button] = []
 var _sweep_btn: Button = null
 var _tags_btn: Button = null
+var _form_btn: Button = null
 var _desc_label: Label = null
 
 var _ring_phase: float = 0.0
@@ -115,7 +128,8 @@ func _ready() -> void:
 	_build_alt2_scouter_dual_arc()
 	_build_alt3_anime_cinema()
 	_build_desktop_ui()
-	_select_alternative(HudAlt.TACTICAL_FLANKS)
+	_apply_form_portraits()
+	_select_alternative(HudAlt.ANIME_CINEMA)
 	_select_scenario(Scenario.DEFENSE)
 
 
@@ -124,12 +138,14 @@ func _preload_zenkai_ui_textures() -> void:
 		"target_fight.png", "target_normal.png",
 		"scouter_radar.png", "radar_map.png",
 		"indicator_base.png", "indicator_active.png",
-		"icon_fist.png", "icon_burst.png", "icon_up.png", "icon_down.png",
+		"icon_fist.png", "icon_ki_blast.png", "icon_burst.png", "icon_up.png", "icon_down.png",
 		"finisher_lv0.png", "finisher_lv1.png", "finisher_lv2.png",
 		"alert_base_y.png", "alert_base_b.png", "alert_base_g.png", "alert_base_r.png",
 		"alert_arrow_y.png", "alert_arrow_b.png", "alert_arrow_g.png", "alert_arrow_r.png",
 		"info_obi.png", "alert_chara_goku.png",
-		"chara_chip_goku.png", "chara_chip_vegeta.png"
+		"chara_chip_goku.png", "chara_chip_vegeta.png",
+		"hex_goku_base.png", "hex_goku_ssj.png", "hex_goku_ssg.png", "hex_goku_ssj3.png", "hex_goku_ssb.png",
+		"hex_vegeta_base.png", "hex_vegeta_ssj.png", "hex_vegeta_super.png", "hex_vegeta_ssb.png", "hex_vegeta_ue.png"
 	]
 	for fn in names:
 		var path: String = UI_PATH + fn
@@ -433,8 +449,10 @@ func _build_alt1_tactical_flanks() -> void:
 	var top_r: Node3D = p_top["root"] as Node3D
 	top_r.position = Vector3(0.0, 0.27, -0.96)
 	top_r.rotation_degrees = Vector3(6.0, 0.0, 0.0)
-	_make_tex_quad(top_r, Vector2(0.11, 0.11), "chara_chip_vegeta.png", Color.WHITE, Vector3(-0.26, 0.0, 0.003), 115)
-	_make_tex_quad(top_r, Vector2(0.11, 0.11), "chara_chip_goku.png", Color.WHITE, Vector3(0.26, 0.0, 0.003), 115)
+	var a1_p_hex: Dictionary = _make_tex_quad(top_r, Vector2(0.11, 0.11), "hex_vegeta_base.png", Color.WHITE, Vector3(-0.26, 0.0, 0.003), 115)
+	var a1_e_hex: Dictionary = _make_tex_quad(top_r, Vector2(0.11, 0.11), "hex_goku_base.png", Color.WHITE, Vector3(0.26, 0.0, 0.003), 115)
+	_p_hex_mats.append(a1_p_hex["mat"] as StandardMaterial3D)
+	_e_hex_mats.append(a1_e_hex["mat"] as StandardMaterial3D)
 	_alt1_role_lbl = _make_label(top_r, "🛡️ DEFENSA", 17, Color(0.30, 0.92, 1.0), Vector3(0.0, 0.038, 0.004))
 	_alt1_p_ki_lbl = _make_label(top_r, "TÚ 74", 15, Color(0.35, 0.95, 1.0), Vector3(-0.185, 0.012, 0.004), HORIZONTAL_ALIGNMENT_LEFT)
 	_alt1_e_ki_lbl = _make_label(top_r, "42 RIVAL", 15, Color(1.0, 0.45, 0.28), Vector3(0.185, 0.012, 0.004), HORIZONTAL_ALIGNMENT_RIGHT)
@@ -468,7 +486,8 @@ func _build_alt2_scouter_dual_arc() -> void:
 	var lr: Node3D = p_l["root"] as Node3D
 	lr.position = Vector3(-0.40, 0.0, 0.03)
 	lr.rotation_degrees = Vector3(0.0, 22.0, 0.0)
-	_make_tex_quad(lr, Vector2(0.09, 0.09), "chara_chip_vegeta.png", Color.WHITE, Vector3(-0.032, 0.155, 0.003), 115)
+	var a2_p_hex: Dictionary = _make_tex_quad(lr, Vector2(0.09, 0.09), "hex_vegeta_base.png", Color.WHITE, Vector3(-0.032, 0.155, 0.003), 115)
+	_p_hex_mats.append(a2_p_hex["mat"] as StandardMaterial3D)
 	_make_bar_fill(lr, Vector3(0.026, 0.21, 0.004), Color(0.06, 0.12, 0.18, 0.92), 113).position = Vector3(-0.032, -0.005, 0.002)
 	_alt2_p_ki_fill = _make_bar_fill(lr, Vector3(0.026, 0.21, 0.006), Color(0.18, 0.92, 1.0, 0.98), 115)
 	_alt2_p_ki_fill.position = Vector3(-0.032, -0.005, 0.003)
@@ -481,7 +500,8 @@ func _build_alt2_scouter_dual_arc() -> void:
 	var rr: Node3D = p_r["root"] as Node3D
 	rr.position = Vector3(0.41, 0.0, 0.03)
 	rr.rotation_degrees = Vector3(0.0, -22.0, 0.0)
-	_make_tex_quad(rr, Vector2(0.09, 0.09), "chara_chip_goku.png", Color.WHITE, Vector3(0.038, 0.155, 0.003), 115)
+	var a2_e_hex: Dictionary = _make_tex_quad(rr, Vector2(0.09, 0.09), "hex_goku_base.png", Color.WHITE, Vector3(0.038, 0.155, 0.003), 115)
+	_e_hex_mats.append(a2_e_hex["mat"] as StandardMaterial3D)
 	_make_bar_fill(rr, Vector3(0.026, 0.21, 0.004), Color(0.14, 0.07, 0.08, 0.92), 113).position = Vector3(0.038, -0.005, 0.002)
 	_alt2_e_ki_fill = _make_bar_fill(rr, Vector3(0.026, 0.21, 0.006), Color(1.0, 0.32, 0.15, 0.98), 115)
 	_alt2_e_ki_fill.position = Vector3(0.038, -0.005, 0.003)
@@ -501,7 +521,8 @@ func _build_alt2_scouter_dual_arc() -> void:
 	sr.position = Vector3(0.33, 0.20, -0.92)
 	sr.rotation_degrees = Vector3(4.0, -16.0, 0.0)
 	_make_tex_quad(sr, Vector2(0.28, 0.14), "scouter_radar.png", Color(0.55, 1.0, 0.72, 0.95), Vector3(-0.04, 0.0, 0.003), 115)
-	_make_tex_quad(sr, Vector2(0.085, 0.085), "alert_chara_goku.png", Color.WHITE, Vector3(0.115, 0.025, 0.004), 116)
+	var sc_e_hex: Dictionary = _make_tex_quad(sr, Vector2(0.085, 0.085), "hex_goku_base.png", Color.WHITE, Vector3(0.115, 0.025, 0.004), 116)
+	_e_hex_mats.append(sc_e_hex["mat"] as StandardMaterial3D)
 	_alt2_scouter_role = _make_label(sr, "[ 🛡️ DEFENSA ]", 17, Color(0.45, 1.0, 0.72), Vector3(-0.03, 0.052, 0.005))
 	_alt2_scouter_bp = _make_label(sr, "BP 1.18x  |  3/4", 15, Color(0.82, 1.0, 0.88), Vector3(-0.03, 0.002, 0.005))
 	_alt2_scouter_flash = _make_label(sr, "▶ ¡PARRY!", 17, Color(1.0, 0.92, 0.25), Vector3(0.0, -0.052, 0.005))
@@ -548,8 +569,10 @@ func _build_alt3_anime_cinema() -> void:
 	var br: Node3D = p_bot["root"] as Node3D
 	br.position = Vector3(0.0, -0.33, 0.04)
 	br.rotation_degrees = Vector3(-14.0, 0.0, 0.0)
-	_make_tex_quad(br, Vector2(0.095, 0.095), "chara_chip_vegeta.png", Color.WHITE, Vector3(-0.265, 0.004, 0.003), 115)
-	_make_tex_quad(br, Vector2(0.095, 0.095), "chara_chip_goku.png", Color.WHITE, Vector3(0.265, 0.004, 0.003), 115)
+	var a3_p_hex: Dictionary = _make_tex_quad(br, Vector2(0.095, 0.095), "hex_vegeta_base.png", Color.WHITE, Vector3(-0.265, 0.004, 0.003), 115)
+	var a3_e_hex: Dictionary = _make_tex_quad(br, Vector2(0.095, 0.095), "hex_goku_base.png", Color.WHITE, Vector3(0.265, 0.004, 0.003), 115)
+	_p_hex_mats.append(a3_p_hex["mat"] as StandardMaterial3D)
+	_e_hex_mats.append(a3_e_hex["mat"] as StandardMaterial3D)
 	_alt3_ki_num_l = _make_label(br, "74", 17, Color(0.35, 0.96, 1.0), Vector3(-0.20, 0.010, 0.004))
 	_alt3_ki_num_r = _make_label(br, "42", 17, Color(1.0, 0.44, 0.24), Vector3(0.20, 0.010, 0.004))
 	_make_tex_quad(br, Vector2(0.17, 0.026), "indicator_base.png", Color(0.25, 0.35, 0.45, 0.85), Vector3(-0.092, 0.010, 0.002), 113)
@@ -579,7 +602,7 @@ func _build_desktop_ui() -> void:
 	top_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
 	top_panel.offset_left = 12.0
 	top_panel.offset_top = 10.0
-	top_panel.offset_right = 760.0
+	top_panel.offset_right = 900.0
 	top_panel.offset_bottom = 120.0
 	var top_sb := StyleBoxFlat.new()
 	top_sb.bg_color = Color(0.05, 0.08, 0.14, 0.86)
@@ -621,6 +644,11 @@ func _build_desktop_ui() -> void:
 	reset_btn.text = "🔄 Reset Vista"
 	reset_btn.pressed.connect(_reset_head_view)
 	row1.add_child(reset_btn)
+
+	_form_btn = Button.new()
+	_form_btn.text = "⚡ Forma: Base"
+	_form_btn.pressed.connect(_cycle_form)
+	row1.add_child(_form_btn)
 
 	_desc_label = Label.new()
 	_desc_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -703,7 +731,7 @@ func _update_description_text() -> void:
 		HudAlt.SCOUTER_DUAL_ARC:
 			detail = "ALT 2 (Zenkai) — [FIJO Izq/Der] Arcos verticales de Ki + Retratos | [CABEZA Ojo Der] Lente oficial 20_scouter_radar."
 		HudAlt.ANIME_CINEMA:
-			detail = "ALT 3 (Zenkai) — [FIJO Izq/Der/Abajo] Alertas + Sello + Barra Ki con CharaChips | [CABEZA] Cinta info_obi solo en evento."
+			detail = "ALT 3 ACTIVA (Cine Anime) — [FIJO Izq/Der/Abajo] Pips + Sello + Barra Ki con Retratos Hex | [CABEZA] Cinta info_obi solo en callout."
 	_desc_label.text = "%s\nArrastra el mouse (o WASD/Flechas) para girar la cabeza VR y comparar FIJO vs CABEZA." % detail
 
 
@@ -818,6 +846,25 @@ func _toggle_tags() -> void:
 			lbl.visible = _show_anchor_tags
 	if _tags_btn:
 		_tags_btn.text = "🏷️ Tags: ON" if _show_anchor_tags else "🏷️ Tags: OFF"
+
+
+func _cycle_form() -> void:
+	_form_idx = (_form_idx + 1) % HEX_FORMS.size()
+	_apply_form_portraits()
+
+
+func _apply_form_portraits() -> void:
+	var form_cfg: Dictionary = HEX_FORMS[_form_idx]
+	var g_tex: Texture2D = _get_ui_tex(String(form_cfg["goku"]))
+	var v_tex: Texture2D = _get_ui_tex(String(form_cfg["vegeta"]))
+	for mat in _p_hex_mats:
+		if mat and v_tex:
+			mat.albedo_texture = v_tex
+	for mat in _e_hex_mats:
+		if mat and g_tex:
+			mat.albedo_texture = g_tex
+	if _form_btn:
+		_form_btn.text = "⚡ Forma: %s" % String(form_cfg["label"])
 
 
 func _reset_head_view() -> void:

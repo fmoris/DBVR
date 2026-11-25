@@ -191,16 +191,35 @@ var _def_stick_used_for_note_idx: int = -1
 var _def_stick_prev: bool = false
 var _def_stick_diag_str: String = ""
 var _hitstop_end_msec: int = 0
+const ZENKAI_UI_DIR: String = "res://assets/ui_zenkai/"
+var _ui_tex_cache: Dictionary = {}
+var _header_obi_mesh: MeshInstance3D = null
 var _ki_bar_root: Node3D = null
 var _player_ki_fill: MeshInstance3D = null
 var _player_ki_mat: StandardMaterial3D = null
 var _enemy_ki_fill: MeshInstance3D = null
 var _enemy_ki_mat: StandardMaterial3D = null
+var _phase_timer_fill: MeshInstance3D = null
+var _player_hex_mat: StandardMaterial3D = null
+var _enemy_hex_mat: StandardMaterial3D = null
+var _last_p_hex_path: String = ""
+var _last_e_hex_path: String = ""
 var _ki_bar_label: Label3D = null
 var _ki_delta_label: Label3D = null
 var _ki_delta_timer: float = 0.0
 var _last_shown_p_ki: int = -1
 var _last_shown_e_ki: int = -1
+
+# Flancos [FIJO] estilo Cine Anime Minimalista (cero alocaciones por frame)
+var _flank_pips_root: Node3D = null
+var _pip_slot_mats: Array[StandardMaterial3D] = []
+var _pip_slot_labels: Array[Label3D] = []
+var _last_flank_pips_key: String = ""
+var _flank_stamp_root: Node3D = null
+var _flank_reticle_mat: StandardMaterial3D = null
+var _flank_icon_mat: StandardMaterial3D = null
+var _flank_stamp_label: Label3D = null
+var _last_flank_stamp_key: String = ""
 
 # Cache XR / HUD / Dirty-check (90 FPS zero-alloc)
 var _cached_player: Node3D = null
@@ -344,9 +363,46 @@ func _ctrl_vec2(ctrl: XRController3D, action: StringName) -> Vector2:
 	return ctrl.get_vector2(action)
 
 
+static func resolve_hex_portrait_path(char_name: String, form_name: String = "") -> String:
+	var cn: String = char_name.to_lower()
+	var fn: String = form_name.to_lower()
+	if "vegeta" in cn:
+		if "ego" in fn or "ue" in fn:
+			return "res://assets/ui_zenkai/hex_vegeta_ue.png"
+		if "ssb" in fn or "blue" in fn:
+			return "res://assets/ui_zenkai/hex_vegeta_ssb.png"
+		if "super" in fn or "ssj2" in fn or "majin" in fn:
+			return "res://assets/ui_zenkai/hex_vegeta_super.png"
+		if "ssj" in fn:
+			return "res://assets/ui_zenkai/hex_vegeta_ssj.png"
+		return "res://assets/ui_zenkai/hex_vegeta_base.png"
+	if "ssb" in fn or "blue" in fn or "ui" in fn or "instinct" in fn:
+		return "res://assets/ui_zenkai/hex_goku_ssb.png"
+	if "ssj3" in fn:
+		return "res://assets/ui_zenkai/hex_goku_ssj3.png"
+	if "ssg" in fn or "god" in fn:
+		return "res://assets/ui_zenkai/hex_goku_ssg.png"
+	if "ssj" in fn:
+		return "res://assets/ui_zenkai/hex_goku_ssj.png"
+	return "res://assets/ui_zenkai/hex_goku_base.png"
+
+
+func _get_ui_tex(fn: String) -> Texture2D:
+	if _ui_tex_cache.has(fn):
+		return _ui_tex_cache[fn] as Texture2D
+	var path: String = fn if fn.begins_with("res://") else (ZENKAI_UI_DIR + fn)
+	var tex: Texture2D = ResourceLoader.load(path) as Texture2D if ResourceLoader.exists(path) else null
+	_ui_tex_cache[fn] = tex
+	return tex
+
+
 func _set_header(txt: String, col: Color) -> void:
 	if not header_label or not is_instance_valid(header_label):
 		return
+	var hide_hdr: bool = txt.is_empty() or (phase == DomePhase.LORE_EVENT)
+	header_label.visible = not hide_hdr
+	if _header_obi_mesh and is_instance_valid(_header_obi_mesh):
+		_header_obi_mesh.visible = not hide_hdr
 	if txt != _last_header_text:
 		_last_header_text = txt
 		header_label.text = txt
@@ -853,89 +909,14 @@ func _apply_zone_role_shapes(is_attack_mode: bool) -> void:
 
 
 func _ensure_action_card() -> void:
-	var cam: Camera3D = _get_player_camera()
-	if not cam or not is_instance_valid(cam):
-		return
+	# Cine Anime Minimalista: tarjeta lateral de texto desactivada para mantener la vista 100% limpia
 	if action_card_anchor and is_instance_valid(action_card_anchor):
-		return
-
-	action_card_anchor = Node3D.new()
-	action_card_anchor.name = "MeleeActionGuideCardAnchor"
-	action_card_anchor.position = Vector3(-0.62, -0.34, -1.15)
-	action_card_anchor.rotation_degrees = Vector3(6.0, 18.0, 0.0)
-	cam.add_child(action_card_anchor)
-
-	var border := MeshInstance3D.new()
-	border.name = "CardBorder"
-	var b_q := QuadMesh.new()
-	b_q.size = Vector2(0.50, 0.22)
-	border.mesh = b_q
-	_action_card_border_mat = StandardMaterial3D.new()
-	_action_card_border_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_action_card_border_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	_action_card_border_mat.no_depth_test = true
-	_action_card_border_mat.render_priority = 110
-	_action_card_border_mat.albedo_color = Color(1.0, 0.55, 0.15, 0.90)
-	border.material_override = _action_card_border_mat
-	action_card_anchor.add_child(border)
-
-	var bg := MeshInstance3D.new()
-	bg.name = "CardBg"
-	var bg_q := QuadMesh.new()
-	bg_q.size = Vector2(0.485, 0.205)
-	bg.mesh = bg_q
-	bg.position = Vector3(0.0, 0.0, 0.001)
-	var bg_mat := StandardMaterial3D.new()
-	bg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	bg_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	bg_mat.no_depth_test = true
-	bg_mat.render_priority = 111
-	bg_mat.albedo_color = Color(0.03, 0.06, 0.11, 0.92)
-	bg.material_override = bg_mat
-	action_card_anchor.add_child(bg)
-
-	_action_card_label = Label3D.new()
-	_action_card_label.name = "MeleeCardText"
-	_action_card_label.font_size = 19
-	_action_card_label.pixel_size = 0.00118
-	_action_card_label.no_depth_test = true
-	_action_card_label.render_priority = 112
-	_action_card_label.outline_size = 6
-	_action_card_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.95)
-	_action_card_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	_action_card_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_action_card_label.position = Vector3(-0.225, 0.0, 0.002)
-	action_card_anchor.add_child(_action_card_label)
+		action_card_anchor.visible = false
 
 
-func _update_action_card(is_attack_mode: bool) -> void:
-	_ensure_action_card()
-	if not _action_card_label or not is_instance_valid(_action_card_label):
-		return
-	var cfg_c: KiEconomyConfig = KiEconomyConfig.get_default()
-	var q_c: int = int(cfg_c.melee_quick_cost)
-	var chg_c: int = int(cfg_c.melee_charged_cost)
-	var v3_c: int = int(cfg_c.melee_v3_cost)
-	var hm_c: int = int(cfg_c.melee_hammer_cost)
-	var clean_r: int = int(cfg_c.melee_clean_hit_ki_refund)
-	var sonic_r: int = int(cfg_c.melee_sonic_ki_refund)
-	var defl_r: int = int(cfg_c.melee_deflect_ki_reward)
-	var parry_r: int = int(cfg_c.melee_parry_ki_reward)
-	var gx_c: int = int(cfg_c.melee_guard_charged_cost)
-	var zv_c: int = int(_get_vanish_cost_and_label(defender).get("cost", cfg_c.melee_vanish_cost))
-	var ew_c: int = int(cfg_c.melee_explosive_wave_cost)
-	var cl_even_r: int = int(cfg_c.melee_clash_even_ki_reward) if cfg_c.get("melee_clash_even_ki_reward") != null else 6
-	var cl_r: int = int(cfg_c.melee_clash_win_reward)
-	if is_attack_mode:
-		if _action_card_border_mat:
-			_action_card_border_mat.albedo_color = Color(1.0, 0.52, 0.15, 0.90)
-		_action_card_label.modulate = Color(1.0, 0.93, 0.72)
-		_action_card_label.text = "⚔️ ATACAR (⭕ CÍRCULOS) | Táctica por Golpe\n• 👊 Rápido (-%d Ki): Sin Parry/Choque/Vanish (+%d~%d Ki limpio; Suave no lanza)\n• ⚡ Cargado 0.5s (-%d Ki): Alto BP (+2 Ki), rompe 1 Mano\n• 🔥 V3 1.1s (-%d Ki): Rompe 1M y ¡LANZA ya! (X frena c/ -10Ki)\n• 🔨 Martillo (-%d Ki): ¡INBLOQUEABLE! Solo Stick Z-Vanish | [A/X]: Ya" % [q_c, clean_r, sonic_r, chg_c, v3_c, hm_c]
-	else:
-		if _action_card_border_mat:
-			_action_card_border_mat.albedo_color = Color(0.20, 0.88, 1.0, 0.90)
-		_action_card_label.modulate = Color(0.88, 0.97, 1.0)
-		_action_card_label.text = "🛡️ DEFENDER (⬜) | Lee el Icono del Objetivo\n• 👊 Rápido: Trigger 1M (+%d Ki) o Guardia X Tortuga (+Ki) | ❌ Sin Parry/Choque/Vanish\n• ⚡/🔥 Cargado: Guardia X (+10Ki en Nv2, -%dKi/50pct en V3) | Parry(Dorado+G+T: +%d Ki) | Choque(G+T: +%d~%d)\n• 🔨 Martillo: SOLO Stick %s (-%d Ki) | 2 Grips abiertos: Kiai (-%d)" % [defl_r, gx_c, parry_r, cl_even_r, cl_r, ("Shunkan" if ("goku" in String((defender.get("character_data").character_name if (defender and defender.get("character_data") and "character_name" in defender.get("character_data")) else "")).to_lower()) else "Z-Vanish"), zv_c, ew_c]
+func _update_action_card(_is_attack_mode: bool) -> void:
+	if action_card_anchor and is_instance_valid(action_card_anchor):
+		action_card_anchor.visible = false
 
 
 func _apply_role_dome_tint(player_attacks: bool) -> void:
@@ -1108,10 +1089,14 @@ func _tint_zone_shapes(zone: Dictionary, albedo_col: Color, em_col: Color, em_en
 
 
 func _update_sequential_target_highlights(skip_tint_zone_id: int = -1) -> void:
+	var normal_tex: Texture2D = _get_ui_tex("target_normal.png")
 	for zone in target_zones:
 		var z_id: int = int(zone["id"])
 		var z_node: Node3D = zone["node"] as Node3D
 		var step_lbl: Label3D = zone.get("step_label") as Label3D
+		var inner_m: StandardMaterial3D = zone.get("inner_mat") as StandardMaterial3D
+		if inner_m and normal_tex and inner_m.albedo_texture != normal_tex:
+			inner_m.albedo_texture = normal_tex
 		var orig_col: Color = zone["color"] as Color
 
 		if z_id != skip_tint_zone_id:
@@ -1140,6 +1125,8 @@ func _update_defense_zone_highlights(active_zone_id: int, step_num: int, next_zo
 	if hl_key == _last_def_hl_key:
 		return
 	_last_def_hl_key = hl_key
+	var fight_tex: Texture2D = _get_ui_tex("target_fight.png")
+	var normal_tex: Texture2D = _get_ui_tex("target_normal.png")
 	var hi_col: Color = Color(0.95, 0.2, 1.0, 0.95) if is_hammer_note else (Color(1.0, 0.24, 0.10, 0.95) if is_v3_note else (Color(1.0, 0.55, 0.12, 0.95) if is_heavy_note else Color(0.2, 0.92, 1.0, 0.95)))
 	var hi_scale: float = 1.28 if is_hammer_note else (1.24 if is_v3_note else (1.18 if is_heavy_note else (1.08 if icon_str == "~👊" else 1.14)))
 	var lbl_col: Color = Color(1.0, 0.92, 0.30, 1.0) if is_hammer_note else (Color(1.0, 0.62, 0.25, 1.0) if is_v3_note else (Color(1.0, 0.88, 0.35, 1.0) if is_heavy_note else Color(0.30, 0.95, 1.0, 1.0)))
@@ -1147,30 +1134,37 @@ func _update_defense_zone_highlights(active_zone_id: int, step_num: int, next_zo
 		var z_id: int = int(zone["id"])
 		var z_node: Node3D = zone["node"] as Node3D
 		var step_lbl: Label3D = zone.get("step_label") as Label3D
+		var inner_m: StandardMaterial3D = zone.get("inner_mat") as StandardMaterial3D
 		var orig_col: Color = zone["color"] as Color
 		if z_node and is_instance_valid(z_node):
 			z_node.visible = true
 
 		if z_id == active_zone_id:
+			if inner_m and fight_tex:
+				inner_m.albedo_texture = fight_tex
 			if z_node and is_instance_valid(z_node):
 				z_node.scale = Vector3.ONE * hi_scale
-			_tint_zone_shapes(zone, hi_col, Color(hi_col.r, hi_col.g, hi_col.b), 2.2, Color(1.0, 1.0, 1.0, 0.92))
+			_tint_zone_shapes(zone, Color(hi_col.r, hi_col.g, hi_col.b, 0.32), Color(hi_col.r, hi_col.g, hi_col.b), 2.0, Color(1.0, 0.96, 0.94, 0.98))
 			if step_lbl and is_instance_valid(step_lbl):
 				step_lbl.text = "%s%d" % [icon_str, step_num]
 				step_lbl.modulate = lbl_col
 				step_lbl.visible = true
 		elif z_id == next_zone_id:
+			if inner_m and normal_tex:
+				inner_m.albedo_texture = normal_tex
 			if z_node and is_instance_valid(z_node):
 				z_node.scale = Vector3.ONE * 0.86
-			_tint_zone_shapes(zone, Color(0.55, 0.45, 0.95, 0.36), Color(0.55, 0.45, 0.95), 0.45, Color(1.0, 1.0, 1.0, 0.28))
+			_tint_zone_shapes(zone, Color(0.55, 0.45, 0.95, 0.22), Color(0.55, 0.45, 0.95), 0.45, Color(0.75, 0.95, 1.0, 0.42))
 			if step_lbl and is_instance_valid(step_lbl):
 				step_lbl.text = "SIG"
 				step_lbl.modulate = Color(0.75, 0.85, 1.0, 0.85)
 				step_lbl.visible = true
 		else:
+			if inner_m and normal_tex:
+				inner_m.albedo_texture = normal_tex
 			if z_node and is_instance_valid(z_node):
 				z_node.scale = Vector3.ONE * 0.70
-			_tint_zone_shapes(zone, Color(orig_col.r, orig_col.g, orig_col.b, 0.10), Color(orig_col.r, orig_col.g, orig_col.b), 0.12, Color(1.0, 1.0, 1.0, 0.08))
+			_tint_zone_shapes(zone, Color(orig_col.r, orig_col.g, orig_col.b, 0.08), Color(orig_col.r, orig_col.g, orig_col.b), 0.12, Color(1.0, 1.0, 1.0, 0.14))
 			if step_lbl and is_instance_valid(step_lbl):
 				step_lbl.visible = false
 
@@ -1269,60 +1263,63 @@ func _process_attack_recording(delta: float) -> void:
 
 
 func _refresh_header_hud(is_charging_hammer: bool = false, active_zone_name: String = "", step_num: int = 0, remaining: float = 0.0, active_note: Dictionary = {}) -> void:
-	if not header_label or not is_instance_valid(header_label):
-		return
-
-	var fb_line: String = ("\n%s" % last_action_feedback) if not last_action_feedback.is_empty() else ""
-
 	if phase == DomePhase.ATTACK_RECORDING:
 		_apply_role_dome_tint(true)
-		var hud_col: Color = Color(1.0, 0.45, 0.18)
-		var pct: float = clampf(time_left / maxf(duration, 0.1), 0.0, 1.0)
-		var bar_len: int = int(pct * 8.0)
-		var bar_str: String = "█".repeat(bar_len) + "░".repeat(8 - bar_len)
+		_refresh_flank_pips(hits.size())
+		_refresh_phase_timer(time_left, duration)
 		var step_shown: int = mini(current_attack_step + 1, max_allowed_hits)
-
 		if hammer_charge_time >= HAMMER_CHARGE_REQ or hammer_primed:
-			_set_header("⚔️ ATACAS — 🔨 ¡BAJA AMBOS PUÑOS!", hud_col)
+			_refresh_flank_stamp("ATTACK", {}, step_shown, max_allowed_hits, "🔨 BAJA AMBOS PUÑOS")
+			_set_header("🔨 ¡BAJA AMBOS PUÑOS!", Color(0.95, 0.35, 1.0))
 			return
 		if is_charging_hammer:
-			var h_pct: float = clampf(hammer_charge_time / maxf(HAMMER_CHARGE_REQ, 0.01), 0.0, 1.0)
-			var h_len: int = int(roundf(h_pct * 8.0))
-			var h_bar: String = "█".repeat(h_len) + "░".repeat(8 - h_len)
-			_set_header("⚔️ ATACAS — 🔨 MARTILLAZO [%s]" % h_bar, hud_col)
+			_refresh_flank_stamp("ATTACK", {}, step_shown, max_allowed_hits, "🔨 CARGANDO...")
+			_set_header("🔨 MARTILLAZO...", Color(0.95, 0.45, 1.0))
 			return
-
 		var max_fist_charge: float = maxf(fist_charge_times[0], fist_charge_times[1])
-		var charge_tag: String = ""
+		var atk_stamp: String = "⚔️ %d/%d" % [step_shown, max_allowed_hits]
 		if max_fist_charge >= 1.10:
-			charge_tag = " 🔥V3 (ROMPE X)"
-			hud_col = Color(1.0, 0.30, 0.12)
+			atk_stamp = "🔥 V3 · %d/%d" % [step_shown, max_allowed_hits]
 		elif max_fist_charge >= 0.50:
-			charge_tag = " ⚡CARGADO (ROMPE 1M)"
-			hud_col = Color(1.0, 0.65, 0.2)
-
-		var tut: String = "\n[A/X]=Ejecutar ya (%d/%d) | Stick↓=Cancelar" % [hits.size(), max_allowed_hits] if hits.size() >= 1 else ("\nPuño(G+T)=Golpe | Stick↓=Cancelar" if not _tutorial_controls_shown else "")
-		_set_header("⚔️ ATACAS (%d/%d)%s  [%s]%s%s" % [step_shown, max_allowed_hits, charge_tag, bar_str, fb_line, tut], hud_col)
+			atk_stamp = "⚡ %d/%d" % [step_shown, max_allowed_hits]
+		elif hits.size() >= 1:
+			atk_stamp = "⚔️ %d/%d · [A/X]" % [hits.size(), max_allowed_hits]
+		_refresh_flank_stamp("ATTACK", {}, step_shown, max_allowed_hits, atk_stamp)
+		# Mitad superior limpia: solo mostrar cinta si hay feedback breve
+		if not last_action_feedback.is_empty():
+			_set_header(last_action_feedback, Color(1.0, 0.85, 0.30))
+		else:
+			_set_header("", Color(1.0, 0.55, 0.20))
 	elif phase == DomePhase.DEFENSE_RHYTHM:
-		var pips: String = _get_pips_string(hits.size())
+		_refresh_flank_pips(hits.size())
+		_refresh_phase_timer(remaining, defense_total_duration)
 		if defender and defender.get("is_player"):
 			_apply_role_dome_tint(false)
+			_refresh_flank_stamp("DEFEND", active_note, step_num, hits.size())
 			var def_ki_now: float = float(defender.get("current_ki")) if defender.get("current_ki") != null else 0.0
 			var cfg_ew_h: KiEconomyConfig = KiEconomyConfig.get_default()
 			var kiai_cost_h: float = float(cfg_ew_h.melee_explosive_wave_cost) if cfg_ew_h.get("melee_explosive_wave_cost") != null else 16.0
-			var kiai_hint: String = "\n🔥 ¡ABRE BRAZOS+2 GRIPS=ONDA KIAI (-%d Ki)!" % int(kiai_cost_h) if (_round_unblocked_hits_taken >= 2 and def_ki_now >= kiai_cost_h) else ""
-			var tut_def: String = "\nTrigger=Bloqueo 1 Mano | Dorado+G+T=Parry | Stick=Z-Vanish" if not _tutorial_controls_shown else ""
-			var note_meta: Dictionary = get_attack_visual_meta(active_note) if not active_note.is_empty() else {}
-			var note_tag: String = (" [" + String(note_meta.get("tag", "")) + "]") if not note_meta.is_empty() else ""
-			var note_hint: String = ("\n" + String(note_meta.get("hud_hint", ""))) if not note_meta.is_empty() else ""
-			var hdr_col: Color = (note_meta.get("color", Color(0.25, 0.90, 1.0)) as Color) if not note_meta.is_empty() else Color(0.25, 0.90, 1.0)
-			var hdr_txt: String = ("🛡️ DEFIENDES (%d/%d) %s%s  %s%s" % [step_num, hits.size(), active_zone_name, note_tag, pips, _def_stick_diag_str]) + note_hint + fb_line + kiai_hint + tut_def
-			_set_header(hdr_txt, hdr_col)
+			if _round_unblocked_hits_taken >= 2 and def_ki_now >= kiai_cost_h:
+				_set_header("🔥 ¡ABRE BRAZOS+2 GRIPS = KIAI (-%d Ki)!" % int(kiai_cost_h), Color(0.25, 0.96, 1.0))
+			elif not _def_stick_diag_str.is_empty():
+				_set_header(_def_stick_diag_str.strip_edges(), Color(0.95, 0.90, 0.35))
+			elif not last_action_feedback.is_empty():
+				_set_header(last_action_feedback, Color(0.92, 0.98, 1.0))
+			else:
+				_set_header("", Color(0.25, 0.90, 1.0))
 		else:
 			_apply_role_dome_tint(true)
-			_set_header("⚔️ ATACAS (%d/%d) %s  %s%s" % [step_num, hits.size(), active_zone_name, pips, fb_line], Color(1.0, 0.55, 0.20))
+			_refresh_flank_stamp("AI_DEFEND", active_note, step_num, hits.size())
+			if not last_action_feedback.is_empty():
+				_set_header(last_action_feedback, Color(1.0, 0.72, 0.25))
+			else:
+				_set_header("", Color(1.0, 0.55, 0.20))
 	elif phase == DomePhase.SIMULTANEOUS_EXCHANGE:
-		_set_header("⚡ ¡INTERCAMBIO SIMULTÁNEO! (%.1fs) ⚡\n⭕ Golpea: %d/4  |  ⬜ Daño recibido: %d/4  |  💥 Choques: %d%s" % [_sim_duration, _sim_enemy_hits_taken, _sim_player_hits_taken, _sim_clash_count, fb_line], Color(1.0, 0.88, 0.22))
+		_refresh_flank_pips(4)
+		_refresh_flank_stamp("SIM", {}, _sim_enemy_hits_taken, 4)
+		_refresh_phase_timer(_sim_duration, 12.0)
+		var sim_fb: String = ("  |  " + last_action_feedback) if not last_action_feedback.is_empty() else ""
+		_set_header("⚡ SIMULTÁNEO · ⭕ %d/4  |  ⬜ %d/4%s" % [_sim_enemy_hits_taken, _sim_player_hits_taken, sim_fb], Color(1.0, 0.88, 0.22))
 
 
 # ==============================================================================
@@ -2663,6 +2660,12 @@ func _set_target_zones_visible(v: bool) -> void:
 		var zn: Node3D = zone.get("node") as Node3D
 		if zn and is_instance_valid(zn):
 			zn.visible = v
+	if _flank_pips_root and is_instance_valid(_flank_pips_root):
+		_flank_pips_root.visible = v
+	if _flank_stamp_root and is_instance_valid(_flank_stamp_root):
+		_flank_stamp_root.visible = v
+	if _header_obi_mesh and is_instance_valid(_header_obi_mesh) and not v:
+		_header_obi_mesh.visible = false
 
 
 func _start_lore_event(event_type: int, return_mode: String) -> void:
@@ -3979,6 +3982,9 @@ func _build_target_boxes() -> void:
 		mat_quad.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
 		mat_quad.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
 		mat_quad.albedo_color = Color(1.0, 1.0, 1.0, 0.9)
+		var def_reticle_tex: Texture2D = _get_ui_tex("target_normal.png")
+		if def_reticle_tex:
+			mat_quad.albedo_texture = def_reticle_tex
 		mat_quad.no_depth_test = true
 		mat_quad.render_priority = 116
 		inner_quad.material_override = mat_quad
@@ -4089,78 +4095,382 @@ func _get_player_camera() -> Camera3D:
 func _build_header_hud() -> void:
 	header_label = Label3D.new()
 	header_label.name = "HeaderLabel"
-	header_label.text = "🥊 FASE DE ATAQUE 🥊"
+	header_label.text = ""
 	header_label.font_size = 24
-	header_label.pixel_size = 0.0014
+	header_label.pixel_size = 0.00135
 	header_label.no_depth_test = true
 	header_label.render_priority = 125
-	header_label.outline_size = 10
+	header_label.outline_size = 9
 	header_label.modulate = Color(1.0, 0.95, 0.3)
-	header_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.95)
+	header_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.96)
+
+	var obi := MeshInstance3D.new()
+	obi.name = "HeaderInfoObi"
+	var oq := QuadMesh.new()
+	oq.size = Vector2(0.56, 0.085)
+	obi.mesh = oq
+	obi.position = Vector3(0.0, 0.0, -0.002)
+	var o_mat := StandardMaterial3D.new()
+	o_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	o_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	o_mat.no_depth_test = true
+	o_mat.render_priority = 124
+	o_mat.albedo_color = Color(1.0, 1.0, 1.0, 0.88)
+	var obi_tex: Texture2D = _get_ui_tex("info_obi.png")
+	if obi_tex:
+		o_mat.albedo_texture = obi_tex
+	else:
+		o_mat.albedo_color = Color(0.02, 0.04, 0.08, 0.72)
+	obi.material_override = o_mat
+	obi.visible = false
+	_header_obi_mesh = obi
+
 	var cam: Camera3D = _get_player_camera()
 	if cam and is_instance_valid(cam):
 		melee_hud_anchor = Node3D.new()
 		melee_hud_anchor.name = "MeleeHUDAnchor"
-		melee_hud_anchor.position = Vector3(0.0, 0.37, -1.18)
+		# Cine Anime Minimalista: callout puntual ligeramente más bajo para no exigir levantar la vista
+		melee_hud_anchor.position = Vector3(0.0, 0.24, -1.06)
 		cam.add_child(melee_hud_anchor)
 		header_label.billboard = BaseMaterial3D.BILLBOARD_DISABLED
 		header_label.position = Vector3.ZERO
+		melee_hud_anchor.add_child(obi)
 		melee_hud_anchor.add_child(header_label)
 	else:
 		header_label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		header_label.position = Vector3(0.0, 0.42, -0.75)
+		header_label.position = Vector3(0.0, 0.28, -0.75)
+		add_child(obi)
 		add_child(header_label)
+	header_label.visible = false
 	_build_melee_ki_bar()
+	_build_cine_anime_flanks()
+
+
+func _build_cine_anime_flanks() -> void:
+	var fixed_parent: Node3D = melee_boxes_anchor if (melee_boxes_anchor and is_instance_valid(melee_boxes_anchor)) else self
+
+	# Flanco Izquierdo [FIJO]: triángulos oficiales Zenkai + Pips de resultados (máx. 6 reutilizables)
+	if not _flank_pips_root or not is_instance_valid(_flank_pips_root):
+		_flank_pips_root = Node3D.new()
+		_flank_pips_root.name = "MeleeFlankPipsFixed"
+		_flank_pips_root.position = Vector3(-0.39, 0.01, 0.02)
+		_flank_pips_root.rotation_degrees = Vector3(0.0, 14.0, 0.0)
+		fixed_parent.add_child(_flank_pips_root)
+		_pip_slot_mats.clear()
+		_pip_slot_labels.clear()
+		var tri_q := QuadMesh.new()
+		tri_q.size = Vector2(0.036, 0.056)
+		var base_b_tex: Texture2D = _get_ui_tex("alert_base_b.png")
+		for i in range(6):
+			var y_off: float = 0.14 - float(i) * 0.056
+			var m_tri := MeshInstance3D.new()
+			m_tri.mesh = tri_q
+			m_tri.position = Vector3(-0.024, y_off, 0.0)
+			var t_mat := StandardMaterial3D.new()
+			t_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+			t_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			t_mat.no_depth_test = true
+			t_mat.render_priority = 116
+			if base_b_tex:
+				t_mat.albedo_texture = base_b_tex
+			t_mat.albedo_color = Color(1.0, 1.0, 1.0, 0.35)
+			m_tri.material_override = t_mat
+			_flank_pips_root.add_child(m_tri)
+			_pip_slot_mats.append(t_mat)
+
+			var plbl := Label3D.new()
+			plbl.text = "○"
+			plbl.font_size = 24
+			plbl.pixel_size = 0.0012
+			plbl.outline_size = 6
+			plbl.outline_modulate = Color(0.0, 0.0, 0.0, 0.96)
+			plbl.no_depth_test = true
+			plbl.render_priority = 118
+			plbl.position = Vector3(0.016, y_off, 0.002)
+			_flank_pips_root.add_child(plbl)
+			_pip_slot_labels.append(plbl)
+
+	# Flanco Derecho [FIJO]: retícula target_fight + icono Zenkai + sello compacto de acción
+	if not _flank_stamp_root or not is_instance_valid(_flank_stamp_root):
+		_flank_stamp_root = Node3D.new()
+		_flank_stamp_root.name = "MeleeFlankActionFixed"
+		_flank_stamp_root.position = Vector3(0.40, 0.01, 0.02)
+		_flank_stamp_root.rotation_degrees = Vector3(0.0, -14.0, 0.0)
+		fixed_parent.add_child(_flank_stamp_root)
+
+		var ret_q := QuadMesh.new()
+		ret_q.size = Vector2(0.115, 0.115)
+		var ret_mi := MeshInstance3D.new()
+		ret_mi.mesh = ret_q
+		ret_mi.position = Vector3(0.0, 0.035, 0.0)
+		_flank_reticle_mat = StandardMaterial3D.new()
+		_flank_reticle_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_flank_reticle_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_flank_reticle_mat.no_depth_test = true
+		_flank_reticle_mat.render_priority = 115
+		var tf_tex: Texture2D = _get_ui_tex("target_fight.png")
+		if tf_tex:
+			_flank_reticle_mat.albedo_texture = tf_tex
+		ret_mi.material_override = _flank_reticle_mat
+		_flank_stamp_root.add_child(ret_mi)
+
+		var ico_q := QuadMesh.new()
+		ico_q.size = Vector2(0.052, 0.052)
+		var ico_mi := MeshInstance3D.new()
+		ico_mi.mesh = ico_q
+		ico_mi.position = Vector3(0.0, 0.035, 0.002)
+		_flank_icon_mat = StandardMaterial3D.new()
+		_flank_icon_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_flank_icon_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_flank_icon_mat.no_depth_test = true
+		_flank_icon_mat.render_priority = 117
+		var fist_tex: Texture2D = _get_ui_tex("icon_fist.png")
+		if fist_tex:
+			_flank_icon_mat.albedo_texture = fist_tex
+		ico_mi.material_override = _flank_icon_mat
+		_flank_stamp_root.add_child(ico_mi)
+
+		_flank_stamp_label = Label3D.new()
+		_flank_stamp_label.text = ""
+		_flank_stamp_label.font_size = 18
+		_flank_stamp_label.pixel_size = 0.0012
+		_flank_stamp_label.outline_size = 7
+		_flank_stamp_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.96)
+		_flank_stamp_label.no_depth_test = true
+		_flank_stamp_label.render_priority = 119
+		_flank_stamp_label.position = Vector3(0.0, -0.055, 0.003)
+		_flank_stamp_root.add_child(_flank_stamp_label)
+
+
+func _refresh_flank_pips(total_hits: int) -> void:
+	if not _flank_pips_root or not is_instance_valid(_flank_pips_root):
+		return
+	var n: int = clampi(maxi(total_hits, pip_results.size()), 1, 6)
+	var key: String = str(n) + "|" + ",".join(pip_results)
+	if key == _last_flank_pips_key:
+		return
+	_last_flank_pips_key = key
+
+	var tex_g: Texture2D = _get_ui_tex("alert_base_g.png")
+	var tex_r: Texture2D = _get_ui_tex("alert_base_r.png")
+	var tex_y: Texture2D = _get_ui_tex("alert_base_y.png")
+	var tex_b: Texture2D = _get_ui_tex("alert_base_b.png")
+	for i in range(_pip_slot_labels.size()):
+		var lbl: Label3D = _pip_slot_labels[i]
+		var mat: StandardMaterial3D = _pip_slot_mats[i]
+		var show_i: bool = i < n
+		lbl.visible = show_i
+		if not show_i:
+			mat.albedo_color = Color(1.0, 1.0, 1.0, 0.0)
+			continue
+		if i < pip_results.size():
+			match pip_results[i]:
+				"blocked":
+					if tex_g: mat.albedo_texture = tex_g
+					mat.albedo_color = Color(1.0, 1.0, 1.0, 0.92)
+					lbl.text = "🛡"
+					lbl.modulate = Color(0.35, 1.0, 0.65)
+				"hit":
+					if tex_r: mat.albedo_texture = tex_r
+					mat.albedo_color = Color(1.0, 1.0, 1.0, 0.92)
+					lbl.text = "💥"
+					lbl.modulate = Color(1.0, 0.40, 0.25)
+				"clash":
+					if tex_y: mat.albedo_texture = tex_y
+					mat.albedo_color = Color(1.0, 1.0, 1.0, 0.92)
+					lbl.text = "⚡"
+					lbl.modulate = Color(1.0, 0.90, 0.28)
+				_:
+					if tex_b: mat.albedo_texture = tex_b
+					mat.albedo_color = Color(1.0, 1.0, 1.0, 0.65)
+					lbl.text = "·"
+					lbl.modulate = Color.WHITE
+		else:
+			if tex_b: mat.albedo_texture = tex_b
+			mat.albedo_color = Color(1.0, 1.0, 1.0, 0.35)
+			lbl.text = "○"
+			lbl.modulate = Color(0.70, 0.88, 1.0, 0.78)
+
+
+func _refresh_flank_stamp(mode: String, note: Dictionary, step_num: int, total_hits: int, custom_lbl: String = "") -> void:
+	if not _flank_stamp_root or not is_instance_valid(_flank_stamp_root):
+		return
+	var icon_fn: String = "icon_fist.png"
+	var stamp_txt: String = custom_lbl
+	var stamp_col: Color = Color(1.0, 0.85, 0.35)
+	var ret_col: Color = Color(1.0, 0.85, 0.35, 0.95)
+	if mode == "ATTACK":
+		icon_fn = "icon_fist.png"
+		if stamp_txt.is_empty():
+			stamp_txt = "⚔️ %d/%d" % [step_num, total_hits]
+		ret_col = Color(1.0, 0.62, 0.20, 0.95)
+		stamp_col = Color(1.0, 0.86, 0.38)
+	elif mode == "DEFEND":
+		var is_hm: bool = bool(note.get("is_hammer", false))
+		var is_v3: bool = bool(note.get("is_charged_v3", false))
+		var is_chg: bool = bool(note.get("is_charged", false))
+		if is_hm:
+			icon_fn = "icon_burst.png"
+			stamp_txt = "🔨 · 🕹️"
+			ret_col = Color(0.95, 0.28, 1.0, 0.98)
+			stamp_col = Color(1.0, 0.85, 1.0)
+		elif is_v3:
+			icon_fn = "icon_burst.png"
+			stamp_txt = "🔥 V3 · 🕹️/G+T"
+			ret_col = Color(1.0, 0.28, 0.14, 0.98)
+			stamp_col = Color(1.0, 0.75, 0.30)
+		elif is_chg:
+			icon_fn = "icon_burst.png"
+			stamp_txt = "⚡ · 🕹️/G+T/X"
+			ret_col = Color(1.0, 0.60, 0.15, 0.95)
+			stamp_col = Color(1.0, 0.88, 0.35)
+		else:
+			icon_fn = "icon_fist.png"
+			stamp_txt = "👊 %d/%d · ✋/X" % [step_num, total_hits]
+			ret_col = Color(0.25, 0.92, 1.0, 0.95)
+			stamp_col = Color(0.55, 0.96, 1.0)
+	elif mode == "AI_DEFEND":
+		icon_fn = "icon_fist.png"
+		stamp_txt = "⚔️ %d/%d" % [step_num, total_hits]
+		ret_col = Color(1.0, 0.58, 0.20, 0.95)
+		stamp_col = Color(1.0, 0.80, 0.35)
+	elif mode == "SIM":
+		icon_fn = "icon_burst.png"
+		stamp_txt = "💥 %d/4 · ⚡" % step_num
+		ret_col = Color(1.0, 0.88, 0.22, 0.98)
+		stamp_col = Color(1.0, 0.94, 0.35)
+
+	var stamp_key: String = "%s|%s|%s" % [mode, icon_fn, stamp_txt]
+	if stamp_key == _last_flank_stamp_key:
+		return
+	_last_flank_stamp_key = stamp_key
+	var i_tex: Texture2D = _get_ui_tex(icon_fn)
+	if _flank_icon_mat and i_tex:
+		_flank_icon_mat.albedo_texture = i_tex
+	if _flank_reticle_mat:
+		_flank_reticle_mat.albedo_color = ret_col
+	if _flank_stamp_label:
+		_flank_stamp_label.text = stamp_txt
+		_flank_stamp_label.modulate = stamp_col
+
+
+func _refresh_phase_timer(rem: float, total: float) -> void:
+	if not _phase_timer_fill or not is_instance_valid(_phase_timer_fill):
+		return
+	var frac: float = clampf(rem / maxf(total, 0.05), 0.02, 1.0)
+	_phase_timer_fill.scale = Vector3(frac * 0.38, 1.0, 1.0)
 
 
 func _build_melee_ki_bar() -> void:
 	if _ki_bar_root and is_instance_valid(_ki_bar_root):
 		return
-	var hud_parent: Node3D = melee_hud_anchor if (melee_hud_anchor and is_instance_valid(melee_hud_anchor)) else header_label
+	# Cine Anime Minimalista: barra Ki frente-a-frente FIJA debajo de las cajas del combate (con retratos hexagonales)
+	var hud_parent: Node3D = melee_boxes_anchor if (melee_boxes_anchor and is_instance_valid(melee_boxes_anchor)) else self
 	if not hud_parent or not is_instance_valid(hud_parent):
 		return
 
 	_ki_bar_root = Node3D.new()
 	_ki_bar_root.name = "MeleeDoubleKiBar"
-	_ki_bar_root.position = Vector3(0.0, -0.075, 0.0)
+	_ki_bar_root.position = Vector3(0.0, -0.33, 0.03)
+	_ki_bar_root.rotation_degrees = Vector3(-14.0, 0.0, 0.0)
 	hud_parent.add_child(_ki_bar_root)
 
 	var bg := MeshInstance3D.new()
 	var bg_q := QuadMesh.new()
-	bg_q.size = Vector2(0.54, 0.048)
+	bg_q.size = Vector2(0.62, 0.090)
 	bg.mesh = bg_q
 	var bg_mat := StandardMaterial3D.new()
 	bg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	bg_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	bg_mat.no_depth_test = true
-	bg_mat.render_priority = 123
-	bg_mat.albedo_color = Color(0.02, 0.04, 0.09, 0.85)
+	bg_mat.render_priority = 121
+	bg_mat.albedo_color = Color(0.02, 0.04, 0.09, 0.80)
 	bg.material_override = bg_mat
 	_ki_bar_root.add_child(bg)
 
+	# Retratos hexagonales oficiales (Jugador Izq, Rival Der)
+	var hex_q := QuadMesh.new()
+	hex_q.size = Vector2(0.092, 0.092)
+	var p_hex := MeshInstance3D.new()
+	p_hex.name = "PlayerHexPortrait"
+	p_hex.mesh = hex_q
+	p_hex.position = Vector3(-0.262, 0.002, 0.003)
+	_player_hex_mat = StandardMaterial3D.new()
+	_player_hex_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_player_hex_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_player_hex_mat.no_depth_test = true
+	_player_hex_mat.render_priority = 125
+	p_hex.material_override = _player_hex_mat
+	_ki_bar_root.add_child(p_hex)
+
+	var e_hex := MeshInstance3D.new()
+	e_hex.name = "EnemyHexPortrait"
+	e_hex.mesh = hex_q
+	e_hex.position = Vector3(0.262, 0.002, 0.003)
+	_enemy_hex_mat = StandardMaterial3D.new()
+	_enemy_hex_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_enemy_hex_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_enemy_hex_mat.no_depth_test = true
+	_enemy_hex_mat.render_priority = 125
+	e_hex.material_override = _enemy_hex_mat
+	_ki_bar_root.add_child(e_hex)
+
+	# Fondos indicator_base oficiales detrás de ambas barras
+	var ind_tex: Texture2D = _get_ui_tex("indicator_base.png")
+	for side_x in [-0.105, 0.105]:
+		var trk := MeshInstance3D.new()
+		var tq := QuadMesh.new()
+		tq.size = Vector2(0.185, 0.024)
+		trk.mesh = tq
+		trk.position = Vector3(side_x, 0.008, 0.001)
+		var tmat := StandardMaterial3D.new()
+		tmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		tmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		tmat.no_depth_test = true
+		tmat.render_priority = 122
+		if ind_tex:
+			tmat.albedo_texture = ind_tex
+		tmat.albedo_color = Color(0.22, 0.30, 0.42, 0.85) if side_x < 0.0 else Color(0.35, 0.18, 0.18, 0.85)
+		trk.material_override = tmat
+		_ki_bar_root.add_child(trk)
+
 	_player_ki_fill = MeshInstance3D.new()
 	var p_q := QuadMesh.new()
-	p_q.size = Vector2(1.0, 0.016)
+	p_q.size = Vector2(1.0, 0.014)
 	_player_ki_fill.mesh = p_q
 	_player_ki_mat = StandardMaterial3D.new()
 	_player_ki_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_player_ki_mat.no_depth_test = true
 	_player_ki_mat.render_priority = 124
-	_player_ki_mat.albedo_color = Color(0.18, 0.85, 1.0)
+	_player_ki_mat.albedo_color = Color(0.18, 0.88, 1.0)
 	_player_ki_fill.material_override = _player_ki_mat
 	_ki_bar_root.add_child(_player_ki_fill)
 
 	_enemy_ki_fill = MeshInstance3D.new()
 	var e_q := QuadMesh.new()
-	e_q.size = Vector2(1.0, 0.016)
+	e_q.size = Vector2(1.0, 0.014)
 	_enemy_ki_fill.mesh = e_q
 	_enemy_ki_mat = StandardMaterial3D.new()
 	_enemy_ki_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_enemy_ki_mat.no_depth_test = true
 	_enemy_ki_mat.render_priority = 124
-	_enemy_ki_mat.albedo_color = Color(1.0, 0.45, 0.15)
+	_enemy_ki_mat.albedo_color = Color(1.0, 0.38, 0.16)
 	_enemy_ki_fill.material_override = _enemy_ki_mat
 	_ki_bar_root.add_child(_enemy_ki_fill)
+
+	_phase_timer_fill = MeshInstance3D.new()
+	var pt_q := QuadMesh.new()
+	pt_q.size = Vector2(1.0, 0.007)
+	_phase_timer_fill.mesh = pt_q
+	_phase_timer_fill.position = Vector3(0.0, -0.022, 0.002)
+	var pt_mat := StandardMaterial3D.new()
+	pt_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	pt_mat.no_depth_test = true
+	pt_mat.render_priority = 124
+	pt_mat.albedo_color = Color(1.0, 0.90, 0.24)
+	_phase_timer_fill.material_override = pt_mat
+	_phase_timer_fill.scale = Vector3(0.38, 1.0, 1.0)
+	_ki_bar_root.add_child(_phase_timer_fill)
 
 	_ki_bar_label = Label3D.new()
 	_ki_bar_label.name = "KiBarText"
@@ -4170,7 +4480,7 @@ func _build_melee_ki_bar() -> void:
 	_ki_bar_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.95)
 	_ki_bar_label.no_depth_test = true
 	_ki_bar_label.render_priority = 125
-	_ki_bar_label.position = Vector3(0.0, 0.015, 0.002)
+	_ki_bar_label.position = Vector3(0.0, 0.028, 0.003)
 	_ki_bar_root.add_child(_ki_bar_label)
 
 	_ki_delta_label = Label3D.new()
@@ -4181,11 +4491,34 @@ func _build_melee_ki_bar() -> void:
 	_ki_delta_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.95)
 	_ki_delta_label.no_depth_test = true
 	_ki_delta_label.render_priority = 126
-	_ki_delta_label.position = Vector3(0.0, -0.032, 0.003)
+	_ki_delta_label.position = Vector3(0.0, -0.056, 0.004)
 	_ki_delta_label.visible = false
 	_ki_bar_root.add_child(_ki_delta_label)
 
 	_refresh_melee_ki_bar()
+
+
+func _refresh_hex_portraits(p_node: Node3D, e_node: Node3D) -> void:
+	for entry in [[p_node, _player_hex_mat, true], [e_node, _enemy_hex_mat, false]]:
+		var f_n: Node3D = entry[0] as Node3D
+		var mat_h: StandardMaterial3D = entry[1] as StandardMaterial3D
+		var is_p_slot: bool = bool(entry[2])
+		if not f_n or not is_instance_valid(f_n) or not mat_h:
+			continue
+		var cdata: Variant = f_n.get("character_data")
+		var c_name: String = String(cdata.character_name) if (cdata and "character_name" in cdata) else ("Goku" if is_p_slot else "Vegeta")
+		var tr_res: Variant = f_n.get("current_transformation")
+		var f_name: String = String(tr_res.form_name) if (tr_res and "form_name" in tr_res) else ""
+		var h_path: String = resolve_hex_portrait_path(c_name, f_name)
+		var prev_p: String = _last_p_hex_path if is_p_slot else _last_e_hex_path
+		if h_path != prev_p:
+			if is_p_slot:
+				_last_p_hex_path = h_path
+			else:
+				_last_e_hex_path = h_path
+			var tex_h: Texture2D = _get_ui_tex(h_path)
+			if tex_h:
+				mat_h.albedo_texture = tex_h
 
 
 func _refresh_melee_ki_bar() -> void:
@@ -4194,6 +4527,7 @@ func _refresh_melee_ki_bar() -> void:
 	var pair: Array[Node3D] = _get_player_and_ai()
 	var p_node: Node3D = pair[0] if pair[0] else attacker
 	var e_node: Node3D = pair[1] if pair[1] else defender
+	_refresh_hex_portraits(p_node, e_node)
 
 	var p_ki: float = float(p_node.get("current_ki")) if (p_node and is_instance_valid(p_node) and p_node.get("current_ki") != null) else 0.0
 	var e_ki: float = float(e_node.get("current_ki")) if (e_node and is_instance_valid(e_node) and e_node.get("current_ki") != null) else 0.0
@@ -4215,27 +4549,27 @@ func _refresh_melee_ki_bar() -> void:
 
 	var p_frac: float = clampf(p_ki / p_max, 0.0, 1.0)
 	var e_frac: float = clampf(e_ki / e_max, 0.0, 1.0)
-	var bar_half_w: float = 0.24
+	var bar_half_w: float = 0.165
 
 	if _player_ki_fill and is_instance_valid(_player_ki_fill):
 		var pw: float = maxf(p_frac * bar_half_w, 0.004)
 		_player_ki_fill.scale = Vector3(pw, 1.0, 1.0)
-		_player_ki_fill.position = Vector3(-0.255 + pw * 0.5, -0.008, 0.002)
+		_player_ki_fill.position = Vector3(-0.022 - pw * 0.5, 0.008, 0.003)
 	if _enemy_ki_fill and is_instance_valid(_enemy_ki_fill):
 		var ew: float = maxf(e_frac * bar_half_w, 0.004)
 		_enemy_ki_fill.scale = Vector3(ew, 1.0, 1.0)
-		_enemy_ki_fill.position = Vector3(0.015 + ew * 0.5, -0.008, 0.002)
+		_enemy_ki_fill.position = Vector3(0.022 + ew * 0.5, 0.008, 0.003)
 
 	var critical: bool = p_ki < 22.0
 	if _player_ki_mat:
-		_player_ki_mat.albedo_color = Color(1.0, 0.22, 0.18) if critical else Color(0.18, 0.85, 1.0)
+		_player_ki_mat.albedo_color = Color(1.0, 0.22, 0.18) if critical else Color(0.18, 0.88, 1.0)
 	if _ki_bar_label and is_instance_valid(_ki_bar_label):
 		if critical:
 			_ki_bar_label.modulate = Color(1.0, 0.30, 0.25)
-			_ki_bar_label.text = "⚠️ KI CRÍTICO (%d)  |  RIVAL: %d" % [p_int, e_int]
+			_ki_bar_label.text = "⚠️ %d   |   %d" % [p_int, e_int]
 		else:
 			_ki_bar_label.modulate = Color(0.92, 0.98, 1.0)
-			_ki_bar_label.text = "TU KI: %d  |  RIVAL KI: %d" % [p_int, e_int]
+			_ki_bar_label.text = "%d   |   %d" % [p_int, e_int]
 
 
 func _show_ki_delta_popup(fighter: Node3D, delta_ki: float) -> void:

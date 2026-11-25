@@ -28,6 +28,8 @@ var reticle_ring: MeshInstance3D = null
 var reticle_icon: MeshInstance3D = null
 var _reticle_icon_mat: StandardMaterial3D = null
 var reticle_label: Label3D = null
+var _tex_target_normal: Texture2D = null
+var _tex_target_fight: Texture2D = null
 
 var ki_pointer_root: Node3D = null
 var pointer_label: Label3D = null
@@ -103,21 +105,28 @@ func _build_lockon_reticle() -> void:
 	reticle_ring.material_override = mat_ring
 	lockon_reticle_root.add_child(reticle_ring)
 
-	# 2. Icono Scouter 3D de objetivo fijado (sin texto flotante sobre el rival)
+	# 2. Retícula oficial Zenkai Target (target_normal -> target_fight, sin texto flotante)
+	if ResourceLoader.exists("res://assets/ui_zenkai/target_normal.png"):
+		_tex_target_normal = ResourceLoader.load("res://assets/ui_zenkai/target_normal.png") as Texture2D
+	if ResourceLoader.exists("res://assets/ui_zenkai/target_fight.png"):
+		_tex_target_fight = ResourceLoader.load("res://assets/ui_zenkai/target_fight.png") as Texture2D
+	if _tex_target_normal != null and _tex_target_fight != null:
+		reticle_ring.visible = false
+
 	reticle_icon = MeshInstance3D.new()
 	reticle_icon.name = "ScouterLockOnIcon"
 	var quad := QuadMesh.new()
-	quad.size = Vector2(0.42, 0.42)
+	quad.size = Vector2(0.56, 0.56)
 	reticle_icon.mesh = quad
 	_reticle_icon_mat = StandardMaterial3D.new()
 	_reticle_icon_mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
-	_reticle_icon_mat.blend_mode = StandardMaterial3D.BLEND_MODE_ADD
+	_reticle_icon_mat.blend_mode = BaseMaterial3D.BLEND_MODE_MIX if _tex_target_fight != null else BaseMaterial3D.BLEND_MODE_ADD
 	_reticle_icon_mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
 	_reticle_icon_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	_reticle_icon_mat.no_depth_test = true
 	_reticle_icon_mat.render_priority = 115
-	_reticle_icon_mat.albedo_texture = _create_scouter_lock_icon_texture()
-	_reticle_icon_mat.albedo_color = Color(1.0, 0.90, 0.22, 0.95)
+	_reticle_icon_mat.albedo_texture = _tex_target_fight if _tex_target_fight != null else _create_scouter_lock_icon_texture()
+	_reticle_icon_mat.albedo_color = Color(1.0, 0.95, 0.95, 0.96) if _tex_target_fight != null else Color(1.0, 0.90, 0.22, 0.95)
 	reticle_icon.material_override = _reticle_icon_mat
 	reticle_icon.visible = false
 	lockon_reticle_root.add_child(reticle_icon)
@@ -279,8 +288,17 @@ func _show_reticle_charging(pos: Vector3, progress: float) -> void:
 	lockon_reticle_root.visible = true
 	lockon_reticle_root.global_position = pos
 
-	var scale_factor = lerpf(1.4, 1.0, progress)
+	var scale_factor = lerpf(1.45, 1.0, progress)
 	lockon_reticle_root.scale = Vector3.ONE * scale_factor
+
+	if _tex_target_normal != null and reticle_icon and _reticle_icon_mat:
+		reticle_ring.visible = false
+		reticle_icon.visible = true
+		_reticle_icon_mat.albedo_texture = _tex_target_normal
+		_reticle_icon_mat.albedo_color = Color(0.85, 1.0, 0.90, 0.50 + progress * 0.48)
+		reticle_icon.scale = Vector3.ONE
+		reticle_icon.rotation.z = progress * 1.2
+		return
 
 	var mat = reticle_ring.material_override as StandardMaterial3D
 	if mat:
@@ -295,12 +313,28 @@ func _show_reticle_locked(pos: Vector3) -> void:
 	lockon_reticle_root.global_position = pos
 	lockon_reticle_root.scale = Vector3.ONE
 
+	var opp_crater_v: Variant = opponent_instance.get("ground_crater_stun_timer") if (opponent_instance != null and is_instance_valid(opponent_instance)) else null
+	var is_opp_crater: bool = opp_crater_v != null and float(opp_crater_v) > 0.0
+	var opp_open_v: Variant = opponent_instance.get("blast_opened_timer") if (opponent_instance != null and is_instance_valid(opponent_instance)) else null
+	var is_opp_opened: bool = opp_open_v != null and float(opp_open_v) > 0.0
+
+	if _tex_target_fight != null and reticle_icon and _reticle_icon_mat:
+		reticle_ring.visible = false
+		reticle_icon.visible = true
+		_reticle_icon_mat.albedo_texture = _tex_target_fight
+		if is_opp_crater:
+			var cpulse_tex: float = 0.72 + 0.28 * sin(Time.get_ticks_msec() * 0.018)
+			_reticle_icon_mat.albedo_color = Color(1.0, 0.35 * cpulse_tex + 0.20, 1.0, 0.98)
+		elif is_opp_opened:
+			_reticle_icon_mat.albedo_color = Color(1.0, 0.80, 0.25, 0.98)
+		else:
+			_reticle_icon_mat.albedo_color = Color(1.0, 0.95, 0.95, 0.98)
+		var pulse_t: float = 1.0 + sin(Time.get_ticks_msec() * 0.010) * 0.07
+		reticle_icon.scale = Vector3(pulse_t, pulse_t, pulse_t)
+		return
+
 	var mat = reticle_ring.material_override as StandardMaterial3D
 	if mat:
-		var opp_crater_v: Variant = opponent_instance.get("ground_crater_stun_timer") if (opponent_instance != null and is_instance_valid(opponent_instance)) else null
-		var is_opp_crater: bool = opp_crater_v != null and float(opp_crater_v) > 0.0
-		var opp_open_v: Variant = opponent_instance.get("blast_opened_timer") if (opponent_instance != null and is_instance_valid(opponent_instance)) else null
-		var is_opp_opened: bool = opp_open_v != null and float(opp_open_v) > 0.0
 		if is_opp_crater:
 			var cpulse: float = 0.72 + 0.28 * sin(Time.get_ticks_msec() * 0.018)
 			mat.albedo_color = Color(0.95, 0.25 * cpulse + 0.15, 1.0, 0.98)
