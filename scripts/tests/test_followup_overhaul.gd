@@ -198,9 +198,11 @@ func _process(_delta: float) -> bool:
 	projs = get_nodes_in_group("ki_projectiles")
 	var p_kd: Node = projs[projs.size() - 1]
 	if not _check(bool(p_kd.get("is_renzoku_knockdown")) and not bool(p_kd.get("is_renzoku_juggle")), "Hold-GRIP Renzoku finisher marks is_renzoku_knockdown"): return true
-	e_def.call("apply_renzoku_knockdown", p_atk, Vector3.FORWARD)
-	if not _check(absf(float(e_def.get("air_juggle_suspend_timer"))) < 0.001 and (e_def.get("velocity") as Vector3).y <= -15.0, "apply_renzoku_knockdown drives target down"): return true
+	e_def.call("apply_renzoku_relaunch", p_atk, Vector3.FORWARD)
+	if not _check(absf(float(e_def.get("air_juggle_suspend_timer"))) < 0.001 and bool(e_def.get("is_ballistic_launch")) and (e_def.get("velocity") as Vector3).y > 4.0, "apply_renzoku_relaunch launches target airborne again"): return true
 	e_def.set("velocity", Vector3.ZERO)
+	e_def.set("is_ballistic_launch", false)
+	e_def.set("is_knocked_back", false)
 
 	# Crash defender -> CRASHED_STAMPED + +18 Ki once -> barrage shot is unblockable_defenseless
 	var ki_before_crash: float = float(p_atk.get("current_ki"))

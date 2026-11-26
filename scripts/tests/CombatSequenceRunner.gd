@@ -75,7 +75,7 @@ func _run_all_sequences() -> void:
 		"followup_hammer",
 		"followup_super",
 		"followup_barrage",
-		"followup_barrage_knockdown",
+		"followup_barrage_relaunch",
 		"followup_defense",
 		"chain_sequences"
 	]
@@ -87,9 +87,12 @@ func _run_all_sequences() -> void:
 		for part: String in _requested_suite.split(",", false):
 			var trimmed: String = part.strip_edges()
 			if trimmed == "followup_all":
-				for fu_name: String in ["followup_melee", "followup_hammer", "followup_super", "followup_barrage", "followup_barrage_knockdown", "followup_defense"]:
+				for fu_name: String in ["followup_melee", "followup_hammer", "followup_super", "followup_barrage", "followup_barrage_relaunch", "followup_defense"]:
 					if not selected.has(fu_name):
 						selected.append(fu_name)
+			elif trimmed == "followup_barrage_knockdown":
+				if not selected.has("followup_barrage_relaunch"):
+					selected.append("followup_barrage_relaunch")
 			elif all_tests.has(trimmed):
 				selected.append(trimmed)
 			else:
@@ -131,7 +134,7 @@ func _run_all_sequences() -> void:
 				ok = await _seq_followup_super()
 			"followup_barrage":
 				ok = await _seq_followup_barrage()
-			"followup_barrage_knockdown":
+			"followup_barrage_relaunch", "followup_barrage_knockdown":
 				ok = await _seq_followup_barrage_knockdown()
 			"followup_defense":
 				ok = await _seq_followup_defense()
@@ -989,19 +992,28 @@ func _seq_followup_barrage_knockdown() -> bool:
 			break
 	simulator.v_right_grip = 0.0
 
-	if is_visual:
-		await _step_real_seconds(1.2)
-	else:
-		await _step_real_seconds(0.15)
-		for p_n in get_tree().get_nodes_in_group("ki_projectiles"):
-			if p_n and is_instance_valid(p_n) and bool(p_n.get("is_renzoku_knockdown")):
-				kd_proj_seen = true
-
 	var closed_ok: bool = (not is_instance_valid(fu)) or (not bool(fu.get("is_active")))
-	var ok: bool = kd_proj_seen and closed_ok
-	_audit_add("Hold-GRIP Knockdown", ok, "kd_proj=%s closed=%s" % [str(kd_proj_seen), str(closed_ok)])
-	if is_instance_valid(fu):
-		fu.call("_finish_sequence", "test_done", false)
+
+	# Esperar impacto del proyectil cargado y verificar relanzamiento aéreo + siguiente secuencia encadenada
+	var relaunched_ok: bool = false
+	var next_seq_ok: bool = false
+	var impact_deadline: int = Time.get_ticks_msec() + 1800
+	while Time.get_ticks_msec() < impact_deadline:
+		await get_tree().process_frame
+		if opp and is_instance_valid(opp) and (bool(opp.get("is_ballistic_launch")) or (opp.get("velocity") as Vector3).y > 2.0):
+			relaunched_ok = true
+		var next_fu: Variant = player.get("active_followup_controller")
+		if next_fu != null and is_instance_valid(next_fu) and next_fu != fu and int(next_fu.get("chain_depth")) >= 2:
+			next_seq_ok = true
+			if is_visual:
+				await _step_real_seconds(1.35)
+			break
+
+	var ok: bool = kd_proj_seen and closed_ok and relaunched_ok and next_seq_ok
+	_audit_add("Hold-GRIP Relaunch", ok, "kd_proj=%s closed=%s airborne=%s next_chain=%s" % [str(kd_proj_seen), str(closed_ok), str(relaunched_ok), str(next_seq_ok)])
+	var leftover_fu: Variant = player.get("active_followup_controller")
+	if leftover_fu != null and is_instance_valid(leftover_fu) and leftover_fu.has_method("_finish_sequence"):
+		leftover_fu.call("_finish_sequence", "test_done", false)
 	Engine.time_scale = 1.0
 	return ok
 

@@ -4115,22 +4115,42 @@ func apply_air_juggle_suspend(duration: float = 0.55) -> void:
 		velocity.y = clampf(maxf(velocity.y, 0.45), 0.35, 1.8)
 
 
-## Rompe la suspensión aérea y derriba al rival directo al suelo desde una Lluvia Renzoku.
-func apply_renzoku_knockdown(attacker_node: Node3D, impact_dir: Vector3) -> void:
+## Rompe la suspensión aérea y vuelve a lanzar al rival por los aires encadenando la siguiente secuencia.
+func apply_renzoku_relaunch(attacker_node: Node3D, impact_dir: Vector3) -> void:
 	if is_match_over:
 		return
 	air_juggle_suspend_timer = 0.0
-	is_ballistic_launch = false
-	ballistic_elapsed = 0.0
-	is_knocked_back = true
-	knockback_drag = 6.0
+	var my_root: Node3D = get_spatial_root() if has_method("get_spatial_root") else self
+	var my_p: Vector3 = my_root.global_position
+	var g_h: float = get_ground_elevation(my_p)
+	if not is_player:
+		my_root.global_position.y = maxf(my_p.y, g_h + 0.85)
+	else:
+		my_root.global_position.y = maxf(my_p.y, g_h)
+
 	var h_d: Vector3 = Vector3(impact_dir.x, 0.0, impact_dir.z)
 	if h_d.length_squared() < 0.01 and attacker_node and is_instance_valid(attacker_node):
-		var my_p: Vector3 = get_spatial_root().global_position if has_method("get_spatial_root") else global_position
 		var atk_p: Vector3 = attacker_node.get_spatial_root().global_position if attacker_node.has_method("get_spatial_root") else attacker_node.global_position
 		h_d = Vector3(my_p.x - atk_p.x, 0.0, my_p.z - atk_p.z)
 	h_d = h_d.normalized() if h_d.length_squared() >= 0.01 else -global_transform.basis.z
-	velocity = h_d * 7.5 + Vector3(0.0, -18.5, 0.0)
+
+	var impulse: Vector3 = clamp_launch_angle_diagonal(h_d * 27.0 + Vector3.UP * 9.0, 28.0, h_d)
+	launch_ballistic(impulse, 1.18, 10.5)
+	if is_player and has_method("begin_air_brake"):
+		var atk_bp: float = float(attacker_node.get("current_np")) if (attacker_node and is_instance_valid(attacker_node) and attacker_node.get("current_np") != null) else 10000.0
+		begin_air_brake(impulse.length(), 460.0, atk_bp, 10.5)
+
+	if attacker_node and is_instance_valid(attacker_node) and not bool(attacker_node.get("is_match_over")):
+		var existing_fu: Variant = attacker_node.get("active_followup_controller")
+		var cur_depth: int = int(attacker_node.get("combat_chain_depth")) if attacker_node.get("combat_chain_depth") != null else 0
+		var atk_ki: float = float(attacker_node.get("current_ki")) if attacker_node.get("current_ki") != null else 0.0
+		if (existing_fu == null or not is_instance_valid(existing_fu)) and cur_depth < 6 and atk_ki >= 10.0 and attacker_node.has_method("_start_followup_controller"):
+			attacker_node._start_followup_controller(self, 1.25, "renzoku_relaunch", true)
+
+
+## Alias heredado; redirige al relanzamiento aéreo Renzoku.
+func apply_renzoku_knockdown(attacker_node: Node3D, impact_dir: Vector3) -> void:
+	apply_renzoku_relaunch(attacker_node, impact_dir)
 
 
 func apply_knockback(dir: Vector3, force: float, air_drag_override: float = 2.6) -> void:

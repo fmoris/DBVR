@@ -865,7 +865,7 @@ func _process_mini_ki_barrage_atk(real_dt: float) -> void:
 		_barrage_grip_hold += real_dt
 		var pct: int = clampi(int(roundf((_barrage_grip_hold / BARRAGE_KNOCKDOWN_HOLD_SEC) * 100.0)), 0, 100)
 		if _status_label and is_instance_valid(_status_label):
-			_status_label.text = "✊ ¡CARGANDO REMATE AL SUELO! %d%%" % pct
+			_status_label.text = "✊ ¡CARGANDO IMPACTO LANZADOR! %d%%" % pct
 			_status_label.modulate = Color(1.0, 0.78, 0.20)
 		if _barrage_grip_hold >= BARRAGE_KNOCKDOWN_HOLD_SEC:
 			var kd_hand: int = 0 if l_grip else 1
@@ -873,12 +873,12 @@ func _process_mini_ki_barrage_atk(real_dt: float) -> void:
 				_pulse_attacker_hands(220.0, 1.0, 0.16)
 				if is_inside_tree() and get_tree():
 					KiSmokeFX.spawn_smoke(get_tree(), defender.global_position + Vector3.UP * 0.9, 1.65)
-				_finish_sequence("ki_barrage_knockdown", true)
+				_finish_sequence("ki_barrage_relaunch", false)
 				return
 	elif _barrage_grip_hold > 0.0:
 		_barrage_grip_hold = 0.0
 		if _status_label and is_instance_valid(_status_label):
-			_status_label.text = "💥 ¡LLUVIA RENZOKU! Gatillos: Suspender | ✊ Mantén GRIP: Derribar"
+			_status_label.text = "💥 ¡LLUVIA RENZOKU! Gatillos: Suspender | ✊ Mantén GRIP: ¡Lanzar de nuevo!"
 			_status_label.modulate = Color(0.35, 0.96, 1.0)
 
 	var l_trig: bool = _ctrl_float(lc, &"trigger") > 0.45 or _ctrl_pressed(lc, &"trigger_click")
@@ -1405,7 +1405,7 @@ func _build_hammer_attacker_target() -> void:
 func _build_barrage_attacker_hud() -> void:
 	_build_defender_status_only_hud()
 	if _status_label:
-		_status_label.text = "💥 ¡LLUVIA RENZOKU! Gatillos: Suspender | ✊ Mantén GRIP: Derribar"
+		_status_label.text = "💥 ¡LLUVIA RENZOKU! Gatillos: Suspender | ✊ Mantén GRIP: ¡Lanzar de nuevo!"
 		_status_label.modulate = Color(0.35, 0.96, 1.0)
 	var cam: Camera3D = _get_player_camera()
 	if not cam:

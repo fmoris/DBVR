@@ -620,7 +620,9 @@ func _apply_projectile_hit(char_node: Node, caster: Node, pos: Vector3, hit_dir:
 		if char_node.has_method("_spawn_bp_delta_popup"):
 			char_node._spawn_bp_delta_popup(0.0, "✋ ¡DEVOLUCIÓN PERFECTA!")
 
-	if is_renzoku_knockdown and char_node.has_method("apply_renzoku_knockdown"):
+	if is_renzoku_knockdown and char_node.has_method("apply_renzoku_relaunch"):
+		char_node.apply_renzoku_relaunch(caster, hit_dir)
+	elif is_renzoku_knockdown and char_node.has_method("apply_renzoku_knockdown"):
 		char_node.apply_renzoku_knockdown(caster, hit_dir)
 	elif is_renzoku_juggle and not was_char_blocking and char_node.has_method("apply_air_juggle_suspend"):
 		char_node.apply_air_juggle_suspend(0.55)
