@@ -7,6 +7,10 @@ Operar las herramientas de validación rápida en escritorio (sin APK), pruebas 
 - `zenkai_showcase.tscn`
 - `scripts/ZenkaiShowcaseViewer.gd`
 - `run_desktop_preview.ps1`
+- `build_apk.ps1`
+- `build_apk.bat`
+- `.agents/hooks.json`
+- `.agents/hooks/trigger_apk_build.ps1`
 - `scripts/tests/CombatSequenceRunner.gd`
 - `FEATURE_MAP.md`
 

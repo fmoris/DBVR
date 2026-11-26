@@ -66,3 +66,12 @@ Mapa vivo de funcionalidades, escenas, recursos, shaders y puntos de entrada de 
 | **Destrucción de Arena e Impactos** | [ArenaDestructionManager.gd](file:///d:/Mis%20Documentos/dbzvr/scripts/ArenaDestructionManager.gd) | Física de destrucción de rocas/pilares (`PillarSpire_*`), cráteres sísmicos (`METEOR_SMASH` y Martillazo), escombros y daño ambiental AoE. |
 | **Simulador XR en Escritorio** | [DesktopXRSimulator.gd](file:///d:/Mis%20Documentos/dbzvr/scripts/debug/DesktopXRSimulator.gd) | Simulación de manos, cámara, gatillos y sticks para probar combate libre y Melee Rítmico sin visor OpenXR conectado. |
 | **Runner Automatizado de Combate** | [CombatSequenceRunner.gd](file:///d:/Mis%20Documentos/dbzvr/scripts/tests/CombatSequenceRunner.gd) | Ejecuta secuencias automatizadas `--test-suite=all` sobre `DesktopXRSimulator` para validación en escritorio. |
+
+---
+
+## 6. Tooling de Build APK Fuera del Chat (0 Tokens) y Hooks
+
+| Componente | Ruta | Responsabilidad |
+|---|---|---|
+| **Compilador e Instalador APK Standalone** | [build_apk.ps1](file:///d:/Mis%20Documentos/dbzvr/build_apk.ps1), [build_apk.bat](file:///d:/Mis%20Documentos/dbzvr/build_apk.bat) | Compila `builds/dbzvr.apk` con lockfile en `finally`, detiene el daemon de Gradle, valida `adb devices` y solicita confirmación explícita `[S/N]` antes de instalar en Meta Quest 3 (soporta `-DryRun`). |
+| **Hook de Antigravity (`PostToolUse`)** | [hooks.json](file:///d:/Mis%20Documentos/dbzvr/.agents/hooks.json), [trigger_apk_build.ps1](file:///d:/Mis%20Documentos/dbzvr/.agents/hooks/trigger_apk_build.ps1) | Escucha `run_command` y abre `build_apk.ps1` en una ventana independiente de Windows solo tras un `git commit` exitoso con el marcador `[apk]` y sin lockfile activo (retorna `{}` en `< 1s`). |
