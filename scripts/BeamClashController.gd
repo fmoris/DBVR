@@ -458,10 +458,28 @@ func _resolve_clash(winner: Node3D, loser: Node3D, winning_tech: String) -> void
 	if winner and winner.get("is_in_zenkai_state"):
 		clash_damage *= 1.65
 
+	var was_winner_zenkai: bool = bool(winner and is_instance_valid(winner) and winner.get("is_in_zenkai_state"))
 	var dir_to_loser: Vector3 = (loser.global_position - winner.global_position).normalized() if (winner and loser) else Vector3.BACK
 	if loser and is_instance_valid(loser) and loser.has_method("take_hit"):
 		loser.take_hit(clash_damage, dir_to_loser, false)
-		if loser.has_method("apply_knockback"):
+		if not was_winner_zenkai and not bool(loser.get("is_match_over")) and loser.has_method("launch_ballistic"):
+			var loser_root: Node3D = loser.get_spatial_root() if loser.has_method("get_spatial_root") else loser
+			var win_root: Node3D = winner.get_spatial_root() if (winner and winner.has_method("get_spatial_root")) else winner
+			var cur_p: Vector3 = loser_root.global_position
+			var g_h: float = loser.get_ground_elevation(cur_p) if loser.has_method("get_ground_elevation") else 0.0
+			if not bool(loser.get("is_player")):
+				loser_root.global_position.y = maxf(cur_p.y, g_h + 0.85)
+			var h_dir: Vector3 = Vector3(cur_p.x - win_root.global_position.x, 0.0, cur_p.z - win_root.global_position.z) if win_root else Vector3(dir_to_loser.x, 0.0, dir_to_loser.z)
+			h_dir = h_dir.normalized() if h_dir.length_squared() >= 0.01 else Vector3.BACK
+			var raw_imp: Vector3 = h_dir * 29.0 + Vector3.UP * 9.5
+			var impulse: Vector3 = loser.clamp_launch_angle_diagonal(raw_imp, 30.0, h_dir) if loser.has_method("clamp_launch_angle_diagonal") else raw_imp
+			var win_bp: float = maxf(float(winner.get("current_np")) if (winner and winner.get("current_np") != null) else 10000.0, 100.0)
+			loser.launch_ballistic(impulse, 1.18, 10.5)
+			if loser.has_method("enter_airborne_launched"):
+				loser.enter_airborne_launched(win_bp, 1.35, impulse.length())
+			if bool(loser.get("is_player")) and loser.has_method("begin_air_brake"):
+				loser.begin_air_brake(impulse.length(), clash_damage, win_bp, 10.5)
+		elif loser.has_method("apply_knockback"):
 			loser.apply_knockback(dir_to_loser, 16.0, 2.4)
 
 	var dd_res: DramaticDirector = DramaticDirector.get_active(get_tree())
@@ -471,7 +489,6 @@ func _resolve_clash(winner: Node3D, loser: Node3D, winning_tech: String) -> void
 
 	# Recompensas de Ki y BP al vencedor
 	if winner and is_instance_valid(winner):
-		var was_winner_zenkai: bool = bool(winner.get("is_in_zenkai_state"))
 		if winner.has_method("recharge_ki"):
 			winner.recharge_ki(45.0)
 		if winner.has_method("increase_np"):
@@ -486,8 +503,18 @@ func _resolve_clash(winner: Node3D, loser: Node3D, winning_tech: String) -> void
 	# Emitir señal
 	emit_signal("clash_resolved", winner, loser, winning_tech)
 
+	if not was_winner_zenkai and winner and is_instance_valid(winner) and loser and is_instance_valid(loser) and not bool(winner.get("is_match_over")) and not bool(loser.get("is_match_over")):
+		if winner == defender:
+			winner.set("combat_chain_depth", 0)
+			loser.set("combat_chain_depth", 0)
+			if winner.has_method("_log_combat_event"):
+				winner._log_combat_event("⚡ ¡CONTRAATAQUE TRAS CHOQUE DE HACES! TURNO INVERTIDO", "success")
+		if winner.has_method("start_post_super_followup"):
+			winner.start_post_super_followup(loser)
+
 	# Desvanecer y limpiar
 	var tw = create_tween()
+	tw.set_ignore_time_scale(true)
 	tw.tween_property(self, "scale", Vector3.ZERO, 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
 	tw.tween_callback(queue_free)
 
@@ -644,6 +671,20 @@ func _build_clash_diegetic_bar() -> void:
 	clash_bar_root.add_child(clash_divider_spark)
 
 
+func _has_other_active_bullet_time() -> bool:
+	for f: Node3D in [attacker, defender]:
+		if f and is_instance_valid(f):
+			var af: Variant = f.get("active_followup_controller")
+			if af != null and is_instance_valid(af):
+				return true
+			var ad: Variant = f.get("active_target_dome")
+			if ad != null and is_instance_valid(ad):
+				return true
+			if bool(f.get("is_in_bullet_time")) or bool(f.get("is_in_beam_sequence")):
+				return true
+	return false
+
+
 func _exit_tree() -> void:
 	if attacker and is_instance_valid(attacker) and attacker.has_method("set"):
 		attacker.set("is_in_beam_clash", false)
@@ -653,7 +694,7 @@ func _exit_tree() -> void:
 		var dd_ex: DramaticDirector = DramaticDirector.get_active(get_tree())
 		if dd_ex:
 			dd_ex.update_beam_clash_atmosphere(0.5, color_atk, color_def, global_position, false)
-	if Engine.time_scale < 1.0:
+	if Engine.time_scale < 1.0 and not _has_other_active_bullet_time():
 		Engine.time_scale = 1.0
 	if clash_hud_anchor and is_instance_valid(clash_hud_anchor):
 		clash_hud_anchor.queue_free()

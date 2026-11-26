@@ -1159,11 +1159,15 @@ func _is_followup_minigame_locked(player: Node) -> bool:
 		return true
 	if not player or not is_instance_valid(player):
 		return false
-	var my_fu: Variant = player.get("active_followup_controller")
-	if my_fu != null and is_instance_valid(my_fu):
-		var st: int = int(my_fu.get("state"))
-		if st == 5 or st == 7 or st == 8 or st == 9:
-			return true
+	var opp: Node = player._get_opponent() if player.has_method("_get_opponent") else null
+	for fighter: Node in [player, opp]:
+		if not fighter or not is_instance_valid(fighter):
+			continue
+		var fu_ctrl: Variant = fighter.get("active_followup_controller")
+		if fu_ctrl != null and is_instance_valid(fu_ctrl):
+			var st: int = int(fu_ctrl.get("state"))
+			if st == 5 or st == 7 or st == 8 or st == 9:
+				return true
 	return false
 
 
@@ -2068,8 +2072,8 @@ func _process_grid_step_movement(delta: float) -> void:
 	if not player:
 		return
 
-	# Si estamos volando en dash hacia el rival, no se permite movimiento manual
-	if player.get("is_flying_to_opponent"):
+	# Si estamos en vuelo/melee/beam/minijuego Follow-Up, bloquear desplazamiento discreto para no competir con Z-Vanish ni arrastre de stick
+	if bool(player.get("is_flying_to_opponent")) or bool(player.get("is_in_bullet_time")) or bool(player.get("is_in_beam_sequence")) or bool(player.get("is_in_beam_clash")) or _is_followup_minigame_locked(player):
 		return
 
 	# A. ELEVACIÓN VERTICAL POR CLIC DE STICK

@@ -820,10 +820,29 @@ func _resolve_direct_hit() -> void:
 	var bp_atk: float = maxf(float(attacker.get("current_np")) if (attacker and attacker.get("current_np") != null) else 10000.0, 100.0)
 	var bp_def: float = maxf(float(defender.get("current_np")) if (defender and defender.get("current_np") != null) else 10000.0, 100.0)
 	var bp_ratio: float = clampf(sqrt(bp_atk / bp_def), 0.45, 2.8)
+	var atk_in_zenkai: bool = bool(attacker and is_instance_valid(attacker) and (attacker.get("is_in_zenkai_state") or attacker.get("is_comeback_zenkai")))
+	var def_exhausted_ko: bool = bool(defender and is_instance_valid(defender) and defender.has_method("is_defenseless_for_ko") and defender.is_defenseless_for_ko() and attacker and is_instance_valid(attacker) and attacker.has_method("get_combat_act") and int(attacker.get_combat_act()) >= 2)
+	var is_ko_hit: bool = atk_in_zenkai or def_exhausted_ko
 	if defender and is_instance_valid(defender):
 		if defender.has_method("take_hit"):
 			defender.take_hit(final_damage, beam_dir, false)
-		if defender.has_method("apply_knockback"):
+		if not is_ko_hit and defender.has_method("launch_ballistic"):
+			var def_root: Node3D = defender.get_spatial_root() if defender.has_method("get_spatial_root") else defender
+			var cur_p: Vector3 = def_root.global_position
+			var g_h: float = defender.get_ground_elevation(cur_p) if defender.has_method("get_ground_elevation") else 0.0
+			if not bool(defender.get("is_player")):
+				def_root.global_position.y = maxf(cur_p.y, g_h + 0.85)
+			var h_dir: Vector3 = Vector3(beam_dir.x, 0.0, beam_dir.z)
+			h_dir = h_dir.normalized() if h_dir.length_squared() >= 0.01 else -defender.global_transform.basis.z
+			var launch_spd: float = clampf(26.0 * bp_ratio, 22.0, 36.0)
+			var raw_imp: Vector3 = h_dir * launch_spd + Vector3.UP * clampf(8.5 * bp_ratio, 7.0, 12.0)
+			var impulse: Vector3 = defender.clamp_launch_angle_diagonal(raw_imp, 30.0, h_dir) if defender.has_method("clamp_launch_angle_diagonal") else raw_imp
+			defender.launch_ballistic(impulse, 1.18, 10.5)
+			if defender.has_method("enter_airborne_launched"):
+				defender.enter_airborne_launched(bp_atk, clampf(bp_ratio, 1.0, 1.8), impulse.length())
+			if bool(defender.get("is_player")) and defender.has_method("begin_air_brake"):
+				defender.begin_air_brake(impulse.length(), final_damage, bp_atk, 10.5)
+		elif defender.has_method("apply_knockback"):
 			defender.apply_knockback(beam_dir, clampf(28.0 * bp_ratio, 22.0, 40.0), 1.6)
 		if defender.get("procedural_animator"):
 			defender.procedural_animator.trigger_hit_flinch(2.5, beam_dir)
@@ -849,10 +868,8 @@ func _resolve_direct_hit() -> void:
 
 	print("[SuperBeamSequence] 💥 ¡IMPACTO DIRECTO DE SUPER HAZ! %s colisionó con el defensor (Daño: %.0f NP)." % [power_name, final_damage])
 
-	var atk_in_zenkai: bool = bool(attacker and is_instance_valid(attacker) and (attacker.get("is_in_zenkai_state") or attacker.get("is_comeback_zenkai")))
-	var def_exhausted_ko: bool = bool(defender and is_instance_valid(defender) and defender.has_method("is_defenseless_for_ko") and defender.is_defenseless_for_ko() and attacker and is_instance_valid(attacker) and attacker.has_method("get_combat_act") and int(attacker.get_combat_act()) >= 2)
-	if (atk_in_zenkai or def_exhausted_ko) and defender and is_instance_valid(defender):
-		if attacker.has_method("trigger_zenkai_match_finish"):
+	if is_ko_hit and defender and is_instance_valid(defender):
+		if attacker and is_instance_valid(attacker) and attacker.has_method("trigger_zenkai_match_finish"):
 			attacker.trigger_zenkai_match_finish(attacker, defender, power_name)
 
 
@@ -861,6 +878,8 @@ func _cleanup_and_finish(result: String, dmg: float) -> void:
 		attacker.set("is_firing_beam", false)
 		if attacker.has_method("set"):
 			attacker.set("is_in_beam_sequence", false)
+			if attacker.get("active_beam_sequence") == self:
+				attacker.set("active_beam_sequence", null)
 	if defender and is_instance_valid(defender) and defender.has_method("set"):
 		defender.set("is_in_beam_sequence", false)
 
@@ -872,8 +891,12 @@ func _cleanup_and_finish(result: String, dmg: float) -> void:
 	if (result == "direct_hit" or result == "hit") and attacker and is_instance_valid(attacker) and not bool(attacker.get("is_match_over")):
 		if defender and is_instance_valid(defender) and attacker.has_method("start_post_super_followup"):
 			attacker.start_post_super_followup(defender)
+	elif (result == "deflected" or result == "evaded") and defender and is_instance_valid(defender) and attacker and is_instance_valid(attacker) and not bool(defender.get("is_match_over")) and not bool(attacker.get("is_match_over")):
+		if defender.has_method("start_counter_melee_reversal"):
+			defender.start_counter_melee_reversal(attacker, true, 0.85, "super_" + result)
 
 	var tw = create_tween()
+	tw.set_ignore_time_scale(true)
 	tw.tween_property(self, "scale", Vector3.ZERO, 0.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
 	tw.tween_callback(queue_free)
 
@@ -991,8 +1014,26 @@ func _update_beam_geometry() -> void:
 		beam_light.global_position = current_head_pos
 
 
+func _has_other_active_bullet_time() -> bool:
+	for f: Node3D in [attacker, defender]:
+		if f and is_instance_valid(f):
+			var af: Variant = f.get("active_followup_controller")
+			if af != null and is_instance_valid(af):
+				return true
+			var ad: Variant = f.get("active_target_dome")
+			if ad != null and is_instance_valid(ad):
+				return true
+			if bool(f.get("is_in_bullet_time")) or bool(f.get("is_in_beam_clash")):
+				return true
+	return false
+
+
 func _exit_tree() -> void:
-	if Engine.time_scale < 1.0:
+	if attacker and is_instance_valid(attacker) and attacker.get("active_beam_sequence") == self:
+		attacker.set("active_beam_sequence", null)
+		attacker.set("is_in_beam_sequence", false)
+		attacker.set("is_firing_beam", false)
+	if Engine.time_scale < 1.0 and not _has_other_active_bullet_time():
 		Engine.time_scale = 1.0
 	if beam_hud_anchor and is_instance_valid(beam_hud_anchor):
 		beam_hud_anchor.queue_free()

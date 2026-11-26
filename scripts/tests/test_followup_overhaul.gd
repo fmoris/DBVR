@@ -324,6 +324,15 @@ func _process(_delta: float) -> bool:
 	fu_hd.call("_process_mini_hammer_def", 0.005)
 	sim_mock.set("v_right_stick", Vector2.ZERO)
 	if not _check(int(fu_hd.get("state")) == 10 and String(fu_hd.get("last_action_chosen")) == "vanish_hammer" and int(p_atk.get("vulnerability_state")) != 3, "Green Z-Vanish evades Hammer cleanly"): return true
+	if not _check(bool(p_atk.get("is_in_bullet_time")) and p_atk.get("active_target_dome") != null and bool(e_def.get("is_staggered")), "Green Z-Vanish vs Hammer opens Counter Melee Dome"): return true
+	var h_dome: Variant = p_atk.get("active_target_dome")
+	if h_dome != null and is_instance_valid(h_dome):
+		h_dome.queue_free()
+	p_atk.set("active_target_dome", null)
+	p_atk.set("is_in_bullet_time", false)
+	e_def.set("is_in_bullet_time", false)
+	e_def.set("is_staggered", false)
+	Engine.time_scale = 1.0
 
 	# 9c. MINI_KI_BARRAGE_DEF with forced relaunch finisher (4 rapid + 1 golden orb) & AI 2.4x fast super
 	p_atk.set("current_ki", 50.0)
@@ -338,7 +347,123 @@ func _process(_delta: float) -> bool:
 	if ai_c and ai_c.has_method("trigger_followup_fast_super"):
 		ai_c.call("trigger_followup_fast_super", 2.4)
 		if not _check(absf(float(ai_c.get("followup_super_charge_mult")) - 2.4) < 0.01, "AI fast super sets 2.4x multiplier"): return true
-	fu_bd.call("_finish_sequence", "barrage_def_done", false)
+	# 10d-1. Perfect Return on Golden Orb relaunches attacker & starts reversed Follow-Up
+	fu_bd.set("_cached_desktop_sim", sim_mock)
+	fu_bd.set("_def_note_idx", 4)
+	fu_bd.set("_def_elapsed", 2.83)
+	fu_bd.set("_def_trig_prev_l", false)
+	fu_bd.set("_def_trig_prev_r", false)
+	sim_mock.set("v_right_trigger", 1.0)
+	fu_bd.call("_process_mini_ki_barrage_def", 0.005)
+	sim_mock.set("v_right_trigger", 0.0)
+	var rev_fu: Node3D = p_atk.get("active_followup_controller") as Node3D
+	if not _check(bool(e_def.get("is_ballistic_launch")) and rev_fu != null and is_instance_valid(rev_fu) and rev_fu != fu_bd and bool(rev_fu.call("is_in_intro_pause")), "Barrage Perfect Return relaunches AI & opens reversed Follow-Up"): return true
+	fu_bd.free()
+	if not _check(Engine.time_scale <= 0.01 and is_instance_valid(rev_fu), "Freeing old Barrage Def controller does NOT clobber reversed 1s pause"): return true
+	rev_fu.call("_finish_sequence", "rev_fu_done", false)
+	rev_fu.free()
+	e_def.set("is_ballistic_launch", false)
+	e_def.set("is_staggered", false)
+	e_def.set("vulnerability_state", 0)
+	Engine.time_scale = 1.0
+
+	# 10. Post-Super / Beam Clash chain gates & Defense -> Attack reversals
+	# 10a. start_post_super_followup gates (low Ki, max chain depth 6, valid pass)
+	p_atk.set("is_match_over", false)
+	e_def.set("is_match_over", false)
+	p_atk.set("current_ki", 5.0)
+	p_atk.set("combat_chain_depth", 0)
+	if not _check(not bool(p_atk.call("start_post_super_followup", e_def)), "start_post_super_followup blocked below min Ki (12)"): return true
+	p_atk.set("current_ki", 40.0)
+	p_atk.set("combat_chain_depth", 6)
+	if not _check(not bool(p_atk.call("start_post_super_followup", e_def)), "start_post_super_followup blocked at chain_depth == 6"): return true
+	p_atk.set("combat_chain_depth", 2)
+	if not _check(bool(p_atk.call("start_post_super_followup", e_def)), "start_post_super_followup succeeds with Ki >= 12 & depth < 6"): return true
+	var post_fu: Node3D = p_atk.get("active_followup_controller") as Node3D
+	if not _check(post_fu != null and bool(post_fu.call("is_in_intro_pause")), "Post-super follow-up starts in 1s intro pause"): return true
+	post_fu.call("_finish_sequence", "post_super_test_done", false)
+	post_fu.free()
+	e_def.set("vulnerability_state", 0)
+	Engine.time_scale = 1.0
+
+	# 10b. SuperBeam direct_hit ballistic launch + survives beam free
+	p_atk.set("current_ki", 50.0)
+	p_atk.set("combat_chain_depth", 0)
+	var beam_hit := beam_s.new() as Node3D
+	test_scene.add_child(beam_hit)
+	beam_hit.call("setup", p_atk, e_def, "Kamehameha", Color(0.2, 0.7, 1.0), 900.0, 3, Vector3.ZERO)
+	beam_hit.call("_resolve_direct_hit")
+	if not _check(bool(e_def.get("is_ballistic_launch")), "SuperBeam direct hit launches defender ballistically"): return true
+	beam_hit.call("_cleanup_and_finish", "direct_hit", 900.0)
+	var sb_fu: Node3D = p_atk.get("active_followup_controller") as Node3D
+	if not _check(sb_fu != null and is_instance_valid(sb_fu) and bool(sb_fu.call("is_in_intro_pause")), "SuperBeam direct hit starts post-super Follow-Up"): return true
+	beam_hit.free()
+	if not _check(Engine.time_scale <= 0.01 and is_instance_valid(sb_fu), "Freeing SuperBeam does NOT clobber post-super 1s pause"): return true
+	sb_fu.call("_finish_sequence", "sb_fu_done", false)
+	sb_fu.free()
+	e_def.set("is_ballistic_launch", false)
+	e_def.set("vulnerability_state", 0)
+	Engine.time_scale = 1.0
+
+	# 10c. BeamClash winner follow-up reversal (defender wins clash)
+	var clash_s: GDScript = load("res://scripts/BeamClashController.gd") as GDScript
+	var clash := clash_s.new() as Node3D
+	test_scene.add_child(clash)
+	e_def.set("combat_chain_depth", 3)
+	p_atk.set("combat_chain_depth", 0)
+	p_atk.set("current_ki", 50.0)
+	clash.call("setup", e_def, p_atk, "Kamehameha", Color(0.2, 0.7, 1.0), "Galick Ho", Color(0.8, 0.2, 1.0), 5.5, 1800.0, 1800.0, 1.0, 1.0)
+	clash.call("_resolve_clash", p_atk, e_def, "Galick Ho")
+	var cl_fu: Node3D = p_atk.get("active_followup_controller") as Node3D
+	if not _check(bool(e_def.get("is_ballistic_launch")) and int(e_def.get("combat_chain_depth")) == 0 and cl_fu != null and is_instance_valid(cl_fu), "BeamClash defender win launches attacker & opens reversed Follow-Up"): return true
+	clash.free()
+	if not _check(Engine.time_scale <= 0.01, "Freeing BeamClash does NOT clobber reversed Follow-Up pause"): return true
+	cl_fu.call("_finish_sequence", "clash_fu_done", false)
+	cl_fu.free()
+	e_def.set("is_ballistic_launch", false)
+	e_def.set("vulnerability_state", 0)
+	Engine.time_scale = 1.0
+
+	# 10d-2. Barrage Golden Orb Z-Vanish -> Counter Melee Dome
+	p_atk.set("current_ki", 50.0)
+	e_def.set("current_ki", 90.0)
+	p_atk.call("enter_airborne_launched", 12000.0, 1.0, 24.0)
+	e_def.call("_start_followup_controller", p_atk, 1.0, "barrage_vanish_test", true)
+	var fu_bv: Node3D = e_def.get("active_followup_controller") as Node3D
+	p_atk.call("complete_air_brake")
+	fu_bv.call("choose_ki_barrage", 1)
+	fu_bv.set("_cached_desktop_sim", sim_mock)
+	fu_bv.set("_def_note_idx", 4)
+	fu_bv.set("_def_elapsed", 2.83)
+	fu_bv.set("_def_stick_prev", false)
+	sim_mock.set("v_right_stick", Vector2(1.0, 0.0))
+	fu_bv.call("_process_mini_ki_barrage_def", 0.005)
+	sim_mock.set("v_right_stick", Vector2.ZERO)
+	if not _check(bool(p_atk.get("is_in_bullet_time")) and p_atk.get("active_target_dome") != null and bool(e_def.get("is_staggered")), "Barrage Z-Vanish opens Counter Melee Dome"): return true
+	var bv_dome: Variant = p_atk.get("active_target_dome")
+	if bv_dome != null and is_instance_valid(bv_dome):
+		bv_dome.queue_free()
+	p_atk.set("active_target_dome", null)
+	p_atk.set("is_in_bullet_time", false)
+	e_def.set("is_in_bullet_time", false)
+	e_def.set("is_staggered", false)
+	fu_bv.free()
+	Engine.time_scale = 1.0
+
+	# 10e. SuperBeam deflected -> Counter Melee reversal
+	var beam_def := beam_s.new() as Node3D
+	test_scene.add_child(beam_def)
+	beam_def.call("setup", e_def, p_atk, "Kamehameha", Color(0.2, 0.7, 1.0), 900.0, 3, Vector3.ZERO)
+	beam_def.call("_cleanup_and_finish", "deflected", 0.0)
+	if not _check(bool(p_atk.get("is_in_bullet_time")) and bool(e_def.get("is_staggered")), "SuperBeam deflected triggers Counter Melee reversal"): return true
+	var sd_dome: Variant = p_atk.get("active_target_dome")
+	if sd_dome != null and is_instance_valid(sd_dome):
+		sd_dome.queue_free()
+	p_atk.set("active_target_dome", null)
+	p_atk.set("is_in_bullet_time", false)
+	e_def.set("is_in_bullet_time", false)
+	e_def.set("is_staggered", false)
+	beam_def.free()
 	sim_mock.queue_free()
 
 	Engine.time_scale = 1.0

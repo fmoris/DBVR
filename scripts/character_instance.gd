@@ -4136,6 +4136,9 @@ func apply_renzoku_relaunch(attacker_node: Node3D, impact_dir: Vector3) -> void:
 
 	var impulse: Vector3 = clamp_launch_angle_diagonal(h_d * 27.0 + Vector3.UP * 9.0, 28.0, h_d)
 	launch_ballistic(impulse, 1.18, 10.5)
+	if vulnerability_state == VulnerabilityState.NONE and has_method("enter_airborne_launched"):
+		var atk_bp_r: float = float(attacker_node.get("current_np")) if (attacker_node and is_instance_valid(attacker_node) and attacker_node.get("current_np") != null) else 10000.0
+		enter_airborne_launched(atk_bp_r, 1.25, impulse.length())
 	if is_player and has_method("begin_air_brake"):
 		var atk_bp: float = float(attacker_node.get("current_np")) if (attacker_node and is_instance_valid(attacker_node) and attacker_node.get("current_np") != null) else 10000.0
 		begin_air_brake(impulse.length(), 460.0, atk_bp, 10.5)
@@ -4733,7 +4736,12 @@ func start_super_beam_sequence(tech_name: String, col: Color, dmg: float, tier_l
 	var opp = _get_opponent()
 	if not opp or not is_instance_valid(opp):
 		return
-	var opp_seq: Node = opp.get("active_beam_sequence")
+	var raw_opp_seq: Variant = opp.get("active_beam_sequence")
+	var opp_seq: Node = (raw_opp_seq as Node) if (raw_opp_seq != null and is_instance_valid(raw_opp_seq)) else null
+	if raw_opp_seq != null and opp_seq == null and opp.has_method("set"):
+		opp.set("active_beam_sequence", null)
+	if active_beam_sequence != null and not is_instance_valid(active_beam_sequence):
+		active_beam_sequence = null
 	if is_in_beam_sequence and opp_seq != null and is_instance_valid(opp_seq):
 		if int(opp_seq.get("state")) == 0: # SuperBeamSequenceController.BeamState.ADVANCING_BULLET_TIME
 			opp_seq._trigger_beam_clash(self, tech_name, col, dmg)
@@ -5490,10 +5498,53 @@ func get_chain_ki_multiplier() -> float:
 	return 1.0 + float(combat_chain_depth - 1) * step
 
 
-func start_post_super_followup(opponent: Node3D) -> void:
+func start_post_super_followup(opponent: Node3D) -> bool:
 	if is_match_over or not opponent or not is_instance_valid(opponent):
-		return
+		return false
+	if bool(opponent.get("is_match_over")):
+		return false
+	if combat_chain_depth >= 6:
+		return false
+	var cfg: KiEconomyConfig = KiEconomyConfig.get_default()
+	var min_ki: float = float(cfg.post_super_followup_min_ki) if cfg.get("post_super_followup_min_ki") != null else 12.0
+	if current_ki < min_ki:
+		return false
+	if opponent.has_method("enter_airborne_launched") and int(opponent.get("vulnerability_state")) == VulnerabilityState.NONE:
+		opponent.enter_airborne_launched(maxf(current_np, 1000.0), 1.25, 26.0)
 	_start_followup_controller(opponent, 1.25, "post_super", true)
+	return true
+
+
+func start_counter_melee_reversal(opponent: Node3D, use_z_dash: bool = false, stagger_sec: float = 0.55, reason: String = "counter_reversal") -> bool:
+	if is_match_over or not opponent or not is_instance_valid(opponent):
+		return false
+	if bool(opponent.get("is_match_over")) or is_in_bullet_time or bool(opponent.get("is_in_bullet_time")):
+		return false
+	combat_chain_depth = 0
+	opponent.set("combat_chain_depth", 0)
+	vulnerability_state = VulnerabilityState.NONE
+	is_defenseless_crash = false
+	crashed_stamped_timer = 0.0
+	is_knocked_back = false
+	is_ballistic_launch = false
+	air_juggle_suspend_timer = 0.0
+	opponent.set("is_staggered", true)
+	opponent.set("stagger_timer", maxf(stagger_sec, 0.35))
+	_log_combat_event("⚡ ¡CONTRAATAQUE! TURNO INVERTIDO (%s)" % reason, "success")
+	if use_z_dash:
+		var my_p: Vector3 = get_spatial_root().global_position if has_method("get_spatial_root") else global_position
+		var opp_p: Vector3 = opponent.get_spatial_root().global_position if opponent.has_method("get_spatial_root") else opponent.global_position
+		var can_dash: bool = _get_opponent() == opponent and my_p.distance_to(opp_p) > 3.2
+		if can_dash:
+			is_target_locked = true
+			start_flight_to_opponent()
+			if is_flying_to_opponent:
+				pending_followup_bonus_hits = max(pending_followup_bonus_hits, 1)
+				_dash_speed_mult = maxf(_dash_speed_mult, 1.85)
+				return true
+	pending_followup_bonus_hits = max(pending_followup_bonus_hits, 1)
+	_start_melee_bullet_time(opponent)
+	return is_in_bullet_time
 
 
 func trigger_explosive_wave_chain_break() -> bool:

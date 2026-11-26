@@ -81,6 +81,10 @@ func _run_all_sequences() -> void:
 		"followup_def_hammer",
 		"followup_def_super",
 		"followup_def_barrage",
+		"followup_rev_hammer",
+		"followup_rev_barrage_return",
+		"followup_rev_barrage_vanish",
+		"followup_rev_super",
 		"chain_sequences"
 	]
 
@@ -98,6 +102,10 @@ func _run_all_sequences() -> void:
 				for df_name: String in ["followup_def_melee", "followup_def_hammer", "followup_def_super", "followup_def_barrage"]:
 					if not selected.has(df_name):
 						selected.append(df_name)
+			elif trimmed == "followup_reversals_all":
+				for rv_name: String in ["followup_rev_hammer", "followup_rev_barrage_return", "followup_rev_barrage_vanish", "followup_rev_super"]:
+					if not selected.has(rv_name):
+						selected.append(rv_name)
 			elif trimmed == "followup_barrage_knockdown":
 				if not selected.has("followup_barrage_relaunch"):
 					selected.append("followup_barrage_relaunch")
@@ -154,6 +162,14 @@ func _run_all_sequences() -> void:
 				ok = await _seq_followup_def_super()
 			"followup_def_barrage":
 				ok = await _seq_followup_def_barrage()
+			"followup_rev_hammer":
+				ok = await _seq_followup_rev_hammer()
+			"followup_rev_barrage_return":
+				ok = await _seq_followup_rev_barrage_return()
+			"followup_rev_barrage_vanish":
+				ok = await _seq_followup_rev_barrage_vanish()
+			"followup_rev_super":
+				ok = await _seq_followup_rev_super()
 			"chain_sequences":
 				ok = await _seq_chain_sequences()
 
@@ -519,6 +535,7 @@ func _reset_between_tests() -> void:
 			fighter.set("is_blocking", false)
 			fighter.set("is_in_bullet_time", false)
 			fighter.set("is_in_beam_sequence", false)
+			fighter.set("active_beam_sequence", null)
 			fighter.set("is_firing_beam", false)
 			fighter.set("is_in_beam_clash", false)
 			fighter.set("is_flying_to_opponent", false)
@@ -1178,10 +1195,16 @@ func _seq_followup_def_hammer() -> bool:
 	var dist_after: float = _get_fighters_dist(opp)
 	var not_crashed: bool = int(player.get("vulnerability_state")) != 3
 	var closed_ok: bool = (not is_instance_valid(fu_def)) or (not bool(fu_def.get("is_active")))
-	var ok: bool = not_crashed and closed_ok and dist_after <= 3.8
-	_audit_add("Z-Vanish Behind AI", ok, "dist=%.2fm crashed=%s" % [dist_after, str(not not_crashed)])
+	var counter_dome: Variant = player.get("active_target_dome")
+	var rev_dome_ok: bool = (counter_dome != null and is_instance_valid(counter_dome)) or bool(player.get("is_in_bullet_time"))
+	var opp_stag: bool = opp != null and bool(opp.get("is_staggered"))
+	var ok: bool = not_crashed and closed_ok and dist_after <= 3.8 and rev_dome_ok and opp_stag
+	_audit_add("Z-Vanish -> Counter Dome", ok, "dist=%.2fm dome=%s stag=%s" % [dist_after, str(rev_dome_ok), str(opp_stag)])
 	if is_visual:
 		await _step_real_seconds(0.9)
+	_cleanup_active_dome_for_test()
+	if opp and is_instance_valid(opp):
+		opp.set("is_staggered", false)
 	Engine.time_scale = 1.0
 	return ok
 
@@ -1258,12 +1281,108 @@ func _seq_followup_def_barrage() -> bool:
 	var deflected_cnt: int = int(fu_def.get("_def_barrage_deflected_count")) if is_instance_valid(fu_def) else 4
 	var atk_staggered: bool = opp != null and bool(opp.get("is_staggered"))
 	var closed_ok: bool = (not is_instance_valid(fu_def)) or (not bool(fu_def.get("is_active")))
-	var ok: bool = deflected_cnt >= 4 and atk_staggered and closed_ok
-	_audit_add("Deflect 4 + Perfect Ret", ok, "deflected=%d staggered=%s closed=%s" % [deflected_cnt, str(atk_staggered), str(closed_ok)])
+	var opp_relaunched: bool = opp != null and (bool(opp.get("is_ballistic_launch")) or (opp.get("velocity") as Vector3).y > 1.0)
+	var rev_fu: Variant = player.get("active_followup_controller")
+	var rev_fu_ok: bool = rev_fu != null and is_instance_valid(rev_fu) and rev_fu != fu_def and bool(rev_fu.call("is_in_intro_pause")) and rev_fu.get("attacker") == player
+	var ok: bool = deflected_cnt >= 4 and atk_staggered and closed_ok and opp_relaunched and rev_fu_ok
+	_audit_add("Deflect 4 + Reversal FU", ok, "deflected=%d relaunched=%s rev_fu=%s" % [deflected_cnt, str(opp_relaunched), str(rev_fu_ok)])
 	if is_visual:
 		await _step_real_seconds(1.0)
+	if rev_fu != null and is_instance_valid(rev_fu) and rev_fu.has_method("_finish_sequence"):
+		rev_fu.call("_finish_sequence", "test_done", false)
 	if opp and is_instance_valid(opp):
 		opp.set("is_staggered", false)
+	Engine.time_scale = 1.0
+	return ok
+
+
+func _seq_followup_rev_hammer() -> bool:
+	return await _seq_followup_def_hammer()
+
+
+func _seq_followup_rev_barrage_return() -> bool:
+	return await _seq_followup_def_barrage()
+
+
+func _seq_followup_rev_barrage_vanish() -> bool:
+	var is_visual: bool = not DisplayServer.get_name().to_lower().contains("headless")
+	var opp: Node3D = player._get_opponent() if player.has_method("_get_opponent") else null
+	var fu_def: Node3D = await _ai_launch_and_stabilize_player(is_visual)
+	if not fu_def:
+		return false
+
+	var entered: bool = bool(fu_def.call("choose_ki_barrage", 1)) and int(fu_def.get("state")) == 8
+	_audit_add("Barrage Vanish Entry", entered, "notes=%d" % (fu_def.get("_def_notes") as Array).size())
+	if not entered:
+		Engine.time_scale = 1.0
+		return false
+
+	var loop_deadline: int = Time.get_ticks_msec() + 9000
+	while Time.get_ticks_msec() < loop_deadline and is_instance_valid(fu_def) and bool(fu_def.get("is_active")) and int(fu_def.get("state")) == 8:
+		var notes_arr: Array = fu_def.get("_def_notes")
+		var n_idx: int = int(fu_def.get("_def_note_idx"))
+		var elap: float = float(fu_def.get("_def_elapsed"))
+		if n_idx < notes_arr.size():
+			var note: Dictionary = notes_arr[n_idx]
+			var t_diff: float = float(note["time"]) - elap
+			var is_relaunch: bool = String(note.get("kind", "rapid")) == "relaunch"
+			if is_relaunch and t_diff <= 0.14 and t_diff >= -0.10:
+				simulator.v_right_stick = Vector2(1.0, 0.0)
+				await get_tree().process_frame
+				await get_tree().process_frame
+				simulator.v_right_stick = Vector2.ZERO
+			elif not is_relaunch and t_diff <= 0.14 and t_diff >= -0.10:
+				simulator.v_right_trigger = 1.0
+				await get_tree().process_frame
+				await get_tree().process_frame
+				simulator.v_right_trigger = 0.0
+		await get_tree().process_frame
+
+	var dist_after: float = _get_fighters_dist(opp)
+	var counter_dome: Variant = player.get("active_target_dome")
+	var rev_dome_ok: bool = (counter_dome != null and is_instance_valid(counter_dome)) or bool(player.get("is_in_bullet_time"))
+	var opp_stag: bool = opp != null and bool(opp.get("is_staggered"))
+	var ok: bool = rev_dome_ok and opp_stag and dist_after <= 3.8
+	_audit_add("Barrage Z-Vanish -> Dome", ok, "dist=%.2fm dome=%s stag=%s" % [dist_after, str(rev_dome_ok), str(opp_stag)])
+	if is_visual:
+		await _step_real_seconds(0.9)
+	_cleanup_active_dome_for_test()
+	if opp and is_instance_valid(opp):
+		opp.set("is_staggered", false)
+	Engine.time_scale = 1.0
+	return ok
+
+
+func _seq_followup_rev_super() -> bool:
+	var is_visual: bool = not DisplayServer.get_name().to_lower().contains("headless")
+	var opp: Node3D = player._get_opponent() if player.has_method("_get_opponent") else null
+	if not opp or not is_instance_valid(opp):
+		return false
+	opp.set("current_ki", 80.0)
+	player.set("current_ki", 80.0)
+	var beam_ctrl: Node3D = load("res://scripts/SuperBeamSequenceController.gd").new() as Node3D
+	get_tree().current_scene.add_child(beam_ctrl)
+	beam_ctrl.call("setup", opp, player, "Kamehameha", Color(0.2, 0.75, 1.0), 1200.0, 3, Vector3.ZERO)
+	beam_ctrl.call("_resolve_deflection")
+	var wait_deadline: int = Time.get_ticks_msec() + 1800
+	var rev_started: bool = false
+	while Time.get_ticks_msec() < wait_deadline:
+		await get_tree().process_frame
+		if bool(player.get("is_flying_to_opponent")) or bool(player.get("is_in_bullet_time")):
+			rev_started = true
+			break
+	var opp_stag: bool = bool(opp.get("is_staggered"))
+	var ok: bool = rev_started and opp_stag
+	_audit_add("Super Deflect -> Reversal", ok, "dash=%s dome=%s stag=%s" % [str(player.get("is_flying_to_opponent")), str(player.get("is_in_bullet_time")), str(opp_stag)])
+	if is_visual:
+		await _step_real_seconds(0.9)
+	player._stop_flight()
+	_cleanup_active_dome_for_test()
+	player.set("is_in_beam_sequence", false)
+	opp.set("is_in_beam_sequence", false)
+	opp.set("is_staggered", false)
+	if is_instance_valid(beam_ctrl):
+		beam_ctrl.queue_free()
 	Engine.time_scale = 1.0
 	return ok
 
@@ -1540,6 +1659,9 @@ func _seq_chain_sequences() -> bool:
 
 	# 4. Fase 2 & 3: Shunkan Idō + Nuevos Poderes
 	_cleanup_active_dome_for_test()
+	var clash_fu: Variant = player.get("active_followup_controller")
+	if clash_fu != null and is_instance_valid(clash_fu) and clash_fu.has_method("_finish_sequence"):
+		clash_fu.call("_finish_sequence", "test_cleanup", false)
 	player.set("is_flying_to_opponent", false)
 	player.set("is_in_beam_sequence", false)
 	player.set("is_in_beam_clash", false)

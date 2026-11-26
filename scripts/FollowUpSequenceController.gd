@@ -884,7 +884,11 @@ func _process_mini_hammer_def(real_dt: float) -> void:
 				if defender.has_method("_log_combat_event"):
 					defender._log_combat_event("💨 ¡Z-VANISH VS MARTILLO! Teletransporte a la espalda.", "success")
 				_pulse_defender_hands(195.0, 0.90, 0.12)
+				var atk_ref_h: Node3D = attacker
+				var def_ref_h: Node3D = defender
 				_finish_sequence("hammer_evaded", false)
+				if def_ref_h and is_instance_valid(def_ref_h) and atk_ref_h and is_instance_valid(atk_ref_h) and def_ref_h.has_method("start_counter_melee_reversal"):
+					def_ref_h.start_counter_melee_reversal(atk_ref_h, false, 0.55, "hammer_z_vanish")
 				return
 		elif _state_timer > 0.34:
 			_def_hammer_early_lockout = true
@@ -1218,18 +1222,30 @@ func _process_mini_ki_barrage_def(real_dt: float) -> void:
 		if fresh_deflect and in_green:
 			note["resolved"] = true
 			_def_note_idx += 1
-			if attacker.has_method("take_hit"):
-				attacker.take_hit(360.0, Vector3.FORWARD, true)
-			attacker.set("is_staggered", true)
-			attacker.set("stagger_timer", 0.60)
-			if defender.has_method("recharge_ki"):
-				defender.recharge_ki(14.0)
+			var atk_ref_r: Node3D = attacker
+			var def_ref_r: Node3D = defender
+			var atk_p: Vector3 = atk_ref_r.get_spatial_root().global_position if atk_ref_r.has_method("get_spatial_root") else atk_ref_r.global_position
+			var def_p: Vector3 = def_ref_r.get_spatial_root().global_position if def_ref_r.has_method("get_spatial_root") else def_ref_r.global_position
+			var dir_to_atk: Vector3 = Vector3(atk_p.x - def_p.x, 0.0, atk_p.z - def_p.z)
+			dir_to_atk = dir_to_atk.normalized() if dir_to_atk.length_squared() > 0.01 else Vector3.FORWARD
+			if atk_ref_r.has_method("take_hit"):
+				atk_ref_r.take_hit(360.0, dir_to_atk, true)
+			atk_ref_r.set("is_staggered", true)
+			atk_ref_r.set("stagger_timer", 0.60)
+			if def_ref_r.has_method("recharge_ki"):
+				def_ref_r.recharge_ki(14.0)
 			_pulse_defender_hands(210.0, 0.95, 0.16)
 			if _audio_player:
 				AudioActionManager.play_action("common.ki_blast_deflect", _audio_player)
-			if defender.has_method("_log_combat_event"):
-				defender._log_combat_event("✋ ¡DEVOLUCIÓN PERFECTA! Esfera devuelta (+14 Ki).", "success")
-			_finish_sequence("ki_barrage_perfect_return", true)
+			if def_ref_r.has_method("_log_combat_event"):
+				def_ref_r._log_combat_event("⚡ ¡DEVOLUCIÓN PERFECTA — CONTRAATAQUE! Rival lanzado por los aires (+14 Ki).", "success")
+			atk_ref_r.set("combat_chain_depth", 0)
+			def_ref_r.set("combat_chain_depth", 0)
+			def_ref_r.set("vulnerability_state", 0)
+			def_ref_r.set("is_defenseless_crash", false)
+			_finish_sequence("ki_barrage_perfect_return", false)
+			if atk_ref_r and is_instance_valid(atk_ref_r) and atk_ref_r.has_method("apply_renzoku_relaunch"):
+				atk_ref_r.apply_renzoku_relaunch(def_ref_r, dir_to_atk)
 			return
 		if fresh_stick:
 			if in_green and not _def_relaunch_early_lockout:
@@ -1240,7 +1256,11 @@ func _process_mini_ki_barrage_def(real_dt: float) -> void:
 					_teleport_defender_behind_attacker()
 					if defender.has_method("_log_combat_event"):
 						defender._log_combat_event("💨 ¡Z-VANISH VS ESFERA CARGADA!", "success")
+					var atk_ref_v: Node3D = attacker
+					var def_ref_v: Node3D = defender
 					_finish_sequence("ki_barrage_vanished", false)
+					if def_ref_v and is_instance_valid(def_ref_v) and atk_ref_v and is_instance_valid(atk_ref_v) and def_ref_v.has_method("start_counter_melee_reversal"):
+						def_ref_v.start_counter_melee_reversal(atk_ref_v, false, 0.55, "barrage_z_vanish")
 					return
 			elif t_diff > 0.34:
 				_def_relaunch_early_lockout = true
@@ -1812,8 +1832,22 @@ func _finish_sequence(reason: String, restore_distance: bool) -> void:
 	queue_free()
 
 
+func _has_other_active_bullet_time() -> bool:
+	for f: Node3D in [attacker, defender]:
+		if f and is_instance_valid(f):
+			var af: Variant = f.get("active_followup_controller")
+			if af != null and is_instance_valid(af) and af != self:
+				return true
+			var ad: Variant = f.get("active_target_dome")
+			if ad != null and is_instance_valid(ad):
+				return true
+			if bool(f.get("is_in_bullet_time")) or bool(f.get("is_in_beam_sequence")) or bool(f.get("is_in_beam_clash")):
+				return true
+	return false
+
+
 func _exit_tree() -> void:
-	if Engine.time_scale < 0.99:
+	if Engine.time_scale < 0.99 and not _has_other_active_bullet_time():
 		Engine.time_scale = 1.0
 	_clear_action_hud()
 	if attacker and is_instance_valid(attacker) and attacker.get("active_followup_controller") == self:
