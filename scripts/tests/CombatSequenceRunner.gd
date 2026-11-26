@@ -36,6 +36,9 @@ var _opp_wall_stick_msec: int = 0
 var _proj_spawned: int = 0
 var _proj_aimed_at_target: int = 0
 var _observed_opp: Node = null
+var _init_player_pos: Vector3 = Vector3.ZERO
+var _init_opp_pos: Vector3 = Vector3.ZERO
+var _has_init_poses: bool = false
 
 
 func start_from_cmdline(sim: DesktopXRSimulator, suite_arg: String = "all") -> void:
@@ -68,6 +71,11 @@ func _run_all_sequences() -> void:
 		"guard_and_move",
 		"transformation",
 		"melee_punch",
+		"followup_melee",
+		"followup_hammer",
+		"followup_super",
+		"followup_barrage",
+		"followup_defense",
 		"chain_sequences"
 	]
 
@@ -77,7 +85,11 @@ func _run_all_sequences() -> void:
 	else:
 		for part: String in _requested_suite.split(",", false):
 			var trimmed: String = part.strip_edges()
-			if all_tests.has(trimmed):
+			if trimmed == "followup_all":
+				for fu_name: String in ["followup_melee", "followup_hammer", "followup_super", "followup_barrage", "followup_defense"]:
+					if not selected.has(fu_name):
+						selected.append(fu_name)
+			elif all_tests.has(trimmed):
 				selected.append(trimmed)
 			else:
 				print("[WARN] Secuencia desconocida ignorada: %s" % trimmed)
@@ -110,6 +122,16 @@ func _run_all_sequences() -> void:
 				ok = await _seq_guard_and_move()
 			"transformation":
 				ok = await _seq_transformation()
+			"followup_melee":
+				ok = await _seq_followup_melee()
+			"followup_hammer":
+				ok = await _seq_followup_hammer()
+			"followup_super":
+				ok = await _seq_followup_super()
+			"followup_barrage":
+				ok = await _seq_followup_barrage()
+			"followup_defense":
+				ok = await _seq_followup_defense()
 			"chain_sequences":
 				ok = await _seq_chain_sequences()
 
@@ -192,6 +214,13 @@ func _wait_for_scene_ready() -> bool:
 	while wait_cd > 0.0 and float(hybrid.get("startup_cooldown")) > 0.0:
 		await get_tree().process_frame
 		wait_cd -= get_process_delta_time()
+
+	if xr_origin and is_instance_valid(xr_origin):
+		_init_player_pos = xr_origin.global_position
+		var opp_init: Node3D = player._get_opponent() if (player and player.has_method("_get_opponent")) else null
+		if opp_init and is_instance_valid(opp_init):
+			_init_opp_pos = opp_init.global_position
+			_has_init_poses = true
 
 	return float(hybrid.get("startup_cooldown")) <= 0.0
 
@@ -409,6 +438,7 @@ func _freeze_enemy_ai(frozen: bool) -> void:
 
 
 func _reset_between_tests() -> void:
+	Engine.time_scale = 1.0
 	simulator.clear_virtual_buttons()
 	simulator.set_scripted_hands(Vector3(-0.22, -0.18, 0.22), Vector3(0.22, -0.18, 0.22), false, false, true)
 	_sig_ki_recharge_started = 0
@@ -427,22 +457,61 @@ func _reset_between_tests() -> void:
 	_proj_spawned = 0
 	_proj_aimed_at_target = 0
 
+	var cur_sc: Node = get_tree().current_scene
+	if cur_sc:
+		for c: Node in cur_sc.get_children():
+			if c.get_script():
+				var spath: String = str(c.get_script().resource_path)
+				if spath.ends_with("BeamClashController.gd") or spath.ends_with("SuperBeamSequenceController.gd") or spath.ends_with("FollowUpSequenceController.gd"):
+					if c.has_method("_finish_sequence"):
+						c._finish_sequence("reset", false)
+					else:
+						c.queue_free()
+	for p_node: Node in get_tree().get_nodes_in_group("ki_projectiles"):
+		if p_node and is_instance_valid(p_node):
+			p_node.queue_free()
+
 	if player and is_instance_valid(player):
-		player.set("current_ki", 60.0)
-		player.set("is_blocking", false)
-		player.set("is_in_bullet_time", false)
-		player.set("is_in_beam_sequence", false)
-		player.set("is_firing_beam", false)
-		player.set("is_in_beam_clash", false)
-		player.set("is_flying_to_opponent", false)
-		player.set("is_flying_to_melee", false)
-		player.set("is_knocked_back", false)
-		player.set("velocity", Vector3.ZERO)
-		var cur_sc: Node = get_tree().current_scene
-		if cur_sc:
-			for c: Node in cur_sc.get_children():
-				if c.get_script() and str(c.get_script().resource_path).ends_with("BeamClashController.gd"):
-					c.queue_free()
+		for fighter: Node in [player, player._get_opponent() if player.has_method("_get_opponent") else null]:
+			if not fighter or not is_instance_valid(fighter):
+				continue
+			var fu_v: Variant = fighter.get("active_followup_controller")
+			if fu_v != null and is_instance_valid(fu_v):
+				if fu_v.has_method("_finish_sequence"):
+					fu_v._finish_sequence("reset", false)
+				else:
+					fu_v.queue_free()
+			fighter.set("active_followup_controller", null)
+			fighter.set("is_in_followup_bullet_time", false)
+			fighter.set("followup_bullet_time_timer", 0.0)
+			fighter.set("combat_chain_depth", 0)
+			fighter.set("pending_followup_bonus_hits", 0)
+			fighter.set("pending_followup_damage_mult", 1.0)
+			fighter.set("vulnerability_state", 0)
+			fighter.set("is_defenseless_crash", false)
+			fighter.set("crashed_stamped_timer", 0.0)
+			fighter.set("defenseless_crash_timer", 0.0)
+			fighter.set("is_air_brake_active", false)
+			fighter.set("air_brake_progress", 0.0)
+			fighter.set("airborne_recovery_state", "RECOVERED")
+			fighter.set("is_blocking", false)
+			fighter.set("is_in_bullet_time", false)
+			fighter.set("is_in_beam_sequence", false)
+			fighter.set("is_firing_beam", false)
+			fighter.set("is_in_beam_clash", false)
+			fighter.set("is_flying_to_opponent", false)
+			fighter.set("is_flying_to_melee", false)
+			fighter.set("is_knocked_back", false)
+			fighter.set("is_ballistic_launch", false)
+			fighter.set("velocity", Vector3.ZERO)
+			fighter.set("is_match_over", false)
+			fighter.set("is_in_zenkai_state", false)
+			fighter.set("is_in_furia", false)
+			fighter.set("current_np", 10000.0)
+			fighter.set("current_ki", 60.0)
+			if fighter.has_method("stop_ragdoll"):
+				fighter.stop_ragdoll()
+
 		var dome: Variant = player.get("active_target_dome")
 		if dome and is_instance_valid(dome):
 			dome.queue_free()
@@ -457,10 +526,17 @@ func _reset_between_tests() -> void:
 		hybrid.set("transform_cooldown", 0.0)
 		hybrid.set("melee_approach_progress", 0.0)
 		player.set("melee_approach_progress", 0.0)
-		var opp_r: Node = player._get_opponent() if player.has_method("_get_opponent") else null
-		if opp_r and is_instance_valid(opp_r):
-			opp_r.set("is_in_bullet_time", false)
 
+		if _has_init_poses and xr_origin and is_instance_valid(xr_origin):
+			xr_origin.global_position = _init_player_pos
+			var opp_reset: Node3D = player._get_opponent() if player.has_method("_get_opponent") else null
+			if opp_reset and is_instance_valid(opp_reset):
+				opp_reset.global_position = _init_opp_pos
+				var cam_r: Camera3D = xr_origin.get_node_or_null("XRCamera3D") as Camera3D
+				if cam_r and is_instance_valid(cam_r):
+					cam_r.look_at(opp_reset.global_position + Vector3(0.0, 1.15, 0.0), Vector3.UP)
+
+	Engine.time_scale = 1.0
 	await _step_seconds(0.35)
 
 
@@ -469,6 +545,12 @@ func _step_seconds(duration: float) -> void:
 	while elapsed < duration:
 		await get_tree().process_frame
 		elapsed += get_process_delta_time()
+
+
+func _step_real_seconds(duration: float) -> void:
+	var end_msec: int = Time.get_ticks_msec() + int(duration * 1000.0)
+	while Time.get_ticks_msec() < end_msec:
+		await get_tree().process_frame
 
 
 # --- SECUENCIAS DE PRUEBA ---
@@ -655,6 +737,263 @@ func _seq_transformation() -> bool:
 	return true
 
 
+func _launch_opp_and_wait_followup(is_visual: bool) -> Node3D:
+	var opp: Node3D = player._get_opponent() if player.has_method("_get_opponent") else null
+	if not opp or not is_instance_valid(opp):
+		return null
+	_connect_opponent_signals(opp)
+	player.set("current_ki", 95.0)
+	opp.set("current_ki", 95.0)
+
+	player.start_flight_to_opponent()
+	if is_visual:
+		var wait_t: float = 0.0
+		while bool(player.get("is_flying_to_opponent")) and wait_t < 2.2:
+			await _step_seconds(0.05)
+			wait_t += 0.05
+		await _step_seconds(0.35)
+	else:
+		player._stop_flight()
+		player._start_melee_bullet_time(opp)
+
+	var dome_0: Variant = player.get("active_target_dome")
+	if dome_0 and is_instance_valid(dome_0):
+		_attach_dome_observers(dome_0)
+		dome_0.set("is_active", false)
+		dome_0.emit_signal("finisher_triggered", "charged_v3_back", 3.2, [{ "zone_id": 0, "is_charged": true, "power": 1.35 }], Vector3(0.0, 5.0, -18.0))
+		if is_instance_valid(dome_0):
+			dome_0.queue_free()
+	else:
+		player._execute_charged_v3_or_ki_break_finisher(opp, "charged_v3_back", 3.2, Vector3(0.0, 5.0, -18.0))
+
+	await get_tree().process_frame
+	var fu: Node3D = player.get("active_followup_controller") as Node3D
+	if not fu or not is_instance_valid(fu):
+		_audit_add("Intro Pause 1.0s", false, "No se creó FollowUpSequenceController")
+		return null
+	var pause_ok: bool = fu.has_method("is_in_intro_pause") and bool(fu.call("is_in_intro_pause")) and Engine.time_scale <= 0.01
+	_audit_add("Intro Pause 1.0s", pause_ok, "state=%d scale=%.3fx" % [int(fu.get("state")), Engine.time_scale])
+	if not pause_ok:
+		return null
+
+	var cam_v: Camera3D = xr_origin.get_node_or_null("XRCamera3D") as Camera3D if xr_origin else null
+	if cam_v and is_instance_valid(cam_v):
+		cam_v.look_at(opp.global_position + Vector3(0.0, 1.15, 0.0), Vector3.UP)
+
+	var wait_msec: int = Time.get_ticks_msec() + 3000
+	while Time.get_ticks_msec() < wait_msec and is_instance_valid(fu) and int(fu.get("state")) != 3:
+		await get_tree().process_frame
+
+	var dec_ok: bool = is_instance_valid(fu) and int(fu.get("state")) == 3 and is_equal_approx(Engine.time_scale, 0.12)
+	_audit_add("Decision Window", dec_ok, "state=%s scale=%.2fx" % [str(fu.get("state")) if is_instance_valid(fu) else "freed", Engine.time_scale])
+	if not dec_ok:
+		Engine.time_scale = 1.0
+		return null
+
+	if is_visual:
+		await _step_real_seconds(0.75)
+	return fu
+
+
+func _seq_followup_melee() -> bool:
+	var is_visual: bool = not DisplayServer.get_name().to_lower().contains("headless")
+	var opp: Node3D = player._get_opponent() if player.has_method("_get_opponent") else null
+	var fu: Node3D = await _launch_opp_and_wait_followup(is_visual)
+	if not fu:
+		return false
+
+	var chosen_ok: bool = bool(fu.call("choose_melee_chase"))
+	var bonus_hits: int = int(player.get("pending_followup_bonus_hits"))
+	var flying: bool = bool(player.get("is_flying_to_opponent"))
+	var ok: bool = chosen_ok and bonus_hits == 2 and flying
+	_audit_add("Melee Chase +2 Hits", ok, "chosen=%s bonus=%d flying=%s" % [str(chosen_ok), bonus_hits, str(flying)])
+	if not ok:
+		Engine.time_scale = 1.0
+		return false
+
+	if is_visual:
+		var wait_t: float = 0.0
+		while bool(player.get("is_flying_to_opponent")) and wait_t < 2.2:
+			await _step_real_seconds(0.05)
+			wait_t += 0.05
+		await _step_real_seconds(0.85)
+		if opp and is_instance_valid(opp):
+			_trace("FOLLOWUP_MELEE", "ARRIVED", "dist=%.2fm" % _get_fighters_dist(opp))
+	else:
+		player._stop_flight()
+	_cleanup_active_dome_for_test()
+	Engine.time_scale = 1.0
+	return true
+
+
+func _seq_followup_hammer() -> bool:
+	var is_visual: bool = not DisplayServer.get_name().to_lower().contains("headless")
+	var opp: Node3D = player._get_opponent() if player.has_method("_get_opponent") else null
+	var fu: Node3D = await _launch_opp_and_wait_followup(is_visual)
+	if not fu:
+		return false
+
+	var chosen_ok: bool = bool(fu.call("choose_vanish_hammer"))
+	var in_hammer: bool = chosen_ok and int(fu.get("state")) == 5
+	_audit_add("Vanish Hammer", in_hammer, "state=%d" % int(fu.get("state")))
+	if not in_hammer:
+		Engine.time_scale = 1.0
+		return false
+
+	if is_visual:
+		await _step_real_seconds(0.65)
+
+	fu.call("_execute_hammer_slam_impact", 3.4)
+	var crashed: bool = opp != null and int(opp.get("vulnerability_state")) == 3
+	var chained_pause: bool = is_instance_valid(fu) and bool(fu.call("is_in_intro_pause")) and int(fu.get("chain_depth")) >= 2
+	_audit_add("Hammer Slam + Chain", crashed and chained_pause, "vuln=%d depth=%d" % [int(opp.get("vulnerability_state")) if opp else -1, int(fu.get("chain_depth")) if is_instance_valid(fu) else -1])
+	if is_visual:
+		await _step_real_seconds(1.35)
+	if is_instance_valid(fu):
+		fu.call("_finish_sequence", "test_done", false)
+	Engine.time_scale = 1.0
+	return crashed and chained_pause
+
+
+func _seq_followup_super() -> bool:
+	var is_visual: bool = not DisplayServer.get_name().to_lower().contains("headless")
+	var opp: Node3D = player._get_opponent() if player.has_method("_get_opponent") else null
+	var fu: Node3D = await _launch_opp_and_wait_followup(is_visual)
+	if not fu:
+		return false
+
+	var cam_v: Camera3D = xr_origin.get_node_or_null("XRCamera3D") as Camera3D if xr_origin else null
+	if cam_v and is_instance_valid(cam_v) and opp:
+		cam_v.look_at(opp.global_position + Vector3(0.0, 1.15, 0.0), Vector3.UP)
+
+	var ki_before: float = float(player.get("current_ki"))
+	var cdata: Resource = player.get("character_data")
+	var char_name: String = str(cdata.get("character_name")) if cdata else "Goku"
+	var is_vegeta: bool = "VEGETA" in char_name.to_upper()
+
+	simulator.v_left_grip = 1.0
+	simulator.v_right_grip = 1.0
+	if is_vegeta:
+		simulator.set_scripted_hands(Vector3(0.24, 0.05, 0.08), Vector3(0.32, 0.05, 0.12), false, false, true)
+	else:
+		simulator.set_scripted_hands(Vector3(-0.28, -0.16, 0.10), Vector3(-0.16, -0.16, 0.14), false, false, true)
+
+	var charge_deadline: int = Time.get_ticks_msec() + 2400
+	var entered_fast_super: bool = false
+	while Time.get_ticks_msec() < charge_deadline:
+		await get_tree().process_frame
+		var s_state: int = int(hybrid.get("current_super_state"))
+		var fu_s: int = int(fu.get("state")) if is_instance_valid(fu) else -1
+		if s_state != 0 and fu_s == 6:
+			entered_fast_super = true
+			if float(hybrid.get("super_charge_timer")) >= 0.85 or s_state == 2:
+				break
+
+	_audit_add("Fast Super 2.4x Charge", entered_fast_super, "super_state=%d fu_state=%s" % [int(hybrid.get("current_super_state")), str(fu.get("state")) if is_instance_valid(fu) else "freed"])
+	if not entered_fast_super:
+		simulator.clear_virtual_buttons()
+		Engine.time_scale = 1.0
+		return false
+
+	simulator.set_scripted_hands(Vector3(-0.10, -0.05, 0.56), Vector3(0.10, -0.05, 0.56), false, false, true)
+	await _step_real_seconds(1.4 if is_visual else 0.5)
+	simulator.clear_virtual_buttons()
+
+	var ki_after: float = float(player.get("current_ki"))
+	var fired_ok: bool = (ki_after < ki_before) or (not is_instance_valid(fu)) or (String(fu.get("last_action_chosen")) == "fast_super")
+	_audit_add("Fast Super Fired", fired_ok, "ki=%.1f->%.1f" % [ki_before, ki_after])
+	Engine.time_scale = 1.0
+	return entered_fast_super and fired_ok
+
+
+func _seq_followup_barrage() -> bool:
+	var is_visual: bool = not DisplayServer.get_name().to_lower().contains("headless")
+	var opp: Node3D = player._get_opponent() if player.has_method("_get_opponent") else null
+	var fu: Node3D = await _launch_opp_and_wait_followup(is_visual)
+	if not fu:
+		return false
+
+	var cam_v: Camera3D = xr_origin.get_node_or_null("XRCamera3D") as Camera3D if xr_origin else null
+	if cam_v and is_instance_valid(cam_v) and opp:
+		cam_v.look_at(opp.global_position + Vector3(0.0, 1.15, 0.0), Vector3.UP)
+
+	var chosen_ok: bool = bool(fu.call("choose_ki_barrage"))
+	var in_barrage: bool = chosen_ok and int(fu.get("state")) == 7
+	_audit_add("Ki Barrage Entry", in_barrage, "state=%d" % int(fu.get("state")))
+	if not in_barrage:
+		Engine.time_scale = 1.0
+		return false
+
+	var fired_cnt: int = 0
+	for i: int in range(8):
+		if is_instance_valid(fu) and bool(fu.call("fire_barrage_shot", i % 2)):
+			fired_cnt += 1
+		await _step_real_seconds(0.15 if is_visual else 0.05)
+
+	var projs: Array = get_tree().get_nodes_in_group("ki_projectiles")
+	var has_unblockable: bool = false
+	for p_n in projs:
+		if p_n and is_instance_valid(p_n) and bool(p_n.get("unblockable_defenseless")):
+			has_unblockable = true
+			break
+
+	var shots_ok: bool = fired_cnt >= 6 and (has_unblockable or projs.size() >= 1)
+	_audit_add("Renzoku 8 Shots", shots_ok, "fired=%d projs=%d unblockable=%s" % [fired_cnt, projs.size(), str(has_unblockable)])
+	if is_visual:
+		await _step_real_seconds(1.1)
+	if is_instance_valid(fu):
+		fu.call("_finish_sequence", "test_done", false)
+	Engine.time_scale = 1.0
+	return shots_ok
+
+
+func _seq_followup_defense() -> bool:
+	var is_visual: bool = not DisplayServer.get_name().to_lower().contains("headless")
+	var opp: Node3D = player._get_opponent() if player.has_method("_get_opponent") else null
+	if not opp or not is_instance_valid(opp):
+		return false
+	opp.set("current_ki", 85.0)
+	player.set("current_ki", 75.0)
+
+	opp._launch_and_start_followup(player, Vector3(0.0, 5.0, 18.0), 1.0, "ai_test_launch")
+	await get_tree().process_frame
+	var fu_def: Node3D = opp.get("active_followup_controller") as Node3D
+	if not fu_def or not is_instance_valid(fu_def):
+		_audit_add("Def Intro Pause", false, "No se creó FollowUpSequenceController defensivo")
+		return false
+
+	var d_title: Label3D = fu_def.get("_title_label") as Label3D
+	var d_acts: Label3D = fu_def.get("_def_actions_label") as Label3D
+	var hud_ok: bool = bool(fu_def.call("is_in_intro_pause")) and d_title != null and ("FUISTE LANZADO" in d_title.text) and d_acts != null and ("Z-Vanish" in d_acts.text)
+	_audit_add("Def Intro Pause", hud_ok, "title=%s" % (d_title.text if d_title else "null"))
+	if not hud_ok:
+		fu_def.call("_finish_sequence", "test_fail", false)
+		Engine.time_scale = 1.0
+		return false
+
+	var wait_msec: int = Time.get_ticks_msec() + 3000
+	while Time.get_ticks_msec() < wait_msec and is_instance_valid(fu_def) and int(fu_def.get("state")) != 3:
+		await get_tree().process_frame
+
+	player.complete_air_brake()
+	var stab_ok: bool = int(player.get("vulnerability_state")) == 2 and is_instance_valid(fu_def)
+	_audit_add("Air Brake Stabilized", stab_ok, "vuln=%d" % int(player.get("vulnerability_state")))
+	if not stab_ok:
+		if is_instance_valid(fu_def):
+			fu_def.call("_finish_sequence", "test_fail", false)
+		Engine.time_scale = 1.0
+		return false
+
+	var box_ok: bool = bool(fu_def.call("choose_vanish_hammer")) and int(fu_def.get("state")) == 9
+	_audit_add("Hammer Def Box", box_ok, "state=%d" % int(fu_def.get("state")))
+	if is_visual:
+		await _step_real_seconds(0.95)
+	if is_instance_valid(fu_def):
+		fu_def.call("_finish_sequence", "test_done", false)
+	Engine.time_scale = 1.0
+	return hud_ok and stab_ok and box_ok
+
+
 func _seq_chain_sequences() -> bool:
 	var is_visual: bool = not DisplayServer.get_name().to_lower().contains("headless")
 	var opp: Node3D = player._get_opponent() if player.has_method("_get_opponent") else null
@@ -703,9 +1042,12 @@ func _seq_chain_sequences() -> bool:
 	else:
 		player._execute_charged_v3_or_ki_break_finisher(opp, "charged_v3_back", 3.2, Vector3(0.0, 5.0, -18.0))
 
-	await get_tree().create_timer(0.45 if is_visual else 0.38, true, false, true).timeout
+	var wait_fu_msec: int = Time.get_ticks_msec() + 3000
+	var fu_chain: Variant = player.get("active_followup_controller")
+	while Time.get_ticks_msec() < wait_fu_msec and fu_chain != null and is_instance_valid(fu_chain) and int(fu_chain.get("state")) != 3:
+		await get_tree().process_frame
 	var opp_vel_after_launch: float = (opp.get("velocity") as Vector3).length() if opp.get("velocity") is Vector3 else 0.0
-	var bt_ok: bool = bool(player.get("is_in_followup_bullet_time")) and is_equal_approx(Engine.time_scale, 0.08)
+	var bt_ok: bool = bool(player.get("is_in_followup_bullet_time")) and is_equal_approx(Engine.time_scale, 0.12)
 	_trace("SEQ1", "LAUNCH_CHECK", "bt=%s scale=%.2fx opp_kb=%s opp_vel=%.1fm/s hits_unblocked=%d" % [
 		str(bt_ok),
 		Engine.time_scale,
@@ -715,16 +1057,19 @@ func _seq_chain_sequences() -> bool:
 	])
 	_audit_add("SEQ1 Launch + BT", bt_ok, "scale=%.2fx opp_kb=%s opp_vel=%.1fm/s" % [Engine.time_scale, str(opp.get("is_knocked_back")), opp_vel_after_launch])
 	if not bt_ok:
-		print("  -> Motivo: el golpe Melee de Vegeta no disparó Follow-Up Bullet-Time (0.08x).")
+		print("  -> Motivo: el golpe Melee de Vegeta no disparó Follow-Up Bullet-Time (0.12x).")
 		Engine.time_scale = 1.0
 		return false
 
-	# 1. SEQ 2: Follow-Up Bullet-Time -> dejar ver a Goku suspendido en 0.08x antes de lanzar Meteor Chase
+	# 1. SEQ 2: Follow-Up Bullet-Time -> dejar ver a Goku suspendido en 0.12x antes de lanzar Meteor Chase
 	if is_visual:
-		await get_tree().create_timer(1.1, true, false, true).timeout
+		await _step_real_seconds(0.85)
 	var d2_start_dist: float = _get_fighters_dist(opp)
 	var d2_start_msec: int = Time.get_ticks_msec()
-	player.start_flight_to_opponent()
+	if fu_chain != null and is_instance_valid(fu_chain) and fu_chain.has_method("choose_melee_chase"):
+		fu_chain.call("choose_melee_chase")
+	else:
+		player.start_flight_to_opponent()
 	var bonus_hits: int = int(player.get("pending_followup_bonus_hits"))
 	var bonus_mult: float = float(player.get("pending_followup_damage_mult"))
 	var bonus_ok: bool = (bonus_hits == 2 and is_equal_approx(bonus_mult, 1.25))
@@ -914,6 +1259,10 @@ func _seq_chain_sequences() -> bool:
 		await _step_seconds(1.0)
 
 	# 4. Fase 2 & 3: Shunkan Idō + Nuevos Poderes
+	_cleanup_active_dome_for_test()
+	player.set("is_flying_to_opponent", false)
+	player.set("is_in_beam_sequence", false)
+	player.set("is_in_beam_clash", false)
 	player.set("current_ki", 50.0)
 	if not player.execute_shunkan_ido_flank() or float(player.get("current_ki")) >= 50.0:
 		print("  -> Motivo: execute_shunkan_ido_flank falló o no consumió Ki.")

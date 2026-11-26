@@ -2224,9 +2224,7 @@ func _cut_melee_hammer_defended(p_def: Node3D, p_atk: Node3D, chip_dmg: float) -
 		return
 	is_active = false
 	_kill_surge_tween()
-	_hitstop_end_msec = 0
-	if Engine.time_scale < 1.0:
-		Engine.time_scale = 1.0
+	_reset_dome_hitstop_timescale()
 	phase = DomePhase.COMPLETED
 	_hide_all_charge_spheres()
 	_reset_all_timing_rings()
@@ -2626,9 +2624,7 @@ func _trigger_finisher_and_close(finisher_name: String, swing_vel: float) -> voi
 		return
 	is_active = false
 	_kill_surge_tween()
-	_hitstop_end_msec = 0
-	if Engine.time_scale < 1.0:
-		Engine.time_scale = 1.0
+	_reset_dome_hitstop_timescale()
 	phase = DomePhase.COMPLETED
 	last_finisher_attacker = attacker
 	last_finisher_victim = defender
@@ -2637,6 +2633,7 @@ func _trigger_finisher_and_close(finisher_name: String, swing_vel: float) -> voi
 	emit_signal("finisher_triggered", finisher_name, swing_vel, hits, last_impact_vector)
 	if dome_mesh and is_instance_valid(dome_mesh):
 		var tw := create_tween()
+		tw.set_ignore_time_scale(true)
 		tw.tween_property(dome_mesh, "scale", Vector3.ZERO, 0.14).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
 		tw.tween_callback(queue_free)
 	else:
@@ -2738,9 +2735,7 @@ func _close_dome_with_separation(sep_dist: float, reason_msg: String = "") -> vo
 	_custom_separation_reason = reason_msg
 	is_active = false
 	_kill_surge_tween()
-	_hitstop_end_msec = 0
-	if Engine.time_scale < 1.0:
-		Engine.time_scale = 1.0
+	_reset_dome_hitstop_timescale()
 	phase = DomePhase.COMPLETED
 	_hide_all_charge_spheres()
 	_reset_all_timing_rings()
@@ -5450,6 +5445,20 @@ func _spawn_parry_shockwave(pos: Vector3) -> void:
 		ZenkaiVFXManager.spawn_zenkai_impact_flash(get_tree(), pos, Color(1.0, 0.96, 0.48, 1.0), 1.05)
 
 
+## Restaura time_scale tras hitstop local de cúpula sin pisar FollowUpSequenceController si está activo.
+func _reset_dome_hitstop_timescale() -> void:
+	_hitstop_end_msec = 0
+	var keep_followup_timescale: bool = false
+	for fighter_ref in [attacker, defender, last_finisher_attacker, last_finisher_victim]:
+		if fighter_ref and is_instance_valid(fighter_ref):
+			var fu_ref: Variant = fighter_ref.get("active_followup_controller")
+			if bool(fighter_ref.get("is_in_followup_bullet_time")) or (fu_ref != null and is_instance_valid(fu_ref)):
+				keep_followup_timescale = true
+				break
+	if Engine.time_scale < 1.0 and not keep_followup_timescale:
+		Engine.time_scale = 1.0
+
+
 func _exit_tree() -> void:
 	_kill_surge_tween()
 	if _impact_popup_tween and is_instance_valid(_impact_popup_tween):
@@ -5458,9 +5467,7 @@ func _exit_tree() -> void:
 	if _active_impact_popup and is_instance_valid(_active_impact_popup):
 		_active_impact_popup.queue_free()
 		_active_impact_popup = null
-	_hitstop_end_msec = 0
-	if Engine.time_scale < 1.0:
-		Engine.time_scale = 1.0
+	_reset_dome_hitstop_timescale()
 	for i in [0, 1]:
 		if charge_spheres[i] and is_instance_valid(charge_spheres[i]):
 			charge_spheres[i].queue_free()

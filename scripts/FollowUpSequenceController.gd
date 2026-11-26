@@ -338,6 +338,8 @@ func _process(delta: float) -> void:
 
 	match state:
 		FollowUpState.HITSTOP:
+			if _state_timer > 0.0 and Engine.time_scale > 0.01:
+				Engine.time_scale = 0.005
 			_state_timer -= real_dt
 			_refresh_intro_pause_hud()
 			if _state_timer <= 0.0:
