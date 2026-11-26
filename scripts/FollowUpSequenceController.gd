@@ -670,7 +670,7 @@ func choose_ki_barrage() -> bool:
 	if bool(attacker.get("is_player")):
 		state = FollowUpState.MINI_KI_BARRAGE_ATK
 		_state_timer = _barrage_total
-		Engine.time_scale = 0.38
+		Engine.time_scale = 0.58
 		_build_barrage_attacker_hud()
 	else:
 		if _is_defender_stabilized() and bool(defender.get("is_player")):
@@ -842,7 +842,7 @@ func _process_mini_ki_barrage_atk(real_dt: float) -> void:
 		var use_hand: int = 0 if fresh_l else (1 if fresh_r else _barrage_next_hand)
 		if fire_barrage_shot(use_hand):
 			_barrage_next_hand = 1 - use_hand
-			_barrage_shot_cd = 0.14
+			_barrage_shot_cd = 0.095
 			if _barrage_shots_fired >= _barrage_max_shots:
 				_finish_sequence("ki_barrage", true)
 				return
@@ -886,7 +886,7 @@ func fire_barrage_shot(hand_side: int) -> bool:
 	if side_vec.length_squared() < 0.001:
 		side_vec = Vector3.RIGHT
 	var arc_sign: float = -1.0 if (hand_side == 0) else 1.0
-	var spread_dir: Vector3 = (to_def + side_vec * arc_sign * 0.42 + Vector3.UP * randf_range(0.08, 0.30)).normalized()
+	var spread_dir: Vector3 = (to_def + side_vec * arc_sign * 0.36 + Vector3.UP * randf_range(0.06, 0.24)).normalized()
 
 	var energy_col := Color(0.20, 0.85, 1.0, 0.95)
 	if attacker.get("character_data") and attacker.character_data.powers.size() > 0:
@@ -897,7 +897,7 @@ func fire_barrage_shot(hand_side: int) -> bool:
 	var p_rad: float = 0.22 if is_final else 0.09
 	ZenkaiVFXManager.build_zenkai_orb_visual(proj, p_rad, energy_col, is_final, is_final)
 	proj.set_script(ProceduralKiProjectileScript)
-	proj.set("speed_velocity", spread_dir * (30.0 if is_final else 26.0))
+	proj.set("speed_velocity", spread_dir * (64.0 if is_final else 54.0))
 	proj.set("p_radius", p_rad)
 	proj.set("p_color", energy_col)
 	proj.set("tier", 2 if is_final else 1)
@@ -906,7 +906,7 @@ func fire_barrage_shot(hand_side: int) -> bool:
 	proj.set("shooter_node", attacker)
 	proj.set("original_shooter", attacker)
 	proj.set("homing_target", defender)
-	proj.set("homing_strength", 9.5)
+	proj.set("homing_strength", 15.5)
 	proj.set("is_volley_final", is_final)
 	var is_def_vuln: bool = defender.has_method("is_vulnerable_defenseless") and bool(defender.is_vulnerable_defenseless())
 	proj.set("unblockable_defenseless", is_def_vuln)
@@ -941,7 +941,7 @@ func _process_mini_ki_barrage_def(real_dt: float) -> void:
 		if _def_barrage_unblockable_shots > 0 and _def_barrage_spawn_cd <= 0.0:
 			fire_barrage_shot(_def_barrage_unblockable_shots % 2)
 			_def_barrage_unblockable_shots -= 1
-			_def_barrage_spawn_cd = 0.14
+			_def_barrage_spawn_cd = 0.095
 		if _state_timer <= 0.0:
 			if is_inside_tree() and get_tree():
 				KiSmokeFX.spawn_smoke(get_tree(), defender.global_position + Vector3.UP * 0.9, 1.45)

@@ -928,7 +928,7 @@ func _seq_followup_barrage() -> bool:
 	for i: int in range(8):
 		if is_instance_valid(fu) and bool(fu.call("fire_barrage_shot", i % 2)):
 			fired_cnt += 1
-		await _step_real_seconds(0.15 if is_visual else 0.05)
+		await _step_real_seconds(0.10 if is_visual else 0.04)
 
 	var projs: Array = get_tree().get_nodes_in_group("ki_projectiles")
 	var has_unblockable: bool = false
