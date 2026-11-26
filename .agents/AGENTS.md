@@ -23,8 +23,10 @@
   - Tipado estático estricto (`func test() -> void:`), multiplicar física por `delta` en `_physics_process(delta)` y **zero allocations** en hot paths.
   - Rutas OpenXR canónicas: `/user/hand_tracker/left` y `/user/hand_tracker/right`. Escala métrica 1:1 en runtime.
 - **Compilación APK Fuera del Chat (0 Tokens) y Autorización Obligatoria para Envío a los Lentes:**
-  - El agente **NO** compila `builds/dbzvr.apk` dentro del chat (ahorro de tokens y tiempo de espera).
-  - El usuario puede compilar en cualquier momento con doble clic en `build_apk.bat` (0 tokens), o pedir al agente cerrar un commit con el marcador `[apk]` para que el hook `.agents/hooks.json` abra automáticamente la ventana independiente de Windows (`build_apk.ps1` + parada de Gradle daemon + confirmación interactiva `[S/N]` de `adb install`).
+  - El agente **NO** compila `builds/dbzvr.apk` ni ejecuta `adb install` dentro del chat (ahorro de tokens y tiempo de espera).
+  - En lugar de ejecutar el build en el chat, cuando un cambio esté listo para probar en Meta Quest 3 (o si el usuario pide generar el APK), el agente debe **entregarle la ruta/comando directo y la opción de dispararlo**:
+    1. **Manual (0 tokens):** doble clic en `d:\Mis Documentos\dbzvr\build_apk.bat` o ejecutar `& "d:\Mis Documentos\dbzvr\build_apk.ps1"`.
+    2. **Automático por hook:** ofrecer cerrar un `git commit` con el marcador `[apk]` para que `.agents/hooks.json` abra automáticamente la ventana independiente de Windows (`build_apk.ps1` + parada de Gradle daemon + confirmación interactiva `[S/N]` de `adb install`).
   - **NUNCA** desplegar ni instalar el APK en los lentes sin autorización explícita del usuario. Cuando autorice, verificar `adb devices` primero.
 - **Informe Final Obligatorio:** concluir cada ciclo explicando qué cambió, dónde, por qué y la validación empírica realizada.
 

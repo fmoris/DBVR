@@ -29,7 +29,8 @@ Operar las herramientas de validación rápida en escritorio (sin APK), pruebas 
 
 ## Invariantes Críticas
 - Todo cambio visual/animación/UI se valida primero en escritorio con `run_desktop_preview.ps1` antes de compilar APK.
-- Todo export de APK debe detener el Gradle daemon (`gradlew.bat --stop`) al terminar.
+- **Cero builds APK dentro del chat:** nunca ejecutar `--export-debug "Android"` ni `adb install` en el chat; en su lugar, entregar al usuario la ruta/comando (`d:\Mis Documentos\dbzvr\build_apk.bat` o `& "d:\Mis Documentos\dbzvr\build_apk.ps1"`) o ofrecerle cerrar el commit con `[apk]` para disparar `.agents/hooks.json`.
+- Todo export de APK (ejecutado vía `build_apk.ps1`) debe detener el Gradle daemon (`gradlew.bat --stop`) al terminar y limpiar `builds\.apk_build.lock` en `finally`.
 - Verificar `adb devices` antes de instalar cuando el usuario autorice el envío.
 
 ## Gate de Verificación
