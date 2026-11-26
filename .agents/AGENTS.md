@@ -26,6 +26,7 @@
   - Al cerrar un ciclo listo para probar en visor, compilar `d:\Mis Documentos\dbzvr\builds\dbzvr.apk` con `Start-Process -Wait` + `android\build\gradlew.bat --stop` (salvo que el usuario pida explícitamente trabajar sin APK en escritorio).
   - **NUNCA** desplegar ni instalar el APK en los lentes sin autorización explícita del usuario. Cuando autorice, verificar `adb devices` primero.
 - **Informe Final Obligatorio:** concluir cada ciclo explicando qué cambió, dónde, por qué y la validación empírica realizada.
+- **Ahorro de Tokens y Recordatorio Proactivo de Contexto:** al cerrar un hito/commit/APK, después de sesiones con muchas lecturas/imágenes o al detectar un cambio de Squad/dominio, recordar proactivamente al usuario cuándo conviene usar `/compact` (si sigue sobre el mismo bloque), cuándo abrir un chat nuevo (si cambia de dominio) y sugerir validar en Godot headless/escritorio y agrupar cambios en lote antes de compilar APK cuando ahorre tokens y tiempo.
 
 ---
 
@@ -35,7 +36,7 @@ Cada dominio del juego tiene un Squad dueño de sus archivos y sus skills (curad
 
 | ID | Squad | Ficha | Dominio / Archivos Propios | Skills Clave |
 |---|---|---|---|---|
-| **1A** | `melee-squad` | [1a-melee-sequences.md](squads/1a-melee-sequences.md) | `MeleeTargetDome.gd`, `MeleeLoreEventController.gd`, `HybridCombatController.gd` (melee/desvío/dash) | `godot-genre-fighting`, `godot-combat-system`, `state-machine`, `physics-system` |
+| **1A** | `melee-squad` | [1a-melee-sequences.md](squads/1a-melee-sequences.md) | `MeleeTargetDome.gd`, `FollowUpSequenceController.gd`, `MeleeLoreEventController.gd`, `HybridCombatController.gd` (melee/desvío/dash) | `godot-genre-fighting`, `godot-combat-system`, `state-machine`, `physics-system` |
 | **1B** | `super-beam-squad` | [1b-super-beams.md](squads/1b-super-beams.md) | `SuperBeamSequenceController.gd`, `BeamClashController.gd`, `ProceduralKiProjectile.gd` | `godot-combat-system`, `godot-signal-architecture`, `tween-animation`, `godot-raycasting-queries` |
 | **2** | `ki-bp-systems` | [2-ki-bp-systems.md](squads/2-ki-bp-systems.md) | `character_instance.gd` (Ki/NP/Furia/Zenkai), `CombatAIController.gd`, `DramaticDirector.gd`, `vr_hud.gd` | `godot-state-machine-advanced`, `godot-signal-architecture`, `godot-gdscript-mastery`, `game-ui-specialist` |
 | **3A** | `xr-gestures` | [3a-xr-gestures.md](squads/3a-xr-gestures.md) | `GesturePhaseTree.gd`, `xr_setup.gd`, `ki_sense_and_lockon.gd`, OpenXR 26 joints | `xr-development`, `godot-platform-vr`, `gdscript-advanced` |

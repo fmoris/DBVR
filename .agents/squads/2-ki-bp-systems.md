@@ -27,6 +27,9 @@ Administrar el núcleo de reglas de combate sin barra de HP: Ki, Nivel de Poder 
 - Arquitectura estricta **Signal Up, Call Down**: el combate emite señales; `vr_hud.gd` solo escucha.
 - Los umbrales de NP (25/50/75/100%) son irreversibles una vez alcanzados.
 - Las técnicas desbloqueadas en una transformación se heredan en todas las formas posteriores.
+- **Ki Máximo Escalable por Transformación:** usar `get_max_ki()` (`base_ki + ki_max_bonus`: 100 Base ➔ 130/160/190/220 según forma) en vez de leer `character_data.base_ki` directamente en regeneración, HUD y límites de cúpula/IA; `revert_to_base()` debe clampear `current_ki` al tope activo.
+- **Restauración al Transformar vs Limit Break:** `transform_to()` suma `ki_transform_restore` (`+25..+45 Ki`) únicamente si `not _is_limit_break_running`, para que el Despertar Límite automático otorgue exclusivamente su `+10 Ki` canónico.
+- **Estados Indefensos Post-Lanzamiento (`VulnerabilityState`):** distinguir `AIRBORNE_LAUNCHED` (intenta Air Brake para pasar a `STABILIZED`) de `CRASHED_STAMPED` (estampado contra suelo/pilar/cordillera, sin despertar aéreo, duración `1.05s–3.40s` pausada durante `HITSTOP`/`DECISION_WINDOW`). El bono `+18 Ki` al estampar (`followup_crash_ki_bonus`) se otorga **como máximo una vez** por lanzamiento (`_crash_bonus_awarded_this_launch`).
 
 ## Gate de Verificación
 ```powershell
