@@ -28,6 +28,9 @@ Implementar y mantener el combate cuerpo a cuerpo en tiempo real, la Cúpula Mel
 - En Bullet-Time (`Engine.time_scale = 0.12` durante Follow-Up), todo temporizador de input/carga/pose/aire (`FollowUpSequenceController`, pose/carga de Súper y Air Brake en `HybridCombatController`) **debe usar `real_dt = clampf(delta / maxf(Engine.time_scale, 0.005), 0.001, 0.08)`**; nunca acumular `delta` escalado para poses ni gatillos.
 - En `FollowUpSequenceController.choose_melee_chase()`, invocar `attacker.start_flight_to_opponent()` **antes** de `_finish_sequence("melee_chase", false)` para que `was_followup_chase` sea `true` (preservando Z-Blink aéreo, `2.2×` velocidad, `pending_followup_bonus_hits` y sin duplicar `combat_chain_depth`).
 - `complete_air_brake()` habilita defensa pasando al defensor a `STABILIZED`, pero **nunca** cancela el `FollowUpSequenceController` activo del atacante.
+- `_exit_tree()` en `MeleeTargetDome.gd` y `FollowUpSequenceController.gd` **nunca** debe reiniciar `Engine.time_scale = 1.0` a ciegas si otro controlador activo (`active_followup_controller`, `active_target_dome`, `is_in_bullet_time`, `is_in_beam_sequence`, `is_in_beam_clash`) posee el Bullet-Time; además todo tween de cierre/encogimiento debe usar `tw.set_ignore_time_scale(true)`.
+- `_is_followup_minigame_locked(player)` en `HybridCombatController.gd` debe revisar tanto `player` como `opp`, y `_process_grid_step_movement()` debe bloquear pasos discretos durante `is_in_bullet_time`, `is_in_beam_sequence`, `is_in_beam_clash` y minijuegos Follow-Up para que el flick de `Stick` de Z-Vanish nunca dispare un tween lateral que arrastre `XROrigin3D`.
+- `start_flight_to_opponent()` limpia `pending_followup_bonus_hits = 0`; cualquier contraataque con Z-Dash (`start_counter_melee_reversal`) debe aplicar bonos y `_dash_speed_mult` **después** de llamarla.
 
 ## Gate de Verificación
 ```powershell

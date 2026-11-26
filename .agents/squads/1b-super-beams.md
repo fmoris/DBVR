@@ -24,6 +24,8 @@ Gestionar proyectiles de Ki (rápidos y cargados), secuencias Bullet-Time de Sú
 - El Bullet-Time adaptativo siempre debe restaurar `Engine.time_scale = 1.0` al finalizar o cancelar la secuencia.
 - En Beam Clash, la IA no dispara Ki Blasts durante el choque; el haz avanza y resuelve al llegar a 0 Ki o desistir.
 - Cero referencias a `ki_sphere.gdshader` o `ki_corona.gdshader`.
+- `_exit_tree()` en `SuperBeamSequenceController.gd` y `BeamClashController.gd` debe verificar `_has_other_active_bullet_time()` antes de restaurar `Engine.time_scale = 1.0`, y los tweens de cierre deben llevar `tw.set_ignore_time_scale(true)` para no bloquear ni pisar una secuencia Follow-Up (`0.005×`) o Cúpula Melee de contraataque recién abierta.
+- Limpiar siempre `attacker.active_beam_sequence = null` en `_cleanup_and_finish` y `_exit_tree()`, y al leer `active_beam_sequence` desde `character_instance.gd` usar `Variant` + `is_instance_valid(...)` antes de castear a `Node` (evita `Trying to assign invalid previously freed instance` en GDScript 4).
 
 ## Gate de Verificación
 ```powershell

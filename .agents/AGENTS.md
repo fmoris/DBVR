@@ -26,6 +26,7 @@
   - Al cerrar un ciclo listo para probar en visor, compilar `d:\Mis Documentos\dbzvr\builds\dbzvr.apk` con `Start-Process -Wait` + `android\build\gradlew.bat --stop` (salvo que el usuario pida explícitamente trabajar sin APK en escritorio).
   - **NUNCA** desplegar ni instalar el APK en los lentes sin autorización explícita del usuario. Cuando autorice, verificar `adb devices` primero.
 - **Informe Final Obligatorio:** concluir cada ciclo explicando qué cambió, dónde, por qué y la validación empírica realizada.
+- **Destilación Automática de Aprendizajes (Cero Regresiones Futuras):** cada vez que se descubra y resuelva un bug no trivial, una trampa de Godot/OpenXR o una nueva invariante de arquitectura, registrarla de inmediato en la sección `Invariantes Críticas` del Squad dueño (`.agents/squads/<squad>.md`) y en la memoria de sesión (`d:\openclaw\workspace\memory\YYYY-MM-DD.md` / `MEMORY.md`).
 - **Ahorro de Tokens y Recordatorio Proactivo de Contexto:** al cerrar un hito/commit/APK, después de sesiones con muchas lecturas/imágenes o al detectar un cambio de Squad/dominio, recordar proactivamente al usuario cuándo conviene usar `/compact` (si sigue sobre el mismo bloque), cuándo abrir un chat nuevo (si cambia de dominio) y sugerir validar en Godot headless/escritorio y agrupar cambios en lote antes de compilar APK cuando ahorre tokens y tiempo.
 
 ---
