@@ -3699,9 +3699,12 @@ func _modify_fighter_ki(fighter: Node3D, delta_ki: float, is_defensive_reward: b
 		actual_delta *= 2.0
 	var cur_ki: float = float(fighter.get("current_ki")) if fighter.get("current_ki") != null else 0.0
 	var max_ki: float = 100.0
-	var cdata: Resource = fighter.get("character_data")
-	if cdata and "base_ki" in cdata:
-		max_ki = float(cdata.base_ki)
+	if fighter.has_method("get_max_ki"):
+		max_ki = maxf(float(fighter.get_max_ki()), 1.0)
+	else:
+		var cdata: Resource = fighter.get("character_data")
+		if cdata and "base_ki" in cdata:
+			max_ki = float(cdata.base_ki)
 	fighter.set("current_ki", clampf(cur_ki + actual_delta, 0.0, max_ki))
 	if actual_delta < 0.0 and fighter.has_method("_mark_ki_spent"):
 		fighter._mark_ki_spent()
@@ -4551,12 +4554,18 @@ func _refresh_melee_ki_bar() -> void:
 	var e_ki: float = float(e_node.get("current_ki")) if (e_node and is_instance_valid(e_node) and e_node.get("current_ki") != null) else 0.0
 	var p_max: float = 100.0
 	var e_max: float = 100.0
-	var p_cd: Resource = p_node.get("character_data") if (p_node and is_instance_valid(p_node)) else null
-	var e_cd: Resource = e_node.get("character_data") if (e_node and is_instance_valid(e_node)) else null
-	if p_cd and "base_ki" in p_cd:
-		p_max = maxf(float(p_cd.base_ki), 1.0)
-	if e_cd and "base_ki" in e_cd:
-		e_max = maxf(float(e_cd.base_ki), 1.0)
+	if p_node and is_instance_valid(p_node) and p_node.has_method("get_max_ki"):
+		p_max = maxf(float(p_node.get_max_ki()), 1.0)
+	else:
+		var p_cd: Resource = p_node.get("character_data") if (p_node and is_instance_valid(p_node)) else null
+		if p_cd and "base_ki" in p_cd:
+			p_max = maxf(float(p_cd.base_ki), 1.0)
+	if e_node and is_instance_valid(e_node) and e_node.has_method("get_max_ki"):
+		e_max = maxf(float(e_node.get_max_ki()), 1.0)
+	else:
+		var e_cd: Resource = e_node.get("character_data") if (e_node and is_instance_valid(e_node)) else null
+		if e_cd and "base_ki" in e_cd:
+			e_max = maxf(float(e_cd.base_ki), 1.0)
 
 	var p_int: int = int(roundf(p_ki))
 	var e_int: int = int(roundf(e_ki))

@@ -37,6 +37,7 @@ var homing_target: Node3D = null
 var homing_strength: float = 0.0
 var pierce_damage_mult: float = 1.0
 var was_launched_in_zenkai: bool = false
+var unblockable_defenseless: bool = false
 
 # Red de seguridad de ciclo de vida (Punto 10: Ki blasts que no desaparecen)
 const HARD_MAX_AGE: float = 8.0
@@ -84,10 +85,11 @@ func _physics_process(delta: float) -> void:
 
 	# 2. Comprobar desvío por proximidad de manos a alta velocidad (Ki Deflection)
 	# (Solo se salta el frame exacto del desvío; luego el proyectil sigue volando y envejeciendo)
-	var deflections_before: int = deflection_count
-	_check_hand_deflection_proximity()
-	if is_dead or deflection_count != deflections_before:
-		return
+	if not unblockable_defenseless:
+		var deflections_before: int = deflection_count
+		_check_hand_deflection_proximity()
+		if is_dead or deflection_count != deflections_before:
+			return
 
 	# 2b. Guiado suave de seguimiento (Cargados y Devoluciones Perfectas, cero allocs)
 	if homing_strength > 0.0 and homing_target != null and is_instance_valid(homing_target):
@@ -158,8 +160,8 @@ func _physics_process(delta: float) -> void:
 					if ctrl:
 						hand_vel = ctrl.left_velocity if "left" in col_name.to_lower() else ctrl.right_velocity
 
-				# Proyectiles de Tier 1 y 2 se pueden desviar según velocidad y ratio de BP
-				var def_check: Dictionary = _can_hand_deflect(hand_vel, collider)
+				# Proyectiles de Tier 1 y 2 se pueden desviar según velocidad y ratio de BP (salvo objetivo indefenso)
+				var def_check: Dictionary = {"allowed": false} if unblockable_defenseless else _can_hand_deflect(hand_vel, collider)
 				if bool(def_check.get("allowed", false)):
 					_execute_deflection(collision, hand_vel, collider)
 					return
@@ -585,8 +587,9 @@ func _apply_projectile_hit(char_node: Node, caster: Node, pos: Vector3, hit_dir:
 			if char_node.has_method("_spawn_bp_delta_popup"):
 				char_node._spawn_bp_delta_popup(0.0, "⚡ ¡DASH INTERCEPTADO!")
 
-	# 3. Evaluación de Guardia Cruzada vs Ki Blast Cargado
-	var was_char_blocking: bool = bool(char_node.get("is_blocking")) and not bool(char_node.get("is_guard_broken"))
+	# 3. Evaluación de Guardia Cruzada vs Ki Blast Cargado / Estado Indefenso
+	var def_vuln: bool = unblockable_defenseless or (char_node.has_method("is_vulnerable_defenseless") and bool(char_node.is_vulnerable_defenseless()))
+	var was_char_blocking: bool = (not def_vuln) and bool(char_node.get("is_blocking")) and not bool(char_node.get("is_guard_broken"))
 	var forced_guard_break: bool = false
 	if is_charged_blast and was_char_blocking:
 		if bool(profile.get("triggers_guard_break", false)):

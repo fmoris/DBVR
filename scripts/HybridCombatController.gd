@@ -665,6 +665,19 @@ func _is_arm_extended_palm_forward(
 
 # --- 2. KI BLASTS (Izquierda y Derecha) ---
 func _process_ki_blasts(delta: float) -> void:
+	# Durante Follow-Up Bullet-Time, la lluvia de Ki Blasts se gestiona en tiempo real desde FollowUpSequenceController
+	var p_fu_kb: Node = gesture_tree._get_player_instance() if gesture_tree else null
+	if p_fu_kb != null and is_instance_valid(p_fu_kb) and bool(p_fu_kb.get("is_in_followup_bullet_time")):
+		if left_is_charging or right_is_charging:
+			if gesture_tree:
+				gesture_tree._cleanup_ki_blast_charge_sphere(0)
+				gesture_tree._cleanup_ki_blast_charge_sphere(1)
+		left_charge_time = 0.0
+		right_charge_time = 0.0
+		left_is_charging = false
+		right_is_charging = false
+		return
+
 	# Bloqueo total si se está recargando Ki, en preparación, en debounce de salida (250ms) o cargando super poder
 	if is_charging_ki or ki_prep_phase or recharge_exit_cooldown > 0.0 or current_super_state != SuperPowerState.IDLE:
 		if left_is_charging or right_is_charging:
@@ -799,50 +812,6 @@ func _process_single_ki_blast(controller: XRController3D, hand_side: int, delta:
 		if held_time >= 0.025:
 			var is_charged = held_time >= 0.45
 			var action_name = "ki_blast_left" if is_left else "ki_blast_right"
-			var p_ref: Node = gesture_tree._get_player_instance() if gesture_tree else null
-			var in_fu_renzoku: bool = (not is_charged) and p_ref != null and is_instance_valid(p_ref) and bool(p_ref.get("is_in_followup_bullet_time"))
-			if in_fu_renzoku and gesture_tree:
-				var cfg_r: KiEconomyConfig = KiEconomyConfig.get_default()
-				var renzoku_cost: float = cfg_r.ki_blast_cost * 3.0
-				if float(p_ref.get("current_ki")) >= renzoku_cost:
-					if p_ref.has_method("_end_followup_bullet_time"):
-						p_ref._end_followup_bullet_time(false)
-					else:
-						p_ref.set("is_in_followup_bullet_time", false)
-						Engine.time_scale = 1.0
-						if p_ref.has_method("_hide_followup_decision_banner"):
-							p_ref._hide_followup_decision_banner()
-					for r_i: int in range(3):
-						var r_act: String = "ki_blast_right" if (r_i % 2 == 0) else "ki_blast_left"
-						var r_hand: int = r_i % 2
-						var delay_s: float = float(r_i) * 0.08
-						if delay_s <= 0.001:
-							gesture_tree._trigger_action(r_act)
-							var pa0: Variant = p_ref.get("procedural_animator")
-							if pa0 and pa0.has_method("trigger_ki_blast_shot"):
-								pa0.trigger_ki_blast_shot(r_hand)
-						else:
-							get_tree().create_timer(delay_s, true, false, true).timeout.connect(func():
-								if is_instance_valid(gesture_tree):
-									gesture_tree._trigger_action(r_act)
-								if is_instance_valid(p_ref):
-									var pa_n: Variant = p_ref.get("procedural_animator")
-									if pa_n and pa_n.has_method("trigger_ki_blast_shot"):
-										pa_n.trigger_ki_blast_shot(r_hand)
-							)
-					if gesture_tree.has_signal("gesture_logged"):
-						gesture_tree.emit_signal("gesture_logged", "💥 ¡RENZOKU ENERGY DAN! Ráfaga x3 en seguimiento", "success")
-					if is_left:
-						left_charge_time = 0.0
-						left_is_charging = false
-						left_blast_locked_haptic = false
-						left_blast_cooldown = 0.25
-					else:
-						right_charge_time = 0.0
-						right_is_charging = false
-						right_blast_locked_haptic = false
-						right_blast_cooldown = 0.25
-					return
 			var player_cd: Node = gesture_tree._get_player_instance() if gesture_tree else null
 			var c_data_cd = player_cd.get("character_data") if (player_cd and is_instance_valid(player_cd)) else null
 			var is_veg_cd: bool = c_data_cd != null and "VEGETA" in String(c_data_cd.character_name).to_upper()
@@ -1172,6 +1141,8 @@ func _is_valid_super_release_pose(tech_name: String, l_local_z: float, r_local_z
 
 func _process_super_powers(delta: float) -> void:
 	var player: Node = gesture_tree._get_player_instance() if gesture_tree else null
+	var in_followup: bool = player != null and is_instance_valid(player) and bool(player.get("is_in_followup_bullet_time"))
+	var eff_dt: float = clampf(delta / maxf(Engine.time_scale, 0.005), 0.001, 0.08) if in_followup else delta
 	if player and is_instance_valid(player) and (bool(player.get("is_match_over")) or bool(player.get("is_in_bullet_time")) or bool(player.get("is_in_beam_clash")) or bool(player.get("is_flying_to_opponent"))):
 		if current_super_state != SuperPowerState.IDLE:
 			_reset_super_state()
@@ -1292,12 +1263,13 @@ func _process_super_powers(delta: float) -> void:
 				return
 
 			if target_tech == candidate_super_tech:
-				candidate_hold_timer += delta
+				candidate_hold_timer += eff_dt
 			else:
 				candidate_super_tech = target_tech
-				candidate_hold_timer = delta
+				candidate_hold_timer = eff_dt
 
-			if candidate_hold_timer >= SUPER_POSE_HOLD_TIME:
+			var pose_hold_req: float = 0.08 if in_followup else SUPER_POSE_HOLD_TIME
+			if candidate_hold_timer >= pose_hold_req:
 				candidate_super_tech = ""
 				candidate_hold_timer = 0.0
 				current_super_state = SuperPowerState.CHARGING
@@ -1306,6 +1278,10 @@ func _process_super_powers(delta: float) -> void:
 				super_phase1_anchor_z = (l_local_z if l_grip else r_local_z) if target_tech == "big_bang" else avg_local_z
 				if player and player.has_method("start_charging_super"):
 					player.start_charging_super()
+				if in_followup and player:
+					var fu_ctrl_s: Variant = player.get("active_followup_controller")
+					if fu_ctrl_s != null and is_instance_valid(fu_ctrl_s) and fu_ctrl_s.has_method("notify_super_charge_started"):
+						fu_ctrl_s.notify_super_charge_started(target_tech)
 				if target_tech == "big_bang":
 					var bb_side_init: int = 0 if l_grip else 1
 					if gesture_tree:
@@ -1350,26 +1326,26 @@ func _process_super_powers(delta: float) -> void:
 				_reset_super_state()
 				return
 
-		# Consumo continuo de Ki durante la carga
-		if player and is_instance_valid(player):
+		# Consumo continuo de Ki durante la carga (exento en seguimiento acelerado)
+		if player and is_instance_valid(player) and not in_followup:
 			var drain_rate: float = KiEconomyConfig.get_default().super_charge_drain_per_sec
 
 			if player.current_ki > 0.0:
-				player.consume_ki(drain_rate * delta)
+				player.consume_ki(drain_rate * eff_dt)
 			else:
 				# ¡SOBRE-ESFUERZO VITAL DURANTE LA CARGA!
-				var vital_drain: float = 350.0 * delta
+				var vital_drain: float = 350.0 * eff_dt
 				player.current_np = max(1.0, player.current_np - vital_drain)
 				player._notify_stats()
-				_pulse_haptic(left_controller, 160.0, 0.85, delta)
-				_pulse_haptic(right_controller, 160.0, 0.85, delta)
+				_pulse_haptic(left_controller, 160.0, 0.85, eff_dt)
+				_pulse_haptic(right_controller, 160.0, 0.85, eff_dt)
 				if int(super_charge_timer * 10) % 4 == 0:
 					if gesture_tree and gesture_tree.has_signal("phase_changed"):
 						gesture_tree.emit_signal("phase_changed", "¡SOBRE-ESFUERZO VITAL! (QUEMANDO FUERZA VITAL)")
 
 		var super_spd_mult: float = player.get_dramatic_modifier("super_charge_speed_mult", 1.0) if (player and is_instance_valid(player) and player.has_method("get_dramatic_modifier")) else 1.0
 		var opp_sup: Node = player._get_opponent() if (player and is_instance_valid(player) and player.has_method("_get_opponent")) else null
-		var is_chain_fast_charge: bool = bool(player and is_instance_valid(player) and player.get("is_in_followup_bullet_time"))
+		var is_chain_fast_charge: bool = in_followup
 		if opp_sup and is_instance_valid(opp_sup):
 			var cfg_sup: KiEconomyConfig = KiEconomyConfig.get_default()
 			var sup_window_mult: float = 1.0
@@ -1382,17 +1358,18 @@ func _process_super_powers(delta: float) -> void:
 			if bool(opp_sup.get("is_defenseless_crash")):
 				is_chain_fast_charge = true
 			super_spd_mult *= sup_window_mult
-		var charge_dt: float = delta / maxf(Engine.time_scale, 0.01) if is_chain_fast_charge else delta
+		var charge_dt: float = eff_dt if (is_chain_fast_charge or in_followup) else delta
 		if is_chain_fast_charge:
-			super_spd_mult *= 2.2
+			var cfg_fast: KiEconomyConfig = KiEconomyConfig.get_default()
+			super_spd_mult *= float(cfg_fast.followup_super_charge_mult) if cfg_fast.get("followup_super_charge_mult") != null else 2.4
 		super_charge_timer += charge_dt * super_spd_mult
-		_pulse_haptic(left_controller, 110.0, clamp(0.25 + super_charge_timer * 0.35, 0.25, 0.95), delta)
-		_pulse_haptic(right_controller, 110.0, clamp(0.25 + super_charge_timer * 0.35, 0.25, 0.95), delta)
+		_pulse_haptic(left_controller, 110.0, clamp(0.25 + super_charge_timer * 0.35, 0.25, 0.95), eff_dt)
+		_pulse_haptic(right_controller, 110.0, clamp(0.25 + super_charge_timer * 0.35, 0.25, 0.95), eff_dt)
 
 		# Actualizar esfera visual concentrada y mira suave en tiempo real
 		if gesture_tree:
 			_set_gesture_tree_charge_time(super_power_type, super_charge_timer)
-			gesture_tree._update_special_charge_sphere(delta)
+			gesture_tree._update_special_charge_sphere(eff_dt)
 
 			var aim_color: Color = Color(1.0, 0.9, 0.1)
 			var aim_origin: Vector3 = (left_controller.global_position + right_controller.global_position) * 0.5
@@ -1467,7 +1444,7 @@ func _process_super_powers(delta: float) -> void:
 		var p2_ratio: float = clampf(super_charge_timer / maxf(min_fire_time, 0.01), 0.0, 1.0)
 		_update_controller_phase2_cues(super_power_type, p2_ratio, p2_ready, bb_side)
 		if p2_ready:
-			_phase2_heartbeat_timer += delta
+			_phase2_heartbeat_timer += eff_dt
 			if _phase2_heartbeat_timer >= 0.35:
 				_phase2_heartbeat_timer = 0.0
 				if super_power_type == "big_bang":
@@ -1494,7 +1471,7 @@ func _process_super_powers(delta: float) -> void:
 				super_phase2_latched = true
 				super_phase2_grace_timer = 0.75
 			elif super_phase2_grace_timer > 0.0:
-				super_phase2_grace_timer = maxf(super_phase2_grace_timer - delta, 0.0)
+				super_phase2_grace_timer = maxf(super_phase2_grace_timer - eff_dt, 0.0)
 				if super_phase2_grace_timer <= 0.0:
 					super_phase2_latched = false
 					super_phase2_ready_notified = false
@@ -1622,6 +1599,11 @@ func _execute_super_fire(tech_name: String) -> void:
 		gesture_tree._reset_to_idle()
 		gesture_tree.sync_controller_gesture_state("IDLE")
 
+	if player and is_instance_valid(player):
+		var fu_ctrl_f: Variant = player.get("active_followup_controller")
+		if fu_ctrl_f != null and is_instance_valid(fu_ctrl_f) and fu_ctrl_f.has_method("notify_super_fired"):
+			fu_ctrl_f.notify_super_fired()
+
 	# Bloquear reentrada hasta soltar Grips tras auto-disparo en Fase 2
 	_reset_super_state()
 	super_fatigue_timer = 1.0
@@ -1660,6 +1642,10 @@ func _reset_super_state() -> void:
 	var player = gesture_tree._get_player_instance() if gesture_tree else null
 	if player and player.has_method("stop_charging_super"):
 		player.stop_charging_super()
+	if player and is_instance_valid(player):
+		var fu_ctrl_c: Variant = player.get("active_followup_controller")
+		if fu_ctrl_c != null and is_instance_valid(fu_ctrl_c) and fu_ctrl_c.has_method("notify_super_cancelled"):
+			fu_ctrl_c.notify_super_cancelled()
 	if gesture_tree:
 		var chg_pl: Node = gesture_tree.get("ki_blast_charge_player")
 		if chg_pl and is_instance_valid(chg_pl) and chg_pl.has_method("stop"):
@@ -1948,9 +1934,23 @@ func _execute_melee_punch(controller: XRController3D) -> void:
 		return
 
 	if player and is_instance_valid(player):
+		var is_followup_chase: bool = bool(player.get("is_in_followup_bullet_time"))
+		if is_followup_chase:
+			var fu_ctrl_m: Variant = player.get("active_followup_controller")
+			if fu_ctrl_m != null and is_instance_valid(fu_ctrl_m) and fu_ctrl_m.has_method("choose_melee_chase"):
+				if not fu_ctrl_m.choose_melee_chase():
+					melee_cooldown = 0.6
+					_pulse_haptic(controller, 90.0, 0.35, 0.12)
+				else:
+					melee_cooldown = 0.35
+					_reset_super_state()
+					left_charge_time = 0.0
+					right_charge_time = 0.0
+					left_is_charging = false
+					right_is_charging = false
+				return
 		var curr_ki: float = float(player.get("current_ki")) if player.get("current_ki") != null else 0.0
 		var cfg_m: KiEconomyConfig = KiEconomyConfig.get_default()
-		var is_followup_chase: bool = bool(player.get("is_in_followup_bullet_time"))
 		var base_dash_cost: float = cfg_m.melee_meteor_chase_cost if is_followup_chase else cfg_m.melee_dash_cost
 		var chain_mult: float = player.get_chain_ki_multiplier() if (is_followup_chase and player.has_method("get_chain_ki_multiplier")) else 1.0
 		var dash_cost: float = base_dash_cost * chain_mult
@@ -2251,7 +2251,8 @@ func _process_air_brake(delta: float, player: Node) -> void:
 
 
 func _update_air_brake_with_motion(delta: float, player: Node, l_vel: Vector3, r_vel: Vector3) -> void:
-	if not player or not is_instance_valid(player) or not bool(player.get("is_air_brake_active")) or DramaticDirector.is_dramatic_pause_active:
+	var is_crashed_3: bool = player != null and is_instance_valid(player) and int(player.get("vulnerability_state")) == 3
+	if not player or not is_instance_valid(player) or is_crashed_3 or not bool(player.get("is_air_brake_active")) or DramaticDirector.is_dramatic_pause_active:
 		_prev_air_l_vel = l_vel
 		_prev_air_r_vel = r_vel
 		_air_l_active_timer = 0.0

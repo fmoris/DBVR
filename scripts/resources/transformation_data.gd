@@ -5,6 +5,8 @@ extends Resource
 @export var tier_level: int = 1 # Tier canónico 1..4 del sistema equilibrado
 @export var np_multiplier: float = 2.0 # Multiplica el NP máximo y aumenta el daño
 @export var ki_drain_per_sec: float = 1.0 # Costo por segundo para mantener la transformación
+@export var ki_max_bonus: float = 0.0 # Aumento adicional al tope máximo de Ki en esta forma
+@export var ki_transform_restore: float = 25.0 # Bono instantáneo de Ki al completar la transformación
 @export var aura_color: Color = Color(1, 0.8, 0, 1) # Color del aura de energía del personaje
 
 @export_group("Zenkai VFX, Iluminación, Audio y Animación")

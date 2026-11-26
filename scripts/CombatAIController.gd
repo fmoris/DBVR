@@ -112,27 +112,10 @@ func _physics_process(delta: float) -> void:
 			host.is_blocking = false
 		return
 
-	# En Follow-Up Bullet-Time, la IA reacciona usando tiempo real (Engine.time_scale puede estar en 0.08)
+	# En Follow-Up Bullet-Time, la IA delega completamente en FollowUpSequenceController
+	if host.get("active_followup_controller") != null and is_instance_valid(host.get("active_followup_controller")):
+		return
 	if host.is_in_followup_bullet_time:
-		if not player or not is_instance_valid(player):
-			var opp_fu = host._get_opponent()
-			if opp_fu is CharacterInstance:
-				player = opp_fu
-		_ai_followup_delay += delta / maxf(Engine.time_scale, 0.01)
-		if _ai_followup_delay >= 0.65:
-			_ai_followup_delay = 0.0
-			var super_pick: Dictionary = _select_ai_super_power()
-			var super_cost: float = float(super_pick.get("ki_cost", 30.0))
-			if not super_pick.is_empty() and host.current_ki >= maxf(super_cost, 30.0) and randf() < 0.35:
-				host._end_followup_bullet_time(false)
-				_transition_to(AIState.KAMEHAMEHA_CHARGE)
-			elif host.current_ki >= 16.0 and randf() < 0.55:
-				host.start_flight_to_opponent()
-			elif host.current_ki >= 8.0:
-				host._end_followup_bullet_time(false)
-				_transition_to(AIState.KI_BLAST_VOLLEY)
-			else:
-				host._end_followup_bullet_time(true)
 		return
 	_ai_followup_delay = 0.0
 
@@ -244,7 +227,7 @@ func _process_state_idle_spacing(delta: float) -> void:
 
 ## Evalúa el cambio de estado según Ki, distancia, dificultad y CharacterData
 func _evaluate_tactical_transition(dist: float) -> void:
-	var host_max_ki: float = host.character_data.base_ki if host.character_data else 100.0
+	var host_max_ki: float = host.get_max_ki() if host.has_method("get_max_ki") else (host.character_data.base_ki if host.character_data else 100.0)
 	var recharge_thresh: float = host_max_ki * 0.32
 	if host.current_ki < recharge_thresh:
 		_transition_to(AIState.KI_RECHARGE)
@@ -355,7 +338,7 @@ func _process_state_ki_recharge(delta: float) -> void:
 		host.global_position += back_dir * 1.5 * delta
 		host._clamp_to_arena(host)
 
-	var max_ki: float = host.character_data.base_ki if host.character_data else 100.0
+	var max_ki: float = host.get_max_ki() if host.has_method("get_max_ki") else (host.character_data.base_ki if host.character_data else 100.0)
 	if host.current_ki >= max_ki * 0.75 or state_timer >= 3.2:
 		host.is_charging_ki = false
 		if host.procedural_animator and host.procedural_animator.has_method("set_ki_recharge_phase"):

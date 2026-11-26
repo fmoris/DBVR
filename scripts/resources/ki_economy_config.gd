@@ -90,9 +90,23 @@ static var _cached: KiEconomyConfig = null
 @export_range(0.5, 1.0) var secured_floor_at_full: float = 0.90
 
 @export_group("Secuencias Encadenadas (Manga Chain Loop)")
-@export var chain_ki_cost_step: float = 0.22
+@export var chain_ki_cost_step: float = 0.18
 @export var post_super_followup_min_ki: float = 12.0
-@export var post_super_followup_duration: float = 3.0
+@export var post_super_followup_duration: float = 3.2
+@export var followup_launch_ki_bonus: float = 14.0
+@export var followup_crash_ki_bonus: float = 18.0
+@export var followup_melee_cost: float = 12.0
+@export var followup_vanish_hammer_cost: float = 18.0
+@export var followup_barrage_entry_cost: float = 10.0
+@export var followup_barrage_shot_cost: float = 1.5
+@export var followup_decision_duration: float = 3.2
+@export var followup_hitstop_sec: float = 0.18
+@export var followup_ramp_sec: float = 0.38
+@export var followup_super_charge_mult: float = 2.4
+@export var followup_crashed_super_dmg_mult: float = 1.15
+@export var followup_barrage_max_shots: int = 12
+@export var followup_barrage_duration: float = 2.2
+@export var followup_hammer_window_sec: float = 1.1
 
 
 static func get_default() -> KiEconomyConfig:

@@ -28,6 +28,7 @@ var energy_color: Color = Color(0.2, 0.8, 1.0)
 var base_damage: float = 1800.0
 var tier: int = 3
 var is_orb_super: bool = false
+var defender_is_defenseless: bool = false
 
 var state: BeamState = BeamState.ADVANCING_BULLET_TIME
 var is_active: bool = false
@@ -168,7 +169,17 @@ func setup(
 	if defender and defender.has_method("set"):
 		defender.set("is_in_beam_sequence", true)
 
-	# 1. Calcular Bullet-Time Adaptativo según la jerarquía de poder
+	# 1. Calcular Bullet-Time Adaptativo según la jerarquía de poder (y detectar estado indefenso)
+	defender_is_defenseless = false
+	if defender and is_instance_valid(defender):
+		if defender.has_method("is_vulnerable_defenseless"):
+			defender_is_defenseless = bool(defender.is_vulnerable_defenseless())
+		else:
+			defender_is_defenseless = bool(defender.get("is_defenseless_crash"))
+	var is_def_crashed_3: bool = defender != null and is_instance_valid(defender) and (int(defender.get("vulnerability_state")) == 3 or bool(defender.get("is_defenseless_crash")))
+	if is_def_crashed_3:
+		var cfg_dmg: KiEconomyConfig = KiEconomyConfig.get_default()
+		base_damage *= float(cfg_dmg.followup_crashed_super_dmg_mult) if cfg_dmg.get("followup_crashed_super_dmg_mult") != null else 1.15
 	reaction_duration = _calculate_adaptive_reaction_time()
 	time_left = reaction_duration
 
@@ -204,12 +215,17 @@ func setup(
 	current_head_pos = start_pos
 	prev_head_pos = start_pos
 
-	# 3. Aplicar dilatación temporal (Bullet-Time profundo en impacto o vuelo rápido en tiro fallado)
+	# 3. Aplicar dilatación temporal (Bullet-Time profundo en impacto, vuelo rápido en tiro fallado o rival indefenso)
 	if is_aimed_miss:
 		reaction_duration = 0.65
 		time_left = reaction_duration
 		_reading_pause_timer = 0.0
 		Engine.time_scale = 0.65
+	elif defender_is_defenseless:
+		reaction_duration = 0.70
+		time_left = reaction_duration
+		_reading_pause_timer = 0.0
+		Engine.time_scale = 0.42
 	else:
 		var is_player_def: bool = defender != null and is_instance_valid(defender) and bool(defender.get("is_player"))
 		_reading_pause_timer = 1.0 if is_player_def else 0.0
@@ -219,8 +235,8 @@ func setup(
 	_build_reticle_and_hud()
 	_build_audio()
 
-	# Si el defensor es la IA y el tiro va al cuerpo, evaluar su respuesta anticipada
-	if defender and not defender.get("is_player") and not is_aimed_miss:
+	# Si el defensor es la IA y el tiro va al cuerpo (y no está indefenso), evaluar su respuesta anticipada
+	if defender and not defender.get("is_player") and not is_aimed_miss and not defender_is_defenseless:
 		_plan_ai_defense_reaction()
 
 	print("[SuperBeamSequence] ⚡ ¡SECUENCIA DE SUPER HAZ INICIADA! %s -> %s (Miss: %s | Ventana Bullet-Time: %.2fs)" % [
@@ -268,8 +284,8 @@ func _process(delta: float) -> void:
 		_update_hud(time_left)
 		_pulse_firing_haptics()
 
-		# Evaluar respuestas defensivas únicamente cuando el ataque va dirigido al defensor
-		if not is_aimed_miss:
+		# Evaluar respuestas defensivas únicamente cuando el ataque va dirigido al defensor y NO está indefenso
+		if not is_aimed_miss and not defender_is_defenseless:
 			_update_defender_hand_velocities(real_delta)
 			if defender and defender.get("is_player"):
 				_check_player_defense_options()
@@ -338,7 +354,7 @@ func _check_player_defense_options() -> void:
 	var r_ctrl = origin.get_node_or_null("RightHand") as XRController3D
 	var cam = origin.get_node_or_null("XRCamera3D") as Camera3D
 
-	if defender and is_instance_valid(defender) and bool(defender.get("is_defenseless_crash")):
+	if defender and is_instance_valid(defender) and (defender_is_defenseless or bool(defender.get("is_defenseless_crash"))):
 		return
 
 	var l_grip: bool = (l_ctrl.get_float("grip") > 0.55 or l_ctrl.is_button_pressed("grip_click")) if l_ctrl else false
@@ -729,7 +745,7 @@ func _resolve_evasion() -> void:
 	if defender and is_instance_valid(defender):
 		var cfg_ev: KiEconomyConfig = KiEconomyConfig.get_default()
 		var zv_reward: float = float(cfg_ev.super_z_vanish_ki_reward) if cfg_ev.get("super_z_vanish_ki_reward") != null else 15.0
-		var max_k: float = float(defender.character_data.base_ki) if defender.get("character_data") else 100.0
+		var max_k: float = float(defender.get_max_ki()) if defender.has_method("get_max_ki") else (float(defender.character_data.base_ki) if defender.get("character_data") else 100.0)
 		var cur_k: float = float(defender.get("current_ki")) if defender.get("current_ki") != null else 0.0
 		defender.set("current_ki", minf(cur_k + zv_reward, max_k))
 		if defender.has_method("_notify_stats"):
@@ -1137,7 +1153,10 @@ func _update_hud(rem_time: float) -> void:
 	else:
 		alert_label.modulate = Color(1.0, 0.85, 0.25)
 
-	if defender and is_instance_valid(defender) and bool(defender.get("is_player")):
+	if defender_is_defenseless and not is_aimed_miss:
+		alert_label.modulate = Color(1.0, 0.30, 0.18)
+		alert_label.text = "💥 ¡RIVAL INDEFENSO! IMPACTO DIRECTO\n%s [%s] %.1fs" % [power_name.to_upper(), bar, maxf(rem_time, 0.0)]
+	elif defender and is_instance_valid(defender) and bool(defender.get("is_player")):
 		if _reading_pause_timer > 0.0:
 			alert_label.text = "%s👁️ ¡ELIGE TU DEFENSA! (%.1fs lectura)\n[%s] %.1fs (Ver panel inferior)" % [
 				zenkai_prefix, _reading_pause_timer, bar, maxf(rem_time, 0.0)

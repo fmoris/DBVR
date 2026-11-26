@@ -1265,10 +1265,10 @@ func _update_dbz_hud_elements(delta: float) -> void:
 
 
 func _on_player_stats_changed(ki: float, np: float, _is_zenkai: bool) -> void:
-	var max_ki = 100.0
-	var max_np = 20000.0
+	var max_ki: float = 100.0
+	var max_np: float = 20000.0
 	if player_instance and player_instance.character_data:
-		max_ki = player_instance.character_data.base_ki
+		max_ki = float(player_instance.get_max_ki()) if player_instance.has_method("get_max_ki") else float(player_instance.character_data.base_ki)
 		max_np = player_instance.character_data.max_np
 		if player_instance.current_transformation:
 			max_np *= player_instance.current_transformation.np_multiplier
@@ -1349,7 +1349,7 @@ func _update_combat_stats(_delta: float) -> void:
 		ki_current = player_instance.current_ki
 		np_current = player_instance.current_np
 		
-		var max_ki = player_instance.character_data.base_ki
+		var max_ki: float = float(player_instance.get_max_ki()) if player_instance.has_method("get_max_ki") else float(player_instance.character_data.base_ki)
 		var max_np = player_instance.character_data.max_np
 		if player_instance.current_transformation:
 			max_np *= player_instance.current_transformation.np_multiplier
@@ -1380,7 +1380,11 @@ func update_ki(current: float, max_val: float) -> void:
 	_hud_dirty = true
 	var percent: float = (current / max_val) * 100.0 if max_val > 0.0 else 0.0
 	if ki_text_label:
-		ki_text_label.text = ("KI %d%% ⚡" % int(percent)) if is_recharging else ("KI %d%%" % int(percent))
+		var bolt: String = " ⚡" if is_recharging else ""
+		if max_val > 105.0:
+			ki_text_label.text = "KI %d/%d%s" % [cur_int, max_int, bolt]
+		else:
+			ki_text_label.text = "KI %d%%%s" % [int(percent), bolt]
 	if ki_progress_bar:
 		ki_progress_bar.max_value = max_val
 		ki_progress_bar.value = current
