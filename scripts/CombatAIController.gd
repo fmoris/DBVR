@@ -68,6 +68,7 @@ var blast_interval_timer: float = 0.0
 # Carga de Super Ataque
 const KAMEHAMEHA_CHARGE_DURATION: float = 1.25
 var kamehameha_charge_timer: float = 0.0
+var followup_super_charge_mult: float = 1.0
 var kamehameha_vfx_sphere: Node3D = null
 var _queued_ai_super: Dictionary = {}
 
@@ -366,9 +367,15 @@ func _process_state_ki_blast_volley(delta: float) -> void:
 			_transition_to(AIState.IDLE_SPACING)
 
 
+## Inicia la carga acelerada de Súper desde FollowUpSequenceController (2.4x).
+func trigger_followup_fast_super(speed_mult: float = 2.4) -> void:
+	followup_super_charge_mult = maxf(speed_mult, 1.0)
+	_transition_to(AIState.KAMEHAMEHA_CHARGE)
+
+
 ## Estado 4: Carga y disparo del Super Ataque dinámico (Kamehameha / Galick Ho / Final Flash / Big Bang / Genkidama)
 func _process_state_kamehameha_charge(delta: float) -> void:
-	kamehameha_charge_timer += delta
+	kamehameha_charge_timer += delta * followup_super_charge_mult
 	host.is_charging_ki = true
 	var super_info: Dictionary = _queued_ai_super if not _queued_ai_super.is_empty() else _select_ai_super_power()
 	var s_name: String = String(super_info.get("name", "Kamehameha"))
@@ -411,6 +418,7 @@ func _process_state_kamehameha_charge(delta: float) -> void:
 
 		var target_pos = player.global_position + Vector3(0.0, 1.35, 0.0)
 		_spawn_kamehameha_beam(target_pos)
+		followup_super_charge_mult = 1.0
 		attack_cooldown = 2.2 if difficulty == AIDifficulty.Z_HARD else 3.2
 		_transition_to(AIState.IDLE_SPACING)
 
@@ -418,6 +426,7 @@ func _process_state_kamehameha_charge(delta: float) -> void:
 ## Cancela el Super Ataque por rotura de concentración
 func interrupt_kamehameha() -> void:
 	if current_state == AIState.KAMEHAMEHA_CHARGE:
+		followup_super_charge_mult = 1.0
 		host.is_charging_ki = false
 		host.stop_charging_super()
 		if host.procedural_animator and host.procedural_animator.has_method("set_super_pose"):
@@ -628,6 +637,7 @@ func get_difficulty_label() -> String:
 
 
 func reset_ai_for_character() -> void:
+	followup_super_charge_mult = 1.0
 	if kamehameha_vfx_sphere and is_instance_valid(kamehameha_vfx_sphere):
 		kamehameha_vfx_sphere.queue_free()
 		kamehameha_vfx_sphere = null

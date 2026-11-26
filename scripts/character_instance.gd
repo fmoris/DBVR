@@ -5499,10 +5499,18 @@ func start_post_super_followup(opponent: Node3D) -> void:
 func trigger_explosive_wave_chain_break() -> bool:
 	if is_match_over:
 		return false
+	if vulnerability_state == VulnerabilityState.CRASHED_STAMPED or is_defenseless_crash:
+		return false
+	if vulnerability_state == VulnerabilityState.AIRBORNE_LAUNCHED:
+		return false
 	var cfg: KiEconomyConfig = KiEconomyConfig.get_default()
 	if current_ki < cfg.melee_explosive_wave_cost:
 		return false
 	var opp: Node3D = _get_opponent()
+	if opp and is_instance_valid(opp):
+		var opp_fu: Variant = opp.get("active_followup_controller")
+		if opp_fu != null and is_instance_valid(opp_fu) and opp_fu.has_method("is_in_intro_pause") and bool(opp_fu.is_in_intro_pause()):
+			return false
 	var in_opp_chain: bool = opp != null and is_instance_valid(opp) and bool(opp.get("is_in_followup_bullet_time"))
 	if not in_opp_chain and not is_knocked_back and not is_air_brake_active:
 		return false

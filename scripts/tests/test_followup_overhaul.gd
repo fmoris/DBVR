@@ -277,6 +277,70 @@ func _process(_delta: float) -> bool:
 	if not _check(d_acts != null and ("Z-Vanish" in d_acts.text), "Defender HUD lists defense actions"): return true
 	fu_def.call("_finish_sequence", "def_test_done", false)
 
+	# 9. Defense Lore Gates: Kiai Wave shield, Hammer Def (early lockout, Guard X, Z-Vanish behind), Barrage Perfect Return, AI 2.4x Super
+	p_atk.set("current_ki", 60.0)
+	p_atk.set("combat_chain_depth", 0)
+	e_def.set("combat_chain_depth", 0)
+	e_def.set("current_ki", 90.0)
+	p_atk.call("enter_airborne_launched", 12000.0, 1.0, 24.0)
+	e_def.call("_start_followup_controller", p_atk, 1.0, "def_lore_gate", true)
+	var fu_gate: Node3D = e_def.get("active_followup_controller") as Node3D
+	if not _check(not bool(p_atk.call("trigger_explosive_wave_chain_break")), "Explosive Wave blocked while AIRBORNE_LAUNCHED & intro pause"): return true
+	p_atk.call("enter_crashed_stamped", e_def, 1.2)
+	if not _check(not bool(p_atk.call("trigger_explosive_wave_chain_break")), "Explosive Wave blocked while CRASHED_STAMPED"): return true
+	p_atk.set("vulnerability_state", 2) # STABILIZED
+	p_atk.set("is_defenseless_crash", false)
+	if not _check(not bool(p_atk.call("trigger_explosive_wave_chain_break")), "Explosive Wave blocked during 1s intro pause even if stabilized"): return true
+	for _gt in range(14):
+		fu_gate.call("_process", 0.0004)
+	for _gr in range(8):
+		fu_gate.call("_process", 0.06)
+	if not _check(int(fu_gate.get("state")) == 3, "Gate test reaches DECISION_WINDOW"): return true
+	if not _check(bool(p_atk.call("trigger_explosive_wave_chain_break")), "Explosive Wave allowed once STABILIZED after intro pause"): return true
+
+	# 9b. MINI_HAMMER_DEF: early lockout on red + Z-Vanish behind attacker on green
+	p_atk.set("current_ki", 60.0)
+	e_def.set("current_ki", 90.0)
+	p_atk.call("enter_airborne_launched", 12000.0, 1.0, 24.0)
+	e_def.call("_start_followup_controller", p_atk, 1.0, "hammer_def_test", true)
+	var fu_hd: Node3D = e_def.get("active_followup_controller") as Node3D
+	p_atk.call("complete_air_brake")
+	if not _check(bool(fu_hd.call("choose_vanish_hammer")), "AI choose_vanish_hammer enters MINI_HAMMER_DEF"): return true
+	if not _check(int(fu_hd.get("state")) == 9, "Stabilized player enters MINI_HAMMER_DEF (9)"): return true
+	fu_hd.set("_state_timer", 0.70) # Red zone -> early stick locks out
+	var sim_mock := Node.new()
+	sim_mock.set_script(load("res://scripts/debug/DesktopXRSimulator.gd"))
+	sim_mock.set("sim_active", true)
+	fu_hd.set("_cached_desktop_sim", sim_mock)
+	sim_mock.set("v_right_stick", Vector2(1.0, 0.0))
+	fu_hd.call("_process_mini_hammer_def", 0.004)
+	sim_mock.set("v_right_stick", Vector2.ZERO)
+	if not _check(bool(fu_hd.get("_def_hammer_early_lockout")), "Early stick during Red locks out Hammer Z-Vanish"): return true
+	# Reset early lockout & test Green Z-Vanish teleport behind attacker
+	fu_hd.set("_def_hammer_early_lockout", false)
+	fu_hd.set("_def_stick_prev", false)
+	fu_hd.set("_state_timer", 0.06) # Green window (0.25x scale -> real_dt ~0.06)
+	sim_mock.set("v_right_stick", Vector2(1.0, 0.0))
+	fu_hd.call("_process_mini_hammer_def", 0.005)
+	sim_mock.set("v_right_stick", Vector2.ZERO)
+	if not _check(int(fu_hd.get("state")) == 10 and String(fu_hd.get("last_action_chosen")) == "vanish_hammer" and int(p_atk.get("vulnerability_state")) != 3, "Green Z-Vanish evades Hammer cleanly"): return true
+
+	# 9c. MINI_KI_BARRAGE_DEF with forced relaunch finisher (4 rapid + 1 golden orb) & AI 2.4x fast super
+	p_atk.set("current_ki", 50.0)
+	e_def.set("current_ki", 90.0)
+	p_atk.call("enter_airborne_launched", 12000.0, 1.0, 24.0)
+	e_def.call("_start_followup_controller", p_atk, 1.0, "barrage_def_test", true)
+	var fu_bd: Node3D = e_def.get("active_followup_controller") as Node3D
+	p_atk.call("complete_air_brake")
+	if not _check(bool(fu_bd.call("choose_ki_barrage", 1)), "AI choose_ki_barrage(1) enters MINI_KI_BARRAGE_DEF with relaunch orb"): return true
+	if not _check(int(fu_bd.get("state")) == 8 and (fu_bd.get("_def_notes") as Array).size() == 5, "Barrage defense builds 4 rapid + 1 relaunch note"): return true
+	var ai_c: Node = e_def.get("cached_ai_controller") as Node
+	if ai_c and ai_c.has_method("trigger_followup_fast_super"):
+		ai_c.call("trigger_followup_fast_super", 2.4)
+		if not _check(absf(float(ai_c.get("followup_super_charge_mult")) - 2.4) < 0.01, "AI fast super sets 2.4x multiplier"): return true
+	fu_bd.call("_finish_sequence", "barrage_def_done", false)
+	sim_mock.queue_free()
+
 	Engine.time_scale = 1.0
 	test_scene.queue_free()
 	print("FOLLOWUP_OVERHAUL_PASSED")

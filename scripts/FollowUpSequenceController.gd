@@ -74,6 +74,12 @@ var _def_trig_prev_r: bool = false
 var _def_ai_hammer_windup: float = 0.0
 var _def_barrage_unblockable_shots: int = 0
 var _def_barrage_spawn_cd: float = 0.0
+var _def_hammer_early_lockout: bool = false
+var _def_barrage_deflected_count: int = 0
+var _def_barrage_has_relaunch_finisher: bool = false
+var _def_relaunch_early_lockout: bool = false
+var _def_by_prev: bool = false
+var _def_visual_orbs: Array[Dictionary] = []
 
 # Registro extensible de movimientos de seguimiento
 var _move_registry: Array[Dictionary] = []
@@ -639,9 +645,20 @@ func choose_ai_fast_super() -> bool:
 	var ai_ctrl: Node = attacker.get("cached_ai_controller") as Node
 	if not ai_ctrl or not is_instance_valid(ai_ctrl):
 		return false
+	var cfg: KiEconomyConfig = KiEconomyConfig.get_default()
+	var fast_mult: float = float(cfg.followup_super_charge_mult) if cfg.get("followup_super_charge_mult") != null else 2.4
+	if bool(defender.get("is_player")):
+		if defender.has_method("_get_gesture_tree"):
+			var gss: Node = defender._get_gesture_tree()
+			if gss and gss.has_signal("phase_changed"):
+				gss.emit_signal("phase_changed", "🔥 ¡RIVAL CARGANDO SÚPER 2.4x! Prepárate: Z-Vanish / Desvío / Choque")
+		if defender.has_method("_log_combat_event"):
+			defender._log_combat_event("🔥 ¡RIVAL CARGANDO SÚPER 2.4x! Prepárate para Z-Vanish, Desvío o Choque.", "warning")
 	last_action_chosen = "fast_super"
 	_finish_sequence("fast_super", false)
-	if ai_ctrl.has_method("_transition_to"):
+	if ai_ctrl.has_method("trigger_followup_fast_super"):
+		ai_ctrl.call("trigger_followup_fast_super", fast_mult)
+	elif ai_ctrl.has_method("_transition_to"):
 		ai_ctrl.call("_transition_to", 3) # AIState.KAMEHAMEHA_CHARGE
 	return true
 
@@ -672,8 +689,9 @@ func choose_vanish_hammer() -> bool:
 			_state_timer = 0.92
 			_def_ai_hammer_windup = 0.92
 			_def_stick_prev = false
+			_def_hammer_early_lockout = false
 			Engine.time_scale = 0.25
-			_build_defense_box_hud("🔨", Color(0.95, 0.22, 1.0, 0.95), "¡Z-VANISH (Stick)!")
+			_build_defense_box_hud("🔨", Color(0.95, 0.22, 1.0, 0.95), "🕹️ Stick (Verde): Z-Vanish | 🛡️ Guardia X: Frenar")
 		else:
 			state = FollowUpState.MINI_VANISH_HAMMER
 			_state_timer = 0.35
@@ -682,7 +700,7 @@ func choose_vanish_hammer() -> bool:
 	return true
 
 
-func choose_ki_barrage() -> bool:
+func choose_ki_barrage(force_relaunch_finisher: int = -1) -> bool:
 	if not is_active:
 		return false
 	var cost: float = get_move_ki_cost("ki_barrage")
@@ -707,12 +725,20 @@ func choose_ki_barrage() -> bool:
 	else:
 		if _is_defender_stabilized() and bool(defender.get("is_player")):
 			state = FollowUpState.MINI_KI_BARRAGE_DEF
-			_setup_barrage_defense_notes()
+			var do_relaunch: bool = (force_relaunch_finisher == 1) or (force_relaunch_finisher == -1 and float(attacker.get("current_ki")) >= 12.0 and randf() < 0.60)
+			_setup_barrage_defense_notes(do_relaunch)
+			_def_barrage_deflected_count = 0
+			_def_relaunch_early_lockout = false
+			_def_by_prev = false
+			_def_stick_prev = false
+			_def_trig_prev_l = false
+			_def_trig_prev_r = false
 			Engine.time_scale = 0.35
-			_build_defense_box_hud("💥", Color(0.20, 0.88, 1.0, 0.95), "¡TRIGGER DESVÍO o GUARDIA X!")
+			_build_defense_box_hud("💥", Color(0.20, 0.88, 1.0, 0.95), "💥 Trigger (Verde): Desviar | 🛡️ Guardia X | B/Y: Kiai")
 		else:
 			state = FollowUpState.MINI_KI_BARRAGE_DEF
 			_def_notes.clear()
+			_def_barrage_has_relaunch_finisher = false
 			_def_barrage_unblockable_shots = 6
 			_def_barrage_spawn_cd = 0.0
 			_state_timer = 1.15
@@ -775,15 +801,67 @@ func _process_mini_vanish_hammer(real_dt: float) -> void:
 			_execute_hammer_slam_impact(3.6)
 
 
+func _is_guard_x_held(lc: XRController3D, rc: XRController3D) -> bool:
+	var l_grip: bool = _ctrl_float(lc, &"grip") > 0.45 or _ctrl_pressed(lc, &"grip_click")
+	var r_grip: bool = _ctrl_float(rc, &"grip") > 0.45 or _ctrl_pressed(rc, &"grip_click")
+	if not (l_grip and r_grip):
+		return false
+	var sim: Node = _get_desktop_sim()
+	if sim and bool(sim.get("sim_active")):
+		return true
+	return lc != null and rc != null and lc.global_position.distance_to(rc.global_position) <= 0.44
+
+
+func _teleport_defender_behind_attacker() -> void:
+	if not attacker or not is_instance_valid(attacker) or not defender or not is_instance_valid(defender):
+		return
+	var atk_root: Node3D = attacker.get_spatial_root() if attacker.has_method("get_spatial_root") else attacker
+	var def_root: Node3D = defender.get_spatial_root() if defender.has_method("get_spatial_root") else defender
+	var atk_pos: Vector3 = atk_root.global_position
+	var to_def: Vector3 = def_root.global_position - atk_pos
+	to_def.y = 0.0
+	var back_dir: Vector3 = (-to_def.normalized()) if to_def.length_squared() > 0.01 else attacker.global_transform.basis.z
+	back_dir.y = 0.0
+	back_dir = back_dir.normalized() if back_dir.length_squared() > 0.01 else Vector3.BACK
+	var dest: Vector3 = atk_pos + back_dir * 2.2
+	var g_y: float = defender.get_ground_elevation(dest) if defender.has_method("get_ground_elevation") else 0.0
+	dest.y = maxf(atk_pos.y, g_y)
+	if not bool(defender.get("is_player")):
+		dest.y = maxf(dest.y, g_y + 0.5)
+	if is_inside_tree() and get_tree():
+		KiSmokeFX.spawn_smoke(get_tree(), def_root.global_position + Vector3.UP * 0.9, 0.85)
+		KiSmokeFX.spawn_smoke(get_tree(), dest + Vector3.UP * 0.9, 0.95)
+	def_root.global_position = dest
+	defender.set("velocity", Vector3.ZERO)
+	defender.set("is_knocked_back", false)
+	defender.set("is_ballistic_launch", false)
+	defender.set("air_juggle_suspend_timer", 0.0)
+	attacker.set("combat_chain_depth", 0)
+	if bool(defender.get("is_player")):
+		var cam: Camera3D = _get_player_camera()
+		if cam and is_instance_valid(cam):
+			cam.look_at(atk_pos + Vector3(0.0, 1.15, 0.0), Vector3.UP)
+	if _audio_player:
+		AudioActionManager.play_action("common.dodge_vanish", _audio_player)
+
+
 func _process_mini_hammer_def(real_dt: float) -> void:
 	_state_timer -= real_dt
 	var total_t: float = 0.92
 	var norm_t: float = clampf(_state_timer / total_t, 0.0, 1.0)
 	var in_green: bool = (_state_timer <= 0.34 and _state_timer >= -0.10)
+	var in_amber: bool = (_state_timer <= 0.52 and _state_timer > 0.34)
 	if _def_ring_mesh and is_instance_valid(_def_ring_mesh):
 		_def_ring_mesh.scale = Vector3.ONE * (1.0 + norm_t * 1.45)
 	if _def_ring_mat:
-		_def_ring_mat.albedo_color = Color(0.15, 1.0, 0.35, 1.0) if in_green else Color(0.95, 0.20, 1.0, 0.96)
+		if _def_hammer_early_lockout:
+			_def_ring_mat.albedo_color = Color(0.55, 0.10, 0.12, 0.95)
+		elif in_green:
+			_def_ring_mat.albedo_color = Color(0.15, 1.0, 0.35, 1.0)
+		elif in_amber:
+			_def_ring_mat.albedo_color = Color(1.0, 0.58, 0.10, 0.96)
+		else:
+			_def_ring_mat.albedo_color = Color(0.95, 0.16, 0.16, 0.95)
 
 	var lc: XRController3D = _get_player_controller("LeftHand")
 	var rc: XRController3D = _get_player_controller("RightHand")
@@ -794,19 +872,42 @@ func _process_mini_hammer_def(real_dt: float) -> void:
 	var fresh_stick: bool = stick_now and not _def_stick_prev
 	_def_stick_prev = stick_now
 
-	if fresh_stick and in_green:
-		var cfg_z: KiEconomyConfig = KiEconomyConfig.get_default()
-		var zv_cost: float = float(cfg_z.melee_vanish_cost) if cfg_z.get("melee_vanish_cost") != null else 10.0
-		if float(defender.get("current_ki")) >= zv_cost:
-			defender.consume_ki(zv_cost)
-			if defender.has_method("recharge_ki"):
-				defender.recharge_ki(10.0)
-			if defender.has_method("_log_combat_event"):
-				defender._log_combat_event("💨 ¡Z-VANISH VS MARTILLO! Esquivaste la caída.", "success")
-			if _audio_player:
-				AudioActionManager.play_action("common.dodge_vanish", _audio_player)
-			_finish_sequence("hammer_evaded", true)
-			return
+	if fresh_stick:
+		if in_green and not _def_hammer_early_lockout:
+			var cfg_z: KiEconomyConfig = KiEconomyConfig.get_default()
+			var zv_cost: float = float(cfg_z.melee_vanish_cost) if cfg_z.get("melee_vanish_cost") != null else 10.0
+			if float(defender.get("current_ki")) >= zv_cost:
+				defender.consume_ki(zv_cost)
+				if defender.has_method("recharge_ki"):
+					defender.recharge_ki(10.0)
+				_teleport_defender_behind_attacker()
+				if defender.has_method("_log_combat_event"):
+					defender._log_combat_event("💨 ¡Z-VANISH VS MARTILLO! Teletransporte a la espalda.", "success")
+				_pulse_defender_hands(195.0, 0.90, 0.12)
+				_finish_sequence("hammer_evaded", false)
+				return
+		elif _state_timer > 0.34:
+			_def_hammer_early_lockout = true
+			_pulse_defender_hands(95.0, 0.45, 0.10)
+			if _def_hint_label and is_instance_valid(_def_hint_label):
+				_def_hint_label.text = "❌ ¡MUY PRONTO! ¡USA GUARDIA X!"
+				_def_hint_label.modulate = Color(1.0, 0.35, 0.30)
+
+	# Guardia X de emergencia al instante del impacto -> reduce daño y evita quedar estampado
+	if _state_timer <= 0.0 and _is_guard_x_held(lc, rc) and float(defender.get("current_ki")) >= 14.0:
+		defender.consume_ki(14.0)
+		if defender.has_method("take_hit"):
+			defender.take_hit(245.0, Vector3.BACK, false)
+		defender.set("vulnerability_state", 0)
+		defender.set("is_defenseless_crash", false)
+		defender.set("crashed_stamped_timer", 0.0)
+		if _audio_player:
+			AudioActionManager.play_action("common.melee_block", _audio_player)
+		_pulse_defender_hands(180.0, 0.85, 0.16)
+		if defender.has_method("_log_combat_event"):
+			defender._log_combat_event("🛡️ ¡GUARDIA X VS MARTILLO! Evitaste quedar estampado (-14 Ki).", "info")
+		_finish_sequence("hammer_guarded", true)
+		return
 
 	if _state_timer <= -0.10:
 		_execute_hammer_slam_impact(3.6)
@@ -982,26 +1083,73 @@ func fire_barrage_shot(hand_side: int, force_knockdown: bool = false) -> bool:
 	return true
 
 
-func _setup_barrage_defense_notes() -> void:
+func _setup_barrage_defense_notes(include_relaunch: bool = false) -> void:
 	_def_notes.clear()
 	_def_note_idx = 0
 	_def_elapsed = 0.0
+	_def_barrage_has_relaunch_finisher = include_relaunch
 	for i in range(4):
-		_def_notes.append({ "time": 0.55 + float(i) * 0.52, "resolved": false })
+		_def_notes.append({ "kind": "rapid", "time": 0.55 + float(i) * 0.50, "spawned": false, "resolved": false })
+	if include_relaunch:
+		_def_notes.append({ "kind": "relaunch", "time": 0.55 + 4.0 * 0.50 + 0.28, "spawned": false, "resolved": false })
+
+
+func _spawn_def_visual_orb(is_relaunch: bool) -> void:
+	if not defender or not is_instance_valid(defender) or not attacker or not is_instance_valid(attacker):
+		return
+	var scene_root: Node = get_tree().current_scene if (is_inside_tree() and get_tree() and get_tree().current_scene) else get_parent()
+	if not scene_root:
+		return
+	var atk_p: Vector3 = (attacker.get_spatial_root().global_position if attacker.has_method("get_spatial_root") else attacker.global_position) + Vector3(0.0, 1.3, 0.0)
+	var def_cam: Camera3D = _get_player_camera()
+	var tgt_p: Vector3 = (def_cam.global_position - Vector3(0.0, 0.14, 0.0)) if def_cam else (defender.global_position + Vector3(0.0, 1.15, 0.0))
+	var col: Color = Color(1.0, 0.72, 0.15, 0.98) if is_relaunch else Color(0.25, 0.90, 1.0, 0.95)
+	var orb := Node3D.new()
+	ZenkaiVFXManager.build_zenkai_orb_visual(orb, 0.22 if is_relaunch else 0.10, col, is_relaunch, is_relaunch)
+	scene_root.add_child(orb)
+	orb.global_position = atk_p
+	_def_visual_orbs.append({ "node": orb, "start": atk_p, "end": tgt_p, "age": 0.0, "dur": 0.42 })
+
+
+func _tick_def_visual_orbs(real_dt: float) -> void:
+	for idx in range(_def_visual_orbs.size() - 1, -1, -1):
+		var entry: Dictionary = _def_visual_orbs[idx]
+		var n: Node3D = entry.get("node") as Node3D
+		if not n or not is_instance_valid(n):
+			_def_visual_orbs.remove_at(idx)
+			continue
+		var age: float = float(entry["age"]) + real_dt
+		var dur: float = maxf(float(entry["dur"]), 0.05)
+		entry["age"] = age
+		var t: float = clampf(age / dur, 0.0, 1.0)
+		var p0: Vector3 = entry["start"]
+		var p1: Vector3 = entry["end"]
+		var arc_off: Vector3 = Vector3(0.0, sin(t * PI) * 0.45, 0.0)
+		n.global_position = p0.lerp(p1, t) + arc_off
+		if t >= 1.0:
+			n.queue_free()
+			_def_visual_orbs.remove_at(idx)
 
 
 func _process_mini_ki_barrage_def(real_dt: float) -> void:
+	_tick_def_visual_orbs(real_dt)
 	if _def_notes.is_empty():
 		_state_timer -= real_dt
 		_def_barrage_spawn_cd -= real_dt
 		if _def_barrage_unblockable_shots > 0 and _def_barrage_spawn_cd <= 0.0:
-			fire_barrage_shot(_def_barrage_unblockable_shots % 2)
+			fire_barrage_shot(_def_barrage_unblockable_shots % 2, false)
 			_def_barrage_unblockable_shots -= 1
 			_def_barrage_spawn_cd = 0.095
 		if _state_timer <= 0.0:
-			if is_inside_tree() and get_tree():
-				KiSmokeFX.spawn_smoke(get_tree(), defender.global_position + Vector3.UP * 0.9, 1.45)
-			_finish_sequence("ki_barrage_hit", true)
+			if float(attacker.get("current_ki")) >= 2.0 and chain_depth < 6:
+				fire_barrage_shot(1, true)
+				if is_inside_tree() and get_tree():
+					KiSmokeFX.spawn_smoke(get_tree(), defender.global_position + Vector3.UP * 0.9, 1.55)
+				_finish_sequence("ki_barrage_hit_relaunch", false)
+			else:
+				if is_inside_tree() and get_tree():
+					KiSmokeFX.spawn_smoke(get_tree(), defender.global_position + Vector3.UP * 0.9, 1.45)
+				_finish_sequence("ki_barrage_hit", true)
 		return
 
 	_def_elapsed += real_dt
@@ -1010,13 +1158,35 @@ func _process_mini_ki_barrage_def(real_dt: float) -> void:
 		return
 
 	var note: Dictionary = _def_notes[_def_note_idx]
+	var note_kind: String = String(note.get("kind", "rapid"))
 	var t_diff: float = float(note["time"]) - _def_elapsed
+	var is_relaunch_note: bool = (note_kind == "relaunch")
+
+	if not bool(note.get("spawned", false)) and t_diff <= 0.42:
+		note["spawned"] = true
+		_spawn_def_visual_orb(is_relaunch_note)
+		if is_relaunch_note:
+			if _def_box_mat:
+				_def_box_mat.albedo_color = Color(1.0, 0.62, 0.12, 0.44)
+			if _def_icon_label and is_instance_valid(_def_icon_label):
+				_def_icon_label.text = "🔥"
+			if _def_hint_label and is_instance_valid(_def_hint_label):
+				_def_hint_label.text = "🔥 ¡ESFERA CARGADA! Trigger: Devolver | Stick: Z-Vanish | Guardia X"
+				_def_hint_label.modulate = Color(1.0, 0.85, 0.25)
+
 	var norm_t: float = clampf(maxf(t_diff, 0.0) / 0.55, 0.0, 1.0)
-	var in_green: bool = (t_diff <= 0.24 and t_diff >= -0.16)
+	var in_green: bool = (t_diff <= 0.26 and t_diff >= -0.14) if is_relaunch_note else (t_diff <= 0.24 and t_diff >= -0.16)
 	if _def_ring_mesh and is_instance_valid(_def_ring_mesh):
 		_def_ring_mesh.scale = Vector3.ONE * (1.0 + norm_t * 1.45)
 	if _def_ring_mat:
-		_def_ring_mat.albedo_color = Color(0.15, 1.0, 0.35, 1.0) if in_green else (Color(1.0, 0.58, 0.10, 0.96) if t_diff <= 0.34 else Color(0.95, 0.16, 0.16, 0.92))
+		if is_relaunch_note and _def_relaunch_early_lockout:
+			_def_ring_mat.albedo_color = Color(0.55, 0.10, 0.12, 0.95)
+		elif in_green:
+			_def_ring_mat.albedo_color = Color(0.15, 1.0, 0.35, 1.0)
+		elif t_diff <= 0.34:
+			_def_ring_mat.albedo_color = Color(1.0, 0.58, 0.10, 0.96)
+		else:
+			_def_ring_mat.albedo_color = Color(0.95, 0.16, 0.16, 0.92)
 
 	var lc: XRController3D = _get_player_controller("LeftHand")
 	var rc: XRController3D = _get_player_controller("RightHand")
@@ -1028,15 +1198,92 @@ func _process_mini_ki_barrage_def(real_dt: float) -> void:
 	_def_trig_prev_l = l_trig
 	_def_trig_prev_r = r_trig
 
-	var is_guard_x: bool = l_grip and r_grip and lc != null and rc != null and lc.global_position.distance_to(rc.global_position) <= 0.42
+	var by_now: bool = _ctrl_pressed(lc, &"by_button") or _ctrl_pressed(rc, &"by_button")
+	var fresh_by: bool = by_now and not _def_by_prev
+	_def_by_prev = by_now
+	if fresh_by and defender.has_method("trigger_explosive_wave_chain_break") and defender.trigger_explosive_wave_chain_break():
+		_finish_sequence("ki_barrage_kiai_break", true)
+		return
+
+	var stick_l: float = _ctrl_vec2(lc, &"primary").length()
+	var stick_r: float = _ctrl_vec2(rc, &"primary").length()
+	var stick_clk: bool = _ctrl_pressed(lc, &"primary_click") or _ctrl_pressed(rc, &"primary_click")
+	var stick_now: bool = maxf(stick_l, stick_r) >= 0.55 or stick_clk
+	var fresh_stick: bool = stick_now and not _def_stick_prev
+	_def_stick_prev = stick_now
+
+	var is_guard_x: bool = _is_guard_x_held(lc, rc)
+
+	if is_relaunch_note:
+		if fresh_deflect and in_green:
+			note["resolved"] = true
+			_def_note_idx += 1
+			if attacker.has_method("take_hit"):
+				attacker.take_hit(360.0, Vector3.FORWARD, true)
+			attacker.set("is_staggered", true)
+			attacker.set("stagger_timer", 0.60)
+			if defender.has_method("recharge_ki"):
+				defender.recharge_ki(14.0)
+			_pulse_defender_hands(210.0, 0.95, 0.16)
+			if _audio_player:
+				AudioActionManager.play_action("common.ki_blast_deflect", _audio_player)
+			if defender.has_method("_log_combat_event"):
+				defender._log_combat_event("✋ ¡DEVOLUCIÓN PERFECTA! Esfera devuelta (+14 Ki).", "success")
+			_finish_sequence("ki_barrage_perfect_return", true)
+			return
+		if fresh_stick:
+			if in_green and not _def_relaunch_early_lockout:
+				var cfg_z: KiEconomyConfig = KiEconomyConfig.get_default()
+				var zv_cost: float = float(cfg_z.melee_vanish_cost) if cfg_z.get("melee_vanish_cost") != null else 10.0
+				if float(defender.get("current_ki")) >= zv_cost:
+					defender.consume_ki(zv_cost)
+					_teleport_defender_behind_attacker()
+					if defender.has_method("_log_combat_event"):
+						defender._log_combat_event("💨 ¡Z-VANISH VS ESFERA CARGADA!", "success")
+					_finish_sequence("ki_barrage_vanished", false)
+					return
+			elif t_diff > 0.34:
+				_def_relaunch_early_lockout = true
+				_pulse_defender_hands(95.0, 0.45, 0.10)
+		if t_diff <= -0.14:
+			note["resolved"] = true
+			_def_note_idx += 1
+			if is_guard_x and float(defender.get("current_ki")) >= 10.0:
+				defender.consume_ki(10.0)
+				if defender.has_method("take_hit"):
+					defender.take_hit(180.0, Vector3.BACK, false)
+				if _audio_player:
+					AudioActionManager.play_action("common.melee_block", _audio_player)
+				if defender.has_method("_log_combat_event"):
+					defender._log_combat_event("🛡️ ¡GUARDIA X VS ESFERA CARGADA! Evitaste salir volando (-10 Ki).", "info")
+				_finish_sequence("ki_barrage_relaunch_guarded", true)
+			else:
+				if defender.has_method("take_hit"):
+					defender.take_hit(420.0, Vector3.BACK, true)
+				var relaunch_dir: Vector3 = (defender.global_position - attacker.global_position)
+				relaunch_dir.y = 0.0
+				relaunch_dir = relaunch_dir.normalized() if relaunch_dir.length_squared() > 0.01 else Vector3.BACK
+				var atk_ref: Node3D = attacker
+				var def_ref: Node3D = defender
+				_finish_sequence("ki_barrage_relaunch_hit", false)
+				if def_ref and is_instance_valid(def_ref) and def_ref.has_method("apply_renzoku_relaunch"):
+					def_ref.apply_renzoku_relaunch(atk_ref, relaunch_dir)
+		return
+
 	if fresh_deflect and t_diff <= 0.28 and t_diff >= -0.16:
 		note["resolved"] = true
 		_def_note_idx += 1
+		_def_barrage_deflected_count += 1
 		if defender.has_method("recharge_ki"):
 			defender.recharge_ki(6.0)
 		_pulse_defender_hands(175.0, 0.85, 0.10)
 		if _audio_player:
 			AudioActionManager.play_action("common.ki_blast_deflect", _audio_player)
+		if _def_barrage_deflected_count >= 4 and note == _def_notes[3]:
+			if defender.has_method("recharge_ki"):
+				defender.recharge_ki(12.0)
+			if defender.has_method("_log_combat_event"):
+				defender._log_combat_event("✨ ¡DESVÍO TOTAL DE LLUVIA! (+12 Ki)", "success")
 		if _def_note_idx >= _def_notes.size():
 			_finish_sequence("ki_barrage_defended", true)
 		return
@@ -1048,7 +1295,9 @@ func _process_mini_ki_barrage_def(real_dt: float) -> void:
 		if defender.has_method("take_hit"):
 			defender.take_hit(dmg, Vector3.BACK, not is_guard_x)
 		if defender.has_method("drain_ki"):
-			defender.drain_ki(4.0 if not is_guard_x else 2.0)
+			defender.drain_ki(4.0 if not is_guard_x else 3.0)
+		if not is_guard_x and defender.has_method("apply_air_juggle_suspend"):
+			defender.apply_air_juggle_suspend(0.45)
 		_pulse_defender_hands(140.0 if is_guard_x else 200.0, 0.60 if is_guard_x else 0.90, 0.12)
 		if _def_note_idx >= _def_notes.size():
 			_finish_sequence("ki_barrage_defended", true)
@@ -1518,6 +1767,11 @@ func _clear_minigame_meshes() -> void:
 	if _def_box_node and is_instance_valid(_def_box_node):
 		_def_box_node.queue_free()
 	_def_box_node = null
+	for entry in _def_visual_orbs:
+		var vn: Node3D = entry.get("node") as Node3D
+		if vn and is_instance_valid(vn):
+			vn.queue_free()
+	_def_visual_orbs.clear()
 
 
 func _clear_action_hud() -> void:

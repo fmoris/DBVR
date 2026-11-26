@@ -2444,9 +2444,10 @@ func _process_guard() -> void:
 	var l_trig: bool = _ctrl_float(left_controller, &"trigger") > 0.45 or _ctrl_pressed(left_controller, &"trigger_click")
 	var r_trig: bool = _ctrl_float(right_controller, &"trigger") > 0.45 or _ctrl_pressed(right_controller, &"trigger_click")
 
-	# Onda Expansiva para cortar cadena enemiga (B/Y durante knockback o seguimiento aéreo rival)
+	# Onda Expansiva para cortar cadena enemiga (B/Y solo tras estabilizarse o en defensa activa)
 	var by_burst: bool = _ctrl_pressed(left_controller, &"by_button") or _ctrl_pressed(right_controller, &"by_button")
-	if by_burst and player.has_method("trigger_explosive_wave_chain_break"):
+	var can_kiai_break: bool = not _is_followup_intro_paused(player) and not (player.has_method("is_vulnerable_defenseless") and bool(player.is_vulnerable_defenseless()))
+	if by_burst and can_kiai_break and player.has_method("trigger_explosive_wave_chain_break"):
 		if player.trigger_explosive_wave_chain_break():
 			_pulse_haptic(left_controller, 200.0, 1.0, 0.18)
 			_pulse_haptic(right_controller, 200.0, 1.0, 0.18)
