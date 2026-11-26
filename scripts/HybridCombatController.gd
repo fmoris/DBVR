@@ -1139,9 +1139,30 @@ func _is_valid_super_release_pose(tech_name: String, l_local_z: float, r_local_z
 	return true
 
 
+func _is_followup_intro_paused(player: Node) -> bool:
+	if not player or not is_instance_valid(player):
+		return false
+	var my_fu: Variant = player.get("active_followup_controller")
+	if my_fu != null and is_instance_valid(my_fu) and my_fu.has_method("is_in_intro_pause") and bool(my_fu.is_in_intro_pause()):
+		return true
+	if player.has_method("_get_opponent"):
+		var opp: Variant = player._get_opponent()
+		if opp != null and is_instance_valid(opp):
+			var opp_fu: Variant = opp.get("active_followup_controller")
+			if opp_fu != null and is_instance_valid(opp_fu) and opp_fu.has_method("is_in_intro_pause") and bool(opp_fu.is_in_intro_pause()):
+				return true
+	return false
+
+
 func _process_super_powers(delta: float) -> void:
 	var player: Node = gesture_tree._get_player_instance() if gesture_tree else null
 	var in_followup: bool = player != null and is_instance_valid(player) and bool(player.get("is_in_followup_bullet_time"))
+	if _is_followup_intro_paused(player):
+		if current_super_state != SuperPowerState.IDLE:
+			_reset_super_state()
+		candidate_super_tech = ""
+		candidate_hold_timer = 0.0
+		return
 	var eff_dt: float = clampf(delta / maxf(Engine.time_scale, 0.005), 0.001, 0.08) if in_followup else delta
 	if player and is_instance_valid(player) and (bool(player.get("is_match_over")) or bool(player.get("is_in_bullet_time")) or bool(player.get("is_in_beam_clash")) or bool(player.get("is_flying_to_opponent"))):
 		if current_super_state != SuperPowerState.IDLE:
@@ -1847,6 +1868,10 @@ func _process_melee_punches() -> void:
 		return
 
 	var is_followup_active: bool = player != null and is_instance_valid(player) and bool(player.get("is_in_followup_bullet_time"))
+	if _is_followup_intro_paused(player):
+		left_punch_cocked = false
+		right_punch_cocked = false
+		return
 	if (melee_cooldown > 0.0 and not is_followup_active) or is_charging_ki or startup_cooldown > 0.0:
 		left_punch_cocked = false
 		right_punch_cocked = false
@@ -2252,7 +2277,7 @@ func _process_air_brake(delta: float, player: Node) -> void:
 
 func _update_air_brake_with_motion(delta: float, player: Node, l_vel: Vector3, r_vel: Vector3) -> void:
 	var is_crashed_3: bool = player != null and is_instance_valid(player) and int(player.get("vulnerability_state")) == 3
-	if not player or not is_instance_valid(player) or is_crashed_3 or not bool(player.get("is_air_brake_active")) or DramaticDirector.is_dramatic_pause_active:
+	if not player or not is_instance_valid(player) or is_crashed_3 or _is_followup_intro_paused(player) or not bool(player.get("is_air_brake_active")) or DramaticDirector.is_dramatic_pause_active:
 		_prev_air_l_vel = l_vel
 		_prev_air_r_vel = r_vel
 		_air_l_active_timer = 0.0

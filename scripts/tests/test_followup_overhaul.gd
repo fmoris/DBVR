@@ -41,6 +41,7 @@ func _process(_delta: float) -> bool:
 	if not _check(absf(float(cfg.get("followup_melee_cost")) - 12.0) < 0.001, "followup_melee_cost == 12"): return true
 	if not _check(absf(float(cfg.get("followup_vanish_hammer_cost")) - 18.0) < 0.001, "followup_vanish_hammer_cost == 18"): return true
 	if not _check(absf(float(cfg.get("followup_barrage_entry_cost")) - 10.0) < 0.001, "followup_barrage_entry_cost == 10"): return true
+	if not _check(absf(float(cfg.get("followup_intro_pause_sec")) - 1.0) < 0.001, "followup_intro_pause_sec == 1.0"): return true
 	if not _check(absf(float(cfg.get("followup_super_charge_mult")) - 2.4) < 0.001, "followup_super_charge_mult == 2.4"): return true
 
 	# 2. Load character resources & verify Transformation ki_max_bonus values
@@ -141,6 +142,15 @@ func _process(_delta: float) -> bool:
 	var fu: Node3D = p_atk.get("active_followup_controller") as Node3D
 	if not _check(fu != null and is_instance_valid(fu), "active_followup_controller created"): return true
 	if not _check(int(fu.get("state")) == 1, "Initial state is HITSTOP (1)"): return true
+	if not _check(bool(fu.call("is_in_intro_pause")), "is_in_intro_pause() active on start"): return true
+	if not _check(Engine.time_scale <= 0.01, "Intro pause freezes Engine.time_scale <= 0.01"): return true
+	if not _check(absf(float(fu.call("get_intro_pause_remaining")) - 1.0) < 0.01, "Intro pause starts at 1.0s"): return true
+	var hud_a: Node3D = fu.get("_hud_anchor") as Node3D
+	var title_l: Label3D = fu.get("_title_label") as Label3D
+	var slots: Array = fu.get("_card_slots")
+	if not _check(hud_a != null and is_instance_valid(hud_a), "HUD created immediately during 1s intro pause"): return true
+	if not _check(title_l != null and ("SIGUIENTE SECUENCIA" in title_l.text), "Intro pause HUD announces SIGUIENTE SECUENCIA"): return true
+	if not _check(slots.size() == 4, "Intro pause HUD renders 4 action cards"): return true
 	if not _check(absf(float(p_atk.get("current_ki")) - 54.0) < 0.01, "+14 Ki awarded on launch (40 -> 54, got %.2f)" % float(p_atk.get("current_ki"))): return true
 
 	# Complete Air Brake on defender while FollowUp is active -> must NOT cancel FollowUp!
@@ -149,10 +159,15 @@ func _process(_delta: float) -> bool:
 	if not _check(not bool(e_def.call("is_vulnerable_defenseless")), "STABILIZED is no longer defenseless"): return true
 	if not _check(is_instance_valid(fu) and bool(fu.get("is_active")), "complete_air_brake must NOT cancel active FollowUp"): return true
 
-	# Step FollowUp HITSTOP -> RAMP_TO_BT -> DECISION_WINDOW using real_dt simulation
-	for _i in range(4):
-		fu.call("_process", 0.0006) # real_dt capped to 0.08 per tick at time_scale=0.01 (HITSTOP 0.18s)
-	if not _check(int(fu.get("state")) == 2, "HITSTOP transitions to RAMP_TO_BT (2)"): return true
+	# Step FollowUp HITSTOP (0.48s still paused -> 1.12s unlocks to RAMP_TO_BT) -> DECISION_WINDOW using real_dt simulation
+	for _k in range(6):
+		fu.call("_process", 0.0004) # 6 * 0.08s = 0.48s < 1.0s
+	if not _check(int(fu.get("state")) == 1 and bool(fu.call("is_in_intro_pause")), "Still in 1s intro pause at 0.48s"): return true
+	for _i in range(8):
+		fu.call("_process", 0.0004) # +0.64s -> total 1.12s > 1.0s
+	if not _check(int(fu.get("state")) == 2 and not bool(fu.call("is_in_intro_pause")), "HITSTOP transitions to RAMP_TO_BT (2) after 1.0s"): return true
+	var hud_still: Node3D = fu.get("_hud_anchor") as Node3D
+	if not _check(hud_still != null and is_instance_valid(hud_still), "HUD stays alive across pause unlock into RAMP_TO_BT"): return true
 	for _j in range(8):
 		fu.call("_process", 0.06)
 	if not _check(int(fu.get("state")) == 3, "RAMP_TO_BT transitions to DECISION_WINDOW (3)"): return true
@@ -202,7 +217,13 @@ func _process(_delta: float) -> bool:
 	if not _check(int(fu2.get("state")) == 5, "Player Hammer state is MINI_VANISH_HAMMER (5)"): return true
 	fu2.call("_execute_hammer_slam_impact", 3.2)
 	if not _check(int(e_def.get("vulnerability_state")) == 3, "Hammer slam stamps rival to CRASHED_STAMPED"): return true
-	if not _check(int(fu2.get("state")) == 3, "Hammer slam re-enters DECISION_WINDOW when attacker has Ki"): return true
+	if not _check(int(fu2.get("state")) == 1 and bool(fu2.call("is_in_intro_pause")), "Hammer slam re-enters 1s intro pause when attacker has Ki"): return true
+	if not _check(int(fu2.get("chain_depth")) == 3, "Hammer slam chain increments chain_depth to 3"): return true
+	for _h in range(14):
+		fu2.call("_process", 0.0004)
+	for _r in range(8):
+		fu2.call("_process", 0.06)
+	if not _check(int(fu2.get("state")) == 3, "Hammer slam chain unlocks to DECISION_WINDOW after 1s + ramp"): return true
 	if not _check(bool(fu2.call("choose_melee_chase")), "choose_melee_chase succeeds after slam"): return true
 	if not _check(int(p_atk.get("pending_followup_bonus_hits")) == 2, "Defenseless Melee chase grants +2 bonus hits"): return true
 	if not _check(bool(p_atk.get("is_flying_to_opponent")), "Melee chase starts flight cleanly"): return true
@@ -225,6 +246,20 @@ func _process(_delta: float) -> bool:
 	if not _check(absf(float(beam.get("base_damage")) - 1150.0) < 0.1, "Crashed super damage boosted 1.15x (1000 -> 1150)"): return true
 	if not _check(absf(float(beam.get("_reading_pause_timer"))) < 0.01 and absf(float(beam.get("reaction_duration")) - 0.70) < 0.01, "Defenseless Super uses direct 0.70s hit window"): return true
 	beam.queue_free()
+
+	# 8. Defender player HUD during 1s intro pause when AI launches player
+	p_atk.set("combat_chain_depth", 0)
+	p_atk.call("enter_airborne_launched", 12000.0, 1.0, 24.0)
+	e_def.set("combat_chain_depth", 0)
+	e_def.set("current_ki", 60.0)
+	e_def.call("_start_followup_controller", p_atk, 1.0, "ai_launch_test", true)
+	var fu_def: Node3D = e_def.get("active_followup_controller") as Node3D
+	if not _check(fu_def != null and bool(fu_def.call("is_in_intro_pause")), "Defender follow-up starts in 1s intro pause"): return true
+	var d_title: Label3D = fu_def.get("_title_label") as Label3D
+	var d_acts: Label3D = fu_def.get("_def_actions_label") as Label3D
+	if not _check(d_title != null and ("FUISTE LANZADO" in d_title.text), "Defender HUD announces FUISTE LANZADO"): return true
+	if not _check(d_acts != null and ("Z-Vanish" in d_acts.text), "Defender HUD lists defense actions"): return true
+	fu_def.call("_finish_sequence", "def_test_done", false)
 
 	Engine.time_scale = 1.0
 	test_scene.queue_free()

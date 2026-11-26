@@ -84,6 +84,7 @@ followup_barrage_entry_cost = 10.0
 followup_barrage_shot_cost = 1.5
 followup_decision_duration = 3.2
 followup_hitstop_sec = 0.18
+followup_intro_pause_sec = 1.0
 followup_ramp_sec = 0.38
 followup_super_charge_mult = 2.4
 followup_crashed_super_dmg_mult = 1.15

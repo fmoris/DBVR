@@ -43,6 +43,8 @@ var _state_timer: float = 0.0
 var _decision_total: float = 3.2
 var _decision_remaining: float = 3.2
 var _hitstop_total: float = 0.18
+var _intro_pause_total: float = 1.0
+var _intro_pause_reason: String = ""
 var _ramp_total: float = 0.38
 var _hammer_window_total: float = 1.1
 var _barrage_total: float = 2.2
@@ -84,8 +86,11 @@ var _vel_r_real: Vector3 = Vector3.ZERO
 var _ui_tex_cache: Dictionary = {}
 var _hud_anchor: Node3D = null
 var _title_label: Label3D = null
+var _subtitle_label: Label3D = null
 var _status_label: Label3D = null
+var _def_actions_label: Label3D = null
 var _timer_fill: MeshInstance3D = null
+var _timer_fill_mat: StandardMaterial3D = null
 var _card_slots: Array[Dictionary] = []
 var _hammer_target_node: Node3D = null
 var _hammer_ring_mat: StandardMaterial3D = null
@@ -106,10 +111,18 @@ func _ready() -> void:
 
 func _register_default_moves() -> void:
 	_move_registry.clear()
-	_move_registry.append({ "id": "melee_chase", "title": "MELEE", "cue": "👊 Puño", "icon": "icon_fist.png" })
+	_move_registry.append({ "id": "melee_chase", "title": "MELEE", "cue": "👊 1 Puño", "icon": "icon_fist.png" })
 	_move_registry.append({ "id": "vanish_hammer", "title": "MARTILLO", "cue": "🔨 2P Arriba", "icon": "icon_burst.png" })
-	_move_registry.append({ "id": "fast_super", "title": "SÚPER 2.4x", "cue": "🔥 Pose", "icon": "target_fight.png" })
-	_move_registry.append({ "id": "ki_barrage", "title": "LLUVIA", "cue": "💥 Palmas", "icon": "icon_ki_blast.png" })
+	_move_registry.append({ "id": "fast_super", "title": "SÚPER 2.4x", "cue": "🔥 Pose Súper", "icon": "target_fight.png" })
+	_move_registry.append({ "id": "ki_barrage", "title": "LLUVIA KI", "cue": "💥 2 Palmas", "icon": "icon_ki_blast.png" })
+
+
+func is_in_intro_pause() -> bool:
+	return is_active and state == FollowUpState.HITSTOP
+
+
+func get_intro_pause_remaining() -> float:
+	return maxf(_state_timer, 0.0) if is_in_intro_pause() else 0.0
 
 
 ## Punto de extensión futuro para secuencias exclusivas por personaje o transformación.
@@ -156,6 +169,7 @@ func start_sequence(p_attacker: Node3D, p_defender: Node3D, p_strike_factor: flo
 
 	var cfg: KiEconomyConfig = KiEconomyConfig.get_default()
 	_hitstop_total = float(cfg.followup_hitstop_sec) if cfg.get("followup_hitstop_sec") != null else 0.18
+	_intro_pause_total = float(cfg.followup_intro_pause_sec) if cfg.get("followup_intro_pause_sec") != null else 1.0
 	_ramp_total = float(cfg.followup_ramp_sec) if cfg.get("followup_ramp_sec") != null else 0.38
 	_decision_total = float(cfg.followup_decision_duration) if cfg.get("followup_decision_duration") != null else 3.2
 	_decision_remaining = _decision_total
@@ -169,7 +183,7 @@ func start_sequence(p_attacker: Node3D, p_defender: Node3D, p_strike_factor: flo
 	attacker.set("active_followup_controller", self)
 	attacker.set("opponent_airborne_target", defender)
 	attacker.set("is_in_followup_bullet_time", true)
-	attacker.set("followup_bullet_time_timer", _hitstop_total + _ramp_total + _decision_total + 4.0)
+	attacker.set("followup_bullet_time_timer", _intro_pause_total + _ramp_total + _decision_total + 4.0)
 
 	if p_award_launch_bonus:
 		var launch_bonus: float = float(cfg.followup_launch_ki_bonus) if cfg.get("followup_launch_ki_bonus") != null else 14.0
@@ -190,14 +204,9 @@ func start_sequence(p_attacker: Node3D, p_defender: Node3D, p_strike_factor: flo
 					register_custom_move(cm)
 
 	is_active = true
-	state = FollowUpState.HITSTOP
-	_state_timer = _hitstop_total
 	_ai_sim_delay = 0.0
 	_last_ai_stab_progress = 0.0
-	_hammer_entry_hold = 0.0
-	_barrage_entry_hold = 0.0
-	_melee_entry_armed = false
-	Engine.time_scale = 0.01
+	_enter_intro_pause(p_reason)
 
 	_audio_player = AudioStreamPlayer3D.new()
 	add_child(_audio_player)
@@ -330,15 +339,18 @@ func _process(delta: float) -> void:
 	match state:
 		FollowUpState.HITSTOP:
 			_state_timer -= real_dt
+			_refresh_intro_pause_hud()
 			if _state_timer <= 0.0:
 				state = FollowUpState.RAMP_TO_BT
 				_state_timer = _ramp_total
 				Engine.time_scale = 1.0
+				_on_intro_pause_unlocked()
 		FollowUpState.RAMP_TO_BT:
 			_state_timer -= real_dt
 			var t_ramp: float = clampf(1.0 - (_state_timer / maxf(_ramp_total, 0.01)), 0.0, 1.0)
 			Engine.time_scale = lerpf(1.0, 0.12, t_ramp)
 			_tick_ai_stabilization(real_dt)
+			_refresh_decision_hud()
 			if _state_timer <= 0.0:
 				_enter_decision_window()
 		FollowUpState.DECISION_WINDOW:
@@ -357,6 +369,44 @@ func _process(delta: float) -> void:
 			_refresh_status_hud_for_defender()
 
 
+func _enter_intro_pause(p_reason: String = "") -> void:
+	state = FollowUpState.HITSTOP
+	_intro_pause_reason = p_reason
+	_state_timer = _intro_pause_total
+	Engine.time_scale = 0.005
+	_hammer_entry_hold = 0.0
+	_barrage_entry_hold = 0.0
+	_melee_entry_armed = false
+	_build_visor_hud()
+	_refresh_intro_pause_hud()
+	var pf: Node3D = _get_player_fighter()
+	if pf and is_instance_valid(pf) and pf.has_method("_get_gesture_tree"):
+		var gss: Node = pf._get_gesture_tree()
+		if gss and gss.has_signal("phase_changed"):
+			gss.emit_signal("phase_changed", "⏸️ ¡SIGUIENTE SECUENCIA! (%.1fs) — LEE TUS ACCIONES" % _intro_pause_total)
+
+
+func _on_intro_pause_unlocked() -> void:
+	if bool(attacker.get("is_player")):
+		_pulse_attacker_hands(160.0, 0.45, 0.06)
+		if _title_label and is_instance_valid(_title_label):
+			_title_label.text = ("⚡ ¡REBOTE Z x%d! ¡ACTÚA AHORA!" % chain_depth) if chain_depth >= 2 else "⚡ ¡ELIGE SEGUIMIENTO!"
+			_title_label.modulate = Color(1.0, 0.94, 0.30)
+		if _subtitle_label and is_instance_valid(_subtitle_label):
+			_subtitle_label.text = "⚡ ¡ELIGE TU ACCIÓN AHORA!"
+			_subtitle_label.modulate = Color(0.30, 1.0, 0.55)
+		if _timer_fill_mat:
+			_timer_fill_mat.albedo_color = Color(1.0, 0.88, 0.22)
+	elif bool(defender.get("is_player")):
+		_pulse_defender_hands(160.0, 0.45, 0.06)
+		if _title_label and is_instance_valid(_title_label):
+			_title_label.text = "⚡ ¡SIGUIENTE SECUENCIA EN CURSO!"
+			_title_label.modulate = Color(1.0, 0.88, 0.30)
+		if _timer_fill and is_instance_valid(_timer_fill):
+			_timer_fill.visible = false
+		_refresh_status_hud_for_defender()
+
+
 func _enter_decision_window() -> void:
 	state = FollowUpState.DECISION_WINDOW
 	Engine.time_scale = 0.12
@@ -365,11 +415,29 @@ func _enter_decision_window() -> void:
 	_hammer_entry_hold = 0.0
 	_barrage_entry_hold = 0.0
 	_melee_entry_armed = false
-	_build_visor_hud()
+	if not _hud_anchor or not is_instance_valid(_hud_anchor) or (bool(attacker.get("is_player")) and _card_slots.is_empty()):
+		_build_visor_hud()
 	if bool(attacker.get("is_player")):
+		if _title_label and is_instance_valid(_title_label):
+			_title_label.text = ("⚡ ¡REBOTE Z x%d!" % chain_depth) if chain_depth >= 2 else "⚡ ¡ELIGE SEGUIMIENTO!"
+			_title_label.modulate = Color(1.0, 0.94, 0.30)
+		if _subtitle_label and is_instance_valid(_subtitle_label):
+			_subtitle_label.text = "⚡ ¡ELIGE TU ACCIÓN AHORA!"
+			_subtitle_label.modulate = Color(0.30, 1.0, 0.55)
+		if _timer_fill_mat:
+			_timer_fill_mat.albedo_color = Color(1.0, 0.88, 0.22)
+		if _timer_fill and is_instance_valid(_timer_fill):
+			_timer_fill.visible = true
 		var gss: Node = attacker._get_gesture_tree() if attacker.has_method("_get_gesture_tree") else null
 		if gss and gss.has_signal("phase_changed"):
 			gss.emit_signal("phase_changed", "⚡ ¡ELIGE SEGUIMIENTO! (MELEE / MARTILLO / SÚPER / LLUVIA)")
+	else:
+		if _title_label and is_instance_valid(_title_label):
+			_title_label.text = "⚡ ¡SIGUIENTE SECUENCIA EN CURSO!"
+			_title_label.modulate = Color(1.0, 0.88, 0.30)
+		if _timer_fill and is_instance_valid(_timer_fill):
+			_timer_fill.visible = false
+	_refresh_decision_hud()
 
 
 func _tick_ai_stabilization(real_dt: float) -> void:
@@ -742,10 +810,12 @@ func _execute_hammer_slam_impact(swing_speed: float) -> void:
 	if bool(attacker.get("is_player")) and attacker.has_method("_log_combat_event"):
 		attacker._log_combat_event("🔨 ¡MARTILLAZO DE SEGUIMIENTO! Rival estampado (+18 Ki) [Daño: %d NP]" % int(dmg), "success")
 
-	# Si todavía hay Ki suficiente para rematar al rival estampado y no superamos tope de cadena, volver a DECISION_WINDOW
+	# Si todavía hay Ki suficiente para rematar al rival estampado y no superamos tope de cadena, volver a pausa introductoria de siguiente secuencia
 	if not bool(attacker.get("is_match_over")) and float(attacker.get("current_ki")) >= 10.0 and chain_depth < 6:
-		_clear_minigame_meshes()
-		_enter_decision_window()
+		chain_depth += 1
+		attacker.set("combat_chain_depth", chain_depth)
+		_clear_action_hud()
+		_enter_intro_pause("hammer_slam_chain")
 	else:
 		_finish_sequence("vanish_hammer", true)
 
@@ -941,7 +1011,7 @@ func _build_visor_hud() -> void:
 		var oq := QuadMesh.new()
 		oq.size = Vector2(0.70, 0.075)
 		obi_m.mesh = oq
-		obi_m.position = Vector3(0.0, 0.088, -0.002)
+		obi_m.position = Vector3(0.0, 0.105, -0.002)
 		var om := StandardMaterial3D.new()
 		om.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		om.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
@@ -956,14 +1026,28 @@ func _build_visor_hud() -> void:
 
 		_title_label = Label3D.new()
 		_title_label.text = ("⚡ ¡REBOTE Z x%d!" % chain_depth) if chain_depth >= 2 else "⚡ ¡ELIGE SEGUIMIENTO!"
-		_title_label.font_size = 24
-		_title_label.pixel_size = 0.00125
+		_title_label.font_size = 22
+		_title_label.pixel_size = 0.00122
 		_title_label.no_depth_test = true
 		_title_label.render_priority = 126
 		_title_label.modulate = Color(1.0, 0.94, 0.30)
 		_title_label.outline_size = 8
-		_title_label.position = Vector3(0.0, 0.088, 0.002)
+		_title_label.position = Vector3(0.0, 0.105, 0.002)
 		_hud_anchor.add_child(_title_label)
+
+		_subtitle_label = Label3D.new()
+		_subtitle_label.text = "ACCIONES DISPONIBLES — ¡PREPÁRATE!"
+		_subtitle_label.font_size = 15
+		_subtitle_label.pixel_size = 0.00115
+		_subtitle_label.no_depth_test = true
+		_subtitle_label.render_priority = 126
+		_subtitle_label.modulate = Color(0.55, 0.95, 1.0)
+		_subtitle_label.outline_size = 6
+		_subtitle_label.position = Vector3(0.0, 0.056, 0.003)
+		_hud_anchor.add_child(_subtitle_label)
+
+		var cd_atk: Variant = attacker.get("character_data")
+		var is_vegeta_atk: bool = cd_atk != null and ("VEGETA" in String(cd_atk.get("character_name")).to_upper())
 
 		_card_slots.clear()
 		var xs: Array[float] = [-0.255, -0.085, 0.085, 0.255]
@@ -973,8 +1057,17 @@ func _build_visor_hud() -> void:
 		iq.size = Vector2(0.042, 0.042)
 		for i in range(mini(_move_registry.size(), 4)):
 			var mv: Dictionary = _move_registry[i]
+			var mv_id: String = String(mv["id"])
+			var mv_title: String = String(mv["title"])
+			var mv_cue: String = String(mv["cue"])
+			if mv_id == "melee_chase" and chain_depth >= 2:
+				mv_title = "MELEE (Z)"
+				mv_cue = "👊 Rebote Z"
+			elif mv_id == "fast_super":
+				mv_cue = "🔥 Galick/Final" if is_vegeta_atk else "🔥 Kamehameha"
+
 			var slot_r := Node3D.new()
-			slot_r.position = Vector3(xs[i], 0.002, 0.0)
+			slot_r.position = Vector3(xs[i], -0.006, 0.0)
 			_hud_anchor.add_child(slot_r)
 
 			var bg := MeshInstance3D.new()
@@ -1011,19 +1104,20 @@ func _build_visor_hud() -> void:
 			lbl.position = Vector3(0.022, 0.0, 0.003)
 			slot_r.add_child(lbl)
 
-			_card_slots.append({ "id": String(mv["id"]), "title": String(mv["title"]), "cue": String(mv["cue"]), "bg_mat": bgm, "ic_mat": icm, "lbl": lbl })
+			_card_slots.append({ "id": mv_id, "title": mv_title, "cue": mv_cue, "bg_mat": bgm, "ic_mat": icm, "lbl": lbl })
 
 		_timer_fill = MeshInstance3D.new()
 		var tq := QuadMesh.new()
 		tq.size = Vector2(1.0, 0.010)
 		_timer_fill.mesh = tq
-		_timer_fill.position = Vector3(0.0, -0.054, 0.003)
+		_timer_fill.position = Vector3(0.0, -0.064, 0.003)
 		var tm := StandardMaterial3D.new()
 		tm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		tm.no_depth_test = true
 		tm.render_priority = 125
 		tm.albedo_color = Color(1.0, 0.88, 0.22)
 		_timer_fill.material_override = tm
+		_timer_fill_mat = tm
 		_timer_fill.scale = Vector3(0.68, 1.0, 1.0)
 		_hud_anchor.add_child(_timer_fill)
 		_refresh_decision_hud()
@@ -1037,17 +1131,119 @@ func _build_defender_status_only_hud() -> void:
 		if not cam or not is_instance_valid(cam):
 			return
 		_hud_anchor = Node3D.new()
-		_hud_anchor.position = Vector3(0.0, 0.22, -1.06)
+		_hud_anchor.name = "FollowUpVisorHUD"
+		_hud_anchor.position = Vector3(0.0, 0.16, -1.06)
 		cam.add_child(_hud_anchor)
+	else:
+		_hud_anchor.position = Vector3(0.0, 0.16, -1.06)
+
+	if not _title_label or not is_instance_valid(_title_label):
+		var obi_m := MeshInstance3D.new()
+		var oq := QuadMesh.new()
+		oq.size = Vector2(0.70, 0.070)
+		obi_m.mesh = oq
+		obi_m.position = Vector3(0.0, 0.088, -0.002)
+		var om := StandardMaterial3D.new()
+		om.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		om.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		om.no_depth_test = true
+		om.render_priority = 123
+		var otex: Texture2D = _get_ui_tex("info_obi.png")
+		if otex:
+			om.albedo_texture = otex
+		om.albedo_color = Color(1.0, 0.48, 0.20, 0.90) if not bool(attacker.get("is_player")) else Color(1.0, 0.85, 0.25, 0.90)
+		obi_m.material_override = om
+		_hud_anchor.add_child(obi_m)
+
+		_title_label = Label3D.new()
+		_title_label.text = "🔥 CARGANDO SÚPER 2.4x" if bool(attacker.get("is_player")) else "⚡ ¡SIGUIENTE SECUENCIA!"
+		_title_label.font_size = 21
+		_title_label.pixel_size = 0.0012
+		_title_label.no_depth_test = true
+		_title_label.render_priority = 126
+		_title_label.modulate = Color(1.0, 0.92, 0.35)
+		_title_label.outline_size = 8
+		_title_label.position = Vector3(0.0, 0.088, 0.002)
+		_hud_anchor.add_child(_title_label)
+
 	if not _status_label or not is_instance_valid(_status_label):
 		_status_label = Label3D.new()
-		_status_label.font_size = 24
-		_status_label.pixel_size = 0.00125
+		_status_label.font_size = 22
+		_status_label.pixel_size = 0.00122
 		_status_label.no_depth_test = true
 		_status_label.render_priority = 126
 		_status_label.outline_size = 8
+		_status_label.position = Vector3(0.0, 0.026, 0.002)
 		_hud_anchor.add_child(_status_label)
+
+	if not _def_actions_label or not is_instance_valid(_def_actions_label):
+		_def_actions_label = Label3D.new()
+		_def_actions_label.font_size = 15
+		_def_actions_label.pixel_size = 0.00115
+		_def_actions_label.no_depth_test = true
+		_def_actions_label.render_priority = 126
+		_def_actions_label.modulate = Color(0.88, 0.95, 1.0)
+		_def_actions_label.outline_size = 6
+		_def_actions_label.position = Vector3(0.0, -0.024, 0.002)
+		_hud_anchor.add_child(_def_actions_label)
+
+	if not _timer_fill or not is_instance_valid(_timer_fill):
+		_timer_fill = MeshInstance3D.new()
+		var tq := QuadMesh.new()
+		tq.size = Vector2(1.0, 0.010)
+		_timer_fill.mesh = tq
+		_timer_fill.position = Vector3(0.0, -0.058, 0.003)
+		var tm := StandardMaterial3D.new()
+		tm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		tm.no_depth_test = true
+		tm.render_priority = 125
+		tm.albedo_color = Color(1.0, 0.72, 0.22)
+		_timer_fill.material_override = tm
+		_timer_fill_mat = tm
+		_timer_fill.scale = Vector3(0.68, 1.0, 1.0)
+		_timer_fill.visible = is_in_intro_pause()
+		_hud_anchor.add_child(_timer_fill)
+
 	_refresh_status_hud_for_defender()
+
+
+func _refresh_intro_pause_hud() -> void:
+	if not _hud_anchor or not is_instance_valid(_hud_anchor):
+		return
+	var rem_s: float = maxf(_state_timer, 0.0)
+	var frac: float = clampf(rem_s / maxf(_intro_pause_total, 0.01), 0.02, 1.0)
+	if bool(attacker.get("is_player")):
+		if _title_label and is_instance_valid(_title_label):
+			if _intro_pause_reason == "hammer_slam_chain":
+				_title_label.text = "⏸️ ¡RIVAL ESTAMPADO — SIGUIENTE SECUENCIA! (%.1fs)" % rem_s
+			elif chain_depth >= 2:
+				_title_label.text = "⏸️ ¡SIGUIENTE SECUENCIA — REBOTE Z x%d! (%.1fs)" % [chain_depth, rem_s]
+			else:
+				_title_label.text = "⏸️ ¡SIGUIENTE SECUENCIA! (%.1fs)" % rem_s
+			_title_label.modulate = Color(1.0, 0.94, 0.45)
+		if _subtitle_label and is_instance_valid(_subtitle_label):
+			_subtitle_label.text = "ACCIONES DISPONIBLES — ¡PREPÁRATE!"
+			_subtitle_label.modulate = Color(0.55, 0.95, 1.0)
+		if _timer_fill_mat:
+			_timer_fill_mat.albedo_color = Color(1.0, 0.72, 0.22)
+		if _timer_fill and is_instance_valid(_timer_fill):
+			_timer_fill.visible = true
+			_timer_fill.scale = Vector3(frac * 0.68, 1.0, 1.0)
+		_refresh_card_slots_visuals()
+	else:
+		var v_state: int = int(defender.get("vulnerability_state")) if defender.get("vulnerability_state") != null else 0
+		if _title_label and is_instance_valid(_title_label):
+			if v_state == 3:
+				_title_label.text = "⏸️ ¡SIGUIENTE SECUENCIA! — ¡ESTAMPADO! (%.1fs)" % rem_s
+			else:
+				_title_label.text = "⏸️ ¡SIGUIENTE SECUENCIA! — ¡FUISTE LANZADO! (%.1fs)" % rem_s
+			_title_label.modulate = Color(1.0, 0.92, 0.40)
+		if _timer_fill_mat:
+			_timer_fill_mat.albedo_color = Color(1.0, 0.55, 0.22)
+		if _timer_fill and is_instance_valid(_timer_fill):
+			_timer_fill.visible = true
+			_timer_fill.scale = Vector3(frac * 0.68, 1.0, 1.0)
+		_refresh_status_hud_for_defender()
 
 
 func _refresh_status_hud_for_defender() -> void:
@@ -1056,22 +1252,33 @@ func _refresh_status_hud_for_defender() -> void:
 	var v_state: int = int(defender.get("vulnerability_state")) if defender.get("vulnerability_state") != null else 0
 	if v_state == 3:
 		var t_rem: float = float(defender.get("crashed_stamped_timer")) if defender.get("crashed_stamped_timer") != null else 0.0
-		_status_label.text = "💥 ESTAMPADO — INDEFENSO (%.1fs)" % maxf(t_rem, 0.0)
+		_status_label.text = "💥 ESTAMPADO (%.1fs) — SIN DEFENSA" % maxf(t_rem, 0.0)
 		_status_label.modulate = Color(1.0, 0.28, 0.18)
+		if _def_actions_label and is_instance_valid(_def_actions_label):
+			_def_actions_label.text = "No puedes despertar ni bloquear el siguiente ataque"
+			_def_actions_label.modulate = Color(1.0, 0.62, 0.55)
 	elif v_state == 2:
-		_status_label.text = "✅ ¡ESTABILIZADO! PREPÁRATE A DEFENDER"
+		_status_label.text = "✅ ¡ESTABILIZADO! — PREPÁRATE A DEFENDER"
 		_status_label.modulate = Color(0.28, 1.0, 0.55)
+		if _def_actions_label and is_instance_valid(_def_actions_label):
+			_def_actions_label.text = "🕹️ Stick Z-Vanish | 💥 Trigger Desvío | 🛡️ Guardia X"
+			_def_actions_label.modulate = Color(0.75, 1.0, 0.85)
 	elif v_state == 1:
-		_status_label.text = "⚠️ ¡VOLANDO! ¡AGITA CONTROLES!"
+		var diff_lbl: String = String(defender.get("air_brake_difficulty_label")) if defender.get("air_brake_difficulty_label") != null else "NORMAL"
+		if diff_lbl.is_empty():
+			diff_lbl = "NORMAL"
+		_status_label.text = "⚡ ACCIÓN: AGITA AMBOS CONTROLES (%s)" % diff_lbl
 		_status_label.modulate = Color(1.0, 0.85, 0.25)
+		if _def_actions_label and is_instance_valid(_def_actions_label):
+			_def_actions_label.text = "Al estabilizarte: 🕹️ Stick Z-Vanish | 💥 Trigger Desvío | 🛡️ Guardia X"
+			_def_actions_label.modulate = Color(0.85, 0.94, 1.0)
 	else:
 		_status_label.text = ""
+		if _def_actions_label and is_instance_valid(_def_actions_label):
+			_def_actions_label.text = ""
 
 
-func _refresh_decision_hud() -> void:
-	if not bool(attacker.get("is_player")):
-		_refresh_status_hud_for_defender()
-		return
+func _refresh_card_slots_visuals() -> void:
 	var cur_ki: float = float(attacker.get("current_ki")) if attacker.get("current_ki") != null else 0.0
 	for slot in _card_slots:
 		var mid: String = String(slot["id"])
@@ -1080,13 +1287,22 @@ func _refresh_decision_hud() -> void:
 		var lbl: Label3D = slot["lbl"] as Label3D
 		var bgm: StandardMaterial3D = slot["bg_mat"] as StandardMaterial3D
 		var icm: StandardMaterial3D = slot["ic_mat"] as StandardMaterial3D
+		var disp_title: String = "MELEE (Z)" if (mid == "melee_chase" and chain_depth >= 2) else String(slot["title"])
+		var disp_cue: String = "👊 Rebote Z" if (mid == "melee_chase" and chain_depth >= 2) else String(slot["cue"])
 		if lbl:
-			lbl.text = "%s\n%s\n[-%d Ki]" % [String(slot["title"]), String(slot["cue"]), int(roundf(cost))]
+			lbl.text = "%s\n%s\n[-%d Ki]" % [disp_title, disp_cue, int(roundf(cost))]
 			lbl.modulate = Color(0.95, 0.98, 1.0) if afford else Color(0.45, 0.48, 0.55, 0.65)
 		if bgm:
 			bgm.albedo_color = Color(0.02, 0.06, 0.14, 0.88) if afford else Color(0.04, 0.04, 0.06, 0.60)
 		if icm:
 			icm.albedo_color = Color.WHITE if afford else Color(0.45, 0.45, 0.50, 0.50)
+
+
+func _refresh_decision_hud() -> void:
+	if not bool(attacker.get("is_player")):
+		_refresh_status_hud_for_defender()
+		return
+	_refresh_card_slots_visuals()
 	if _timer_fill and is_instance_valid(_timer_fill):
 		var frac: float = clampf(_decision_remaining / maxf(_decision_total, 0.01), 0.02, 1.0)
 		_timer_fill.scale = Vector3(frac * 0.68, 1.0, 1.0)
@@ -1252,8 +1468,11 @@ func _clear_action_hud() -> void:
 		_hud_anchor.queue_free()
 	_hud_anchor = null
 	_title_label = null
+	_subtitle_label = null
 	_status_label = null
+	_def_actions_label = null
 	_timer_fill = null
+	_timer_fill_mat = null
 	_card_slots.clear()
 
 

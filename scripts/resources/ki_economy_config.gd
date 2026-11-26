@@ -101,6 +101,7 @@ static var _cached: KiEconomyConfig = null
 @export var followup_barrage_shot_cost: float = 1.5
 @export var followup_decision_duration: float = 3.2
 @export var followup_hitstop_sec: float = 0.18
+@export var followup_intro_pause_sec: float = 1.0
 @export var followup_ramp_sec: float = 0.38
 @export var followup_super_charge_mult: float = 2.4
 @export var followup_crashed_super_dmg_mult: float = 1.15
