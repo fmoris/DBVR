@@ -1154,10 +1154,23 @@ func _is_followup_intro_paused(player: Node) -> bool:
 	return false
 
 
+func _is_followup_minigame_locked(player: Node) -> bool:
+	if _is_followup_intro_paused(player):
+		return true
+	if not player or not is_instance_valid(player):
+		return false
+	var my_fu: Variant = player.get("active_followup_controller")
+	if my_fu != null and is_instance_valid(my_fu):
+		var st: int = int(my_fu.get("state"))
+		if st == 5 or st == 7 or st == 8 or st == 9:
+			return true
+	return false
+
+
 func _process_super_powers(delta: float) -> void:
 	var player: Node = gesture_tree._get_player_instance() if gesture_tree else null
 	var in_followup: bool = player != null and is_instance_valid(player) and bool(player.get("is_in_followup_bullet_time"))
-	if _is_followup_intro_paused(player):
+	if _is_followup_minigame_locked(player):
 		if current_super_state != SuperPowerState.IDLE:
 			_reset_super_state()
 		candidate_super_tech = ""
@@ -1868,7 +1881,7 @@ func _process_melee_punches() -> void:
 		return
 
 	var is_followup_active: bool = player != null and is_instance_valid(player) and bool(player.get("is_in_followup_bullet_time"))
-	if _is_followup_intro_paused(player):
+	if _is_followup_minigame_locked(player):
 		left_punch_cocked = false
 		right_punch_cocked = false
 		return

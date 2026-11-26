@@ -38,6 +38,8 @@ var homing_strength: float = 0.0
 var pierce_damage_mult: float = 1.0
 var was_launched_in_zenkai: bool = false
 var unblockable_defenseless: bool = false
+var is_renzoku_juggle: bool = false
+var is_renzoku_knockdown: bool = false
 
 # Red de seguridad de ciclo de vida (Punto 10: Ki blasts que no desaparecen)
 const HARD_MAX_AGE: float = 8.0
@@ -618,7 +620,11 @@ func _apply_projectile_hit(char_node: Node, caster: Node, pos: Vector3, hit_dir:
 		if char_node.has_method("_spawn_bp_delta_popup"):
 			char_node._spawn_bp_delta_popup(0.0, "✋ ¡DEVOLUCIÓN PERFECTA!")
 
-	if forced_guard_break and char_node.has_method("apply_knockback"):
+	if is_renzoku_knockdown and char_node.has_method("apply_renzoku_knockdown"):
+		char_node.apply_renzoku_knockdown(caster, hit_dir)
+	elif is_renzoku_juggle and not was_char_blocking and char_node.has_method("apply_air_juggle_suspend"):
+		char_node.apply_air_juggle_suspend(0.55)
+	elif forced_guard_break and char_node.has_method("apply_knockback"):
 		char_node.apply_knockback(hit_dir, 15.0, 2.5)
 	elif is_charged_blast and not was_char_blocking and char_node.has_method("apply_knockback"):
 		var short_push_dir: Vector3 = Vector3(hit_dir.x, 0.0, hit_dir.z).normalized() if Vector3(hit_dir.x, 0.0, hit_dir.z).length_squared() > 0.01 else hit_dir
@@ -635,7 +641,7 @@ func _apply_projectile_hit(char_node: Node, caster: Node, pos: Vector3, hit_dir:
 	var saturated_now: bool = false
 	if char_node.has_method("apply_ki_blast_pressure"):
 		saturated_now = bool(char_node.apply_ki_blast_pressure(caster, is_charged_blast, was_char_blocking, profile, pos, extra_stacks))
-	if saturated_now and not forced_guard_break and char_node.has_method("apply_knockback"):
+	if saturated_now and not forced_guard_break and not is_renzoku_juggle and not is_renzoku_knockdown and char_node.has_method("apply_knockback"):
 		char_node.apply_knockback(hit_dir, 14.0, 2.5)
 
 	# 6. Ganancia de BP del atacante y condiciones de Zenkai

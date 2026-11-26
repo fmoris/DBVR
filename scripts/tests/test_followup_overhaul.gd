@@ -182,11 +182,25 @@ func _process(_delta: float) -> bool:
 	# Option 4: Ki Barrage + fire_barrage_shot while CRASHED_STAMPED vs STABILIZED
 	if not _check(bool(fu.call("choose_ki_barrage")), "choose_ki_barrage succeeds"): return true
 	if not _check(int(fu.get("state")) == 7, "Player Ki Barrage state is MINI_KI_BARRAGE_ATK (7)"): return true
-	# Test stabilized shot -> unblockable_defenseless == false
+	# Test stabilized shot -> unblockable_defenseless == false & is_renzoku_juggle == true
 	if not _check(bool(fu.call("fire_barrage_shot", 0)), "fire_barrage_shot(0) succeeds"): return true
 	var projs: Array = get_nodes_in_group("ki_projectiles")
 	if not _check(projs.size() >= 1, "Barrage spawned projectile in scene"): return true
-	if not _check(not bool(projs[projs.size() - 1].get("unblockable_defenseless")), "Stabilized target projectile is blockable"): return true
+	var p_juggle: Node = projs[projs.size() - 1]
+	if not _check(not bool(p_juggle.get("unblockable_defenseless")), "Stabilized target projectile is blockable"): return true
+	if not _check(bool(p_juggle.get("is_renzoku_juggle")) and not bool(p_juggle.get("is_renzoku_knockdown")), "Normal Renzoku shot is air-juggle without knockdown"): return true
+
+	# Verify air juggle suspend keeps airborne target aloft, and knockdown shot breaks suspension downward
+	e_def.call("apply_air_juggle_suspend", 0.55)
+	if not _check(float(e_def.get("air_juggle_suspend_timer")) > 0.0 and not bool(e_def.get("is_ballistic_launch")), "apply_air_juggle_suspend holds target in air"): return true
+	if not _check((e_def.get("velocity") as Vector3).y >= 0.0, "Air juggle prevents downward fall velocity"): return true
+	if not _check(bool(fu.call("fire_barrage_shot", 1, true)), "fire_barrage_shot(1, true) knockdown succeeds"): return true
+	projs = get_nodes_in_group("ki_projectiles")
+	var p_kd: Node = projs[projs.size() - 1]
+	if not _check(bool(p_kd.get("is_renzoku_knockdown")) and not bool(p_kd.get("is_renzoku_juggle")), "Hold-GRIP Renzoku finisher marks is_renzoku_knockdown"): return true
+	e_def.call("apply_renzoku_knockdown", p_atk, Vector3.FORWARD)
+	if not _check(absf(float(e_def.get("air_juggle_suspend_timer"))) < 0.001 and (e_def.get("velocity") as Vector3).y <= -15.0, "apply_renzoku_knockdown drives target down"): return true
+	e_def.set("velocity", Vector3.ZERO)
 
 	# Crash defender -> CRASHED_STAMPED + +18 Ki once -> barrage shot is unblockable_defenseless
 	var ki_before_crash: float = float(p_atk.get("current_ki"))

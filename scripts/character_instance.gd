@@ -54,6 +54,7 @@ var is_ballistic_launch: bool = false
 var ballistic_air_damping: float = 1.18
 var ballistic_gravity: float = 10.5
 var ballistic_elapsed: float = 0.0
+var air_juggle_suspend_timer: float = 0.0
 var is_air_brake_active: bool = false
 var air_brake_progress: float = 0.0
 var air_brake_required_effort: float = 10.0
@@ -264,12 +265,14 @@ func setup_character() -> void:
 	permanent_dramatic_entries.clear()
 	is_air_brake_active = false
 	air_brake_progress = 0.0
+	air_juggle_suspend_timer = 0.0
 	knockback_drag = 24.0
 	is_knocked_back = false
 	is_ballistic_launch = false
 	ballistic_air_damping = 1.18
 	ballistic_gravity = 10.5
 	ballistic_elapsed = 0.0
+	air_juggle_suspend_timer = 0.0
 	_limit_break_tiers_used.clear()
 	_is_limit_break_running = false
 	_pending_limit_break_leader = null
@@ -631,6 +634,7 @@ func swap_character_data(new_data: CharacterData) -> void:
 	permanent_dramatic_entries.clear()
 	is_air_brake_active = false
 	air_brake_progress = 0.0
+	air_juggle_suspend_timer = 0.0
 	knockback_drag = 24.0
 	wall_stick_timer = 0.0
 	_wall_crash_immunity_timer = 0.0
@@ -838,6 +842,8 @@ func _physics_process(delta: float) -> void:
 			_stop_flight()
 
 	# 2. Físicas de Velocidad y Knockback
+	if air_juggle_suspend_timer > 0.0:
+		air_juggle_suspend_timer = maxf(air_juggle_suspend_timer - delta, 0.0)
 	if wall_stick_timer > 0.0:
 		wall_stick_timer -= delta
 		velocity = Vector3.ZERO
@@ -856,7 +862,13 @@ func _physics_process(delta: float) -> void:
 		var current_pos = (get_parent().global_position if is_player else global_position)
 		var ground_h = get_ground_elevation(current_pos)
 
-		if is_ballistic_launch and not is_ragdoll_active:
+		if air_juggle_suspend_timer > 0.0 and not is_ragdoll_active:
+			is_ballistic_launch = false
+			ballistic_elapsed = 0.0
+			velocity.x = move_toward(velocity.x, 0.0, knockback_drag * delta)
+			velocity.z = move_toward(velocity.z, 0.0, knockback_drag * delta)
+			velocity.y = move_toward(maxf(velocity.y, 0.0), 0.0, 4.5 * delta)
+		elif is_ballistic_launch and not is_ragdoll_active:
 			ballistic_elapsed += delta
 			if current_pos.y <= ground_h + 0.005 and ballistic_elapsed >= 0.08 and pre_clamp_vy <= 0.0:
 				is_ballistic_launch = false
@@ -4074,6 +4086,7 @@ static func step_ballistic_launch_velocity(vel: Vector3, delta: float, air_dampi
 
 
 func launch_ballistic(impulse: Vector3, air_damping: float = 1.18, grav: float = 10.5) -> void:
+	air_juggle_suspend_timer = 0.0
 	velocity = impulse
 	is_knocked_back = true
 	is_ballistic_launch = true
@@ -4081,6 +4094,43 @@ func launch_ballistic(impulse: Vector3, air_damping: float = 1.18, grav: float =
 	ballistic_gravity = grav
 	ballistic_elapsed = 0.0
 	knockback_drag = 12.0
+
+
+## Mantiene al combatiente suspendido en el aire al recibir proyectiles de Renzoku Ki Barrage.
+func apply_air_juggle_suspend(duration: float = 0.55) -> void:
+	if is_match_over or is_ragdoll_active or vulnerability_state == VulnerabilityState.CRASHED_STAMPED:
+		return
+	air_juggle_suspend_timer = maxf(air_juggle_suspend_timer, duration)
+	is_ballistic_launch = false
+	ballistic_elapsed = 0.0
+	is_knocked_back = true
+	knockback_drag = 8.0
+	velocity.x *= 0.35
+	velocity.z *= 0.35
+	var cur_p: Vector3 = get_spatial_root().global_position if has_method("get_spatial_root") else global_position
+	var g_h: float = get_ground_elevation(cur_p)
+	if cur_p.y < g_h + 1.45:
+		velocity.y = clampf(maxf(velocity.y, 2.2), 1.6, 3.2)
+	else:
+		velocity.y = clampf(maxf(velocity.y, 0.45), 0.35, 1.8)
+
+
+## Rompe la suspensión aérea y derriba al rival directo al suelo desde una Lluvia Renzoku.
+func apply_renzoku_knockdown(attacker_node: Node3D, impact_dir: Vector3) -> void:
+	if is_match_over:
+		return
+	air_juggle_suspend_timer = 0.0
+	is_ballistic_launch = false
+	ballistic_elapsed = 0.0
+	is_knocked_back = true
+	knockback_drag = 6.0
+	var h_d: Vector3 = Vector3(impact_dir.x, 0.0, impact_dir.z)
+	if h_d.length_squared() < 0.01 and attacker_node and is_instance_valid(attacker_node):
+		var my_p: Vector3 = get_spatial_root().global_position if has_method("get_spatial_root") else global_position
+		var atk_p: Vector3 = attacker_node.get_spatial_root().global_position if attacker_node.has_method("get_spatial_root") else attacker_node.global_position
+		h_d = Vector3(my_p.x - atk_p.x, 0.0, my_p.z - atk_p.z)
+	h_d = h_d.normalized() if h_d.length_squared() >= 0.01 else -global_transform.basis.z
+	velocity = h_d * 7.5 + Vector3(0.0, -18.5, 0.0)
 
 
 func apply_knockback(dir: Vector3, force: float, air_drag_override: float = 2.6) -> void:

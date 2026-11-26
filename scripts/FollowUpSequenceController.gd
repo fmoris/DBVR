@@ -29,6 +29,7 @@ signal sequence_finished(action_chosen: String, chain_depth: int)
 
 const ProceduralKiProjectileScript = preload("res://scripts/ProceduralKiProjectile.gd")
 const ZENKAI_UI_DIR: String = "res://assets/ui_zenkai/"
+const BARRAGE_KNOCKDOWN_HOLD_SEC: float = 0.28
 
 var state: FollowUpState = FollowUpState.IDLE
 var is_active: bool = false
@@ -58,7 +59,9 @@ var _barrage_next_hand: int = 0
 var _barrage_prev_trig_l: bool = false
 var _barrage_prev_trig_r: bool = false
 var _barrage_entry_hold: float = 0.0
+var _barrage_grip_hold: float = 0.0
 var _hammer_entry_hold: float = 0.0
+var _cached_desktop_sim: Node = null
 var _melee_entry_armed: bool = false
 
 # Minijuego Defensivo (Reutiliza cajas cuadradas + semáforo de Melee)
@@ -254,19 +257,47 @@ func _get_player_controller(hand_name: String) -> XRController3D:
 	return null
 
 
+func _get_desktop_sim() -> Node:
+	if _cached_desktop_sim != null and is_instance_valid(_cached_desktop_sim):
+		return _cached_desktop_sim
+	var pf: Node3D = _get_player_fighter()
+	if pf and is_instance_valid(pf) and pf.has_method("_get_gesture_tree"):
+		var gss: Node = pf._get_gesture_tree()
+		if gss:
+			var hcc: Node = gss.get_node_or_null("HybridCombatController")
+			if hcc:
+				var sim: Variant = hcc.get("desktop_sim")
+				if sim != null and is_instance_valid(sim):
+					_cached_desktop_sim = sim as Node
+					return _cached_desktop_sim
+	return null
+
+
 func _ctrl_pressed(ctrl: XRController3D, action_name: StringName) -> bool:
-	return ctrl != null and is_instance_valid(ctrl) and ctrl.is_button_pressed(action_name)
+	if not ctrl or not is_instance_valid(ctrl):
+		return false
+	var sim: Node = _get_desktop_sim()
+	if sim and bool(sim.get("sim_active")):
+		return bool(sim.call("get_button_pressed", ctrl.name == "LeftHand", action_name))
+	return ctrl.is_button_pressed(action_name)
 
 
 func _ctrl_float(ctrl: XRController3D, action_name: StringName) -> float:
 	if not ctrl or not is_instance_valid(ctrl):
 		return 0.0
+	var sim: Node = _get_desktop_sim()
+	if sim and bool(sim.get("sim_active")):
+		return float(sim.call("get_float", ctrl.name == "LeftHand", action_name))
 	return ctrl.get_float(action_name)
 
 
 func _ctrl_vec2(ctrl: XRController3D, action_name: StringName) -> Vector2:
 	if not ctrl or not is_instance_valid(ctrl):
 		return Vector2.ZERO
+	var sim: Node = _get_desktop_sim()
+	if sim and bool(sim.get("sim_active")):
+		var v: Variant = sim.call("get_vector2", ctrl.name == "LeftHand", action_name)
+		return v as Vector2 if v is Vector2 else Vector2.ZERO
 	return ctrl.get_vector2(action_name)
 
 
@@ -663,6 +694,7 @@ func choose_ki_barrage() -> bool:
 
 	_barrage_shots_fired = 0
 	_barrage_shot_cd = 0.0
+	_barrage_grip_hold = 0.0
 	_barrage_next_hand = 0
 	_barrage_prev_trig_l = false
 	_barrage_prev_trig_r = false
@@ -827,6 +859,28 @@ func _process_mini_ki_barrage_atk(real_dt: float) -> void:
 	_barrage_shot_cd = maxf(_barrage_shot_cd - real_dt, 0.0)
 	var lc: XRController3D = _get_player_controller("LeftHand")
 	var rc: XRController3D = _get_player_controller("RightHand")
+	var l_grip: bool = _ctrl_float(lc, &"grip") > 0.45 or _ctrl_pressed(lc, &"grip_click")
+	var r_grip: bool = _ctrl_float(rc, &"grip") > 0.45 or _ctrl_pressed(rc, &"grip_click")
+	if l_grip or r_grip:
+		_barrage_grip_hold += real_dt
+		var pct: int = clampi(int(roundf((_barrage_grip_hold / BARRAGE_KNOCKDOWN_HOLD_SEC) * 100.0)), 0, 100)
+		if _status_label and is_instance_valid(_status_label):
+			_status_label.text = "✊ ¡CARGANDO REMATE AL SUELO! %d%%" % pct
+			_status_label.modulate = Color(1.0, 0.78, 0.20)
+		if _barrage_grip_hold >= BARRAGE_KNOCKDOWN_HOLD_SEC:
+			var kd_hand: int = 0 if l_grip else 1
+			if fire_barrage_shot(kd_hand, true):
+				_pulse_attacker_hands(220.0, 1.0, 0.16)
+				if is_inside_tree() and get_tree():
+					KiSmokeFX.spawn_smoke(get_tree(), defender.global_position + Vector3.UP * 0.9, 1.65)
+				_finish_sequence("ki_barrage_knockdown", true)
+				return
+	elif _barrage_grip_hold > 0.0:
+		_barrage_grip_hold = 0.0
+		if _status_label and is_instance_valid(_status_label):
+			_status_label.text = "💥 ¡LLUVIA RENZOKU! Gatillos: Suspender | ✊ Mantén GRIP: Derribar"
+			_status_label.modulate = Color(0.35, 0.96, 1.0)
+
 	var l_trig: bool = _ctrl_float(lc, &"trigger") > 0.45 or _ctrl_pressed(lc, &"trigger_click")
 	var r_trig: bool = _ctrl_float(rc, &"trigger") > 0.45 or _ctrl_pressed(rc, &"trigger_click")
 	var fresh_l: bool = l_trig and not _barrage_prev_trig_l
@@ -836,11 +890,11 @@ func _process_mini_ki_barrage_atk(real_dt: float) -> void:
 
 	var palm_push_l: bool = _vel_l_real.length() >= 1.65 and not l_trig
 	var palm_push_r: bool = _vel_r_real.length() >= 1.65 and not r_trig
-	var want_fire: bool = fresh_l or fresh_r or ((l_trig or r_trig or palm_push_l or palm_push_r) and _barrage_shot_cd <= 0.0)
+	var want_fire: bool = (not l_grip and not r_grip) and (fresh_l or fresh_r or ((l_trig or r_trig or palm_push_l or palm_push_r) and _barrage_shot_cd <= 0.0))
 
 	if want_fire and _barrage_shot_cd <= 0.0 and _barrage_shots_fired < _barrage_max_shots:
 		var use_hand: int = 0 if fresh_l else (1 if fresh_r else _barrage_next_hand)
-		if fire_barrage_shot(use_hand):
+		if fire_barrage_shot(use_hand, false):
 			_barrage_next_hand = 1 - use_hand
 			_barrage_shot_cd = 0.095
 			if _barrage_shots_fired >= _barrage_max_shots:
@@ -857,8 +911,8 @@ func _process_mini_ki_barrage_atk(real_dt: float) -> void:
 		_finish_sequence("ki_barrage", true)
 
 
-## Dispara un proyectil curvo Renzoku; también invocable directamente en tests headless.
-func fire_barrage_shot(hand_side: int) -> bool:
+## Dispara un proyectil curvo Renzoku; force_knockdown=true derriba al rival al suelo en vez de suspenderlo.
+func fire_barrage_shot(hand_side: int, force_knockdown: bool = false) -> bool:
 	if not attacker or not is_instance_valid(attacker) or not defender or not is_instance_valid(defender):
 		return false
 	var cfg: KiEconomyConfig = KiEconomyConfig.get_default()
@@ -868,7 +922,7 @@ func fire_barrage_shot(hand_side: int) -> bool:
 	attacker.consume_ki(shot_cost)
 	_barrage_shots_fired += 1
 
-	var is_final: bool = (_barrage_shots_fired >= _barrage_max_shots)
+	var is_final: bool = force_knockdown or (_barrage_shots_fired >= _barrage_max_shots)
 	var atk_root: Node3D = attacker.get_spatial_root() if attacker.has_method("get_spatial_root") else attacker
 	var spawn_pos: Vector3 = atk_root.global_position + Vector3(0.0, 1.25, 0.0)
 	var ctrl: XRController3D = _get_player_controller("LeftHand" if hand_side == 0 else "RightHand") if bool(attacker.get("is_player")) else null
@@ -894,20 +948,22 @@ func fire_barrage_shot(hand_side: int) -> bool:
 
 	var proj := Node3D.new()
 	proj.name = "RenzokuKiBlast_%d" % _barrage_shots_fired
-	var p_rad: float = 0.22 if is_final else 0.09
+	var p_rad: float = 0.24 if force_knockdown else (0.22 if is_final else 0.09)
 	ZenkaiVFXManager.build_zenkai_orb_visual(proj, p_rad, energy_col, is_final, is_final)
 	proj.set_script(ProceduralKiProjectileScript)
 	proj.set("speed_velocity", spread_dir * (64.0 if is_final else 54.0))
 	proj.set("p_radius", p_rad)
 	proj.set("p_color", energy_col)
 	proj.set("tier", 2 if is_final else 1)
-	proj.set("base_damage", 420.0 if is_final else 185.0)
-	proj.set("explosion_radius", 2.4 if is_final else 1.1)
+	proj.set("base_damage", 460.0 if force_knockdown else (420.0 if is_final else 185.0))
+	proj.set("explosion_radius", 2.6 if force_knockdown else (2.4 if is_final else 1.1))
 	proj.set("shooter_node", attacker)
 	proj.set("original_shooter", attacker)
 	proj.set("homing_target", defender)
 	proj.set("homing_strength", 15.5)
 	proj.set("is_volley_final", is_final)
+	proj.set("is_renzoku_juggle", not force_knockdown)
+	proj.set("is_renzoku_knockdown", force_knockdown)
 	var is_def_vuln: bool = defender.has_method("is_vulnerable_defenseless") and bool(defender.is_vulnerable_defenseless())
 	proj.set("unblockable_defenseless", is_def_vuln)
 	if attacker.has_method("get_projectile_exclude_rids"):
@@ -1349,7 +1405,7 @@ func _build_hammer_attacker_target() -> void:
 func _build_barrage_attacker_hud() -> void:
 	_build_defender_status_only_hud()
 	if _status_label:
-		_status_label.text = "💥 ¡LLUVIA RENZOKU! Alterna Gatillos o Palmas"
+		_status_label.text = "💥 ¡LLUVIA RENZOKU! Gatillos: Suspender | ✊ Mantén GRIP: Derribar"
 		_status_label.modulate = Color(0.35, 0.96, 1.0)
 	var cam: Camera3D = _get_player_camera()
 	if not cam:

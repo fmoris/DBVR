@@ -75,6 +75,7 @@ func _run_all_sequences() -> void:
 		"followup_hammer",
 		"followup_super",
 		"followup_barrage",
+		"followup_barrage_knockdown",
 		"followup_defense",
 		"chain_sequences"
 	]
@@ -86,7 +87,7 @@ func _run_all_sequences() -> void:
 		for part: String in _requested_suite.split(",", false):
 			var trimmed: String = part.strip_edges()
 			if trimmed == "followup_all":
-				for fu_name: String in ["followup_melee", "followup_hammer", "followup_super", "followup_barrage", "followup_defense"]:
+				for fu_name: String in ["followup_melee", "followup_hammer", "followup_super", "followup_barrage", "followup_barrage_knockdown", "followup_defense"]:
 					if not selected.has(fu_name):
 						selected.append(fu_name)
 			elif all_tests.has(trimmed):
@@ -130,6 +131,8 @@ func _run_all_sequences() -> void:
 				ok = await _seq_followup_super()
 			"followup_barrage":
 				ok = await _seq_followup_barrage()
+			"followup_barrage_knockdown":
+				ok = await _seq_followup_barrage_knockdown()
 			"followup_defense":
 				ok = await _seq_followup_defense()
 			"chain_sequences":
@@ -503,6 +506,7 @@ func _reset_between_tests() -> void:
 			fighter.set("is_flying_to_melee", false)
 			fighter.set("is_knocked_back", false)
 			fighter.set("is_ballistic_launch", false)
+			fighter.set("air_juggle_suspend_timer", 0.0)
 			fighter.set("velocity", Vector3.ZERO)
 			fighter.set("is_match_over", false)
 			fighter.set("is_in_zenkai_state", false)
@@ -932,19 +936,74 @@ func _seq_followup_barrage() -> bool:
 
 	var projs: Array = get_tree().get_nodes_in_group("ki_projectiles")
 	var has_unblockable: bool = false
+	var has_juggle: bool = false
 	for p_n in projs:
-		if p_n and is_instance_valid(p_n) and bool(p_n.get("unblockable_defenseless")):
-			has_unblockable = true
-			break
+		if p_n and is_instance_valid(p_n):
+			if bool(p_n.get("unblockable_defenseless")):
+				has_unblockable = true
+			if bool(p_n.get("is_renzoku_juggle")) and not bool(p_n.get("is_renzoku_knockdown")):
+				has_juggle = true
 
-	var shots_ok: bool = fired_cnt >= 6 and (has_unblockable or projs.size() >= 1)
-	_audit_add("Renzoku 8 Shots", shots_ok, "fired=%d projs=%d unblockable=%s" % [fired_cnt, projs.size(), str(has_unblockable)])
+	var shots_ok: bool = fired_cnt >= 6 and (has_unblockable or projs.size() >= 1) and has_juggle
+	_audit_add("Renzoku 8 Shots", shots_ok, "fired=%d projs=%d juggle=%s" % [fired_cnt, projs.size(), str(has_juggle)])
 	if is_visual:
 		await _step_real_seconds(1.1)
 	if is_instance_valid(fu):
 		fu.call("_finish_sequence", "test_done", false)
 	Engine.time_scale = 1.0
 	return shots_ok
+
+
+func _seq_followup_barrage_knockdown() -> bool:
+	var is_visual: bool = not DisplayServer.get_name().to_lower().contains("headless")
+	var opp: Node3D = player._get_opponent() if player.has_method("_get_opponent") else null
+	var fu: Node3D = await _launch_opp_and_wait_followup(is_visual)
+	if not fu:
+		return false
+
+	var cam_v: Camera3D = xr_origin.get_node_or_null("XRCamera3D") as Camera3D if xr_origin else null
+	if cam_v and is_instance_valid(cam_v) and opp:
+		cam_v.look_at(opp.global_position + Vector3(0.0, 1.15, 0.0), Vector3.UP)
+
+	var chosen_ok: bool = bool(fu.call("choose_ki_barrage"))
+	var in_barrage: bool = chosen_ok and int(fu.get("state")) == 7
+	_audit_add("Ki Barrage Entry", in_barrage, "state=%d" % int(fu.get("state")))
+	if not in_barrage:
+		Engine.time_scale = 1.0
+		return false
+
+	for i: int in range(5):
+		if is_instance_valid(fu):
+			fu.call("fire_barrage_shot", i % 2, false)
+		await _step_real_seconds(0.10 if is_visual else 0.04)
+
+	simulator.v_right_grip = 1.0
+	var kd_proj_seen: bool = false
+	var hold_deadline: int = Time.get_ticks_msec() + 900
+	while Time.get_ticks_msec() < hold_deadline:
+		await get_tree().process_frame
+		for p_n in get_tree().get_nodes_in_group("ki_projectiles"):
+			if p_n and is_instance_valid(p_n) and bool(p_n.get("is_renzoku_knockdown")):
+				kd_proj_seen = true
+		if not is_instance_valid(fu) or not bool(fu.get("is_active")):
+			break
+	simulator.v_right_grip = 0.0
+
+	if is_visual:
+		await _step_real_seconds(1.2)
+	else:
+		await _step_real_seconds(0.15)
+		for p_n in get_tree().get_nodes_in_group("ki_projectiles"):
+			if p_n and is_instance_valid(p_n) and bool(p_n.get("is_renzoku_knockdown")):
+				kd_proj_seen = true
+
+	var closed_ok: bool = (not is_instance_valid(fu)) or (not bool(fu.get("is_active")))
+	var ok: bool = kd_proj_seen and closed_ok
+	_audit_add("Hold-GRIP Knockdown", ok, "kd_proj=%s closed=%s" % [str(kd_proj_seen), str(closed_ok)])
+	if is_instance_valid(fu):
+		fu.call("_finish_sequence", "test_done", false)
+	Engine.time_scale = 1.0
+	return ok
 
 
 func _seq_followup_defense() -> bool:
