@@ -1313,6 +1313,7 @@ func _process_super_powers(delta: float) -> void:
 				current_super_state = SuperPowerState.CHARGING
 				super_power_type = target_tech
 				super_charge_timer = 0.0
+				VoiceCombatManager.notify_super_charge_started(target_tech)
 				super_phase1_anchor_z = (l_local_z if l_grip else r_local_z) if target_tech == "big_bang" else avg_local_z
 				if player and player.has_method("start_charging_super"):
 					player.start_charging_super()
@@ -1382,6 +1383,7 @@ func _process_super_powers(delta: float) -> void:
 						gesture_tree.emit_signal("phase_changed", "¡SOBRE-ESFUERZO VITAL! (QUEMANDO FUERZA VITAL)")
 
 		var super_spd_mult: float = player.get_dramatic_modifier("super_charge_speed_mult", 1.0) if (player and is_instance_valid(player) and player.has_method("get_dramatic_modifier")) else 1.0
+		super_spd_mult *= VoiceCombatManager.get_charge_speed_multiplier(super_power_type)
 		var opp_sup: Node = player._get_opponent() if (player and is_instance_valid(player) and player.has_method("_get_opponent")) else null
 		var is_chain_fast_charge: bool = in_followup
 		if opp_sup and is_instance_valid(opp_sup):
@@ -1671,6 +1673,7 @@ func _set_gesture_tree_charge_time(tech_name: String, time_val: float) -> void:
 
 
 func _reset_super_state() -> void:
+	VoiceCombatManager.notify_super_charge_ended()
 	current_super_state = SuperPowerState.IDLE
 	super_power_type = ""
 	super_charge_timer = 0.0

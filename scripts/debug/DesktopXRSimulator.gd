@@ -127,7 +127,7 @@ func _unhandled_input(event: InputEvent) -> void:
 					_hud_panel.visible = _hud_visible
 			elif key_ev.keycode == KEY_K:
 				VoiceCombatManager.trigger_debug_kiai()
-				VoiceCombatManager.trigger_debug_power_chant("kamehameha")
+				VoiceCombatManager.trigger_debug_power_chant("kamehame")
 			elif key_ev.keycode == KEY_M:
 				VoiceCombatManager.set_debug_shout(true)
 			elif key_ev.keycode == KEY_V:

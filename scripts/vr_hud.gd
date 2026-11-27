@@ -160,8 +160,10 @@ func _connect_voice_combat_signals() -> void:
 		return
 	if not VoiceCombatManager.shout_started.is_connected(_on_voice_shout_started):
 		VoiceCombatManager.shout_started.connect(_on_voice_shout_started)
-	if not VoiceCombatManager.power_chant_detected.is_connected(_on_voice_power_chant):
-		VoiceCombatManager.power_chant_detected.connect(_on_voice_power_chant)
+	if not VoiceCombatManager.power_phase1_chant_detected.is_connected(_on_voice_phase1_chant):
+		VoiceCombatManager.power_phase1_chant_detected.connect(_on_voice_phase1_chant)
+	if not VoiceCombatManager.power_phase2_release_detected.is_connected(_on_voice_phase2_release):
+		VoiceCombatManager.power_phase2_release_detected.connect(_on_voice_phase2_release)
 
 
 func _on_voice_shout_started(_intensity: float) -> void:
@@ -170,10 +172,20 @@ func _on_voice_shout_started(_intensity: float) -> void:
 	_status_override_timer = 1.4
 
 
-func _on_voice_power_chant(power_id: String, _confidence: float) -> void:
-	_status_override_text = "VOZ: %s +15%%" % power_id.replace("_", " ").to_upper()
-	_status_override_color = Color(1.0, 0.85, 0.25)
-	_status_override_timer = 2.5
+func _on_voice_phase1_chant(power_id: String) -> void:
+	_status_override_text = "CARGA VOZ: %s..." % power_id.replace("_", " ").to_upper()
+	_status_override_color = Color(0.45, 0.95, 1.0)
+	_status_override_timer = 2.0
+
+
+func _on_voice_phase2_release(power_id: String, is_perfect_combo: bool) -> void:
+	if is_perfect_combo:
+		_status_override_text = "¡%s PERFECTO +20%%!" % power_id.replace("_", " ").to_upper()
+		_status_override_color = Color(1.0, 0.88, 0.25)
+	else:
+		_status_override_text = "¡REMATE VOZ +8%%!"
+		_status_override_color = Color(1.0, 0.72, 0.25)
+	_status_override_timer = 2.4
 
 
 func _exit_tree() -> void:

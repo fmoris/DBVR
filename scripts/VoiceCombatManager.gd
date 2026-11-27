@@ -1,12 +1,15 @@
 extends Node
 
-## Gestor de micrófono VR y bonos de combate por voz (Fase 1: Gritos/Kiai nativo, Fase 2: Vosk Latino/Japonés).
+## Gestor de micrófono VR y bonos de combate por voz en 2 Fases (Fase 1: Gritos/Kiai nativo, Fase 2: Vosk Latino/Japonés).
+## Soporta cantos divididos en Fase 1 (carga: "kamehame", "galick", "final") + Fase 2 (remate: "haa", "ho", "flash" o grito).
 ## Mantiene zero-allocation en _process() reutilizando el buffer de muestras.
 
 signal shout_started(intensity: float)
 signal shout_ended()
 signal kiai_burst_detected(intensity: float)
 signal power_chant_detected(power_id: String, confidence: float)
+signal power_phase1_chant_detected(power_id: String)
+signal power_phase2_release_detected(power_id: String, is_perfect_combo: bool)
 signal mic_calibration_finished(noise_floor_db: float)
 
 const MIC_BUS_NAME := &"MicCapture"
@@ -15,9 +18,42 @@ const SHOUT_HOLD_MIN_SEC: float = 0.25
 const SHOUT_RELEASE_HYSTERESIS_SEC: float = 0.30
 const KIAI_COOLDOWN_SEC: float = 1.80
 const KIAI_BONUS_WINDOW_SEC: float = 0.65
-const POWER_CHANT_WINDOW_SEC: float = 4.0
+const POWER_CHANT_WINDOW_SEC: float = 4.5
+const PHASE2_RELEASE_WINDOW_SEC: float = 1.25
 
-## Gramática canónica Latino / Japonés -> ID interno de poder
+## Fase 1 (Carga): Prefijos en Latino / Japonés -> ID interno de poder
+const PHASE1_CHARGE_KEYWORDS: Dictionary = {
+	"kamehame": "kamehameha",
+	"super kamehame": "super_kamehameha",
+	"diez veces kamehame": "kamehameha_x10",
+	"juubai kamehame": "kamehameha_x10",
+	"galick": "galick_ho",
+	"gyarikku": "galick_ho",
+	"final": "final_flash",
+	"resplandor": "final_flash",
+	"big bang": "big_bang",
+	"ataque": "big_bang",
+	"genki": "genkidama",
+	"energia": "genkidama",
+	"kaio": "kaioken",
+	"explosion": "final_explosion",
+}
+
+## Fase 2 (Remate): Palabras de liberación / grito final -> poderes compatibles ("" = cualquiera)
+const PHASE2_FIRE_KEYWORDS: Dictionary = {
+	"ha": "",
+	"haa": "",
+	"haaa": "",
+	"ho": "galick_ho",
+	"hou": "galick_ho",
+	"flash": "final_flash",
+	"dama": "genkidama",
+	"ken": "kaioken",
+	"attack": "big_bang",
+	"bang": "big_bang",
+}
+
+## Fallback de frase completa en Latino / Japonés -> ID interno de poder
 const KEYWORD_TO_POWER_ID: Dictionary = {
 	"kamehameha": "kamehameha",
 	"super kamehameha": "super_kamehameha",
@@ -67,8 +103,12 @@ var _kiai_cooldown_timer: float = 0.0
 var _kiai_bonus_window_timer: float = 0.0
 var _kiai_bonus_pending: bool = false
 
-var _active_power_chant_id: String = ""
-var _power_chant_timer: float = 0.0
+# Estado de canto en 2 Fases para Súper Poderes
+var _active_charging_tech: String = ""
+var _phase1_power_id: String = ""
+var _phase1_timer: float = 0.0
+var _phase2_fire_power_id: String = ""
+var _phase2_fire_timer: float = 0.0
 
 # Overrides para pruebas de escritorio / DesktopXRSimulator
 var _debug_shout_active: bool = false
@@ -101,10 +141,14 @@ func _process(delta: float) -> void:
 		_kiai_bonus_window_timer = maxf(_kiai_bonus_window_timer - delta, 0.0)
 		if _kiai_bonus_window_timer <= 0.0:
 			_kiai_bonus_pending = false
-	if _power_chant_timer > 0.0:
-		_power_chant_timer = maxf(_power_chant_timer - delta, 0.0)
-		if _power_chant_timer <= 0.0:
-			_active_power_chant_id = ""
+	if _phase1_timer > 0.0:
+		_phase1_timer = maxf(_phase1_timer - delta, 0.0)
+		if _phase1_timer <= 0.0:
+			_phase1_power_id = ""
+	if _phase2_fire_timer > 0.0:
+		_phase2_fire_timer = maxf(_phase2_fire_timer - delta, 0.0)
+		if _phase2_fire_timer <= 0.0:
+			_phase2_fire_power_id = ""
 
 	if _debug_shout_active:
 		_update_shout_state(-10.0, delta)
@@ -207,12 +251,32 @@ func _on_native_energy_updated(rms_db: float) -> void:
 
 func _on_native_keyword_detected(keyword: String, confidence: float) -> void:
 	var normalized: String = keyword.strip_edges().to_lower()
-	var power_id: String = KEYWORD_TO_POWER_ID.get(normalized, normalized)
-	if power_id.is_empty():
+	if normalized.is_empty():
 		return
-	_active_power_chant_id = power_id
-	_power_chant_timer = POWER_CHANT_WINDOW_SEC
-	power_chant_detected.emit(power_id, confidence)
+
+	if PHASE1_CHARGE_KEYWORDS.has(normalized):
+		var p1_id: String = PHASE1_CHARGE_KEYWORDS[normalized]
+		_phase1_power_id = p1_id
+		_phase1_timer = POWER_CHANT_WINDOW_SEC
+		power_phase1_chant_detected.emit(p1_id)
+		power_chant_detected.emit(p1_id, confidence)
+		return
+
+	if PHASE2_FIRE_KEYWORDS.has(normalized):
+		var p2_target: String = PHASE2_FIRE_KEYWORDS[normalized]
+		_phase2_fire_power_id = p2_target if not p2_target.is_empty() else _active_charging_tech
+		_phase2_fire_timer = PHASE2_RELEASE_WINDOW_SEC
+		var has_p1: bool = not _phase1_power_id.is_empty() and _phase1_timer > 0.0
+		power_phase2_release_detected.emit(_phase2_fire_power_id, has_p1)
+		return
+
+	var full_id: String = KEYWORD_TO_POWER_ID.get(normalized, "")
+	if not full_id.is_empty():
+		_phase1_power_id = full_id
+		_phase1_timer = POWER_CHANT_WINDOW_SEC
+		_phase2_fire_power_id = full_id
+		_phase2_fire_timer = POWER_CHANT_WINDOW_SEC
+		power_chant_detected.emit(full_id, confidence)
 
 
 func recalibrate_noise_floor() -> void:
@@ -264,11 +328,13 @@ func _process_rms_db(rms_db: float, delta: float) -> void:
 			mic_calibration_finished.emit(noise_floor_db)
 		return
 
-	# Detección de Kiai (pico vocal súbito para golpes melee)
+	# Detección de Kiai / Remate "¡HAAA!" (pico vocal súbito)
 	if rms_db >= kiai_threshold_db and (rms_db - _smoothed_db) >= 5.5 and _kiai_cooldown_timer <= 0.0:
 		_kiai_cooldown_timer = KIAI_COOLDOWN_SEC
 		_kiai_bonus_window_timer = KIAI_BONUS_WINDOW_SEC
 		_kiai_bonus_pending = true
+		_phase2_fire_power_id = _active_charging_tech
+		_phase2_fire_timer = PHASE2_RELEASE_WINDOW_SEC
 		var kiai_int: float = clampf((rms_db - kiai_threshold_db) / 14.0, 0.35, 1.0)
 		kiai_burst_detected.emit(kiai_int)
 
@@ -303,6 +369,29 @@ func _set_shouting(active: bool, intensity: float) -> void:
 
 ## --- API Pública para Squads de Combate ---
 
+func notify_super_charge_started(tech_name: String) -> void:
+	_active_charging_tech = tech_name.strip_edges().to_lower().replace(" ", "_")
+
+
+func notify_super_charge_ended() -> void:
+	_active_charging_tech = ""
+
+
+func _tech_matches(stored_id: String, tech_norm: String) -> bool:
+	if stored_id.is_empty():
+		return false
+	return stored_id == tech_norm or tech_norm.contains(stored_id) or stored_id.contains(tech_norm)
+
+
+func get_charge_speed_multiplier(tech_name: String) -> float:
+	var norm: String = tech_name.strip_edges().to_lower().replace(" ", "_")
+	if not _phase1_power_id.is_empty() and _phase1_timer > 0.0 and _tech_matches(_phase1_power_id, norm):
+		return 1.10
+	if is_shouting():
+		return 1.05
+	return 1.0
+
+
 func is_shouting() -> bool:
 	return _is_shouting or _debug_shout_active
 
@@ -324,17 +413,26 @@ func consume_kiai_melee_bonus() -> float:
 
 func consume_voice_power_bonus(tech_name: String) -> Dictionary:
 	var norm: String = tech_name.strip_edges().to_lower().replace(" ", "_")
-	var matched_chant: bool = false
-	if not _active_power_chant_id.is_empty() and _power_chant_timer > 0.0:
-		if _active_power_chant_id == norm or norm.contains(_active_power_chant_id) or _active_power_chant_id.contains(norm):
-			matched_chant = true
-			_active_power_chant_id = ""
-			_power_chant_timer = 0.0
+	var has_p1: bool = not _phase1_power_id.is_empty() and _phase1_timer > 0.0 and _tech_matches(_phase1_power_id, norm)
+	var has_p2_word: bool = _phase2_fire_timer > 0.0 and (_phase2_fire_power_id.is_empty() or _tech_matches(_phase2_fire_power_id, norm))
+	var has_p2_shout: bool = is_shouting() or (_kiai_bonus_pending and _kiai_bonus_window_timer > 0.0)
+	var has_p2: bool = has_p2_word or has_p2_shout
 
-	if matched_chant:
-		return {"active": true, "ki_cost_mult": 0.85, "damage_mult": 1.15, "source": "chant"}
-	if is_shouting():
-		return {"active": true, "ki_cost_mult": 0.92, "damage_mult": 1.08, "source": "shout"}
+	if has_p1:
+		_phase1_power_id = ""
+		_phase1_timer = 0.0
+	if has_p2_word:
+		_phase2_fire_power_id = ""
+		_phase2_fire_timer = 0.0
+
+	if has_p1 and has_p2:
+		power_phase2_release_detected.emit(norm, true)
+		return {"active": true, "ki_cost_mult": 0.85, "damage_mult": 1.20, "source": "perfect_2phase"}
+	if has_p1:
+		return {"active": true, "ki_cost_mult": 0.90, "damage_mult": 1.05, "source": "phase1_charge"}
+	if has_p2:
+		power_phase2_release_detected.emit(norm, false)
+		return {"active": true, "ki_cost_mult": 0.95, "damage_mult": 1.08, "source": "phase2_shout"}
 	return {"active": false, "ki_cost_mult": 1.0, "damage_mult": 1.0, "source": "none"}
 
 
@@ -351,6 +449,8 @@ func set_debug_shout(active: bool) -> void:
 func trigger_debug_kiai() -> void:
 	_kiai_bonus_pending = true
 	_kiai_bonus_window_timer = KIAI_BONUS_WINDOW_SEC
+	_phase2_fire_power_id = _active_charging_tech
+	_phase2_fire_timer = PHASE2_RELEASE_WINDOW_SEC
 	kiai_burst_detected.emit(0.9)
 
 
