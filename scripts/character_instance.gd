@@ -137,6 +137,10 @@ var head_bone_idx: int = -1
 var hidden_head_bone_indices: Array[int] = []
 var neck_bone_idx: int = -1
 var torso_yaw: float = 0.0
+const FP_TORSO_BACK_OFFSET: float = 0.20
+const FP_LOOK_DOWN_EXTRA_BACK: float = 0.06
+const FP_NECK_CLEARANCE_BELOW_EYE: float = 0.14
+var _fp_neck_rest_height: float = 1.48
 
 ## Retorna el nodo espacial raíz responsable del posicionamiento en el mundo (XROrigin3D para el jugador, o self para la IA)
 func get_spatial_root() -> Node3D:
@@ -394,47 +398,7 @@ func setup_character() -> void:
 				_calibrate_skeleton_rig()
 
 				if is_player:
-					head_bone_idx = skeleton.find_bone("Head")
-					if head_bone_idx == -1:
-						head_bone_idx = skeleton.find_bone("head")
-					if head_bone_idx == -1:
-						for i in range(skeleton.get_bone_count()):
-							var bone_name = skeleton.get_bone_name(i).to_lower()
-							if "head" in bone_name:
-								head_bone_idx = i
-								break
-					if head_bone_idx != -1:
-						skeleton.set_bone_pose_scale(head_bone_idx, Vector3.ZERO)
-					
-					# Recolectar recursivamente todos los huesos asociados a cabeza, cabello y rostro
-					hidden_head_bone_indices.clear()
-					for i in range(skeleton.get_bone_count()):
-						var b_name = skeleton.get_bone_name(i).to_lower()
-						var is_head_descendant = false
-						var p_idx = skeleton.get_bone_parent(i)
-						while p_idx != -1:
-							if p_idx == head_bone_idx:
-								is_head_descendant = true
-								break
-							p_idx = skeleton.get_bone_parent(p_idx)
-						if i == head_bone_idx or is_head_descendant or "hair" in b_name or "eye" in b_name or "face" in b_name or "jaw" in b_name or "brow" in b_name or "mouth" in b_name:
-							hidden_head_bone_indices.append(i)
-							skeleton.set_bone_pose_scale(i, Vector3.ZERO)
-					
-					# Recolectar recursivamente todos los huesos asociados a cabeza, cabello y rostro
-					hidden_head_bone_indices.clear()
-					for i in range(skeleton.get_bone_count()):
-						var b_name = skeleton.get_bone_name(i).to_lower()
-						var is_head_descendant = false
-						var p_idx = skeleton.get_bone_parent(i)
-						while p_idx != -1:
-							if p_idx == head_bone_idx:
-								is_head_descendant = true
-								break
-							p_idx = skeleton.get_bone_parent(p_idx)
-						if i == head_bone_idx or is_head_descendant or "hair" in b_name or "eye" in b_name or "face" in b_name or "jaw" in b_name or "brow" in b_name or "mouth" in b_name:
-							hidden_head_bone_indices.append(i)
-							skeleton.set_bone_pose_scale(i, Vector3.ZERO)
+					_configure_first_person_head_hiding()
 
 					var cam = get_parent().get_node_or_null("XRCamera3D") if get_parent() else null
 					if cam:
@@ -520,22 +484,7 @@ func _swap_body_mesh_for_path(model_path: String) -> void:
 		_calibrate_skeleton_rig()
 
 		if is_player:
-			head_bone_idx = skeleton.find_bone("Head")
-			if head_bone_idx == -1:
-				head_bone_idx = skeleton.find_bone("head")
-			hidden_head_bone_indices.clear()
-			for i in range(skeleton.get_bone_count()):
-				var b_name: String = skeleton.get_bone_name(i).to_lower()
-				var is_head_descendant: bool = false
-				var p_idx: int = skeleton.get_bone_parent(i)
-				while p_idx != -1:
-					if p_idx == head_bone_idx:
-						is_head_descendant = true
-						break
-					p_idx = skeleton.get_bone_parent(p_idx)
-				if i == head_bone_idx or is_head_descendant or "hair" in b_name or "eye" in b_name or "face" in b_name or "jaw" in b_name or "brow" in b_name or "mouth" in b_name:
-					hidden_head_bone_indices.append(i)
-					skeleton.set_bone_pose_scale(i, Vector3.ZERO)
+			_configure_first_person_head_hiding()
 		else:
 			procedural_animator = ProceduralCombatAnimatorClass.new()
 			procedural_animator.setup(skeleton, self)
@@ -548,6 +497,63 @@ func _swap_body_mesh_for_path(model_path: String) -> void:
 	_apply_model_variant_visibility(model_path)
 
 
+func _configure_first_person_head_hiding() -> void:
+	head_bone_idx = -1
+	hidden_head_bone_indices.clear()
+	_fp_neck_rest_height = 1.48
+	if not skeleton:
+		return
+
+	head_bone_idx = _find_bone_any(["Head", "head", "HEAD"])
+	if head_bone_idx == -1:
+		for i: int in range(skeleton.get_bone_count()):
+			if "head" in skeleton.get_bone_name(i).to_lower():
+				head_bone_idx = i
+				break
+
+	for i: int in range(skeleton.get_bone_count()):
+		var b_name: String = skeleton.get_bone_name(i).to_lower()
+		var is_head_descendant: bool = false
+		var p_idx: int = skeleton.get_bone_parent(i)
+		while p_idx != -1:
+			if p_idx == head_bone_idx:
+				is_head_descendant = true
+				break
+			p_idx = skeleton.get_bone_parent(p_idx)
+		if i == head_bone_idx or is_head_descendant or "hair" in b_name or "eye" in b_name or "face" in b_name or "jaw" in b_name or "brow" in b_name or "mouth" in b_name:
+			hidden_head_bone_indices.append(i)
+			skeleton.set_bone_pose_scale(i, Vector3.ZERO)
+
+	# Altura real del cuello en espacio del modelo para anclar bajo los ojos aunque el jugador se agache
+	var ref_idx: int = neck_bone_idx if neck_bone_idx != -1 else head_bone_idx
+	if ref_idx != -1 and body_mesh_instance and is_instance_valid(body_mesh_instance):
+		var rel_xf := Transform3D.IDENTITY
+		var cur: Node = skeleton
+		while cur and cur != body_mesh_instance:
+			if cur is Node3D:
+				rel_xf = (cur as Node3D).transform * rel_xf
+			cur = cur.get_parent()
+		var rest_pos: Vector3 = rel_xf * skeleton.get_bone_global_rest(ref_idx).origin
+		var neck_h: float = rest_pos.y * body_mesh_instance.scale.y
+		if neck_bone_idx == -1:
+			neck_h -= 0.08
+		if neck_h > 0.5:
+			_fp_neck_rest_height = clampf(neck_h, 1.15, 1.75)
+
+	if body_mesh_instance and is_instance_valid(body_mesh_instance):
+		_hide_first_person_head_meshes(body_mesh_instance)
+
+
+func _hide_first_person_head_meshes(node: Node) -> void:
+	if node is MeshInstance3D:
+		var mi: MeshInstance3D = node as MeshInstance3D
+		var nl: String = mi.name.to_lower()
+		if ("face" in nl) or ("hair" in nl) or ("eye" in nl) or ("eyebrow" in nl) or ("eyeline" in nl) or ("mouth" in nl) or ("tooth" in nl) or ("ear" in nl):
+			mi.visible = false
+	for child: Node in node.get_children():
+		_hide_first_person_head_meshes(child)
+
+
 func _apply_model_variant_visibility(model_path: String) -> void:
 	_mouth_pose_meshes[0].clear()
 	_mouth_pose_meshes[1].clear()
@@ -556,11 +562,12 @@ func _apply_model_variant_visibility(model_path: String) -> void:
 	if not body_mesh_instance or not is_instance_valid(body_mesh_instance):
 		return
 	var model_file: String = model_path.get_file().to_lower()
-	if not ("goku" in model_file or "vegeta" in model_file):
-		return
-	var is_transformed: bool = current_transformation != null
-	_apply_zenkai_visibility_recursive(body_mesh_instance, model_file, is_transformed)
-	set_mouth_expression(0)
+	if "goku" in model_file or "vegeta" in model_file:
+		var is_transformed: bool = current_transformation != null
+		_apply_zenkai_visibility_recursive(body_mesh_instance, model_file, is_transformed)
+		set_mouth_expression(0)
+	if is_player:
+		_hide_first_person_head_meshes(body_mesh_instance)
 
 
 func _apply_zenkai_visibility_recursive(node: Node, model_file: String, is_transformed: bool) -> void:
@@ -1131,16 +1138,20 @@ func _process(delta: float) -> void:
 			else:
 				torso_yaw = lerp_angle(torso_yaw, cam_yaw, 3.5 * delta)
 				
-			# Offset hacia atrás del torso respecto a los ojos (10cm) usando rotación mundial real
+			# Retroceso horizontal y tope vertical bajo los ojos para que pecho/cuello de Goku no tapen la vista al mirar abajo
 			var origin_node: Node3D = get_parent() as Node3D
 			var origin_rot_y: float = origin_node.global_rotation.y if origin_node else 0.0
 			var world_torso_yaw: float = origin_rot_y + torso_yaw
-			var torso_back: Vector3 = Vector3(sin(world_torso_yaw), 0.0, cos(world_torso_yaw)) * 0.10
+			var look_down_t: float = clampf((-camera.rotation.x - 0.30) / 0.75, 0.0, 1.0)
+			var back_dist: float = FP_TORSO_BACK_OFFSET + FP_LOOK_DOWN_EXTRA_BACK * look_down_t
+			var torso_back: Vector3 = Vector3(sin(world_torso_yaw), 0.0, cos(world_torso_yaw)) * back_dist
 			var cam_world: Vector3 = camera.global_position
 			var floor_y: float = origin_node.global_position.y if origin_node else global_position.y
-			
-			# Anclaje mundial absoluto: El cuerpo siempre está exactamente debajo de la cabeza en el mundo real
-			body_mesh_instance.global_position = Vector3(cam_world.x + torso_back.x, floor_y, cam_world.z + torso_back.z)
+			var max_body_y: float = cam_world.y - (_fp_neck_rest_height + FP_NECK_CLEARANCE_BELOW_EYE)
+			var body_y: float = minf(floor_y, max_body_y)
+
+			# Anclaje mundial absoluto: El cuerpo siempre está exactamente debajo y detrás de la cámara
+			body_mesh_instance.global_position = Vector3(cam_world.x + torso_back.x, body_y, cam_world.z + torso_back.z)
 			body_mesh_instance.global_rotation = Vector3(0.0, world_torso_yaw + PI, 0.0)
 			
 			if skeleton:
