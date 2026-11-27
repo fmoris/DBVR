@@ -1425,6 +1425,80 @@ func _process(_delta: float) -> bool:
 	p_mock.call("check_zenkai_conditions", 7000.0) # lead = 48.1% >= 40%
 	assert(bool(p_mock.get("is_in_zenkai_state")) == true, "Base >= 70% BP with >= 40% BP lead must activate Dominio Zenkai")
 
+	# --- 19. 3D Steep Aim Pose Detection & Diagonal Follow-Up Hammer Slam ---
+	var hcc_aim: Node = hcc_s.new() as Node
+	hcc_aim.name = "SteepAimTestHCC"
+	rig.add_child(hcc_aim)
+	hcc_aim.set_process(false)
+	hcc_aim.set("xr_origin", rig)
+	hcc_aim.set("camera", cam)
+	hcc_aim.set("left_controller", l_ctrl)
+	hcc_aim.set("right_controller", r_ctrl)
+	rig.global_position = Vector3.ZERO
+	rig.scale = Vector3.ONE
+	cam.position = Vector3(0.0, 1.60, 0.0)
+
+	# 19a. Looking steeply DOWN (-60 deg): arms extended along gaze must trigger Ki Blast & Phase 2 Super
+	cam.rotation = Vector3(deg_to_rad(-60.0), 0.0, 0.0)
+	var down_dir: Vector3 = (-cam.global_transform.basis.z).normalized()
+	var sh_ref_d: Vector3 = cam.global_position - Vector3(0.0, 0.16, 0.0)
+	l_ctrl.global_position = sh_ref_d + down_dir * 0.55 + Vector3(-0.14, 0.0, 0.0)
+	r_ctrl.global_position = sh_ref_d + down_dir * 0.55 + Vector3(0.14, 0.0, 0.0)
+	l_ctrl.global_transform = Transform3D(Basis(down_dir, Vector3.RIGHT, down_dir.cross(Vector3.RIGHT)).orthonormalized(), l_ctrl.global_position)
+	r_ctrl.global_transform = Transform3D(Basis(-down_dir, Vector3.RIGHT, (-down_dir).cross(Vector3.RIGHT)).orthonormalized(), r_ctrl.global_position)
+	hcc_aim.call("_update_body_space_metrics", p_mock)
+	assert(bool(hcc_aim.call("_is_arm_extended_palm_forward", r_ctrl, false)) == true, "Right arm extended along -60 deg downward gaze must pass")
+	assert(bool(hcc_aim.call("_is_arm_extended_palm_forward", l_ctrl, true)) == true, "Left arm extended along -60 deg downward gaze must pass")
+	var eff_l_down: float = maxf(maxf(hcc_aim.get("l_torso_pos").z, float(hcc_aim.get("l_cam_fwd_proj"))), float(hcc_aim.get("l_cam_fwd_3d_proj")))
+	var eff_r_down: float = maxf(maxf(hcc_aim.get("r_torso_pos").z, float(hcc_aim.get("r_cam_fwd_proj"))), float(hcc_aim.get("r_cam_fwd_3d_proj")))
+	hcc_aim.set("super_phase1_anchor_z", -0.10)
+	assert(bool(hcc_aim.call("_is_phase2_autofire_pose", "kamehameha", eff_l_down, eff_r_down, 1)) == true, "Kamehameha Phase 2 must autofire when extending arms steeply downward (-60 deg)")
+
+	# 19b. Looking steeply UP (+55 deg): arm extended along gaze must pass
+	cam.rotation = Vector3(deg_to_rad(55.0), 0.0, 0.0)
+	var up_dir: Vector3 = (-cam.global_transform.basis.z).normalized()
+	var sh_ref_u: Vector3 = cam.global_position - Vector3(0.0, 0.16, 0.0)
+	r_ctrl.global_position = sh_ref_u + up_dir * 0.55 + Vector3(0.14, 0.0, 0.0)
+	r_ctrl.global_transform = Transform3D(Basis(-up_dir, Vector3.RIGHT, (-up_dir).cross(Vector3.RIGHT)).orthonormalized(), r_ctrl.global_position)
+	hcc_aim.call("_update_body_space_metrics", p_mock)
+	assert(bool(hcc_aim.call("_is_arm_extended_palm_forward", r_ctrl, false)) == true, "Right arm extended along +55 deg upward gaze must pass")
+
+	# 19c. Hands tucked at waist while looking down (-60 deg) must NOT falsely count as extended forward
+	cam.rotation = Vector3(deg_to_rad(-60.0), 0.0, 0.0)
+	l_ctrl.global_position = cam.global_position + Vector3(-0.14, -0.35, -0.12)
+	r_ctrl.global_position = cam.global_position + Vector3(0.14, -0.35, -0.12)
+	hcc_aim.call("_update_body_space_metrics", p_mock)
+	assert(bool(hcc_aim.call("_is_arm_extended_palm_forward", r_ctrl, false)) == false, "Hands tucked at waist must NOT trigger extended palm check")
+
+	cam.rotation = Vector3.ZERO
+	if hcc_aim.get_parent():
+		hcc_aim.get_parent().remove_child(hcc_aim)
+	hcc_aim.free()
+
+	# 19d. Diagonal Follow-Up Hammer Slam must place victim ahead at comfortable diagonal angle
+	var fu_s: GDScript = load("res://scripts/FollowUpSequenceController.gd") as GDScript
+	var fu_hm: Node3D = fu_s.new() as Node3D
+	root.add_child(fu_hm)
+	rig.global_position = Vector3(0.0, 10.0, 0.0)
+	ai_mock.global_position = Vector3(0.0, 8.5, -0.95)
+	p_mock.set("is_match_over", false)
+	ai_mock.set("is_match_over", false)
+	fu_hm.set("attacker", p_mock)
+	fu_hm.set("defender", ai_mock)
+	fu_hm.set("is_active", true)
+	fu_hm.set("chain_depth", 1)
+	fu_hm.call("_execute_hammer_slam_impact", 3.6)
+	var hm_ground_h: float = float(ai_mock.call("get_ground_elevation", ai_mock.global_position))
+	var hm_h_dist: float = Vector2(ai_mock.global_position.x - rig.global_position.x, ai_mock.global_position.z - rig.global_position.z).length()
+	var hm_drop_angle_deg: float = rad_to_deg(atan2(maxf(rig.global_position.y - ai_mock.global_position.y, 0.0), maxf(hm_h_dist, 0.01)))
+	assert(absf(ai_mock.global_position.y - hm_ground_h) < 0.05, "Diagonal hammer slam must land victim on ground_h")
+	assert(hm_h_dist >= 5.5, "Diagonal hammer slam horizontal dist must be >= 5.5m (got %.2fm)" % hm_h_dist)
+	assert(hm_drop_angle_deg <= 36.0, "Diagonal hammer slam pitch angle must be <= 36 deg (got %.2f deg)" % hm_drop_angle_deg)
+	Engine.time_scale = 1.0
+	if fu_hm.get_parent():
+		fu_hm.get_parent().remove_child(fu_hm)
+	fu_hm.free()
+
 	# Teardown cleanly without leaving leaked nodes
 	for n in [mini, dome, dome2, dome3, dome4, dome5, dome6, dome7, dome8, dome9, dome10, dome11, dome12, dome13, dome14, dome15, lockon_t, hud_t, rig, ai_mock]:
 		if is_instance_valid(n):

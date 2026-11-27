@@ -61,6 +61,7 @@ var inv_body_scale: float = 1.0
 var torso_fwd: Vector3 = Vector3.FORWARD
 var torso_right: Vector3 = Vector3.RIGHT
 var cam_fwd_flat: Vector3 = Vector3.FORWARD
+var cam_fwd_3d: Vector3 = Vector3.FORWARD
 var cam_pos_cached: Vector3 = Vector3.ZERO
 var chest_pos_cached: Vector3 = Vector3.ZERO
 var l_torso_pos: Vector3 = Vector3.ZERO
@@ -70,6 +71,8 @@ var l_cam_rel_y: float = 0.0
 var r_cam_rel_y: float = 0.0
 var l_cam_fwd_proj: float = 0.0
 var r_cam_fwd_proj: float = 0.0
+var l_cam_fwd_3d_proj: float = 0.0
+var r_cam_fwd_3d_proj: float = 0.0
 var hands_dist_norm: float = 0.0
 var l_torso_vel: Vector3 = Vector3.ZERO
 var r_torso_vel: Vector3 = Vector3.ZERO
@@ -483,6 +486,7 @@ func _update_body_space_metrics(player: Node) -> void:
 	inv_body_scale = 1.0 / body_scale
 
 	cam_pos_cached = camera.global_position if (camera and is_instance_valid(camera)) else (xr_origin.global_position + Vector3(0.0, 1.6 * body_scale, 0.0))
+	cam_fwd_3d = (-camera.global_transform.basis.z).normalized() if (camera and is_instance_valid(camera)) else (-xr_origin.global_transform.basis.z).normalized()
 	var raw_cam_fwd: Vector3 = -camera.global_transform.basis.z if (camera and is_instance_valid(camera)) else -xr_origin.global_transform.basis.z
 	raw_cam_fwd.y = 0.0
 	cam_fwd_flat = raw_cam_fwd.normalized() if raw_cam_fwd.length_squared() > 0.001 else Vector3.FORWARD
@@ -497,6 +501,7 @@ func _update_body_space_metrics(player: Node) -> void:
 	torso_right = tr.normalized() if tr.length_squared() > 0.001 else Vector3.RIGHT
 
 	chest_pos_cached = cam_pos_cached - Vector3(0.0, 0.28 * body_scale, 0.0)
+	var shoulder_ref: Vector3 = cam_pos_cached - Vector3(0.0, 0.16 * body_scale, 0.0)
 
 	var l_pos: Vector3 = left_controller.global_position
 	var r_pos: Vector3 = right_controller.global_position
@@ -510,6 +515,8 @@ func _update_body_space_metrics(player: Node) -> void:
 	r_cam_rel_y = (r_pos.y - cam_pos_cached.y) * inv_body_scale
 	l_cam_fwd_proj = (l_pos - cam_pos_cached).dot(cam_fwd_flat) * inv_body_scale
 	r_cam_fwd_proj = (r_pos - cam_pos_cached).dot(cam_fwd_flat) * inv_body_scale
+	l_cam_fwd_3d_proj = (l_pos - shoulder_ref).dot(cam_fwd_3d) * inv_body_scale
+	r_cam_fwd_3d_proj = (r_pos - shoulder_ref).dot(cam_fwd_3d) * inv_body_scale
 	hands_dist_norm = l_pos.distance_to(r_pos) * inv_body_scale
 
 	var l_vn: Vector3 = left_velocity * inv_body_scale
@@ -580,8 +587,8 @@ func _process_ki_recharge(delta: float) -> void:
 					_pulse_haptic(left_controller, 65.0, 0.40, 0.10)
 					_pulse_haptic(right_controller, 65.0, 0.40, 0.10)
 
-				# FASE 2: Detonación de Ki al descender las manos/muñecas a la cintura o caderas
-				if pose_waist_ki_p2 or avg_rel_y <= -0.28:
+				# FASE 2: Detonación de Ki al descender las manos/muñecas a la cintura o caderas (bloqueada si las palmas apuntan extendidas abajo)
+				if (pose_waist_ki_p2 or avg_rel_y <= -0.28) and not (l_palm_fwd_rec and r_palm_fwd_rec):
 					is_charging_ki = true
 					ki_prep_phase = false
 					ki_haptic_timer = 0.0
@@ -651,14 +658,18 @@ func _is_arm_extended_palm_forward(
 	var hand_from_chest: float = controller.global_position.distance_to(chest_pos_cached) * inv_body_scale
 	var hand_torso: Vector3 = l_torso_pos if is_left else r_torso_pos
 	var hand_cam_z: float = l_cam_fwd_proj if is_left else r_cam_fwd_proj
-	var cam_fwd_3d: Vector3 = (-camera.global_transform.basis.z).normalized() if (camera and is_instance_valid(camera)) else cam_fwd_flat
+	var hand_cam_3d_z: float = l_cam_fwd_3d_proj if is_left else r_cam_fwd_3d_proj
+	var fwd_reach: float = maxf(maxf(hand_torso.z, hand_cam_z), hand_cam_3d_z)
 	var palm_dir: Vector3 = _get_controller_palm_world_dir(controller, is_left)
+	var aiming_steep: bool = absf(cam_fwd_3d.y) >= 0.25 and hand_cam_3d_z >= min_fwd
+	var min_y: float = -0.68 if aiming_steep else -0.35
+	var max_y: float = 0.72 if aiming_steep else 0.55
 	return (
 		hand_from_chest >= min_reach
-		and maxf(hand_torso.z, hand_cam_z) >= min_fwd
+		and fwd_reach >= min_fwd
 		and absf(hand_torso.x) <= 0.62
-		and hand_torso.y >= -0.35
-		and hand_torso.y <= 0.55
+		and hand_torso.y >= min_y
+		and hand_torso.y <= max_y
 		and palm_dir.dot(cam_fwd_3d) >= min_palm_dot
 	)
 
@@ -919,6 +930,7 @@ func _compute_super_raw_aim_dir(tech_name: String, is_launch_moment: bool) -> Ve
 	var cam_dir: Vector3 = (-camera.global_transform.basis.z).normalized() if (camera and is_instance_valid(camera)) else torso_fwd
 	var shoulder_pos: Vector3 = cam_pos_cached - Vector3(0.0, 0.16 * body_scale, 0.0)
 	var raw: Vector3 = cam_dir
+	var eff_avg_z: float = maxf(avg_torso_pos.z, (l_cam_fwd_3d_proj + r_cam_fwd_3d_proj) * 0.5)
 	if tech_name == "big_bang":
 		var bb_side: int = int(gesture_tree.get("big_bang_hand")) if gesture_tree else 1
 		var bb_ctrl: XRController3D = left_controller if bb_side == 0 else right_controller
@@ -930,12 +942,12 @@ func _compute_super_raw_aim_dir(tech_name: String, is_launch_moment: bool) -> Ve
 				palm_dir = cam_dir
 			raw = (cam_dir * 0.45 + palm_dir * 0.35 + arm_dir * 0.20).normalized()
 	elif tech_name == "genkidama":
-		if is_launch_moment and left_controller and right_controller and avg_torso_pos.z >= 0.16:
+		if is_launch_moment and left_controller and right_controller and eff_avg_z >= 0.16:
 			var mid_h: Vector3 = (left_controller.global_position + right_controller.global_position) * 0.5
 			var c2h: Vector3 = mid_h - shoulder_pos
 			var hand_dir: Vector3 = c2h.normalized() if c2h.length_squared() > 0.001 else cam_dir
 			raw = (cam_dir * 0.65 + hand_dir * 0.35).normalized()
-	elif is_launch_moment or (avg_torso_pos.z >= 0.25 and hands_dist_norm <= 0.50):
+	elif is_launch_moment or (eff_avg_z >= 0.25 and hands_dist_norm <= 0.50):
 		if left_controller and right_controller:
 			var mid_hands: Vector3 = (left_controller.global_position + right_controller.global_position) * 0.5
 			var arm_v_2: Vector3 = mid_hands - shoulder_pos
@@ -1100,29 +1112,32 @@ func _hide_controller_phase2_cues() -> void:
 
 
 func _is_phase2_autofire_pose(tech_name: String, eff_l_z: float, eff_r_z: float, bb_side: int) -> bool:
+	var eff_avg_z: float = maxf(avg_torso_pos.z, (eff_l_z + eff_r_z) * 0.5)
 	match tech_name:
 		"final_flash":
 			return eff_l_z >= 0.22 and eff_r_z >= 0.22 and hands_dist_norm <= 0.42
 		"galick_ho":
-			return eff_l_z >= 0.24 and eff_r_z >= 0.24 and hands_dist_norm <= 0.52 and absf(avg_torso_pos.x) <= 0.38 and (avg_torso_pos.z >= super_phase1_anchor_z + 0.18 or (eff_l_z >= 0.34 and eff_r_z >= 0.34))
+			return eff_l_z >= 0.24 and eff_r_z >= 0.24 and hands_dist_norm <= 0.52 and absf(avg_torso_pos.x) <= 0.38 and (eff_avg_z >= super_phase1_anchor_z + 0.18 or (eff_l_z >= 0.34 and eff_r_z >= 0.34))
 		"kamehameha":
-			return eff_l_z >= 0.24 and eff_r_z >= 0.24 and hands_dist_norm <= 0.52 and (avg_torso_pos.z >= super_phase1_anchor_z + 0.18 or (eff_l_z >= 0.34 and eff_r_z >= 0.34))
+			return eff_l_z >= 0.24 and eff_r_z >= 0.24 and hands_dist_norm <= 0.52 and (eff_avg_z >= super_phase1_anchor_z + 0.18 or (eff_l_z >= 0.34 and eff_r_z >= 0.34))
 		"genkidama":
 			var avg_rel_y: float = (l_cam_rel_y + r_cam_rel_y) * 0.5
-			return avg_rel_y <= 0.08 and (eff_l_z >= 0.16 or eff_r_z >= 0.16)
+			return (avg_rel_y <= 0.08 or cam_fwd_3d.y >= 0.25) and (eff_l_z >= 0.16 or eff_r_z >= 0.16)
 		"big_bang":
 			var bb_ctrl: XRController3D = left_controller if bb_side == 0 else right_controller
 			if not _is_arm_extended_palm_forward(bb_ctrl, bb_side == 0, 0.30, 0.34, 0.24):
 				return false
-			var active_z: float = maxf(l_torso_pos.z, l_cam_fwd_proj) if bb_side == 0 else maxf(r_torso_pos.z, r_cam_fwd_proj)
+			var active_z: float = eff_l_z if bb_side == 0 else eff_r_z
 			var active_vel_z: float = l_torso_vel.z if bb_side == 0 else r_torso_vel.z
-			return active_z >= 0.34 and (active_vel_z >= 0.55 or active_z >= super_phase1_anchor_z + 0.08)
+			var active_vel_3d: float = (left_velocity if bb_side == 0 else right_velocity).dot(cam_fwd_3d) * inv_body_scale
+			var active_vel_fwd: float = maxf(active_vel_z, active_vel_3d)
+			return active_z >= 0.34 and (active_vel_fwd >= 0.55 or active_z >= super_phase1_anchor_z + 0.08)
 	return false
 
 
 func _is_valid_super_release_pose(tech_name: String, l_local_z: float, r_local_z: float, _avg_local_y: float, _avg_local_z: float, hands_dist: float, bb_side: int, l_cam_z: float = -999.0, r_cam_z: float = -999.0) -> bool:
-	var eff_l_z: float = maxf(l_local_z, l_cam_z)
-	var eff_r_z: float = maxf(r_local_z, r_cam_z)
+	var eff_l_z: float = maxf(maxf(l_local_z, l_cam_z), l_cam_fwd_3d_proj)
+	var eff_r_z: float = maxf(maxf(r_local_z, r_cam_z), r_cam_fwd_3d_proj)
 	match tech_name:
 		"final_flash":
 			return eff_l_z >= 0.16 and eff_r_z >= 0.16 and hands_dist <= 0.72
@@ -1459,8 +1474,8 @@ func _process_super_powers(delta: float) -> void:
 				if absf(active_vz_bb) < 0.30:
 					super_phase1_anchor_z = active_z_bb
 
-		var eff_l_z: float = maxf(l_local_z, l_cam_z)
-		var eff_r_z: float = maxf(r_local_z, r_cam_z)
+		var eff_l_z: float = maxf(maxf(l_local_z, l_cam_z), l_cam_fwd_3d_proj)
+		var eff_r_z: float = maxf(maxf(r_local_z, r_cam_z), r_cam_fwd_3d_proj)
 
 		# Pulso háptico e indicación de "FASE 1 LISTA" al completar carga mínima
 		if super_charge_timer >= min_fire_time and not super_locked_haptic:

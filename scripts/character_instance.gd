@@ -5333,7 +5333,7 @@ func _execute_hammer_strike_finisher(opponent: Node3D, swing_velocity: float, re
 	var final_speed: float = clampf(28.0 * clampf(ratio_bp, 0.75, 1.45) * ki_mult * swing_mult, 24.0, 40.0)
 
 	var launch_dir: Vector3 = (fwd * 2.9 + Vector3.DOWN * 1.8).normalized()
-	var final_impulse: Vector3 = clamp_launch_angle_diagonal(launch_dir * final_speed, 32.0, fwd)
+	var final_impulse: Vector3 = clamp_launch_angle_diagonal(launch_dir * final_speed, 28.0, fwd)
 
 	var opp_pos_cur: Vector3 = opponent.get_parent().global_position if (opponent.get("is_player") and opponent.get_parent() is Node3D) else opponent.global_position
 	var ground_h: float = get_ground_elevation(opp_pos_cur)

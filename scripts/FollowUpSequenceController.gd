@@ -928,11 +928,45 @@ func _execute_hammer_slam_impact(swing_speed: float) -> void:
 	if attacker.has_method("increase_np"):
 		attacker.increase_np(dmg * 0.75)
 
-	# Llevar a la víctima directo al suelo y activar CRASHED_STAMPED + +18 Ki
+	# Llevar a la víctima en diagonal adelante hasta el suelo (evita quedar vertical bajo los pies del atacante)
+	var atk_root: Node3D = attacker.get_spatial_root() if attacker.has_method("get_spatial_root") else attacker
 	var def_root: Node3D = defender.get_spatial_root() if defender.has_method("get_spatial_root") else defender
+	var atk_pos: Vector3 = atk_root.global_position
 	var cur_p: Vector3 = def_root.global_position
-	var g_h: float = attacker.get_ground_elevation(cur_p) if attacker.has_method("get_ground_elevation") else 0.0
-	def_root.global_position = Vector3(cur_p.x, g_h, cur_p.z)
+
+	var slam_fwd: Vector3 = Vector3(cur_p.x - atk_pos.x, 0.0, cur_p.z - atk_pos.z)
+	if slam_fwd.length_squared() < 0.04:
+		if bool(attacker.get("is_player")):
+			var slam_cam: Camera3D = _get_player_camera()
+			if slam_cam and is_instance_valid(slam_cam):
+				slam_fwd = -slam_cam.global_transform.basis.z
+		if slam_fwd.length_squared() < 0.04:
+			slam_fwd = -atk_root.global_transform.basis.z
+		slam_fwd.y = 0.0
+	slam_fwd = slam_fwd.normalized() if slam_fwd.length_squared() >= 0.001 else Vector3.FORWARD
+
+	var base_g_h: float = attacker.get_ground_elevation(cur_p) if attacker.has_method("get_ground_elevation") else 0.0
+	var drop_h: float = maxf(atk_pos.y - base_g_h, 2.0)
+	var diag_dist: float = clampf(drop_h * 1.55, 5.5, 13.5)
+	var target_x: float = clampf(atk_pos.x + slam_fwd.x * diag_dist, -72.0, 72.0)
+	var target_z: float = clampf(atk_pos.z + slam_fwd.z * diag_dist, -72.0, 72.0)
+	var g_h: float = attacker.get_ground_elevation(Vector3(target_x, 0.0, target_z)) if attacker.has_method("get_ground_elevation") else 0.0
+	def_root.global_position = Vector3(target_x, g_h, target_z)
+
+	var horiz_sep: float = Vector2(def_root.global_position.x - atk_pos.x, def_root.global_position.z - atk_pos.z).length()
+	if horiz_sep < 4.5:
+		var step_back: float = 5.5 - horiz_sep
+		atk_root.global_position = Vector3(
+			clampf(atk_pos.x - slam_fwd.x * step_back, -72.0, 72.0),
+			atk_pos.y,
+			clampf(atk_pos.z - slam_fwd.z * step_back, -72.0, 72.0)
+		)
+	if not bool(attacker.get("is_player")):
+		var look_after: Vector3 = def_root.global_position - atk_root.global_position
+		look_after.y = 0.0
+		if look_after.length_squared() > 0.001:
+			attacker.rotation.y = atan2(look_after.x, look_after.z)
+
 	if defender.has_method("_on_ground_crash_impact"):
 		defender.set("_last_launch_strike_factor", 1.85)
 		defender.call("_on_ground_crash_impact", clampf(swing_speed * 4.5, 14.0, 26.0), def_root.global_position, g_h)
