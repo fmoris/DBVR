@@ -1499,8 +1499,73 @@ func _process(_delta: float) -> bool:
 		fu_hm.get_parent().remove_child(fu_hm)
 	fu_hm.free()
 
+	# Runtime Dome #20: Melee zone Box -> Outcome Icon Morph (Success / Block / Parry / Clash / Hit Taken + Non-Collision)
+	var dome16: Node3D = dome_s.new()
+	root.add_child(dome16)
+	p_mock.set("current_np", 10000.0)
+	ai_mock.set("current_np", 10000.0)
+	p_mock.set("current_ki", 60.0)
+	ai_mock.set("current_ki", 60.0)
+	dome16.call("setup", p_mock, ai_mock, -1.0, 4)
+	dome16.set("phase", 2) # DEFENSE_RHYTHM
+	dome16.set("is_active", true)
+	var z16: Array = dome16.get("target_zones")
+	assert(z16.size() == 6, "Expected 6 target zones")
+	var icon_m0: MeshInstance3D = z16[0].get("outcome_icon_mesh") as MeshInstance3D
+	var icon_m1: MeshInstance3D = z16[1].get("outcome_icon_mesh") as MeshInstance3D
+	assert(icon_m0 != null and icon_m1 != null and icon_m0.mesh != null and icon_m0.mesh == icon_m1.mesh, "Zones must share OutcomeIconQuad mesh")
+	assert(icon_m0.visible == false, "Outcome icon mesh must start hidden")
+
+	# 20a. Player attacking -> unblocked hit morphs box/circle into green success check
+	dome16.set("attacker", p_mock)
+	dome16.set("defender", ai_mock)
+	dome16.set("_last_role_is_attack", 1)
+	var n_hit_ok: Dictionary = { "zone_id": 0, "is_charged": false, "is_charged_v3": false, "is_hammer": false, "tier": "SOLIDO", "resolved": false }
+	dome16.set("hits", [n_hit_ok])
+	dome16.call("_resolve_unblocked_hit", n_hit_ok, z16[0])
+	assert(String(z16[0].get("outcome_kind")) == "hit_success", "Player landing clean hit must morph zone to hit_success")
+	assert((z16[0].get("box_mesh") as MeshInstance3D).visible == false, "box_mesh must hide during hit_success morph")
+	assert((z16[0].get("circle_mesh") as MeshInstance3D).visible == false, "circle_mesh must hide during hit_success morph")
+	assert((z16[0].get("inner_mesh") as MeshInstance3D).visible == true, "inner_mesh backdrop must show during hit_success morph")
+	assert(icon_m0.visible == true, "outcome_icon_mesh must show during hit_success morph")
+	var icon_mat0: StandardMaterial3D = z16[0].get("outcome_icon_mat") as StandardMaterial3D
+	assert(icon_mat0 != null and icon_mat0.albedo_texture != null, "Outcome icon must bind non-null texture")
+
+	# 20b. Non-collision: highlighting zone 2 preserves zone 0 outcome; highlighting zone 0 immediately clears zone 0 outcome
+	dome16.call("_update_defense_zone_highlights", 2, 2, -1)
+	assert(String(z16[0].get("outcome_kind")) == "hit_success" and icon_m0.visible == true, "Highlighting another zone must keep zone 0 outcome icon")
+	dome16.call("_update_defense_zone_highlights", 0, 3, -1)
+	assert(float(z16[0].get("outcome_timer")) <= 0.0 and icon_m0.visible == false, "Highlighting zone 0 as active note must clear its outcome immediately")
+
+	# 20c. Player defending outcomes: GREEN deflect, YELLOW block, X guard, hit_taken, clash_win + expiry tick
+	dome16.set("attacker", ai_mock)
+	dome16.set("defender", p_mock)
+	dome16.set("_last_role_is_attack", 0)
+	var n_def_g: Dictionary = { "zone_id": 0, "is_charged": false, "is_charged_v3": false, "is_hammer": false, "tier": "SOLIDO", "resolved": false }
+	var n_def_y: Dictionary = { "zone_id": 1, "is_charged": false, "is_charged_v3": false, "is_hammer": false, "tier": "SOLIDO", "resolved": false }
+	var n_def_x: Dictionary = { "zone_id": 2, "is_charged": false, "is_charged_v3": false, "is_hammer": false, "tier": "SOLIDO", "resolved": false }
+	var n_def_t: Dictionary = { "zone_id": 3, "is_charged": false, "is_charged_v3": false, "is_hammer": false, "tier": "SOLIDO", "resolved": false }
+	var n_def_c: Dictionary = { "zone_id": 4, "is_charged": true, "is_charged_v3": false, "is_hammer": false, "tier": "SOLIDO", "resolved": false }
+	dome16.set("hits", [n_def_g, n_def_y, n_def_x, n_def_t, n_def_c])
+	dome16.call("_resolve_hand_block", n_def_g, z16[0], 0, "GREEN")
+	dome16.call("_resolve_hand_block", n_def_y, z16[1], 1, "YELLOW")
+	dome16.call("_resolve_cross_arm_guard", n_def_x, z16[2])
+	dome16.call("_resolve_unblocked_hit", n_def_t, z16[3])
+	dome16.call("_resolve_fist_clash", n_def_c, z16[4], 0)
+	assert(String(z16[0].get("outcome_kind")) == "deflect_green", "GREEN block must morph to deflect_green")
+	assert(String(z16[1].get("outcome_kind")) == "block_yellow", "YELLOW block must morph to block_yellow")
+	assert(String(z16[2].get("outcome_kind")) == "guard_x", "Cross arm guard must morph to guard_x")
+	assert(String(z16[3].get("outcome_kind")) == "hit_taken", "Unblocked hit on player must morph to hit_taken")
+	assert(String(z16[4].get("outcome_kind")) == "clash_win", "Fist clash tie/win must morph to clash_win")
+	assert((z16[2].get("box_mesh") as MeshInstance3D).visible == false and (z16[2].get("outcome_icon_mesh") as MeshInstance3D).visible == true, "Guard X must hide box and show shield icon")
+
+	# Advance outcome timers past expiration and verify clean restore
+	dome16.call("_tick_zone_outcomes", 0.75)
+	assert(float(z16[0].get("outcome_timer")) == 0.0 and icon_m0.visible == false and (z16[0].get("inner_mesh") as MeshInstance3D).visible == false, "Outcome icon must expire after 0.75s")
+	assert((z16[0].get("box_mesh") as MeshInstance3D).visible == true, "box_mesh must restore after defense outcome expiry")
+
 	# Teardown cleanly without leaving leaked nodes
-	for n in [mini, dome, dome2, dome3, dome4, dome5, dome6, dome7, dome8, dome9, dome10, dome11, dome12, dome13, dome14, dome15, lockon_t, hud_t, rig, ai_mock]:
+	for n in [mini, dome, dome2, dome3, dome4, dome5, dome6, dome7, dome8, dome9, dome10, dome11, dome12, dome13, dome14, dome15, dome16, lockon_t, hud_t, rig, ai_mock]:
 		if is_instance_valid(n):
 			if n.get_parent():
 				n.get_parent().remove_child(n)
