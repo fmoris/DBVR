@@ -110,12 +110,15 @@ var aura_mesh_ref: MeshInstance3D = null
 var aura_outer_mesh_ref: MeshInstance3D = null
 var aura_ground_ring_ref: MeshInstance3D = null
 var aura_sparks_ref: CPUParticles3D = null
+var aura_charge_spikes_ref: CPUParticles3D = null
 var aura_lightning_ref: CPUParticles3D = null
 var aura_light_ref: OmniLight3D = null
-const DEFAULT_AURA_OPACITY_MULT: float = 0.22
-const DEFAULT_AURA_FLAME_ALPHA_MULT: float = 0.18
-const DEFAULT_AURA_LIGHTNING_ALPHA_MULT: float = 0.42
-const PLAYER_AURA_FP_CENTER_CLEAR: float = 0.17
+var _aura_active_flame_tex_key: String = ""
+var _aura_active_bolt_tex_key: String = ""
+const DEFAULT_AURA_OPACITY_MULT: float = 0.24
+const DEFAULT_AURA_FLAME_ALPHA_MULT: float = 0.11
+const DEFAULT_AURA_LIGHTNING_ALPHA_MULT: float = 0.43
+const PLAYER_AURA_FP_CENTER_CLEAR: float = 1.00
 
 var aura_opacity_mult: float = DEFAULT_AURA_OPACITY_MULT
 var aura_flame_alpha_mult: float = DEFAULT_AURA_FLAME_ALPHA_MULT
@@ -170,6 +173,7 @@ var _cached_hybrid_ctrl: Node = null
 var _cached_gesture_tree: Node = null
 
 const ZenkaiAuraShader = preload("res://shaders/zenkai_aura.gdshader")
+const ZenkaiAuraParticleShader = preload("res://shaders/zenkai_aura_particle.gdshader")
 const MeleeTargetDomeClass = preload("res://scripts/MeleeTargetDome.gd")
 const SuperBeamSequenceClass = preload("res://scripts/SuperBeamSequenceController.gd")
 const FollowUpSequenceControllerClass = preload("res://scripts/FollowUpSequenceController.gd")
@@ -2946,19 +2950,19 @@ func _update_aura_visuals(delta: float = 0.0) -> void:
 
 		var flame_tex: Texture2D = ZenkaiVFXManager.get_tex("aura_streaks")
 		var band_tex: Texture2D = ZenkaiVFXManager.get_tex("aura_band")
-		var ring_tex: Texture2D = ZenkaiVFXManager.get_tex("shockwave_ring")
 		var v_flame_tex: Texture2D = ZenkaiVFXManager.get_tex("aura_v_white")
+		var spikes_tex: Texture2D = ZenkaiVFXManager.get_tex("aura_spikes")
 		var bolt_4x4_tex: Texture2D = ZenkaiVFXManager.get_tex("lightning_4x4_blue")
 
 		var inner_mi := MeshInstance3D.new()
 		inner_mi.name = "AuraInnerMesh"
 		inner_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var inner_cyl := CylinderMesh.new()
-		inner_cyl.top_radius = 0.28
-		inner_cyl.bottom_radius = 0.72
+		inner_cyl.top_radius = 0.34
+		inner_cyl.bottom_radius = 0.64
 		inner_cyl.height = 2.25
 		inner_cyl.radial_segments = 24
-		inner_cyl.rings = 6
+		inner_cyl.rings = 10
 		inner_cyl.cap_top = false
 		inner_cyl.cap_bottom = false
 		inner_mi.mesh = inner_cyl
@@ -2980,11 +2984,11 @@ func _update_aura_visuals(delta: float = 0.0) -> void:
 		outer_mi.name = "AuraOuterMesh"
 		outer_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var outer_cyl := CylinderMesh.new()
-		outer_cyl.top_radius = 0.45
-		outer_cyl.bottom_radius = 1.05
-		outer_cyl.height = 2.55
+		outer_cyl.top_radius = 0.48
+		outer_cyl.bottom_radius = 0.88
+		outer_cyl.height = 2.50
 		outer_cyl.radial_segments = 24
-		outer_cyl.rings = 6
+		outer_cyl.rings = 10
 		outer_cyl.cap_top = false
 		outer_cyl.cap_bottom = false
 		outer_mi.mesh = outer_cyl
@@ -3002,45 +3006,34 @@ func _update_aura_visuals(delta: float = 0.0) -> void:
 		outer_mi.position = Vector3(0.0, 1.25, 0.0)
 		aura_outer_mesh_ref = outer_mi
 
-		var ring_mi := MeshInstance3D.new()
-		ring_mi.name = "AuraGroundRing"
-		ring_mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		var ring_quad := QuadMesh.new()
-		ring_quad.size = Vector2(2.8, 2.8)
-		ring_mi.mesh = ring_quad
-		ring_mi.rotation_degrees.x = -90.0
-		ring_mi.position = Vector3(0.0, 0.08, 0.0)
-		var ring_mat := StandardMaterial3D.new()
-		ring_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		ring_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-		ring_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
-		ring_mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
-		if ring_tex:
-			ring_mat.albedo_texture = ring_tex
-		ring_mat.albedo_color = Color(0.85, 0.95, 1.0, 0.65)
-		ring_mi.material_override = ring_mat
-		aura_node.add_child(ring_mi)
-		aura_ground_ring_ref = ring_mi
+		var flame_curve := Curve.new()
+		flame_curve.add_point(Vector2(0.0, 0.55))
+		flame_curve.add_point(Vector2(0.25, 1.05))
+		flame_curve.add_point(Vector2(1.0, 0.75))
+
+		var flame_grad := Gradient.new()
+		flame_grad.colors = PackedColorArray([
+			Color(1.0, 1.0, 1.0, 0.0),
+			Color(1.0, 1.0, 1.0, 1.0),
+			Color(1.0, 1.0, 1.0, 0.85),
+			Color(1.0, 1.0, 1.0, 0.0)
+		])
+		flame_grad.offsets = PackedFloat32Array([0.0, 0.18, 0.72, 1.0])
 
 		var flame_sprites := CPUParticles3D.new()
 		flame_sprites.name = "AuraZenkaiFlames"
 		var flame_quad := QuadMesh.new()
-		flame_quad.size = Vector2(0.85, 1.45)
-		var flame_smat := StandardMaterial3D.new()
-		flame_smat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		flame_smat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		flame_smat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
-		flame_smat.billboard_mode = BaseMaterial3D.BILLBOARD_FIXED_Y
-		flame_smat.billboard_keep_scale = true
-		flame_smat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
-		flame_smat.vertex_color_use_as_albedo = true
+		flame_quad.size = Vector2(0.90, 1.50)
+		var flame_smat := ShaderMaterial.new()
+		flame_smat.shader = ZenkaiAuraParticleShader
 		if v_flame_tex:
-			flame_smat.albedo_texture = v_flame_tex
+			flame_smat.set_shader_parameter("particle_tex", v_flame_tex)
+		flame_smat.set_shader_parameter("opacity_mult", DEFAULT_AURA_FLAME_ALPHA_MULT)
+		flame_smat.set_shader_parameter("fp_center_clear", 0.0)
 		flame_quad.material = flame_smat
 		flame_sprites.mesh = flame_quad
-		flame_sprites.amount = 14
-		flame_sprites.lifetime = 0.42
+		flame_sprites.amount = 10
+		flame_sprites.lifetime = 0.46
 		flame_sprites.emission_shape = CPUParticles3D.EMISSION_SHAPE_RING
 		flame_sprites.emission_ring_radius = 0.62
 		flame_sprites.emission_ring_inner_radius = 0.22
@@ -3052,10 +3045,52 @@ func _update_aura_visuals(delta: float = 0.0) -> void:
 		flame_sprites.initial_velocity_max = 3.2
 		flame_sprites.scale_amount_min = 0.75
 		flame_sprites.scale_amount_max = 1.25
+		flame_sprites.scale_amount_curve = flame_curve
+		flame_sprites.color_ramp = flame_grad
 		flame_sprites.position = Vector3(0.0, 0.55, 0.0)
 		flame_sprites.emitting = true
 		aura_node.add_child(flame_sprites)
 		aura_sparks_ref = flame_sprites
+		_aura_active_flame_tex_key = "aura_v_white"
+
+		var spikes_grad := Gradient.new()
+		spikes_grad.colors = PackedColorArray([
+			Color(1.0, 1.0, 1.0, 0.0),
+			Color(1.0, 1.0, 1.0, 1.0),
+			Color(1.0, 1.0, 1.0, 0.0)
+		])
+		spikes_grad.offsets = PackedFloat32Array([0.0, 0.25, 1.0])
+
+		var spike_sprites := CPUParticles3D.new()
+		spike_sprites.name = "AuraZenkaiChargeSpikes"
+		var spike_quad := QuadMesh.new()
+		spike_quad.size = Vector2(1.15, 1.25)
+		var spike_mat := ShaderMaterial.new()
+		spike_mat.shader = ZenkaiAuraParticleShader
+		if spikes_tex:
+			spike_mat.set_shader_parameter("particle_tex", spikes_tex)
+		spike_mat.set_shader_parameter("opacity_mult", DEFAULT_AURA_FLAME_ALPHA_MULT)
+		spike_mat.set_shader_parameter("fp_center_clear", 0.0)
+		spike_quad.material = spike_mat
+		spike_sprites.mesh = spike_quad
+		spike_sprites.amount = 6
+		spike_sprites.lifetime = 0.38
+		spike_sprites.emission_shape = CPUParticles3D.EMISSION_SHAPE_RING
+		spike_sprites.emission_ring_radius = 0.52
+		spike_sprites.emission_ring_inner_radius = 0.18
+		spike_sprites.emission_ring_height = 0.25
+		spike_sprites.direction = Vector3.UP
+		spike_sprites.spread = 12.0
+		spike_sprites.gravity = Vector3(0.0, 1.4, 0.0)
+		spike_sprites.initial_velocity_min = 0.8
+		spike_sprites.initial_velocity_max = 1.9
+		spike_sprites.scale_amount_min = 0.85
+		spike_sprites.scale_amount_max = 1.25
+		spike_sprites.color_ramp = spikes_grad
+		spike_sprites.position = Vector3(0.0, 0.35, 0.0)
+		spike_sprites.emitting = false
+		aura_node.add_child(spike_sprites)
+		aura_charge_spikes_ref = spike_sprites
 
 		var lightning_sprites := CPUParticles3D.new()
 		lightning_sprites.name = "AuraZenkaiLightning"
@@ -3091,6 +3126,7 @@ func _update_aura_visuals(delta: float = 0.0) -> void:
 		lightning_sprites.emitting = false
 		aura_node.add_child(lightning_sprites)
 		aura_lightning_ref = lightning_sprites
+		_aura_active_bolt_tex_key = "lightning_4x4_blue"
 
 		var light := OmniLight3D.new()
 		light.name = "AuraLight"
@@ -3105,8 +3141,6 @@ func _update_aura_visuals(delta: float = 0.0) -> void:
 	aura_node.rotate_y(delta * 0.65)
 	if is_instance_valid(aura_outer_mesh_ref):
 		aura_outer_mesh_ref.rotate_y(-delta * 1.45)
-	if is_instance_valid(aura_ground_ring_ref):
-		aura_ground_ring_ref.rotate_y(delta * 3.2)
 
 	var active_max: float = character_data.max_np if character_data else 20000.0
 	if current_transformation:
@@ -3207,28 +3241,59 @@ func _update_aura_visuals(delta: float = 0.0) -> void:
 		omat.set_shader_parameter("opacity_mult", op_mult)
 		omat.set_shader_parameter("fp_center_clear", fp_clear)
 
-	if is_instance_valid(aura_ground_ring_ref) and aura_ground_ring_ref.material_override is StandardMaterial3D:
-		var rmat := aura_ground_ring_ref.material_override as StandardMaterial3D
-		var show_ring: bool = is_charging_ki or current_transformation != null or is_in_furia or is_in_zenkai_state or is_flying_to_opponent
-		aura_ground_ring_ref.visible = show_ring
-		if show_ring:
-			var ring_alpha: float = clampf(active_alpha * 0.85 * lerpf(0.45, 1.0, op_mult), 0.15, 0.95)
-			rmat.albedo_color = Color(target_color.r, target_color.g, target_color.b, ring_alpha)
-			var pulse_r: float = 1.0 + sin(float(Time.get_ticks_msec()) * 0.012) * 0.12
-			aura_ground_ring_ref.scale = Vector3.ONE * ((1.35 if is_charging_ki else 1.0) * pulse_r)
+	var desired_flame_key: String = "aura_v_white"
+	if is_divine_form:
+		desired_flame_key = "aura_v_ssb"
+	elif current_transformation != null:
+		desired_flame_key = "aura_v_ssj"
 
 	if is_instance_valid(aura_sparks_ref):
 		aura_sparks_ref.emitting = flame_mult > 0.005 and (is_charging_ki or current_transformation != null or is_in_furia or is_in_zenkai_state or is_flying_to_opponent)
-		aura_sparks_ref.color = Color(target_color.r, target_color.g, target_color.b, clampf(active_alpha * 0.92, 0.18, 0.95))
-		if aura_sparks_ref.mesh and aura_sparks_ref.mesh.material is StandardMaterial3D:
-			var fmat := aura_sparks_ref.mesh.material as StandardMaterial3D
-			fmat.albedo_color = Color(1.0, 1.0, 1.0, flame_mult)
+		var flame_base_a: float = clampf(active_alpha * 0.92, 0.18, 0.95)
+		if desired_flame_key == "aura_v_white":
+			aura_sparks_ref.color = Color(target_color.r, target_color.g, target_color.b, flame_base_a)
+		else:
+			var baked_col: Color = Color(1.0, 1.0, 1.0, flame_base_a)
+			if is_in_furia:
+				baked_col = baked_col.lerp(Color(target_color.r, target_color.g, target_color.b, flame_base_a), 0.25)
+			aura_sparks_ref.color = baked_col
+		if aura_sparks_ref.mesh and aura_sparks_ref.mesh.material is ShaderMaterial:
+			var fmat := aura_sparks_ref.mesh.material as ShaderMaterial
+			if desired_flame_key != _aura_active_flame_tex_key:
+				var next_flame_tex: Texture2D = ZenkaiVFXManager.get_tex(desired_flame_key)
+				if next_flame_tex != null:
+					fmat.set_shader_parameter("particle_tex", next_flame_tex)
+				_aura_active_flame_tex_key = desired_flame_key
+			fmat.set_shader_parameter("opacity_mult", flame_mult)
+			fmat.set_shader_parameter("fp_center_clear", fp_clear)
+
+	if is_instance_valid(aura_charge_spikes_ref):
+		aura_charge_spikes_ref.emitting = flame_mult > 0.005 and (is_charging_ki or is_flying_to_opponent or is_in_furia or is_in_zenkai_state or current_transformation != null)
+		aura_charge_spikes_ref.color = Color(target_color.r, target_color.g, target_color.b, clampf(active_alpha * 0.85, 0.20, 0.95))
+		if aura_charge_spikes_ref.mesh and aura_charge_spikes_ref.mesh.material is ShaderMaterial:
+			var spmat := aura_charge_spikes_ref.mesh.material as ShaderMaterial
+			var spike_a: float = clampf(flame_mult * (0.85 if is_charging_ki else 0.50), 0.0, 1.0)
+			spmat.set_shader_parameter("opacity_mult", spike_a)
+			spmat.set_shader_parameter("fp_center_clear", fp_clear)
+
+	var desired_bolt_key: String = "lightning_4x4_blue"
+	var bolt_tint: Color = Color(0.65, 0.92, 1.0, 0.95)
+	if is_in_furia:
+		bolt_tint = Color(1.0, 0.78, 0.45, 0.95)
+	elif current_transformation != null and not is_divine_form:
+		desired_bolt_key = "lightning_4x4_white"
+		bolt_tint = Color(1.0, 0.90, 0.42, 0.95)
 
 	if is_instance_valid(aura_lightning_ref):
 		aura_lightning_ref.emitting = bolt_mult > 0.005 and has_lightning and (is_charging_ki or current_transformation != null or is_in_furia or is_in_zenkai_state)
-		aura_lightning_ref.color = Color(0.65, 0.92, 1.0, 0.95) if not is_in_furia else Color(1.0, 0.78, 0.45, 0.95)
+		aura_lightning_ref.color = bolt_tint
 		if aura_lightning_ref.mesh and aura_lightning_ref.mesh.material is StandardMaterial3D:
 			var bmat := aura_lightning_ref.mesh.material as StandardMaterial3D
+			if desired_bolt_key != _aura_active_bolt_tex_key:
+				var next_bolt_tex: Texture2D = ZenkaiVFXManager.get_tex(desired_bolt_key)
+				if next_bolt_tex != null:
+					bmat.albedo_texture = next_bolt_tex
+				_aura_active_bolt_tex_key = desired_bolt_key
 			bmat.albedo_color = Color(1.0, 1.0, 1.0, bolt_mult)
 
 	if is_instance_valid(aura_light_ref):
