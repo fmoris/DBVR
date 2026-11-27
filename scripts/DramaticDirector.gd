@@ -58,6 +58,18 @@ var _pillar_mesh: MeshInstance3D = null
 var _pillar_mat: ShaderMaterial = null
 var _cam_banner_anchor: Node3D = null
 var _banner_label: Label3D = null
+var _center_prompt_anchor: Node3D = null
+var _center_prompt_bg: MeshInstance3D = null
+var _center_prompt_bg_mat: StandardMaterial3D = null
+var _center_prompt_title: Label3D = null
+var _center_prompt_sub: Label3D = null
+var _center_prompt_timer: float = 0.0
+var _center_prompt_duration: float = 0.0
+var _center_prompt_priority: int = 0
+var _center_prompt_tween: Tween = null
+var _center_prompt_bg_col: Color = Color(0.04, 0.08, 0.16, 0.86)
+var _center_prompt_title_col: Color = Color(1.0, 0.92, 0.25, 1.0)
+var _center_prompt_sub_col: Color = Color(0.94, 0.97, 1.0, 0.96)
 var _speed_lines_mesh: MeshInstance3D = null
 
 # Estado de secuencias activas
@@ -118,6 +130,11 @@ func _exit_tree() -> void:
 	restore_atmosphere()
 	if _cam_banner_anchor and is_instance_valid(_cam_banner_anchor):
 		_cam_banner_anchor.queue_free()
+	if _center_prompt_tween and is_instance_valid(_center_prompt_tween):
+		_center_prompt_tween.kill()
+		_center_prompt_tween = null
+	if _center_prompt_anchor and is_instance_valid(_center_prompt_anchor):
+		_center_prompt_anchor.queue_free()
 	if _speed_lines_mesh and is_instance_valid(_speed_lines_mesh):
 		_speed_lines_mesh.queue_free()
 	if active_instance == self:
@@ -232,7 +249,11 @@ func _build_pools() -> void:
 
 
 func _build_camera_overlays() -> void:
-	if not _cam and get_viewport():
+	if not _cam or not is_instance_valid(_cam):
+		var scene_ov: Node = get_tree().current_scene if (is_inside_tree() and get_tree()) else null
+		if scene_ov:
+			_cam = scene_ov.find_child("XRCamera3D", true, false) as Camera3D
+	if (not _cam or not is_instance_valid(_cam)) and is_inside_tree() and get_viewport():
 		_cam = get_viewport().get_camera_3d()
 	if not _cam or not is_instance_valid(_cam):
 		return
@@ -252,6 +273,54 @@ func _build_camera_overlays() -> void:
 		_banner_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.96)
 		_banner_label.visible = false
 		_cam_banner_anchor.add_child(_banner_label)
+
+	if not _center_prompt_anchor or not is_instance_valid(_center_prompt_anchor):
+		_center_prompt_anchor = Node3D.new()
+		_center_prompt_anchor.name = "DramaticCenterPromptAnchor"
+		_center_prompt_anchor.position = Vector3(0.0, 0.02, -1.08)
+		_center_prompt_anchor.visible = false
+		_cam.add_child(_center_prompt_anchor)
+
+		_center_prompt_bg = MeshInstance3D.new()
+		_center_prompt_bg.name = "CenterPromptObi"
+		var cp_quad := QuadMesh.new()
+		cp_quad.size = Vector2(0.78, 0.145)
+		_center_prompt_bg.mesh = cp_quad
+		_center_prompt_bg.position = Vector3(0.0, -0.008, -0.002)
+		_center_prompt_bg_mat = StandardMaterial3D.new()
+		_center_prompt_bg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		_center_prompt_bg_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		_center_prompt_bg_mat.no_depth_test = true
+		_center_prompt_bg_mat.render_priority = 126
+		_center_prompt_bg_mat.albedo_color = _center_prompt_bg_col
+		if ResourceLoader.exists("res://assets/ui_zenkai/info_obi.png"):
+			var obi_cp: Texture2D = ResourceLoader.load("res://assets/ui_zenkai/info_obi.png") as Texture2D
+			if obi_cp:
+				_center_prompt_bg_mat.albedo_texture = obi_cp
+		_center_prompt_bg.material_override = _center_prompt_bg_mat
+		_center_prompt_anchor.add_child(_center_prompt_bg)
+
+		_center_prompt_title = Label3D.new()
+		_center_prompt_title.name = "CenterPromptTitle"
+		_center_prompt_title.font_size = 42
+		_center_prompt_title.pixel_size = 0.00145
+		_center_prompt_title.no_depth_test = true
+		_center_prompt_title.render_priority = 127
+		_center_prompt_title.outline_size = 12
+		_center_prompt_title.outline_modulate = Color(0.0, 0.0, 0.0, 0.96)
+		_center_prompt_title.position = Vector3(0.0, 0.014, 0.002)
+		_center_prompt_anchor.add_child(_center_prompt_title)
+
+		_center_prompt_sub = Label3D.new()
+		_center_prompt_sub.name = "CenterPromptSub"
+		_center_prompt_sub.font_size = 20
+		_center_prompt_sub.pixel_size = 0.00125
+		_center_prompt_sub.no_depth_test = true
+		_center_prompt_sub.render_priority = 127
+		_center_prompt_sub.outline_size = 8
+		_center_prompt_sub.outline_modulate = Color(0.0, 0.0, 0.0, 0.95)
+		_center_prompt_sub.position = Vector3(0.0, -0.042, 0.002)
+		_center_prompt_anchor.add_child(_center_prompt_sub)
 
 	if not _speed_lines_mesh or not is_instance_valid(_speed_lines_mesh):
 		_speed_lines_mesh = MeshInstance3D.new()
@@ -296,6 +365,7 @@ func reset_for_new_match() -> void:
 	_hitstop_timer = 0.0
 	_atmos_restore_timer = 0.0
 	_timescale_restore_timer = 0.0
+	hide_center_prompt()
 	_levitation_active = false
 	_saved_hair_materials.clear()
 	Engine.time_scale = 1.0
@@ -357,6 +427,25 @@ func _process(delta: float) -> void:
 			_banner_label.visible = false
 			_banner_label.scale = Vector3.ONE
 
+	if _center_prompt_timer > 0.0:
+		_center_prompt_timer -= real_delta
+		if _center_prompt_timer <= 0.0:
+			hide_center_prompt()
+		elif _center_prompt_timer < 0.18:
+			var cp_alpha: float = clampf(_center_prompt_timer / 0.18, 0.0, 1.0)
+			if _center_prompt_bg_mat:
+				var bg_fade: Color = _center_prompt_bg_col
+				bg_fade.a *= cp_alpha
+				_center_prompt_bg_mat.albedo_color = bg_fade
+			if _center_prompt_title and is_instance_valid(_center_prompt_title):
+				var t_fade: Color = _center_prompt_title_col
+				t_fade.a *= cp_alpha
+				_center_prompt_title.modulate = t_fade
+			if _center_prompt_sub and is_instance_valid(_center_prompt_sub):
+				var s_fade: Color = _center_prompt_sub_col
+				s_fade.a *= cp_alpha
+				_center_prompt_sub.modulate = s_fade
+
 	if _levitation_active and _rock_multimesh and _rock_multimesh.visible:
 		_levitate_timer += real_delta
 		_update_levitating_rocks(real_delta)
@@ -388,6 +477,56 @@ func show_camera_banner(text_val: String, color: Color, duration_sec: float) -> 
 		_banner_label.modulate = color
 		_banner_label.visible = true
 		_banner_timer = duration_sec
+
+
+## Muestra un aviso grande al centro de la mirada durante transiciones e intervalos de turno
+func show_center_prompt(title: String, subtitle: String = "", accent_color: Color = Color(1.0, 0.90, 0.25), duration_sec: float = 0.85, priority: int = 1) -> void:
+	if _center_prompt_timer > 0.0 and priority < _center_prompt_priority:
+		return
+	if not _center_prompt_anchor or not is_instance_valid(_center_prompt_anchor):
+		_build_camera_overlays()
+	if not _center_prompt_anchor or not is_instance_valid(_center_prompt_anchor):
+		return
+	if _center_prompt_tween and is_instance_valid(_center_prompt_tween):
+		_center_prompt_tween.kill()
+		_center_prompt_tween = null
+
+	_center_prompt_title_col = Color(accent_color.r, accent_color.g, accent_color.b, 1.0)
+	_center_prompt_sub_col = Color(0.94, 0.97, 1.0, 0.96)
+	_center_prompt_bg_col = Color(accent_color.r * 0.22, accent_color.g * 0.22, accent_color.b * 0.25, 0.86)
+
+	if _center_prompt_title and is_instance_valid(_center_prompt_title):
+		_center_prompt_title.text = title.to_upper()
+		_center_prompt_title.modulate = _center_prompt_title_col
+	if _center_prompt_sub and is_instance_valid(_center_prompt_sub):
+		_center_prompt_sub.text = subtitle.to_upper()
+		_center_prompt_sub.modulate = _center_prompt_sub_col
+		_center_prompt_sub.visible = not subtitle.is_empty()
+	if _center_prompt_bg_mat:
+		_center_prompt_bg_mat.albedo_color = _center_prompt_bg_col
+
+	_center_prompt_anchor.visible = true
+	_center_prompt_anchor.scale = Vector3.ONE * 0.60
+	_center_prompt_timer = maxf(duration_sec, 0.25)
+	_center_prompt_duration = _center_prompt_timer
+	_center_prompt_priority = priority
+
+	if is_inside_tree():
+		_center_prompt_tween = create_tween().set_ignore_time_scale(true)
+		_center_prompt_tween.tween_property(_center_prompt_anchor, "scale", Vector3.ONE * 1.06, 0.09).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		_center_prompt_tween.tween_property(_center_prompt_anchor, "scale", Vector3.ONE, 0.08).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+
+
+func hide_center_prompt() -> void:
+	if _center_prompt_tween and is_instance_valid(_center_prompt_tween):
+		_center_prompt_tween.kill()
+		_center_prompt_tween = null
+	_center_prompt_timer = 0.0
+	_center_prompt_duration = 0.0
+	_center_prompt_priority = 0
+	if _center_prompt_anchor and is_instance_valid(_center_prompt_anchor):
+		_center_prompt_anchor.visible = false
+		_center_prompt_anchor.scale = Vector3.ONE
 
 
 func _set_atmosphere(tint_color: Color, light_mult: float, env_mult: float, duration_sec: float = -1.0) -> void:

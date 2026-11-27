@@ -233,6 +233,10 @@ func setup(
 		var is_player_def: bool = defender != null and is_instance_valid(defender) and bool(defender.get("is_player"))
 		_reading_pause_timer = 1.0 if is_player_def else 0.0
 		Engine.time_scale = 0.05 if _reading_pause_timer > 0.0 else 0.11
+		if is_player_def:
+			var dd_sb: DramaticDirector = DramaticDirector.get_active(get_tree()) if is_inside_tree() else null
+			if dd_sb and dd_sb.has_method("show_center_prompt"):
+				dd_sb.show_center_prompt("¡SUPER ENTRANTE! DEFIENDE", "DESVIA, ESQUIVA O CONTRAATACA", Color(0.25, 0.92, 1.0), 0.90, 3)
 
 	_build_visual_beam()
 	_build_reticle_and_hud()

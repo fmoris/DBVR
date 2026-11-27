@@ -77,6 +77,7 @@ var last_finisher_victim: Node3D = null
 var max_allowed_hits: int = 3
 var current_attack_step: int = 0
 var attack_step_cooldown: float = 0.0
+var attack_intro_pause_timer: float = 0.0
 
 # Velocidades de atacante y defensor (calculadas en espacio local XR para inmunidad al Arena Surge)
 var left_velocity: Vector3 = Vector3.ZERO
@@ -884,6 +885,7 @@ func start_attack_phase(p_attacker: Node3D, p_defender: Node3D, p_duration: floa
 	hits.clear()
 	current_attack_step = 0
 	attack_step_cooldown = 0.16
+	attack_intro_pause_timer = 0.0
 	clash_penalty_hits = 0
 	defense_score_sum = 0.0
 	defense_round_total_hits = 0
@@ -967,6 +969,9 @@ func start_attack_phase(p_attacker: Node3D, p_defender: Node3D, p_duration: floa
 		_apply_role_dome_tint(true)
 		_update_sequential_target_highlights()
 		_refresh_header_hud()
+		if attacker and bool(attacker.get("is_player")):
+			attack_intro_pause_timer = 0.45
+			_show_center_turn_prompt("¡TE TOCA ATACAR!", "GOLPEA LOS CIRCULOS (%d GOLPES)" % max_allowed_hits, Color(1.0, 0.72, 0.18), 0.85, 2)
 
 	print("[BulletTimeDome] Ataque listo: %d golpes permitidos en %.2fs." % [max_allowed_hits, duration])
 
@@ -1321,13 +1326,20 @@ func _spawn_impact_popup(_world_pos: Vector3, txt: String, col: Color, force_cam
 		)
 
 
+func _show_center_turn_prompt(title: String, subtitle: String, col: Color, dur: float = 0.85, priority: int = 2) -> void:
+	var dd: DramaticDirector = DramaticDirector.get_active(get_tree()) if is_inside_tree() else null
+	if dd and dd.has_method("show_center_prompt"):
+		dd.show_center_prompt(title, subtitle, col, dur, priority)
+
+
 func _begin_phase_transition(mode: String, wait_sec: float, msg: String, col: Color) -> void:
 	phase = DomePhase.PHASE_TRANSITION
 	transition_on_complete_mode = mode
 	var ai_defending: bool = (mode == "start_defense") and defender != null and is_instance_valid(defender) and not bool(defender.get("is_player"))
-	var min_wait: float = 0.16 if ai_defending else 0.45
+	var player_defending: bool = (mode == "start_defense") and defender != null and is_instance_valid(defender) and bool(defender.get("is_player"))
+	var min_wait: float = 0.16 if ai_defending else (0.55 if player_defending else 0.45)
 	var actual_wait: float = minf(wait_sec, 0.18) if ai_defending else wait_sec
-	# Pausa mínima de 0.45s para jugador (legibilidad) y 0.16s-0.18s cuando defiende la IA (agilidad)
+	# Pausa mínima de 0.45s-0.55s para jugador (legibilidad) y 0.16s-0.18s cuando defiende la IA (agilidad)
 	transition_timer = maxf(actual_wait, min_wait) if mode in ["start_defense", "restart_attacker", "continue_offense"] else wait_sec
 	_reset_all_timing_rings()
 	_hide_all_charge_spheres()
@@ -1350,6 +1362,25 @@ func _begin_phase_transition(mode: String, wait_sec: float, msg: String, col: Co
 	else:
 		_pulse_defender_both_hands(110.0, 0.50, 0.07)
 	_set_header(msg, col)
+
+	match mode:
+		"start_defense":
+			if player_will_attack:
+				_show_center_turn_prompt("¡ATAQUE EN CAMINO!", "EJECUTANDO TU COMBO", Color(1.0, 0.58, 0.18), 0.50, 2)
+			else:
+				_show_center_turn_prompt("¡TE TOCA DEFENDER!", "BLOQUEA O DESVIA (%d GOLPES)" % hits.size(), Color(0.22, 0.92, 1.0), 0.85, 2)
+		"restart_attacker":
+			if player_will_attack:
+				_show_center_turn_prompt("¡TE TOCA ATACAR!", "CONTRAATAQUE — CAMBIO DE TURNO", Color(0.30, 1.0, 0.55), 0.85, 2)
+			else:
+				_show_center_turn_prompt("¡TE TOCA DEFENDER!", "EL RIVAL CONTRAATACA", Color(0.25, 0.88, 1.0), 0.85, 2)
+		"continue_offense":
+			if player_will_attack:
+				_show_center_turn_prompt("¡SIGUES ATACANDO!", "MANTEN LA PRESION", Color(1.0, 0.78, 0.22), 0.80, 2)
+			else:
+				_show_center_turn_prompt("¡SIGUE DEFENDIENDO!", "OTRA RAFAGA ENTRANTE", Color(0.25, 0.88, 1.0), 0.80, 2)
+		"start_simultaneous":
+			_show_center_turn_prompt("¡INTERCAMBIO SIMULTANEO!", "ATACA Y BLOQUEA A LA VEZ", Color(1.0, 0.90, 0.20), 0.85, 3)
 
 
 func _process_phase_transition(delta: float) -> void:
@@ -1553,6 +1584,13 @@ func _process_attack_recording(delta: float) -> void:
 		_skip_btn_prev = ax_now
 
 	_update_controller_velocities(delta)
+	if attack_intro_pause_timer > 0.0:
+		var real_dt_ap: float = maxf(delta / maxf(Engine.time_scale, 0.01), 0.001)
+		attack_intro_pause_timer = maxf(attack_intro_pause_timer - real_dt_ap, 0.0)
+		_refresh_header_hud(false)
+		if attack_intro_pause_timer <= 0.0:
+			_pulse_player_both_hands(140.0, 0.45, 0.05)
+		return
 	var is_charging_hammer: bool = _process_hammer_charge(delta)
 	_update_fist_states(delta, is_charging_hammer)
 
@@ -2887,6 +2925,10 @@ func _start_unblockable_ki_break(p_winner: Node3D, p_victim: Node3D) -> void:
 			header_label.text = "💥 ¡RIVAL SIN KI! ¡INDEFENSO!\n¡SUELTA GUARDIA Y GOLPEA EL CÍRCULO CENTRAL (G+T) O STICK ↓ = DESENGANCHE Z!"
 		else:
 			header_label.text = "⚠️ ¡TE QUEDASTE SIN KI! ¡GUARDIA ROTA!\n¡ATAQUE FUERTE IMBLOQUEABLE ENTRANTE!"
+	if winner_is_player:
+		_show_center_turn_prompt("¡HAZ EL REMATE!", "GOLPEA EL CIRCULO CENTRAL", Color(1.0, 0.35, 0.15), 1.05, 3)
+	else:
+		_show_center_turn_prompt("¡GUARDIA ROTA!", "ATAQUE IMBLOQUEABLE ENTRANTE", Color(1.0, 0.18, 0.15), 0.95, 3)
 
 
 static func can_player_trigger_ki_break_punch(is_crossing_arms: bool, hands_dist: float, fist_closed: bool, dist_to_zone: float, fwd_vel: float, vel_mag: float, grace_timer: float = 0.0, must_release_guard: bool = false, stroke_len: float = 0.25, fwd_delta: float = 0.14) -> bool:

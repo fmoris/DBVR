@@ -2252,6 +2252,8 @@ func _on_zenkai_dramatic_trigger(source: String) -> void:
 		current_ki = minf(current_ki + 35.0, get_max_ki())
 	_update_aura_visuals()
 	var dd_z: DramaticDirector = DramaticDirector.get_active(get_tree())
+	if dd_z and is_player and dd_z.has_method("show_center_prompt"):
+		dd_z.show_center_prompt("¡HAZ EL REMATE ZENKAI!", "LANZA UN SUPER PARA K.O.", Color(1.0, 0.88, 0.18), 1.20, 3)
 	if dd_z and dd_z.has_method("play_dramatic_zenkai_event"):
 		dd_z.play_dramatic_zenkai_event(self, source)
 	else:

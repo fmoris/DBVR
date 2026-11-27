@@ -1564,8 +1564,64 @@ func _process(_delta: float) -> bool:
 	assert(float(z16[0].get("outcome_timer")) == 0.0 and icon_m0.visible == false and (z16[0].get("inner_mesh") as MeshInstance3D).visible == false, "Outcome icon must expire after 0.75s")
 	assert((z16[0].get("box_mesh") as MeshInstance3D).visible == true, "box_mesh must restore after defense outcome expiry")
 
+	# Runtime Dome #21: Central Turn Prompts + 0.45s Attack Intro Pause (Option 2)
+	var dd21_s: GDScript = load("res://scripts/DramaticDirector.gd") as GDScript
+	var dd_test: Node3D = dd21_s.new() as Node3D
+	root.add_child(dd_test)
+	dd_test.set("is_in_intro", false)
+	dd_test.set("_cam", cam)
+	dd_test.call("_build_camera_overlays")
+	var cp_anchor: Node3D = dd_test.get("_center_prompt_anchor") as Node3D
+	var cp_title: Label3D = dd_test.get("_center_prompt_title") as Label3D
+	assert(cp_anchor != null and cp_anchor.get_parent() == cam, "Center prompt anchor must be mounted directly on XRCamera3D")
+	assert(absf(cp_anchor.position.x) < 0.01 and absf(cp_anchor.position.y) <= 0.05 and cp_anchor.position.z < -0.5, "Center prompt anchor must sit at center of camera view")
+	assert(cp_anchor.visible == false, "Center prompt anchor must start hidden")
+
+	var dome17: Node3D = dome_s.new()
+	root.add_child(dome17)
+	p_mock.set("current_ki", 60.0)
+	ai_mock.set("current_ki", 60.0)
+	dome17.call("setup", p_mock, ai_mock, -1.0, 4)
+	assert(absf(float(dome17.get("attack_intro_pause_timer")) - 0.45) < 0.01, "Option 2 must initialize 0.45s attack intro pause when player attacks")
+	assert(cp_anchor.visible == true and String(cp_title.text) == "¡TE TOCA ATACAR!", "Attack start must display central prompt '¡TE TOCA ATACAR!' (got '%s')" % String(cp_title.text))
+	var t_before_pause: float = float(dome17.get("time_left"))
+	dome17.call("_process_attack_recording", 0.20)
+	assert(absf(float(dome17.get("time_left")) - t_before_pause) < 0.001, "time_left must NOT tick down during 0.45s attack intro pause")
+	assert(float(dome17.get("attack_intro_pause_timer")) > 0.20, "attack_intro_pause_timer must still be active at 0.20s")
+	dome17.call("_process_attack_recording", 0.30)
+	assert(float(dome17.get("attack_intro_pause_timer")) == 0.0, "attack_intro_pause_timer must unlock after 0.45s")
+
+	# 21b. Defense transition + Ki-Break finisher prompt
+	dome17.set("attacker", ai_mock)
+	dome17.set("defender", p_mock)
+	dome17.set("hits", [{ "zone_id": 0, "resolved": false }])
+	dome17.call("_begin_phase_transition", "start_defense", 0.55, "DEF", Color.CYAN)
+	assert(cp_anchor.visible == true and String(cp_title.text) == "¡TE TOCA DEFENDER!", "Defense transition must show '¡TE TOCA DEFENDER!'")
+	dome17.call("_start_unblockable_ki_break", p_mock, ai_mock)
+	assert(cp_anchor.visible == true and String(cp_title.text) == "¡HAZ EL REMATE!", "Player Ki-Break finisher must show '¡HAZ EL REMATE!'")
+
+	# 21c. FollowUp intro pauses (Continue Sequence vs Slam Finisher)
+	var fu_ps: GDScript = load("res://scripts/FollowUpSequenceController.gd") as GDScript
+	var fu_prompt: Node3D = fu_ps.new() as Node3D
+	root.add_child(fu_prompt)
+	fu_prompt.set("attacker", p_mock)
+	fu_prompt.set("defender", ai_mock)
+	fu_prompt.set("chain_depth", 1)
+	fu_prompt.set("_intro_pause_total", 1.0)
+	fu_prompt.call("_enter_intro_pause", "")
+	assert(String(cp_title.text) == "¡CONTINUA LA SECUENCIA!", "FollowUp depth 1 must show '¡CONTINUA LA SECUENCIA!'")
+	fu_prompt.call("_enter_intro_pause", "hammer_slam_chain")
+	assert(String(cp_title.text) == "¡HAZ EL REMATE!", "Hammer slam follow-up chain must show '¡HAZ EL REMATE!'")
+	Engine.time_scale = 1.0
+
+	# 21d. Auto-expiry in real time hides center prompt without duplicate anchors (DramaticDirector caps real_delta at 0.05s/tick)
+	for _t_cp in range(26):
+		dd_test.call("_process", 0.05)
+	assert(cp_anchor.visible == false, "Center prompt must auto-hide after real-time duration expires")
+	Engine.time_scale = 1.0
+
 	# Teardown cleanly without leaving leaked nodes
-	for n in [mini, dome, dome2, dome3, dome4, dome5, dome6, dome7, dome8, dome9, dome10, dome11, dome12, dome13, dome14, dome15, dome16, lockon_t, hud_t, rig, ai_mock]:
+	for n in [mini, dome, dome2, dome3, dome4, dome5, dome6, dome7, dome8, dome9, dome10, dome11, dome12, dome13, dome14, dome15, dome16, dome17, fu_prompt, dd_test, lockon_t, hud_t, rig, ai_mock]:
 		if is_instance_valid(n):
 			if n.get_parent():
 				n.get_parent().remove_child(n)

@@ -408,6 +408,12 @@ func _process(delta: float) -> void:
 			_refresh_status_hud_for_defender()
 
 
+func _show_followup_center_prompt(title: String, subtitle: String, col: Color, dur: float = 0.95, priority: int = 2) -> void:
+	var dd: DramaticDirector = DramaticDirector.get_active(get_tree()) if is_inside_tree() else null
+	if dd and dd.has_method("show_center_prompt"):
+		dd.show_center_prompt(title, subtitle, col, dur, priority)
+
+
 func _enter_intro_pause(p_reason: String = "") -> void:
 	state = FollowUpState.HITSTOP
 	_intro_pause_reason = p_reason
@@ -418,6 +424,15 @@ func _enter_intro_pause(p_reason: String = "") -> void:
 	_melee_entry_armed = false
 	_build_visor_hud()
 	_refresh_intro_pause_hud()
+	if attacker and is_instance_valid(attacker) and bool(attacker.get("is_player")):
+		if p_reason == "hammer_slam_chain":
+			_show_followup_center_prompt("¡HAZ EL REMATE!", "RIVAL ESTAMPADO — ELIGE ACCION", Color(1.0, 0.42, 0.16), 1.0, 3)
+		elif chain_depth >= 2:
+			_show_followup_center_prompt("¡SIGUE LA CADENA!", "REBOTE Z x%d — ELIGE ACCION" % chain_depth, Color(1.0, 0.86, 0.20), 1.0, 3)
+		else:
+			_show_followup_center_prompt("¡CONTINUA LA SECUENCIA!", "MELEE, MARTILLO, SUPER O LLUVIA", Color(1.0, 0.88, 0.22), 1.0, 3)
+	elif defender and is_instance_valid(defender) and bool(defender.get("is_player")):
+		_show_followup_center_prompt("¡RECUPERATE Y DEFIENDE!", "AGITA PARA ESTABILIZARTE", Color(0.28, 0.92, 1.0), 1.0, 3)
 	var pf: Node3D = _get_player_fighter()
 	if pf and is_instance_valid(pf) and pf.has_method("_get_gesture_tree"):
 		var gss: Node = pf._get_gesture_tree()
@@ -682,6 +697,7 @@ func choose_vanish_hammer() -> bool:
 		Engine.time_scale = 0.22
 		_build_hammer_attacker_target()
 		_pulse_attacker_hands(190.0, 0.90, 0.14)
+		_show_followup_center_prompt("¡HAZ EL MARTILLAZO!", "BAJA AMBOS PUÑOS AL OBJETIVO", Color(0.95, 0.38, 1.0), 0.75, 2)
 	else:
 		# IA atacando: si jugador se estabilizó -> abrir caja cuadrada púrpura con semáforo
 		if _is_defender_stabilized() and bool(defender.get("is_player")):
@@ -692,6 +708,7 @@ func choose_vanish_hammer() -> bool:
 			_def_hammer_early_lockout = false
 			Engine.time_scale = 0.25
 			_build_defense_box_hud("🔨", Color(0.95, 0.22, 1.0, 0.95), "🕹️ Stick (Verde): Z-Vanish | 🛡️ Guardia X: Frenar")
+			_show_followup_center_prompt("¡TE TOCA DEFENDER!", "ESQUIVA O FRENA EL MARTILLAZO", Color(0.95, 0.30, 1.0), 0.75, 2)
 		else:
 			state = FollowUpState.MINI_VANISH_HAMMER
 			_state_timer = 0.35
@@ -722,6 +739,7 @@ func choose_ki_barrage(force_relaunch_finisher: int = -1) -> bool:
 		_state_timer = _barrage_total
 		Engine.time_scale = 0.58
 		_build_barrage_attacker_hud()
+		_show_followup_center_prompt("¡LLUVIA DE KI!", "DISPARA CON AMBAS MANOS", Color(1.0, 0.78, 0.22), 0.75, 2)
 	else:
 		if _is_defender_stabilized() and bool(defender.get("is_player")):
 			state = FollowUpState.MINI_KI_BARRAGE_DEF
@@ -735,6 +753,7 @@ func choose_ki_barrage(force_relaunch_finisher: int = -1) -> bool:
 			_def_trig_prev_r = false
 			Engine.time_scale = 0.35
 			_build_defense_box_hud("💥", Color(0.20, 0.88, 1.0, 0.95), "💥 Trigger (Verde): Desviar | 🛡️ Guardia X | B/Y: Kiai")
+			_show_followup_center_prompt("¡TE TOCA DEFENDER!", "DESVIA LA LLUVIA DE KI", Color(0.22, 0.92, 1.0), 0.75, 2)
 		else:
 			state = FollowUpState.MINI_KI_BARRAGE_DEF
 			_def_notes.clear()
