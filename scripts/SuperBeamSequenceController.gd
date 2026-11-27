@@ -152,6 +152,9 @@ func setup(
 	power_name = p_power_name
 	energy_color = p_color
 	base_damage = p_base_damage
+	if attacker and is_instance_valid(attacker) and attacker.has_meta("voice_super_dmg_mult"):
+		base_damage *= float(attacker.get_meta("voice_super_dmg_mult", 1.0))
+		attacker.remove_meta("voice_super_dmg_mult")
 	if attacker and is_instance_valid(attacker) and attacker.has_method("get_dramatic_modifier"):
 		base_damage *= attacker.get_dramatic_modifier("damage_mult", 1.0) * attacker.get_dramatic_modifier("super_damage_mult", 1.0)
 	tier = p_tier

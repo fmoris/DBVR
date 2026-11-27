@@ -152,6 +152,28 @@ func _ready() -> void:
 		if enable_debug_tooltip:
 			call_deferred("_setup_debug_tooltip")
 		call_deferred("_setup_moves_guide_hud")
+		call_deferred("_connect_voice_combat_signals")
+
+
+func _connect_voice_combat_signals() -> void:
+	if not VoiceCombatManager:
+		return
+	if not VoiceCombatManager.shout_started.is_connected(_on_voice_shout_started):
+		VoiceCombatManager.shout_started.connect(_on_voice_shout_started)
+	if not VoiceCombatManager.power_chant_detected.is_connected(_on_voice_power_chant):
+		VoiceCombatManager.power_chant_detected.connect(_on_voice_power_chant)
+
+
+func _on_voice_shout_started(_intensity: float) -> void:
+	_status_override_text = "GRITO KI ACTIVO"
+	_status_override_color = Color(0.45, 0.95, 1.0)
+	_status_override_timer = 1.4
+
+
+func _on_voice_power_chant(power_id: String, _confidence: float) -> void:
+	_status_override_text = "VOZ: %s +15%%" % power_id.replace("_", " ").to_upper()
+	_status_override_color = Color(1.0, 0.85, 0.25)
+	_status_override_timer = 2.5
 
 
 func _exit_tree() -> void:

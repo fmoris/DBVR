@@ -1601,6 +1601,13 @@ func _execute_super_fire(tech_name: String) -> void:
 			ki_req = power.ki_cost
 			tech_display_name = power.power_name
 
+		var voice_bonus: Dictionary = VoiceCombatManager.consume_voice_power_bonus(tech_name)
+		if bool(voice_bonus.get("active", false)):
+			ki_req *= float(voice_bonus.get("ki_cost_mult", 1.0))
+			player.set_meta("voice_super_dmg_mult", float(voice_bonus.get("damage_mult", 1.0)))
+		elif player.has_meta("voice_super_dmg_mult"):
+			player.remove_meta("voice_super_dmg_mult")
+
 		# Si el jugador dispara dentro de la ventana de fatiga (< 4.0s de otro super), penalizar con 25% más de costo
 		if super_fatigue_timer > 0.0:
 			ki_req *= 1.25

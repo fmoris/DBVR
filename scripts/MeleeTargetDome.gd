@@ -2290,6 +2290,11 @@ func _resolve_unblocked_hit(note: Dictionary, zone: Dictionary, custom_popup: St
 	atk_to_def_uh = atk_to_def_uh.normalized()
 	if defender and is_instance_valid(defender):
 		var raw_dmg_scaled: float = raw_dmg * attacker_damage_mult * float(prof_uh["damage_scale"])
+		if attacker and is_instance_valid(attacker) and bool(attacker.get("is_player")):
+			var kiai_bonus: float = VoiceCombatManager.consume_kiai_melee_bonus()
+			if kiai_bonus > 0.0:
+				raw_dmg_scaled *= (1.0 + kiai_bonus)
+				_modify_fighter_ki(attacker, 2.0)
 		if defender.has_method("take_hit"):
 			defender.take_hit(raw_dmg_scaled, atk_to_def_uh, not is_soft_jab)
 		if defender.get("procedural_animator"):

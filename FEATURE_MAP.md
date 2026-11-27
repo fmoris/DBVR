@@ -12,6 +12,7 @@ Mapa vivo de funcionalidades, escenas, recursos, shaders y puntos de entrada de 
 | **XR Setup & Test Bootstrapper** | [xr_setup.gd](file:///d:/Mis%20Documentos/dbzvr/xr_setup.gd) | Inicialización OpenXR, VRS_XR, centrado HMD y lanzamiento automático de `DesktopXRSimulator` + `CombatSequenceRunner` con `--test-suite=all`. |
 | **Meta Platform Autoload** | [MetaManager.gd](file:///d:/Mis%20Documentos/dbzvr/scripts/MetaManager.gd) | Singleton de plataforma Meta Quest SDK. |
 | **Audio Action Autoload** | [AudioActionManager.gd](file:///d:/Mis%20Documentos/dbzvr/scripts/AudioActionManager.gd) | Precarga y caché O(1) de los 62 eventos de audio mapeados en `assets/audio/audio_actions.json`. |
+| **Voice Combat Autoload** | [VoiceCombatManager.gd](file:///d:/Mis%20Documentos/dbzvr/scripts/VoiceCombatManager.gd) | Captura de micrófono VR (`MicCapture` en [default_bus_layout.tres](file:///d:/Mis%20Documentos/dbzvr/default_bus_layout.tres)), calibración de ruido ambiente, detección de gritos/Kiai (Fase 1) y puente hacia plugin Android Vosk offline en Latino/Japonés ([DBZVRVoicePlugin.kt](file:///d:/Mis%20Documentos/dbzvr/addons/dbzvr_voice/android_src/DBZVRVoicePlugin.kt)) para bonos de recarga Ki, Melee, Súper Poderes y Choque de Haces. |
 
 ---
 

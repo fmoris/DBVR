@@ -125,6 +125,11 @@ func _unhandled_input(event: InputEvent) -> void:
 				_hud_visible = not _hud_visible
 				if _hud_panel:
 					_hud_panel.visible = _hud_visible
+			elif key_ev.keycode == KEY_K:
+				VoiceCombatManager.trigger_debug_kiai()
+				VoiceCombatManager.trigger_debug_power_chant("kamehameha")
+			elif key_ev.keycode == KEY_M:
+				VoiceCombatManager.set_debug_shout(true)
 			elif key_ev.keycode == KEY_V:
 				var ply_v: Node = gesture_tree._get_player_instance() if (gesture_tree and gesture_tree.has_method("_get_player_instance")) else null
 				var dome_v: Variant = ply_v.get("active_target_dome") if ply_v else null
@@ -136,6 +141,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				elif _manual_melee_timer <= 0.0:
 					_manual_melee_timer = 0.28
 					_manual_melee_left = not _manual_melee_left
+		elif not key_ev.pressed and key_ev.keycode == KEY_M:
+			VoiceCombatManager.set_debug_shout(false)
 	elif event is InputEventMouseMotion and _mouse_captured and camera:
 		var motion: InputEventMouseMotion = event as InputEventMouseMotion
 		_cam_yaw -= motion.relative.x * MOUSE_SENSITIVITY

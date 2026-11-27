@@ -19,6 +19,12 @@ config/icon="res://icon.svg"
 
 MetaManager="*res://scripts/MetaManager.gd"
 AudioActionManager="*res://scripts/AudioActionManager.gd"
+VoiceCombatManager="*res://scripts/VoiceCombatManager.gd"
+
+[audio]
+
+driver/enable_input=true
+buses/default_bus_layout="res://default_bus_layout.tres"
 
 [dotnet]
 
