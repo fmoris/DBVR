@@ -224,6 +224,8 @@ func _process_player_inputs(real_delta: float) -> void:
 
 	if player.get("is_in_zenkai_state"):
 		push_power *= 1.45
+	if VoiceCombatManager.is_shouting():
+		push_power *= (1.0 + 0.15 * VoiceCombatManager.get_shout_intensity())
 
 	# 3. Consumo de Ki; si Ki llega a 0, permite seguir compitiendo gastando BP (Último Aliento)
 	var ki_cost: float = (11.0 * real_delta if is_shaking else 0.0) + (2.5 if did_pulse else 0.0)

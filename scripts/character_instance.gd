@@ -1402,6 +1402,8 @@ func recharge_ki(amount: float) -> void:
 	if is_in_furia:
 		# GDD Canon: Furia duplica la recarga activa de Ki (+100%)
 		amount *= 2.0
+	if is_player and VoiceCombatManager.is_shouting():
+		amount *= (1.0 + 0.35 * VoiceCombatManager.get_shout_intensity())
 	amount *= get_dramatic_modifier("ki_recharge_mult", 1.0)
 	current_ki = min(current_ki + amount, get_max_ki())
 	_notify_stats()
