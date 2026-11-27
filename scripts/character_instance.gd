@@ -1076,11 +1076,13 @@ func _process(delta: float) -> void:
 		var opp = _get_opponent()
 		if opp and is_instance_valid(opp):
 			var opp_pos: Vector3 = opp.global_position
+			var has_cam_eye_pos: bool = false
 			if bool(opp.get("is_player")):
 				var o_orig: Node = opp.get_parent()
 				var o_cam: Camera3D = o_orig.get_node_or_null("XRCamera3D") as Camera3D if o_orig else null
 				if o_cam and is_instance_valid(o_cam):
 					opp_pos = o_cam.global_position
+					has_cam_eye_pos = true
 			var diff = opp_pos - global_position
 			diff.y = 0.0
 			if diff.length_squared() > 0.01:
@@ -1088,8 +1090,8 @@ func _process(delta: float) -> void:
 				rotation.y = atan2(diff.x, diff.z)
 
 			if procedural_animator:
-				# Altura de los ojos del jugador estimada a 1.45m o posición del visor
-				var eye_target = opp_pos + Vector3(0.0, 1.45, 0.0)
+				# Altura real de los ojos desde XRCamera3D o estimada a +1.45m si no hay cámara
+				var eye_target: Vector3 = opp_pos if has_cam_eye_pos else (opp_pos + Vector3(0.0, 1.45, 0.0))
 				procedural_animator.update(delta, eye_target, is_charging_ki, is_blocking, is_flying_to_opponent)
 			_update_mouth_expression(delta)
 

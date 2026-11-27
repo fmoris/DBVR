@@ -1246,6 +1246,86 @@ func _process(_delta: float) -> bool:
 
 	dome_s.reset_match_static_state()
 
+	# --- 17. Melee Opponent Head Look-At (Goku & Vegeta must aim at XRCamera3D, not skyward) ---
+	var look_rig: XROrigin3D = XROrigin3D.new()
+	look_rig.name = "LookAtTestRig"
+	var cam_l: XRCamera3D = XRCamera3D.new()
+	cam_l.name = "XRCamera3D"
+	cam_l.position = Vector3(0.0, 1.60, 0.0)
+	var p_look: Node3D = char_s.new() as Node3D
+	p_look.name = "PlayerCharacterInstance"
+	look_rig.add_child(cam_l)
+	look_rig.add_child(p_look)
+	root.add_child(look_rig)
+	p_look.set("is_player", true)
+	p_look.set_physics_process(false)
+
+	var look_chars: Array = [["Goku", goku_res], ["Vegeta", vegeta_res]]
+	for lc in look_chars:
+		var cname: String = String(lc[0])
+		var cres: Resource = lc[1] as Resource
+		var ai_look: Node3D = char_s.new() as Node3D
+		ai_look.name = "EnemyLookTest_" + cname
+		ai_look.set("character_data", cres)
+		root.add_child(ai_look)
+		ai_look.set_physics_process(false)
+		var ai_l_ctrl: Variant = ai_look.get("cached_ai_controller")
+		if ai_l_ctrl and is_instance_valid(ai_l_ctrl):
+			(ai_l_ctrl as Node).set_physics_process(false)
+			ai_l_ctrl.set("enabled", false)
+		ai_look.set("_cached_opponent", p_look)
+		ai_look.global_position = Vector3(0.0, 0.0, -0.90)
+		cam_l.position = Vector3(0.0, 1.60, 0.0)
+
+		var anim_l: ProceduralCombatAnimator = ai_look.get("procedural_animator") as ProceduralCombatAnimator
+		assert(anim_l != null and anim_l.skeleton != null, "%s procedural_animator/skeleton missing" % cname)
+		var head_idx_l: int = int(anim_l.bone_indices.get("Head", -1))
+		assert(head_idx_l != -1, "%s Head bone not mapped" % cname)
+
+		var rest_head_y: float = anim_l.skeleton.to_global(anim_l.skeleton.get_bone_global_rest(head_idx_l).origin).y
+		cam_l.position = Vector3(0.0, rest_head_y + 0.08, 0.0)
+		for _step_i in range(30):
+			ai_look._process(0.05)
+
+		var head_world_pos: Vector3 = anim_l.skeleton.to_global(anim_l.skeleton.get_bone_global_pose(head_idx_l).origin)
+		var rel_h: float = head_world_pos.y - ai_look.global_position.y
+		var torso_pitch_deg: float = rad_to_deg(anim_l.current_hips_euler.x + anim_l.current_spine_euler.x + anim_l.current_chest_euler.x + anim_l.current_upper_chest_euler.x)
+		var pitch_melee_deg: float = rad_to_deg(anim_l.current_neck_euler.x + anim_l.current_head_euler.x)
+		var world_pitch_deg: float = torso_pitch_deg + pitch_melee_deg
+		print("[LookAtTest] %s EyeLevel Melee 0.90m (cam_y=%.2fm): rel_h=%.3fm, local_pitch=%.2f deg, world_pitch=%.2f deg" % [cname, cam_l.position.y, rel_h, pitch_melee_deg, world_pitch_deg])
+		assert(rel_h >= 1.10 and rel_h <= 1.75, "%s Head rel_h=%.3fm out of expected [1.10, 1.75]m range" % [cname, rel_h])
+		assert(absf(world_pitch_deg) < 6.0 and absf(pitch_melee_deg) < 12.0, "%s eye-level Melee pitch must aim straight ahead (got local=%.2f, world=%.2f)" % [cname, pitch_melee_deg, world_pitch_deg])
+
+		if cname == "Goku":
+			cam_l.position = Vector3(0.0, 1.60, 0.0)
+			for _step_g in range(25):
+				ai_look._process(0.05)
+			var g_pitch_deg: float = rad_to_deg(anim_l.current_neck_euler.x + anim_l.current_head_euler.x)
+			print("[LookAtTest] Goku Standard Cam Y=1.60m: local_pitch=%.2f deg" % g_pitch_deg)
+			assert(absf(g_pitch_deg) < 12.0, "Goku Melee 0.90m at Y=1.60m must aim near center, got %.2f" % g_pitch_deg)
+
+		cam_l.position = Vector3(0.0, 2.60, 0.0)
+		for _step_up in range(25):
+			ai_look._process(0.05)
+		var pitch_up_deg: float = rad_to_deg(anim_l.current_neck_euler.x + anim_l.current_head_euler.x)
+		print("[LookAtTest] %s High target (Y=2.60m): pitch=%.2f deg" % [cname, pitch_up_deg])
+		assert(pitch_up_deg < -10.0, "%s must tilt UP (< -10 deg) when target is high, got %.2f" % [cname, pitch_up_deg])
+
+		cam_l.position = Vector3(0.0, 0.60, 0.0)
+		for _step_dn in range(25):
+			ai_look._process(0.05)
+		var pitch_dn_deg: float = rad_to_deg(anim_l.current_neck_euler.x + anim_l.current_head_euler.x)
+		print("[LookAtTest] %s Low target (Y=0.60m): pitch=%.2f deg" % [cname, pitch_dn_deg])
+		assert(pitch_dn_deg > 10.0, "%s must tilt DOWN (> +10 deg) when target is low, got %.2f" % [cname, pitch_dn_deg])
+
+		if ai_look.get_parent():
+			ai_look.get_parent().remove_child(ai_look)
+		ai_look.free()
+
+	if look_rig.get_parent():
+		look_rig.get_parent().remove_child(look_rig)
+	look_rig.free()
+
 	# Teardown cleanly without leaving leaked nodes
 	for n in [mini, dome, dome2, dome3, dome4, dome5, dome6, dome7, dome8, dome9, dome10, dome11, dome12, dome13, dome14, dome15, lockon_t, hud_t, rig, ai_mock]:
 		if is_instance_valid(n):
