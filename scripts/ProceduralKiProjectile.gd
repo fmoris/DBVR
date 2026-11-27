@@ -5,8 +5,6 @@ extends Node3D
 ## Optimizado para Meta Quest 3 en Godot 4.3+/4.8.
 
 const ShockwaveShader = preload("res://shaders/shockwave.gdshader")
-static var _shared_spark_mesh: SphereMesh = null
-static var _shared_spark_mat: StandardMaterial3D = null
 static var _cached_hybrid_ctrl: Node = null
 static var _cached_gss: Node = null
 static var _cached_player_char: Node = null
@@ -39,6 +37,9 @@ var homing_target: Node3D = null
 var homing_strength: float = 0.0
 var pierce_damage_mult: float = 1.0
 var was_launched_in_zenkai: bool = false
+var unblockable_defenseless: bool = false
+var is_renzoku_juggle: bool = false
+var is_renzoku_knockdown: bool = false
 
 # Red de seguridad de ciclo de vida (Punto 10: Ki blasts que no desaparecen)
 const HARD_MAX_AGE: float = 8.0
@@ -86,10 +87,11 @@ func _physics_process(delta: float) -> void:
 
 	# 2. Comprobar desvío por proximidad de manos a alta velocidad (Ki Deflection)
 	# (Solo se salta el frame exacto del desvío; luego el proyectil sigue volando y envejeciendo)
-	var deflections_before: int = deflection_count
-	_check_hand_deflection_proximity()
-	if is_dead or deflection_count != deflections_before:
-		return
+	if not unblockable_defenseless:
+		var deflections_before: int = deflection_count
+		_check_hand_deflection_proximity()
+		if is_dead or deflection_count != deflections_before:
+			return
 
 	# 2b. Guiado suave de seguimiento (Cargados y Devoluciones Perfectas, cero allocs)
 	if homing_strength > 0.0 and homing_target != null and is_instance_valid(homing_target):
@@ -160,8 +162,8 @@ func _physics_process(delta: float) -> void:
 					if ctrl:
 						hand_vel = ctrl.left_velocity if "left" in col_name.to_lower() else ctrl.right_velocity
 
-				# Proyectiles de Tier 1 y 2 se pueden desviar según velocidad y ratio de BP
-				var def_check: Dictionary = _can_hand_deflect(hand_vel, collider)
+				# Proyectiles de Tier 1 y 2 se pueden desviar según velocidad y ratio de BP (salvo objetivo indefenso)
+				var def_check: Dictionary = {"allowed": false} if unblockable_defenseless else _can_hand_deflect(hand_vel, collider)
 				if bool(def_check.get("allowed", false)):
 					_execute_deflection(collision, hand_vel, collider)
 					return
@@ -456,26 +458,8 @@ func _check_projectile_clash() -> void:
 
 ## Detonación de choque de energías en el aire
 func _trigger_air_clash_explosion(pos: Vector3) -> void:
-	var vfx_parent: Node = _get_vfx_parent()
-	if vfx_parent:
-		var flash = MeshInstance3D.new()
-		var sphere_mesh = SphereMesh.new()
-		sphere_mesh.radius = p_radius * 3.0
-		sphere_mesh.height = p_radius * 6.0
-		flash.mesh = sphere_mesh
-
-		var mat = StandardMaterial3D.new()
-		mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
-		mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
-		mat.albedo_color = Color(1.0, 0.95, 0.7, 1.0)
-		flash.material_override = mat
-		vfx_parent.add_child(flash)
-		flash.global_position = pos
-
-		var tween = get_tree().create_tween().set_parallel(true)
-		tween.tween_property(flash, "scale", Vector3.ONE * 5.0, 0.25).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-		tween.tween_property(mat, "albedo_color", Color(1.0, 0.8, 0.2, 0.0), 0.25)
-		tween.chain().tween_callback(flash.queue_free)
+	ZenkaiVFXManager.spawn_zenkai_impact_flash(get_tree(), pos, p_color, clampf(p_radius * 5.0, 1.0, 2.5))
+	ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), pos, 2, p_color, false)
 
 	var gss = _get_gss()
 	if gss and gss.has_signal("gesture_logged"):
@@ -528,7 +512,7 @@ func _apply_projectile_hit(char_node: Node, caster: Node, pos: Vector3, hit_dir:
 			char_node.recharge_ki(clampf(effective_damage * 0.02, 5.0, 25.0))
 
 		if caster and is_instance_valid(caster) and char_node != caster and caster.has_method("increase_np"):
-			caster.increase_np(effective_damage * 0.35)
+			caster.increase_np(effective_damage * 0.55)
 			caster.check_zenkai_conditions(char_node.current_np)
 			char_node.check_zenkai_conditions(caster.current_np)
 			var is_zenkai_finisher: bool = was_launched_in_zenkai or bool(caster.get("is_in_zenkai_state")) or bool(caster.get("is_comeback_zenkai"))
@@ -605,8 +589,9 @@ func _apply_projectile_hit(char_node: Node, caster: Node, pos: Vector3, hit_dir:
 			if char_node.has_method("_spawn_bp_delta_popup"):
 				char_node._spawn_bp_delta_popup(0.0, "⚡ ¡DASH INTERCEPTADO!")
 
-	# 3. Evaluación de Guardia Cruzada vs Ki Blast Cargado
-	var was_char_blocking: bool = bool(char_node.get("is_blocking")) and not bool(char_node.get("is_guard_broken"))
+	# 3. Evaluación de Guardia Cruzada vs Ki Blast Cargado / Estado Indefenso
+	var def_vuln: bool = unblockable_defenseless or (char_node.has_method("is_vulnerable_defenseless") and bool(char_node.is_vulnerable_defenseless()))
+	var was_char_blocking: bool = (not def_vuln) and bool(char_node.get("is_blocking")) and not bool(char_node.get("is_guard_broken"))
 	var forced_guard_break: bool = false
 	if is_charged_blast and was_char_blocking:
 		if bool(profile.get("triggers_guard_break", false)):
@@ -625,8 +610,8 @@ func _apply_projectile_hit(char_node: Node, caster: Node, pos: Vector3, hit_dir:
 			if pre_drain > 0.0 and char_node.has_method("drain_ki"):
 				char_node.drain_ki(pre_drain)
 
-	# 4. Aplicar daño (sin regalar Ki al receptor!) y drenar Ki limpio en impacto abierto
-	var apply_kb_hit: bool = is_charged_blast or is_counter or is_perfect_return or forced_guard_break or (float(profile.get("effective_ratio", 1.0)) >= 0.75)
+	# 4. Aplicar daño sin derribo prematuro: rápidos solo producen flinch; cargados empujan corto sin tumbar
+	var apply_kb_hit: bool = forced_guard_break
 	char_node.take_hit(effective_damage, hit_dir, apply_kb_hit)
 
 	if is_perfect_return:
@@ -635,8 +620,17 @@ func _apply_projectile_hit(char_node: Node, caster: Node, pos: Vector3, hit_dir:
 		if char_node.has_method("_spawn_bp_delta_popup"):
 			char_node._spawn_bp_delta_popup(0.0, "✋ ¡DEVOLUCIÓN PERFECTA!")
 
-	if (forced_guard_break or (bool(profile.get("launches_air_brake", false)) and not was_char_blocking)) and char_node.has_method("apply_knockback"):
-		char_node.apply_knockback(hit_dir, 18.0, 2.5)
+	if is_renzoku_knockdown and char_node.has_method("apply_renzoku_relaunch"):
+		char_node.apply_renzoku_relaunch(caster, hit_dir)
+	elif is_renzoku_knockdown and char_node.has_method("apply_renzoku_knockdown"):
+		char_node.apply_renzoku_knockdown(caster, hit_dir)
+	elif is_renzoku_juggle and not was_char_blocking and char_node.has_method("apply_air_juggle_suspend"):
+		char_node.apply_air_juggle_suspend(0.55)
+	elif forced_guard_break and char_node.has_method("apply_knockback"):
+		char_node.apply_knockback(hit_dir, 15.0, 2.5)
+	elif is_charged_blast and not was_char_blocking and char_node.has_method("apply_knockback"):
+		var short_push_dir: Vector3 = Vector3(hit_dir.x, 0.0, hit_dir.z).normalized() if Vector3(hit_dir.x, 0.0, hit_dir.z).length_squared() > 0.01 else hit_dir
+		char_node.apply_knockback(short_push_dir, 5.5, 4.2)
 
 	if not was_char_blocking:
 		var total_ki_drain: float = float(profile.get("ki_drain", 3.0)) + extra_victim_ki_drain
@@ -645,17 +639,22 @@ func _apply_projectile_hit(char_node: Node, caster: Node, pos: Vector3, hit_dir:
 	elif extra_victim_ki_drain > 0.0 and char_node.has_method("drain_ki"):
 		char_node.drain_ki(extra_victim_ki_drain)
 
-	# 5. Saturación ➔ Apertura + Cortina de Humo Táctica
+	# 5. Saturación ➔ Apertura + Cortina de Humo Táctica (derribo solo al saturar 6.0/6.0 stacks)
+	var saturated_now: bool = false
 	if char_node.has_method("apply_ki_blast_pressure"):
-		char_node.apply_ki_blast_pressure(caster, is_charged_blast, was_char_blocking, profile, pos, extra_stacks)
+		saturated_now = bool(char_node.apply_ki_blast_pressure(caster, is_charged_blast, was_char_blocking, profile, pos, extra_stacks))
+	if saturated_now and not forced_guard_break and not is_renzoku_juggle and not is_renzoku_knockdown and char_node.has_method("apply_knockback"):
+		char_node.apply_knockback(hit_dir, 14.0, 2.5)
 
 	# 6. Ganancia de BP del atacante y condiciones de Zenkai
+	# Prohibido K.O. por Ki Blast cargado normal: solo remata si el defensor está SIN DEFENSA y el atacante en Zenkai
 	if caster and is_instance_valid(caster) and char_node != caster and caster.has_method("increase_np"):
-		caster.increase_np(effective_damage * 0.35)
+		caster.increase_np(effective_damage * 0.55)
 		caster.check_zenkai_conditions(char_node.current_np)
 		char_node.check_zenkai_conditions(caster.current_np)
-		if is_charged_blast and not was_char_blocking and (was_launched_in_zenkai or bool(caster.get("is_in_zenkai_state"))) and caster.has_method("trigger_zenkai_match_finish"):
-			var p_title_kb: String = power.power_name if (power and "power_name" in power) else "Ki Blast Cargado"
+		var victim_defenseless: bool = char_node.has_method("is_defenseless_for_ko") and bool(char_node.is_defenseless_for_ko())
+		if is_charged_blast and not was_char_blocking and victim_defenseless and (was_launched_in_zenkai or bool(caster.get("is_in_zenkai_state"))) and caster.has_method("trigger_zenkai_match_finish"):
+			var p_title_kb: String = power.power_name if (power and "power_name" in power) else "Ki Blast Cargado (Remate Final)"
 			caster.trigger_zenkai_match_finish(caster, char_node, p_title_kb)
 
 
@@ -720,6 +719,16 @@ func _trigger_explosion(pos: Vector3, collider: Node) -> void:
 				if p_dist <= explosion_radius and int(proj.get("tier")) < self.tier:
 					proj.call_deferred("queue_free")
 
+	# 2.5 Destrucción física de pilares, rocas y cañón con daño secundario por escombros
+	if is_inside_tree() and get_tree():
+		var adm_proj: ArenaDestructionManager = ArenaDestructionManager.get_active(get_tree())
+		if adm_proj:
+			var is_env_hit: bool = collider != null and ("Spire" in collider.name or "Pillar" in collider.name or "TacticalRock" in collider.name or "Boulder" in collider.name or "Canyon" in collider.name)
+			if is_env_hit or tier >= 2 or has_meta("charge_time"):
+				var caster_bp: float = float(caster.get("current_np")) if (caster and is_instance_valid(caster) and caster.get("current_np") != null) else 10000.0
+				var env_radius: float = maxf(explosion_radius, 3.2 if (tier >= 2 or has_meta("charge_time")) else 1.8)
+				adm_proj.apply_power_aoe_destruction(pos, env_radius, final_damage, caster_bp)
+
 	# 3. Visuales: Destello esférico + Onda refractiva
 	_spawn_visual_explosion(pos)
 
@@ -732,101 +741,26 @@ func _spawn_visual_explosion(pos: Vector3) -> void:
 	if not vfx_parent or not is_inside_tree() or not get_tree():
 		return
 
-	var flash = MeshInstance3D.new()
-	var sphere_mesh = SphereMesh.new()
-	sphere_mesh.radius = p_radius * 0.6
-	sphere_mesh.height = p_radius * 1.2
-	flash.mesh = sphere_mesh
+	var exp_tier: int = 2
+	if tier >= 4:
+		exp_tier = 5
+	elif tier == 3:
+		exp_tier = 4
+	elif tier == 2:
+		exp_tier = 2
+	else:
+		exp_tier = 2
 
-	var mat = StandardMaterial3D.new()
-	mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
-	mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = p_color
-	flash.material_override = mat
-	vfx_parent.add_child(flash)
-	flash.global_position = pos
+	var has_lightning: bool = false
+	if shooter_node and is_instance_valid(shooter_node):
+		var cur_tr: Variant = shooter_node.get("current_transformation")
+		if cur_tr != null and cur_tr is Resource and "has_bio_lightning" in cur_tr:
+			has_lightning = bool(cur_tr.get("has_bio_lightning"))
+		if bool(shooter_node.get("is_in_zenkai_state")) or bool(shooter_node.get("is_in_furia")):
+			has_lightning = true
 
-	var tween = get_tree().create_tween().set_parallel(true)
-	tween.tween_property(flash, "scale", Vector3.ONE * 5.0, 0.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tween.tween_property(mat, "albedo_color", Color(p_color.r, p_color.g, p_color.b, 0.0), 0.2)
-	tween.chain().tween_callback(flash.queue_free)
-
-	var shockwave = MeshInstance3D.new()
-	shockwave.name = "KiShockwave_" + str(Time.get_ticks_msec())
-	var sphere_wave = SphereMesh.new()
-	sphere_wave.radius = p_radius
-	sphere_wave.height = p_radius * 2.0
-	sphere_wave.radial_segments = 16
-	sphere_wave.rings = 8
-	shockwave.mesh = sphere_wave
-
-	var mat_wave = ShaderMaterial.new()
-	mat_wave.shader = ShockwaveShader
-	mat_wave.set_shader_parameter("ring_color", p_color)
-	mat_wave.set_shader_parameter("use_uv_ring", 0.0)
-	mat_wave.set_shader_parameter("force", 0.15)
-	mat_wave.set_shader_parameter("progress", 0.0)
-	mat_wave.set_shader_parameter("thickness", 0.12)
-	shockwave.material_override = mat_wave
-	vfx_parent.add_child(shockwave)
-	shockwave.global_position = pos
-
-	var wave_tween = get_tree().create_tween().set_parallel(true)
-	var final_wave_scale = explosion_radius * 4.0
-	wave_tween.tween_property(shockwave, "scale", Vector3.ONE * final_wave_scale, 0.45).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	wave_tween.tween_method(
-		func(val: float): mat_wave.set_shader_parameter("progress", val),
-		0.0, 1.0, 0.45
-	)
-	wave_tween.chain().tween_callback(shockwave.queue_free)
-
-	# --- 3. EXPULSIÓN GPU/CPU LIGERA DE CHISPAS KI (Zero RigidBody3D en Meta Quest) ---
-	if _shared_spark_mesh == null:
-		_shared_spark_mesh = SphereMesh.new()
-		_shared_spark_mesh.radius = 0.04
-		_shared_spark_mesh.height = 0.08
-		_shared_spark_mesh.radial_segments = 8
-		_shared_spark_mesh.rings = 4
-	if _shared_spark_mat == null:
-		_shared_spark_mat = StandardMaterial3D.new()
-		_shared_spark_mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
-		_shared_spark_mat.vertex_color_use_as_albedo = true
-		_shared_spark_mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
-	_shared_spark_mesh.material = _shared_spark_mat
-
-	var sparks := CPUParticles3D.new()
-	sparks.mesh = _shared_spark_mesh
-	sparks.amount = 14 if tier >= 3 else (9 if tier == 2 else 6)
-	sparks.one_shot = true
-	sparks.explosiveness = 1.0
-	sparks.lifetime = 0.55
-	sparks.direction = Vector3.UP
-	sparks.spread = 180.0
-	sparks.initial_velocity_min = 3.0 * (1.5 if tier >= 3 else 1.0)
-	sparks.initial_velocity_max = 6.5 * (1.5 if tier >= 3 else 1.0)
-	sparks.gravity = Vector3(0.0, -4.5, 0.0)
-	sparks.damping_min = 1.5
-	sparks.damping_max = 2.5
-	var s_scale: float = clampf(p_radius * 6.0, 0.4, 2.5)
-	sparks.scale_amount_min = s_scale * 0.6
-	sparks.scale_amount_max = s_scale * 1.2
-	sparks.color = Color(p_color.r, p_color.g, p_color.b, 0.95)
-	vfx_parent.add_child(sparks)
-	sparks.global_position = pos
-	sparks.emitting = true
-	sparks.finished.connect(sparks.queue_free)
-
-	# --- 4. FLASH DE LUZ OMNIDIRECCIONAL PUNTUAL (Solo ataques cargados/supers para cuidar 90 FPS en Quest 3) ---
-	if tier >= 2:
-		var exp_light = OmniLight3D.new()
-		exp_light.light_color = p_color
-		exp_light.light_energy = 8.0 if tier >= 3 else 4.0
-		exp_light.omni_range = explosion_radius * 2.5
-		vfx_parent.add_child(exp_light)
-		exp_light.global_position = pos
-		var light_tween = get_tree().create_tween()
-		light_tween.tween_property(exp_light, "light_energy", 0.0, 0.25).set_trans(Tween.TRANS_QUAD)
-		light_tween.chain().tween_callback(exp_light.queue_free)
+	ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), pos, exp_tier, p_color, has_lightning)
+	ZenkaiVFXManager.spawn_zenkai_impact_flash(get_tree(), pos, p_color, clampf(p_radius * 5.5, 0.9, 2.8))
 
 	if AudioActionManager.has_action_sounds("common.ki_blast_impact"):
 		var imp_sfx := AudioStreamPlayer3D.new()
@@ -851,53 +785,17 @@ func _spawn_visual_explosion(pos: Vector3) -> void:
 
 
 func _spawn_plasma_crater(pos: Vector3, radius: float, col: Color) -> void:
-	var vfx_parent: Node = _get_vfx_parent()
-	if not vfx_parent or not is_inside_tree() or not get_tree():
+	if not is_inside_tree() or not get_tree():
 		return
-	var disc := MeshInstance3D.new()
-	disc.name = "PlasmaCraterDisc"
-	var cyl := CylinderMesh.new()
-	cyl.top_radius = radius
-	cyl.bottom_radius = radius * 1.15
-	cyl.height = 0.02
-	cyl.radial_segments = 16
-	disc.mesh = cyl
-
-	var mat := StandardMaterial3D.new()
-	mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
-	mat.blend_mode = StandardMaterial3D.BLEND_MODE_ADD
-	mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color(col.r, col.g, col.b, 0.72)
-	disc.material_override = mat
-
-	vfx_parent.add_child(disc)
-	disc.global_position = pos
-
-	var fade_tw := get_tree().create_tween()
-	if fade_tw:
-		fade_tw.tween_property(mat, "albedo_color", Color(col.r, col.g, col.b, 0.0), 4.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-		fade_tw.tween_callback(disc.queue_free)
+	ZenkaiVFXManager.spawn_zenkai_crater_decal(get_tree(), pos, radius, col)
 
 
 func _spawn_deflection_vfx(pos: Vector3) -> void:
 	var vfx_parent: Node = _get_vfx_parent()
 	if not vfx_parent or not is_inside_tree() or not get_tree():
 		return
-	var spark = MeshInstance3D.new()
-	var sphere = SphereMesh.new()
-	sphere.radius = p_radius * 1.8
-	sphere.height = p_radius * 3.6
-	spark.mesh = sphere
+	ZenkaiVFXManager.spawn_zenkai_explosion(get_tree(), pos, 1, Color(1.0, 0.92, 0.35, 1.0), false)
 
-	var mat = StandardMaterial3D.new()
-	mat.transparency = StandardMaterial3D.TRANSPARENCY_ALPHA
-	mat.shading_mode = StandardMaterial3D.SHADING_MODE_UNSHADED
-	mat.albedo_color = Color(1.0, 0.92, 0.35, 1.0)
-	spark.material_override = mat
-	vfx_parent.add_child(spark)
-	spark.global_position = pos
-
-	# Audio 3D metálico de ping de desvío anime
 	var sfx = AudioStreamPlayer3D.new()
 	sfx.name = "DeflectSfx"
 	var fallback_deflect: AudioStream = null
@@ -910,8 +808,3 @@ func _spawn_deflection_vfx(pos: Vector3) -> void:
 		sfx.finished.connect(sfx.queue_free)
 	else:
 		sfx.queue_free()
-
-	var tween = get_tree().create_tween().set_parallel(true)
-	tween.tween_property(spark, "scale", Vector3.ONE * 3.5, 0.15).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	tween.tween_property(mat, "albedo_color", Color(1.0, 1.0, 1.0, 0.0), 0.15)
-	tween.chain().tween_callback(spark.queue_free)

@@ -214,13 +214,29 @@ func _is_clean_free_phase(player: Node3D, enemy: Node3D) -> bool:
 		return false
 	if Engine.time_scale < 0.85:
 		return false
+	if player.has_method("is_in_active_combat_sequence") and player.is_in_active_combat_sequence():
+		return false
+	if enemy.has_method("is_in_active_combat_sequence") and enemy.is_in_active_combat_sequence():
+		return false
 	if bool(player.get("is_in_bullet_time")) or bool(enemy.get("is_in_bullet_time")):
+		return false
+	if bool(player.get("is_in_followup_bullet_time")) or bool(enemy.get("is_in_followup_bullet_time")):
 		return false
 	if (player.get("active_target_dome") != null and is_instance_valid(player.get("active_target_dome"))) or (enemy.get("active_target_dome") != null and is_instance_valid(enemy.get("active_target_dome"))):
 		return false
 	if bool(player.get("is_in_beam_sequence")) or bool(enemy.get("is_in_beam_sequence")):
 		return false
+	if bool(player.get("is_in_beam_clash")) or bool(enemy.get("is_in_beam_clash")):
+		return false
+	if bool(player.get("is_firing_beam")) or bool(enemy.get("is_firing_beam")):
+		return false
 	if bool(player.get("is_flying_to_opponent")) or bool(enemy.get("is_flying_to_opponent")):
+		return false
+	if bool(player.get("is_knocked_back")) or bool(enemy.get("is_knocked_back")):
+		return false
+	if bool(player.get("is_ballistic_launch")) or bool(enemy.get("is_ballistic_launch")):
+		return false
+	if float(player.get("wall_stick_timer")) > 0.0 or float(enemy.get("wall_stick_timer")) > 0.0:
 		return false
 	if bool(player.get("is_charging_super")) or bool(enemy.get("is_charging_super")):
 		return false
