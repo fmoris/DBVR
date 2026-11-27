@@ -750,15 +750,27 @@ func _apply_look_at(delta: float, target_pos: Vector3) -> void:
 		target_neck_euler = Vector3(-0.22 * _st_flinch_factor, 0.0, 0.0)
 		target_head_euler = Vector3(-0.42 * _st_flinch_factor, 0.0, 0.0)
 	else:
-		var char_pos: Vector3 = character_instance.global_position
-		var char_basis: Basis = character_instance.global_transform.basis
-		var local_target: Vector3 = char_basis.inverse() * (target_pos - char_pos)
+		var char_basis: Basis = character_instance.global_transform.basis.orthonormalized()
+		var head_pos: Vector3 = character_instance.global_position + char_basis.y * 1.50
+		if skeleton and is_instance_valid(skeleton) and skeleton.is_inside_tree():
+			var head_idx: int = int(bone_indices.get("Head", -1))
+			if head_idx != -1:
+				var bone_world_pos: Vector3 = skeleton.to_global(skeleton.get_bone_global_pose(head_idx).origin)
+				var rel_h: float = (bone_world_pos - character_instance.global_position).dot(char_basis.y)
+				if rel_h > 0.8 and rel_h < 2.2:
+					head_pos = bone_world_pos + char_basis.y * 0.08
+		var local_target: Vector3 = char_basis.inverse() * (target_pos - head_pos)
 
-		# Frente canónico del personaje es +Z; compensar giro del torso para mantener vista al jugador
-		var torso_yaw_offset: float = current_hips_euler.y + current_spine_euler.y + current_chest_euler.y
+		# Frente canónico del personaje es +Z; compensar giro y pitch acumulado del torso/malla para mantener vista al jugador
+		var torso_yaw_offset: float = current_hips_euler.y + current_spine_euler.y + current_chest_euler.y + current_upper_chest_euler.y
+		var torso_pitch_offset: float = current_hips_euler.x + current_spine_euler.x + current_chest_euler.x + current_upper_chest_euler.x
+		var mesh_node: Node3D = character_instance.get("body_mesh_instance") as Node3D
+		if mesh_node and is_instance_valid(mesh_node):
+			torso_pitch_offset += mesh_node.rotation.x
 		var yaw: float = clampf(atan2(local_target.x, local_target.z) - torso_yaw_offset * 0.75, deg_to_rad(-58.0), deg_to_rad(58.0))
 		var horizontal_dist: float = Vector2(local_target.x, local_target.z).length()
-		var pitch: float = clampf(-atan2(local_target.y, maxf(horizontal_dist, 0.1)), deg_to_rad(-35.0), deg_to_rad(35.0))
+		var desired_pitch: float = -atan2(local_target.y, maxf(horizontal_dist, 0.1))
+		var pitch: float = clampf(desired_pitch - torso_pitch_offset * 0.85, deg_to_rad(-35.0), deg_to_rad(35.0))
 		if _st_ki_phase > 0:
 			pitch += deg_to_rad(12.0)
 

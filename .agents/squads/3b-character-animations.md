@@ -24,6 +24,7 @@ Controlar el esqueleto de 18 huesos, poses de combate, transiciones suaves (`sle
 - Respetar el mapa empírico de ejes en `skeleton_axis_calibration.json` (`21_goku1_body.glb`).
 - Cero alocaciones por frame en `ProceduralCombatAnimator.update()`.
 - Validar siempre visualmente en `zenkai_showcase.tscn` antes de compilar APK.
+- `ProceduralCombatAnimator._apply_look_at()` debe calcular la mirada desde el hueso `Head` en espacio mundo (`skeleton.to_global(get_bone_global_pose(head_idx).origin) + char_basis.y * 0.08`, nunca desde los pies `character_instance.global_position`) y compensar el pitch acumulado de torso/malla; además `character_instance.gd` solo suma `+1.45m` al `eye_target` cuando no hay `XRCamera3D` disponible (nunca sobre `o_cam.global_position`).
 
 ## Gate de Verificación
 ```powershell
