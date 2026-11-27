@@ -240,6 +240,10 @@ var hand_right_instance: Node3D = null
 var ragdoll_simulator: PhysicalBoneSimulator3D = null
 var is_ragdoll_active: bool = false
 var ragdoll_recovery_timer: float = 0.0
+var _ko_fall_velocity: Vector3 = Vector3.ZERO
+var _ko_fall_landed: bool = false
+var _ko_fall_tween: Tween = null
+var _revert_zenkai_grace_timer: float = 0.0
 
 # Sistema de Ragdoll físico autónomo (Godot PhysicalBoneSimulator3D)
 
@@ -288,6 +292,12 @@ func setup_character() -> void:
 	air_juggle_suspend_timer = 0.0
 	_limit_break_tiers_used.clear()
 	_is_limit_break_running = false
+	_revert_zenkai_grace_timer = 0.0
+	_ko_fall_velocity = Vector3.ZERO
+	_ko_fall_landed = false
+	if _ko_fall_tween and is_instance_valid(_ko_fall_tween):
+		_ko_fall_tween.kill()
+	_ko_fall_tween = null
 	_pending_limit_break_leader = null
 	_pending_zenkai_dramatic_source = ""
 	_free_phase_settle_timer = 0.0
@@ -740,6 +750,12 @@ func swap_character_data(new_data: CharacterData) -> void:
 	is_staggered = false
 	is_ragdoll_active = false
 	ragdoll_recovery_timer = 0.0
+	_revert_zenkai_grace_timer = 0.0
+	_ko_fall_velocity = Vector3.ZERO
+	_ko_fall_landed = false
+	if _ko_fall_tween and is_instance_valid(_ko_fall_tween):
+		_ko_fall_tween.kill()
+	_ko_fall_tween = null
 	velocity = Vector3.ZERO
 
 	if aura_node and is_instance_valid(aura_node):
@@ -768,6 +784,9 @@ func swap_character_data(new_data: CharacterData) -> void:
 
 
 func _exit_tree() -> void:
+	if _ko_fall_tween and is_instance_valid(_ko_fall_tween):
+		_ko_fall_tween.kill()
+		_ko_fall_tween = null
 	if _dash_vfx_ring and is_instance_valid(_dash_vfx_ring):
 		_dash_vfx_ring.queue_free()
 		_dash_vfx_ring = null
@@ -787,8 +806,31 @@ func _physics_process(delta: float) -> void:
 	if is_player:
 		transform = Transform3D.IDENTITY
 
-	# Control de simulación y recuperación Ragdoll
+	# Control de simulación, caída procedural al suelo y recuperación Ragdoll
 	if is_ragdoll_active:
+		if not is_player and (not ragdoll_simulator or not is_instance_valid(ragdoll_simulator)) and not _ko_fall_landed:
+			_ko_fall_velocity.y -= 18.0 * delta
+			_ko_fall_velocity.x = move_toward(_ko_fall_velocity.x, 0.0, 5.5 * delta)
+			_ko_fall_velocity.z = move_toward(_ko_fall_velocity.z, 0.0, 5.5 * delta)
+			var next_pos: Vector3 = global_position + _ko_fall_velocity * delta
+			next_pos.x = clampf(next_pos.x, -76.0, 76.0)
+			next_pos.z = clampf(next_pos.z, -76.0, 76.0)
+			var ground_h: float = get_ground_elevation(next_pos)
+			if next_pos.y <= ground_h:
+				next_pos.y = ground_h
+				global_position = next_pos
+				_ko_fall_velocity = Vector3.ZERO
+				_ko_fall_landed = true
+				_spawn_ground_crash_vfx(Vector3(next_pos.x, ground_h + 0.05, next_pos.z), ground_h > 0.2)
+				if _ko_fall_tween and is_instance_valid(_ko_fall_tween):
+					_ko_fall_tween.kill()
+				if body_mesh_instance and is_instance_valid(body_mesh_instance):
+					_ko_fall_tween = create_tween().set_parallel(true)
+					_ko_fall_tween.set_ignore_time_scale(true)
+					_ko_fall_tween.tween_property(body_mesh_instance, "rotation:x", deg_to_rad(-86.0), 0.18).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+					_ko_fall_tween.tween_property(body_mesh_instance, "position:y", 0.14, 0.18).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+			else:
+				global_position = next_pos
 		if not is_match_over and ragdoll_recovery_timer > 0.0:
 			ragdoll_recovery_timer -= delta
 			if ragdoll_recovery_timer <= 0.0:
@@ -1809,20 +1851,12 @@ func consume_ki_or_life_force(ki_amount: float) -> Dictionary:
 	var min_cost = 500.0 if not current_transformation else (500.0 * current_transformation.np_multiplier)
 	np_cost = max(np_cost, min_cost)
 	
-	# Reducir NP voluntariamente (sacrificio vital de último aliento)
-	current_np = max(0.0, current_np - np_cost)
+	# Reducir NP voluntariamente (sacrificio vital de último aliento) respetando el piso irreversible de BP;
+	# llegar a 0 Ki nunca termina el combate por agotamiento.
+	var floor_limit: float = maxf(get_active_max_np() * secured_np_threshold_ratio, 1000.0)
+	current_np = maxf(floor_limit, current_np - np_cost)
 	_notify_stats()
-	
-	# Si el NP cae a 0 por el sacrificio vital, el luchador colapsa (K.O. por Agotamiento Extremo)
-	if current_np <= 0.0:
-		print("[CharacterInstance] %s: ¡COLAPSO POR SACRIFICIO VITAL! Fuerza vital agotada por completo." % character_data.character_name)
-		var opp = _get_opponent()
-		if opp and is_instance_valid(opp):
-			trigger_zenkai_match_finish(opp, self, "Agotamiento Vital")
-		else:
-			var winner_name = opp.character_data.character_name if (opp and opp.character_data) else "Rival"
-			emit_signal("game_finished", winner_name)
-		
+
 	return { "success": true, "sacrificed_np": np_cost, "is_life_sacrifice": true }
 
 func get_transformation_multiplier() -> float:
@@ -1975,9 +2009,9 @@ func get_combat_act() -> int:
 	if current_transformation != null:
 		return 3 if current_transformation.tier_level >= 2 else 2
 	var ratio: float = current_np / maxf(get_active_max_np(), 1.0)
-	if ratio >= 0.75:
+	if ratio >= 0.85:
 		return 3
-	if ratio >= 0.35:
+	if ratio >= 0.65:
 		return 2
 	return 1
 
@@ -2109,16 +2143,18 @@ func check_zenkai_conditions(opponent_np: float) -> void:
 
 	var active_max: float = get_active_max_np()
 
-	# Zenkai por Dominio Absoluto (GDD Canon): requiere brecha >= 40% BP + Acto II (>= 45% NP o transformado)
-	var act_ii_reached: bool = (current_transformation != null) or (current_np >= active_max * 0.45)
-	if lead_ratio >= 0.40 and act_ii_reached:
+	# Zenkai por Dominio Absoluto (GDD Canon): requiere brecha >= 40% BP + Acto II (>= 70% NP en Base o transformado)
+	var act_ii_reached: bool = (current_transformation != null) or (current_np >= active_max * 0.70)
+	var opp_z_chk: Node3D = _get_opponent()
+	var opp_in_revert_grace: bool = opp_z_chk != null and is_instance_valid(opp_z_chk) and float(opp_z_chk.get("_revert_zenkai_grace_timer") if opp_z_chk.get("_revert_zenkai_grace_timer") != null else 0.0) > 0.0
+	if lead_ratio >= 0.40 and act_ii_reached and not opp_in_revert_grace:
 		if not is_in_zenkai_state:
 			is_in_zenkai_state = true
 			zenkai_source = "dominance"
 			emit_signal("zenkai_activated", "dominance")
 			if in_seq:
 				if character_data:
-					current_ki = minf(current_ki + 35.0, character_data.base_ki)
+					current_ki = minf(current_ki + 35.0, get_max_ki())
 				_update_aura_visuals()
 				_pending_zenkai_dramatic_source = "dominance"
 			else:
@@ -2126,7 +2162,7 @@ func check_zenkai_conditions(opponent_np: float) -> void:
 			var c_name_z: String = character_data.character_name if character_data else name
 			_log_combat_event("⚡ ¡DOMINIO ZENKAI ACTIVADO (%s)! Brecha ≥40%% BP — FINISHER LISTO" % c_name_z, "success")
 			_notify_stats()
-	elif is_in_zenkai_state and (lead_ratio < 0.28 or (current_transformation == null and current_np < active_max * 0.38)):
+	elif is_in_zenkai_state and (lead_ratio < 0.28 or (current_transformation == null and current_np < active_max * 0.58)):
 		is_in_zenkai_state = false
 		zenkai_source = ""
 		if _pending_zenkai_dramatic_source == "dominance":
@@ -2658,6 +2694,7 @@ func revert_to_base() -> void:
 		dd_rev.restore_npc_hair_tint(self)
 	_notify_stats()
 	_update_aura_visuals()
+	_revert_zenkai_grace_timer = 6.0
 	if absf(current_np - old_np) >= 50.0:
 		_spawn_bp_delta_popup(current_np - old_np, "FORMA BASE")
 	var opp: Node3D = _get_opponent()
@@ -2667,6 +2704,8 @@ func revert_to_base() -> void:
 			opp.check_zenkai_conditions(current_np)
 
 func _process_power_cooldowns(delta: float) -> void:
+	if _revert_zenkai_grace_timer > 0.0:
+		_revert_zenkai_grace_timer = maxf(0.0, _revert_zenkai_grace_timer - delta)
 	if global_super_recovery_timer > 0.0:
 		global_super_recovery_timer = maxf(0.0, global_super_recovery_timer - delta)
 	if is_comeback_zenkai and comeback_zenkai_timer > 0.0:
@@ -4718,17 +4757,28 @@ func _check_pillar_collisions(pos: Vector3) -> void:
 func start_ragdoll(impulse: Vector3 = Vector3.ZERO) -> void:
 	if is_ragdoll_active:
 		return
-	# Punto 5: Si el esqueleto tiene escala no unitaria (ej. Vegeta 0.078) o no hay simulador,
-	# Jolt deforma la malla; usar caída procedural segura en su lugar.
+	# Rigs complejos (>100 huesos jiggle como Goku) o con escala no unitaria (Vegeta) omiten Jolt
+	# para evitar estiramiento de malla y caen con trayectoria parabólica procedural limpia al suelo.
 	var has_non_unit_scale: bool = skeleton != null and is_instance_valid(skeleton) and (skeleton.global_transform.basis.get_scale() - Vector3.ONE).length() > 0.05
 	if not ragdoll_simulator or has_non_unit_scale:
 		is_ragdoll_active = true
-		var dir: Vector3 = impulse.normalized() if impulse.length_squared() > 0.01 else Vector3.BACK
+		_ko_fall_landed = false
 		if procedural_animator:
-			procedural_animator.trigger_hit_flinch(1.5, -dir)
+			procedural_animator.enabled = false
+		var horiz_imp: Vector3 = Vector3(impulse.x, 0.0, impulse.z)
+		if horiz_imp.length() > 14.0:
+			horiz_imp = horiz_imp.normalized() * 14.0
+		var ground_now: float = get_ground_elevation(global_position)
+		var init_vy: float = clampf(impulse.y * 0.35, -14.0, 5.0)
+		if global_position.y <= ground_now + 0.15 and init_vy <= 0.5:
+			init_vy = 2.8
+		_ko_fall_velocity = Vector3(horiz_imp.x, init_vy, horiz_imp.z)
+		if _ko_fall_tween and is_instance_valid(_ko_fall_tween):
+			_ko_fall_tween.kill()
 		if body_mesh_instance and is_instance_valid(body_mesh_instance):
-			var tw: Tween = create_tween()
-			tw.tween_property(body_mesh_instance, "rotation:x", deg_to_rad(-65.0), 0.25).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+			_ko_fall_tween = create_tween()
+			_ko_fall_tween.set_ignore_time_scale(true)
+			_ko_fall_tween.tween_property(body_mesh_instance, "rotation:x", deg_to_rad(-55.0), 0.20).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 		return
 	is_ragdoll_active = true
 	if procedural_animator:
@@ -4757,6 +4807,11 @@ func stop_ragdoll() -> void:
 	if not is_ragdoll_active:
 		return
 	is_ragdoll_active = false
+	_ko_fall_velocity = Vector3.ZERO
+	_ko_fall_landed = false
+	if _ko_fall_tween and is_instance_valid(_ko_fall_tween):
+		_ko_fall_tween.kill()
+		_ko_fall_tween = null
 	if ragdoll_simulator and is_instance_valid(ragdoll_simulator):
 		ragdoll_simulator.physical_bones_stop_simulation()
 	if skeleton and is_instance_valid(skeleton):
@@ -5421,8 +5476,8 @@ func _execute_charged_v3_or_ki_break_finisher(opponent: Node3D, mode: String, sw
 	if gss and gss.has_signal("phase_changed"):
 		gss.emit_signal("phase_changed", "¡FASE LIBRE! (%s)" % mode_tag)
 
-	# Zenkai K.O. solo por remates claros (V3 / Ki Break), no por un Parry suelto de Intercambio Simultáneo
-	if is_in_zenkai_state and not is_match_over and mode != "sim_parry_launch":
+	# Zenkai K.O. solo por remates claros (V3), nunca por Parry suelto ni por simple falta de Ki (ki_break_launch)
+	if is_in_zenkai_state and not is_match_over and mode != "sim_parry_launch" and mode != "ki_break_launch":
 		trigger_zenkai_match_finish(self, opponent, "Remate Zenkai (%s)" % mode_tag)
 	elif not is_match_over:
 		var s_f: float = 1.35 if is_upward_diag else 1.20

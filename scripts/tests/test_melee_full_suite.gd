@@ -1326,6 +1326,105 @@ func _process(_delta: float) -> bool:
 		look_rig.get_parent().remove_child(look_rig)
 	look_rig.free()
 
+	# --- 18. Goku KO Procedural Fall & 0-Ki Anti-Premature-Zenkai ---
+	var ko_goku: Node3D = char_s.new() as Node3D
+	ko_goku.name = "GokuKOFallTest"
+	ko_goku.set("character_data", goku_res)
+	root.add_child(ko_goku)
+	ko_goku.set_physics_process(false)
+	var ko_ai_ctrl: Variant = ko_goku.get("cached_ai_controller")
+	if ko_ai_ctrl and is_instance_valid(ko_ai_ctrl):
+		(ko_ai_ctrl as Node).set_physics_process(false)
+		ko_ai_ctrl.set("enabled", false)
+	assert(ko_goku.get("ragdoll_simulator") == null, "Complex 369-bone Goku rig must omit Jolt PhysicalBoneSimulator3D to avoid mesh melt")
+	ko_goku.global_position = Vector3(0.0, 8.0, -4.0)
+	ko_goku.set("ragdoll_recovery_timer", -1.0)
+	ko_goku.call("start_ragdoll", Vector3(0.0, 0.0, -10.0))
+	var ko_anim: ProceduralCombatAnimator = ko_goku.get("procedural_animator") as ProceduralCombatAnimator
+	assert(ko_anim != null and ko_anim.enabled == false, "procedural_animator must pause during KO fall/ragdoll")
+	for _f_step in range(45):
+		ko_goku._physics_process(0.05)
+	var ko_ground_h: float = float(ko_goku.call("get_ground_elevation", ko_goku.global_position))
+	assert(bool(ko_goku.get("_ko_fall_landed")) == true, "Goku procedural KO fall must reach ground")
+	assert(absf(ko_goku.global_position.y - ko_ground_h) < 0.05, "Goku KO position Y must rest cleanly at ground_h (got %.3f vs %.3f)" % [ko_goku.global_position.y, ko_ground_h])
+	ko_goku.call("stop_ragdoll")
+	var ko_mesh: Node3D = ko_goku.get("body_mesh_instance") as Node3D
+	assert(ko_anim.enabled == true and ko_mesh.rotation == Vector3.ZERO, "stop_ragdoll must re-enable procedural_animator and reset mesh transform")
+	if ko_goku.get_parent():
+		ko_goku.get_parent().remove_child(ko_goku)
+	ko_goku.free()
+
+	# 18b. 0-Ki Super Beam direct hit without Zenkai must NOT finish match
+	var beam_s: GDScript = load("res://scripts/SuperBeamSequenceController.gd") as GDScript
+	var beam_t: Node3D = beam_s.new() as Node3D
+	root.add_child(beam_t)
+	p_mock.set("is_match_over", false)
+	ai_mock.set("is_match_over", false)
+	p_mock.set("is_in_zenkai_state", false)
+	p_mock.set("is_comeback_zenkai", false)
+	p_mock.set("current_transformation", g_trans[0] if g_trans.size() > 0 else null)
+	p_mock.set("current_np", 18000.0)
+	ai_mock.set("current_transformation", null)
+	ai_mock.set("current_np", 10000.0)
+	ai_mock.set("current_ki", 0.0)
+	ai_mock.set("is_guard_broken", true)
+	beam_t.set("attacker", p_mock)
+	beam_t.set("defender", ai_mock)
+	beam_t.set("power_name", "Kamehameha")
+	beam_t.set("base_damage", 1200.0)
+	beam_t.set("beam_dir", Vector3.FORWARD)
+	beam_t.set("is_active", true)
+	beam_t.call("_resolve_direct_hit")
+	assert(bool(ai_mock.get("is_match_over")) == false and bool(p_mock.get("is_match_over")) == false, "0-Ki defender hit by non-Zenkai Super Beam must NOT end the match")
+	p_mock.set("is_firing_beam", false)
+	p_mock.set("is_in_beam_sequence", false)
+	if beam_t.get_parent():
+		beam_t.get_parent().remove_child(beam_t)
+	beam_t.free()
+
+	# 18c. consume_ki_or_life_force at 0 Ki must respect NP floor and never end match
+	ai_mock.set("is_match_over", false)
+	ai_mock.set("secured_np_threshold_ratio", 0.25)
+	ai_mock.set("current_ki", 0.0)
+	ai_mock.set("current_np", 1500.0)
+	ai_mock.call("consume_ki_or_life_force", 50.0)
+	assert(bool(ai_mock.get("is_match_over")) == false, "consume_ki_or_life_force must NEVER trigger match finish")
+	assert(float(ai_mock.get("current_np")) >= 1000.0, "consume_ki_or_life_force must respect NP floor")
+
+	# 18d. revert_to_base() must grant 6s grace so opponent does not gain instant Dominio Zenkai
+	p_mock.set("_cached_opponent", ai_mock)
+	ai_mock.set("_cached_opponent", p_mock)
+	p_mock.set("is_match_over", false)
+	ai_mock.set("is_match_over", false)
+	p_mock.set("is_in_zenkai_state", false)
+	p_mock.set("is_comeback_zenkai", false)
+	ai_mock.set("is_in_zenkai_state", false)
+	ai_mock.set("is_comeback_zenkai", false)
+	p_mock.set("current_transformation", g_trans[0] if g_trans.size() > 0 else null)
+	p_mock.set("_active_np_multiplier", 2.0)
+	p_mock.set("current_np", 24000.0)
+	var v_trans: Array = vegeta_res.get("transformations")
+	ai_mock.set("current_transformation", v_trans[0] if v_trans.size() > 0 else null)
+	ai_mock.set("_active_np_multiplier", 2.0)
+	ai_mock.set("current_np", 24000.0)
+	ai_mock.call("revert_to_base") # Vegeta drops to 12000 NP (50% behind Goku's 24000)
+	assert(float(ai_mock.get("_revert_zenkai_grace_timer")) > 5.0, "revert_to_base must arm 6s anti-Zenkai grace")
+	assert(bool(p_mock.get("is_in_zenkai_state")) == false, "Opponent must NOT receive instant Dominio Zenkai right after 0-Ki revert")
+	ai_mock.set("_revert_zenkai_grace_timer", 0.0)
+	p_mock.call("check_zenkai_conditions", float(ai_mock.get("current_np")))
+	assert(bool(p_mock.get("is_in_zenkai_state")) == true, "After revert grace expires, real >= 40% BP gap must still activate Dominio Zenkai")
+
+	# 18e. Base form 50% start cannot trigger Dominio Zenkai; >= 70% Base + >= 40% lead can
+	p_mock.set("current_transformation", null)
+	p_mock.set("_active_np_multiplier", 1.0)
+	p_mock.set("is_in_zenkai_state", false)
+	p_mock.set("current_np", 9000.0) # 50% of 18000
+	p_mock.call("check_zenkai_conditions", 4000.0) # lead = 55% but still in Act I (< 70%)
+	assert(bool(p_mock.get("is_in_zenkai_state")) == false, "Base 50% start must NOT trigger Dominio Zenkai before reaching 70% BP")
+	p_mock.set("current_np", 13500.0) # 75% >= 70%
+	p_mock.call("check_zenkai_conditions", 7000.0) # lead = 48.1% >= 40%
+	assert(bool(p_mock.get("is_in_zenkai_state")) == true, "Base >= 70% BP with >= 40% BP lead must activate Dominio Zenkai")
+
 	# Teardown cleanly without leaving leaked nodes
 	for n in [mini, dome, dome2, dome3, dome4, dome5, dome6, dome7, dome8, dome9, dome10, dome11, dome12, dome13, dome14, dome15, lockon_t, hud_t, rig, ai_mock]:
 		if is_instance_valid(n):

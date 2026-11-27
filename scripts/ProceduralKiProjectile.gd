@@ -646,16 +646,11 @@ func _apply_projectile_hit(char_node: Node, caster: Node, pos: Vector3, hit_dir:
 	if saturated_now and not forced_guard_break and not is_renzoku_juggle and not is_renzoku_knockdown and char_node.has_method("apply_knockback"):
 		char_node.apply_knockback(hit_dir, 14.0, 2.5)
 
-	# 6. Ganancia de BP del atacante y condiciones de Zenkai
-	# Prohibido K.O. por Ki Blast cargado normal: solo remata si el defensor está SIN DEFENSA y el atacante en Zenkai
+	# 6. Ganancia de BP del atacante y condiciones de Zenkai (un Ki Blast cargado no dispara K.O. directo)
 	if caster and is_instance_valid(caster) and char_node != caster and caster.has_method("increase_np"):
 		caster.increase_np(effective_damage * 0.55)
 		caster.check_zenkai_conditions(char_node.current_np)
 		char_node.check_zenkai_conditions(caster.current_np)
-		var victim_defenseless: bool = char_node.has_method("is_defenseless_for_ko") and bool(char_node.is_defenseless_for_ko())
-		if is_charged_blast and not was_char_blocking and victim_defenseless and (was_launched_in_zenkai or bool(caster.get("is_in_zenkai_state"))) and caster.has_method("trigger_zenkai_match_finish"):
-			var p_title_kb: String = power.power_name if (power and "power_name" in power) else "Ki Blast Cargado (Remate Final)"
-			caster.trigger_zenkai_match_finish(caster, char_node, p_title_kb)
 
 
 ## Detonación principal con daño en área (AoE), saturación táctica e impacto físico
