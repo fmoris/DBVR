@@ -112,6 +112,15 @@ var aura_ground_ring_ref: MeshInstance3D = null
 var aura_sparks_ref: CPUParticles3D = null
 var aura_lightning_ref: CPUParticles3D = null
 var aura_light_ref: OmniLight3D = null
+const DEFAULT_AURA_OPACITY_MULT: float = 0.22
+const DEFAULT_AURA_FLAME_ALPHA_MULT: float = 0.18
+const DEFAULT_AURA_LIGHTNING_ALPHA_MULT: float = 0.42
+const PLAYER_AURA_FP_CENTER_CLEAR: float = 0.17
+
+var aura_opacity_mult: float = DEFAULT_AURA_OPACITY_MULT
+var aura_flame_alpha_mult: float = DEFAULT_AURA_FLAME_ALPHA_MULT
+var aura_lightning_alpha_mult: float = DEFAULT_AURA_LIGHTNING_ALPHA_MULT
+var aura_fp_center_clear: float = 0.0
 
 # Variables para seguimiento de jugador y prevención de clipping
 var is_player: bool = false
@@ -320,15 +329,21 @@ func setup_character() -> void:
 	
 	is_player = get_parent() is XROrigin3D
 	
+	aura_opacity_mult = DEFAULT_AURA_OPACITY_MULT
+	aura_flame_alpha_mult = DEFAULT_AURA_FLAME_ALPHA_MULT
+	aura_lightning_alpha_mult = DEFAULT_AURA_LIGHTNING_ALPHA_MULT
+
 	if is_player:
 		# Escalar el XROrigin3D (espacio de seguimiento) para alinear la altura física y el alcance de brazos
 		var origin = get_parent()
 		var s_factor = character_data.scale_factor if character_data.scale_factor > 0.01 else 1.0
 		origin.scale = Vector3.ONE * s_factor
 		scale = Vector3.ONE # La escala de la instancia del jugador debe ser 1.0 para evitar doble escalado
+		aura_fp_center_clear = PLAYER_AURA_FP_CENTER_CLEAR
 		print("[CharacterInstance] Jugador: Origen XR escalado a %.2f (Estatura canon: %.2fm)" % [s_factor, 1.75 * s_factor])
 	else:
 		scale = Vector3.ONE * character_data.scale_factor
+		aura_fp_center_clear = 0.0
 	
 	# Desbloquear técnicas base
 	is_match_over = false
@@ -527,7 +542,7 @@ func _apply_model_variant_visibility(model_path: String) -> void:
 	if not body_mesh_instance or not is_instance_valid(body_mesh_instance):
 		return
 	var model_file: String = model_path.get_file().to_lower()
-	if not ("goku" in model_file):
+	if not ("goku" in model_file or "vegeta" in model_file):
 		return
 	var is_transformed: bool = current_transformation != null
 	_apply_zenkai_visibility_recursive(body_mesh_instance, model_file, is_transformed)
@@ -538,7 +553,20 @@ func _apply_zenkai_visibility_recursive(node: Node, model_file: String, is_trans
 	if node is MeshInstance3D:
 		var mi: MeshInstance3D = node as MeshInstance3D
 		var n_lower: String = mi.name.to_lower()
-		var should_hide: bool = ("glasses" in n_lower) or ("potara" in n_lower) or ("senz" in n_lower) or ("nyoibo" in n_lower)
+		var should_hide: bool = (
+			("glasses" in n_lower)
+			or ("potara" in n_lower)
+			or ("senz" in n_lower)
+			or ("nyoibo" in n_lower)
+			or ("scouter" in n_lower)
+			or ("ginyu_panel" in n_lower)
+			or n_lower.begins_with("sc_0")
+			or ("acs_item_" in n_lower)
+			or ("item_nm_" in n_lower)
+			or ("item_ss_" in n_lower)
+			or n_lower.begins_with("db:")
+			or n_lower.begins_with("necklace:")
+		)
 		var form_hidden: bool = false
 		if not should_hide:
 			if model_file == "21_goku1_body.glb":
@@ -551,14 +579,29 @@ func _apply_zenkai_visibility_recursive(node: Node, model_file: String, is_trans
 			elif model_file == "42_goku_3_body.glb":
 				if n_lower.begins_with("b_"):
 					form_hidden = true
+			elif model_file == "23_vegeta2_body.glb":
+				var is_base_part_v2: bool = ("nm_" in n_lower)
+				var is_ssj_part_v2: bool = ("ss_" in n_lower)
+				if is_transformed and is_base_part_v2:
+					form_hidden = true
+				elif (not is_transformed) and is_ssj_part_v2:
+					form_hidden = true
+			elif model_file == "46_vegeta_6_body.glb":
+				var is_shared_mouth: bool = ("g_mouth" in n_lower)
+				var is_base_part_v6: bool = ("nm_" in n_lower) and not is_shared_mouth
+				var is_ssj_part_v6: bool = ("ss_" in n_lower)
+				if is_transformed and is_base_part_v6:
+					form_hidden = true
+				elif (not is_transformed) and is_ssj_part_v6:
+					form_hidden = true
 
 		if not should_hide and not form_hidden:
 			if "g_mouth" in n_lower:
 				_mouth_pose_meshes[0].append(mi)
-			elif "h_mouth" in n_lower:
+			elif ("h_mouth" in n_lower) or ("h_tooth" in n_lower) or n_lower.begins_with("tooth1"):
 				_mouth_pose_meshes[1].append(mi)
 				should_hide = true
-			elif "i_mouth" in n_lower:
+			elif ("i_mouth" in n_lower) or ("i_tooth" in n_lower) or n_lower.begins_with("tooth2"):
 				_mouth_pose_meshes[2].append(mi)
 				should_hide = true
 
@@ -3139,6 +3182,11 @@ func _update_aura_visuals(delta: float = 0.0) -> void:
 	var bio_f: float = 1.0 if has_lightning else 0.0
 	var div_f: float = 1.0 if is_divine_form else 0.0
 
+	var op_mult: float = clampf(aura_opacity_mult, 0.0, 1.0)
+	var fp_clear: float = clampf(aura_fp_center_clear, 0.0, 1.0)
+	var flame_mult: float = clampf(aura_flame_alpha_mult, 0.0, 1.0)
+	var bolt_mult: float = clampf(aura_lightning_alpha_mult, 0.0, 1.0)
+
 	if is_instance_valid(aura_mesh_ref) and aura_mesh_ref.material_override is ShaderMaterial:
 		var smat := aura_mesh_ref.material_override as ShaderMaterial
 		smat.set_shader_parameter("base_color", target_color)
@@ -3146,6 +3194,8 @@ func _update_aura_visuals(delta: float = 0.0) -> void:
 		smat.set_shader_parameter("vertex_displacement", displacement)
 		smat.set_shader_parameter("has_bio_lightning", bio_f)
 		smat.set_shader_parameter("is_divine", div_f)
+		smat.set_shader_parameter("opacity_mult", op_mult)
+		smat.set_shader_parameter("fp_center_clear", fp_clear)
 
 	if is_instance_valid(aura_outer_mesh_ref) and aura_outer_mesh_ref.material_override is ShaderMaterial:
 		var omat := aura_outer_mesh_ref.material_override as ShaderMaterial
@@ -3154,23 +3204,32 @@ func _update_aura_visuals(delta: float = 0.0) -> void:
 		omat.set_shader_parameter("vertex_displacement", displacement * 1.35)
 		omat.set_shader_parameter("has_bio_lightning", bio_f)
 		omat.set_shader_parameter("is_divine", div_f)
+		omat.set_shader_parameter("opacity_mult", op_mult)
+		omat.set_shader_parameter("fp_center_clear", fp_clear)
 
 	if is_instance_valid(aura_ground_ring_ref) and aura_ground_ring_ref.material_override is StandardMaterial3D:
 		var rmat := aura_ground_ring_ref.material_override as StandardMaterial3D
 		var show_ring: bool = is_charging_ki or current_transformation != null or is_in_furia or is_in_zenkai_state or is_flying_to_opponent
 		aura_ground_ring_ref.visible = show_ring
 		if show_ring:
-			rmat.albedo_color = Color(target_color.r, target_color.g, target_color.b, clampf(active_alpha * 0.85, 0.25, 0.95))
+			var ring_alpha: float = clampf(active_alpha * 0.85 * lerpf(0.45, 1.0, op_mult), 0.15, 0.95)
+			rmat.albedo_color = Color(target_color.r, target_color.g, target_color.b, ring_alpha)
 			var pulse_r: float = 1.0 + sin(float(Time.get_ticks_msec()) * 0.012) * 0.12
 			aura_ground_ring_ref.scale = Vector3.ONE * ((1.35 if is_charging_ki else 1.0) * pulse_r)
 
 	if is_instance_valid(aura_sparks_ref):
-		aura_sparks_ref.emitting = is_charging_ki or current_transformation != null or is_in_furia or is_in_zenkai_state or is_flying_to_opponent
+		aura_sparks_ref.emitting = flame_mult > 0.005 and (is_charging_ki or current_transformation != null or is_in_furia or is_in_zenkai_state or is_flying_to_opponent)
 		aura_sparks_ref.color = Color(target_color.r, target_color.g, target_color.b, clampf(active_alpha * 0.92, 0.18, 0.95))
+		if aura_sparks_ref.mesh and aura_sparks_ref.mesh.material is StandardMaterial3D:
+			var fmat := aura_sparks_ref.mesh.material as StandardMaterial3D
+			fmat.albedo_color = Color(1.0, 1.0, 1.0, flame_mult)
 
 	if is_instance_valid(aura_lightning_ref):
-		aura_lightning_ref.emitting = has_lightning and (is_charging_ki or current_transformation != null or is_in_furia or is_in_zenkai_state)
+		aura_lightning_ref.emitting = bolt_mult > 0.005 and has_lightning and (is_charging_ki or current_transformation != null or is_in_furia or is_in_zenkai_state)
 		aura_lightning_ref.color = Color(0.65, 0.92, 1.0, 0.95) if not is_in_furia else Color(1.0, 0.78, 0.45, 0.95)
+		if aura_lightning_ref.mesh and aura_lightning_ref.mesh.material is StandardMaterial3D:
+			var bmat := aura_lightning_ref.mesh.material as StandardMaterial3D
+			bmat.albedo_color = Color(1.0, 1.0, 1.0, bolt_mult)
 
 	if is_instance_valid(aura_light_ref):
 		aura_light_ref.shadow_enabled = false
