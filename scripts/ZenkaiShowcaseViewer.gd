@@ -9,9 +9,11 @@ const FORM_PRESETS: Array[Dictionary] = [
 	{"label": "Goku SSJ", "char_res": "res://resources/goku_zenkai.tres", "form": "SSJ", "color": Color(1.0, 0.85, 0.1, 0.90), "lightning": false},
 	{"label": "Goku SSJ3", "char_res": "res://resources/goku_zenkai.tres", "form": "SSJ3", "color": Color(1.0, 0.92, 0.25, 0.95), "lightning": true},
 	{"label": "Goku SSB", "char_res": "res://resources/goku_zenkai.tres", "form": "SSB", "color": Color(0.1, 0.7, 1.0, 0.92), "lightning": true},
-	{"label": "Vegeta Base", "char_res": "res://resources/vegeta.tres", "form": "", "color": Color(0.85, 0.35, 1.0, 0.85), "lightning": false},
-	{"label": "Vegeta Super", "char_res": "res://resources/vegeta.tres", "form": "Super Vegeta", "color": Color(1.0, 0.9, 0.0, 0.95), "lightning": true},
-	{"label": "Vegeta SSB", "char_res": "res://resources/vegeta.tres", "form": "SSB", "color": Color(0.1, 0.7, 1.0, 0.92), "lightning": true},
+	{"label": "Vegeta Base", "char_res": "res://resources/vegeta_zenkai.tres", "form": "", "color": Color(0.85, 0.35, 1.0, 0.85), "lightning": false},
+	{"label": "Vegeta SSJ", "char_res": "res://resources/vegeta_zenkai.tres", "form": "SSJ", "color": Color(1.0, 0.85, 0.1, 0.90), "lightning": false},
+	{"label": "Vegeta Super", "char_res": "res://resources/vegeta_zenkai.tres", "form": "Super Vegeta", "color": Color(1.0, 0.9, 0.0, 0.95), "lightning": true},
+	{"label": "Vegeta SSB", "char_res": "res://resources/vegeta_zenkai.tres", "form": "SSB", "color": Color(0.1, 0.7, 1.0, 0.92), "lightning": true},
+	{"label": "Vegeta Ultra Ego", "char_res": "res://resources/vegeta_zenkai.tres", "form": "Ultra Ego", "color": Color(0.68, 0.15, 0.95, 0.95), "lightning": true},
 ]
 
 const MANUAL_BONES: Array[String] = [

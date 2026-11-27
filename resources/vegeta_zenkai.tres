@@ -1,0 +1,214 @@
+[gd_resource type="Resource" script_class="CharacterData" format=3]
+
+[ext_resource type="Script" uid="uid://daatd00d1xbee" path="res://scripts/resources/power_data.gd" id="1_yu3w1"]
+[ext_resource type="Script" uid="uid://bwsul7i3jdgha" path="res://scripts/resources/character_data.gd" id="2_w2v2a"]
+[ext_resource type="Script" uid="uid://cvfnbqj6i0sd1" path="res://scripts/resources/transformation_data.gd" id="3_f203u"]
+
+[sub_resource type="Resource" id="Resource_s6f5x"]
+script = ExtResource("1_yu3w1")
+power_name = "Ki Blast Rápido"
+gesture_trigger = "ki_blast"
+ki_cost = 4.0
+base_damage_np = 250.0
+energy_color = Color(1, 0.6, 0.1, 0.9)
+explosion_tier = 2
+charge_action_id = "common.ki_blast_charge"
+fire_action_id = "common.ki_blast_fire"
+impact_action_id = "common.ki_blast_impact"
+anim_clip_prefix = "kidan"
+
+[sub_resource type="Resource" id="Resource_l1rlh"]
+script = ExtResource("1_yu3w1")
+power_name = "Galick Ho"
+gesture_trigger = "galick_ho"
+ki_cost = 24.0
+base_damage_np = 1950.0
+projectile_speed = 36.0
+energy_color = Color(0.78, 0.18, 1, 0.95)
+cooldown_sec = 7.0
+charge_duration_sec = 1.6
+min_np_ratio = 0.0
+beam_clash_bonus = 1.05
+tactical_role = "Haz más rápido de cargar que Kamehameha; ideal para castigar cargas rivales."
+explosion_tier = 4
+charge_action_id = "vegeta.galick_gun_charge"
+fire_action_id = "vegeta.galick_gun_fire"
+impact_action_id = "common.ko_finisher"
+anim_clip_prefix = "hissatsu1"
+
+[sub_resource type="Resource" id="Resource_bigbang"]
+script = ExtResource("1_yu3w1")
+power_name = "Big Bang Attack"
+gesture_trigger = "big_bang"
+ki_cost = 30.0
+base_damage_np = 3200.0
+projectile_speed = 38.0
+energy_color = Color(1, 0.88, 0.15, 1)
+cooldown_sec = 10.0
+charge_duration_sec = 1.3
+min_np_ratio = 0.3
+beam_clash_bonus = 1.0
+tactical_role = "Orbe explosivo rápido de gran radio AoE; genera humo denso y empuje de escenario."
+explosion_tier = 4
+charge_action_id = "vegeta.big_bang_charge"
+fire_action_id = "vegeta.big_bang_fire"
+impact_action_id = "common.ko_finisher"
+anim_clip_prefix = "hissatsu2"
+
+[sub_resource type="Resource" id="Resource_gamma_burst"]
+script = ExtResource("1_yu3w1")
+power_name = "Gamma Burst Flash"
+gesture_trigger = "final_flash"
+ki_cost = 40.0
+base_damage_np = 4400.0
+projectile_speed = 42.0
+energy_color = Color(1, 0.95, 0.35, 1)
+unlock_requirement_transformation = "SSB"
+cooldown_sec = 15.0
+charge_duration_sec = 2.4
+min_np_ratio = 0.65
+beam_clash_bonus = 1.25
+tactical_role = "Ráfaga divina rápida de SSB."
+explosion_tier = 4
+charge_action_id = "vegeta.final_flash_charge"
+fire_action_id = "vegeta.final_flash_fire"
+impact_action_id = "common.ko_finisher"
+anim_clip_prefix = "hissatsu1"
+
+[sub_resource type="Resource" id="Resource_final_exp"]
+script = ExtResource("1_yu3w1")
+power_name = "Final Explosion"
+gesture_trigger = "big_bang"
+ki_cost = 55.0
+base_damage_np = 6800.0
+projectile_speed = 28.0
+energy_color = Color(1, 0.72, 0.12, 1)
+unlock_requirement_transformation = "Super Vegeta"
+cooldown_sec = 30.0
+charge_duration_sec = 2.5
+min_np_ratio = 0.7
+beam_clash_bonus = 1.3
+drains_user_ki_on_fire = true
+tactical_role = "Estallido omnidireccional de clímax; deja Ki bajo tras usarlo (alto riesgo, máxima recompensa)."
+explosion_tier = 5
+charge_action_id = "vegeta.final_flash_charge"
+fire_action_id = "vegeta.final_flash_fire"
+impact_action_id = "common.ko_finisher"
+anim_clip_prefix = "hissatsu2"
+
+[sub_resource type="Resource" id="Resource_0cf60"]
+script = ExtResource("1_yu3w1")
+power_name = "Final Flash"
+gesture_trigger = "final_flash"
+ki_cost = 44.0
+base_damage_np = 5200.0
+projectile_speed = 44.0
+energy_color = Color(1, 0.92, 0.18, 1)
+unlock_requirement_transformation = "SSJ"
+is_finisher = true
+cooldown_sec = 18.0
+charge_duration_sec = 3.2
+min_np_ratio = 0.5
+beam_clash_bonus = 1.35
+tactical_role = "Haz devastador más ancho del juego; arrolla en Beam Clash."
+explosion_tier = 5
+charge_action_id = "vegeta.final_flash_charge"
+fire_action_id = "vegeta.final_flash_fire"
+impact_action_id = "common.ko_finisher"
+anim_clip_prefix = "hissatsu1"
+
+[sub_resource type="Resource" id="Resource_irx55"]
+script = ExtResource("3_f203u")
+form_name = "SSJ"
+tier_level = 1
+np_multiplier = 2.0
+ki_drain_per_sec = 2.1
+ki_max_bonus = 30.0
+ki_transform_restore = 25.0
+aura_color = Color(1, 0.85, 0.1, 0.85)
+aura_vfx_path = "res://assets/vfx_zenkai/goku/ring_ssj.fbx"
+has_bio_lightning = false
+light_energy = 2.5
+light_range = 4.5
+aura_loop_action_id = "aura.ssj_loop"
+anim_library_path = "res://assets/animations/zenkai/vegeta_base_anims.json"
+body_model_path = "res://assets/models/vegeta_zenkai/23_vegeta2_body.glb"
+api_id = 7
+canonical_ki_text = "330.000.000"
+
+[sub_resource type="Resource" id="Resource_uhbuo"]
+script = ExtResource("3_f203u")
+form_name = "Super Vegeta"
+tier_level = 2
+np_multiplier = 3.5
+ki_drain_per_sec = 3.2
+ki_max_bonus = 60.0
+ki_transform_restore = 30.0
+aura_color = Color(1, 0.9, 0, 1)
+aura_vfx_path = "res://assets/vfx_zenkai/goku/ring_ssj3.fbx"
+has_bio_lightning = true
+light_energy = 3.2
+light_range = 5.5
+aura_loop_action_id = "aura.ssj2_ssj3_electric_loop"
+anim_library_path = "res://assets/animations/zenkai/vegeta_super_anims.json"
+body_model_path = "res://assets/models/vegeta_zenkai/46_vegeta_6_body.glb"
+api_id = 8
+canonical_ki_text = "24 Billion"
+
+[sub_resource type="Resource" id="Resource_7skgi"]
+script = ExtResource("3_f203u")
+form_name = "SSB"
+tier_level = 3
+np_multiplier = 5.0
+ki_drain_per_sec = 4.4
+ki_max_bonus = 90.0
+ki_transform_restore = 35.0
+aura_color = Color(0.1, 0.7, 1, 0.9)
+aura_vfx_path = "res://assets/vfx_zenkai/vegeta/aura_divine_ssb.fbx"
+has_bio_lightning = false
+light_energy = 3.8
+light_range = 6.5
+aura_loop_action_id = "aura.divine_ssb_loop"
+anim_library_path = "res://assets/animations/zenkai/vegeta_ssb_anims.json"
+body_model_path = "res://assets/models/vegeta_zenkai/47_vegeta_8_body.glb"
+api_id = 10
+canonical_ki_text = "100 Quintillion"
+
+[sub_resource type="Resource" id="Resource_ue_vegeta"]
+script = ExtResource("3_f203u")
+form_name = "Ultra Ego"
+tier_level = 4
+np_multiplier = 8.0
+ki_drain_per_sec = 5.5
+ki_max_bonus = 120.0
+ki_transform_restore = 45.0
+aura_color = Color(0.68, 0.15, 0.95, 0.95)
+aura_vfx_path = "res://assets/vfx_zenkai/vegeta/aura_divine_ssb.fbx"
+has_bio_lightning = true
+light_energy = 4.2
+light_range = 7.0
+aura_loop_action_id = "aura.divine_ssb_loop"
+anim_library_path = "res://assets/animations/zenkai/vegeta_ssb_anims.json"
+body_model_path = "res://assets/models/vegeta_zenkai/47_vegeta_8_body.glb"
+api_id = 11
+canonical_ki_text = "19.84 Septillion"
+
+[resource]
+script = ExtResource("2_w2v2a")
+character_name = "Vegeta (Zenkai)"
+base_np = 10000.0
+max_np = 20000.0
+scale_factor = 0.94
+body_model_path = "res://assets/models/vegeta_zenkai/23_vegeta2_body.glb"
+hands_model_path = "res://assets/models/vegeta_hands_optimized.glb"
+api_id = 2
+race = "Saiyan"
+gender = "Male"
+affiliation = "Z Fighter"
+canonical_ki_text = "54.000.000"
+canonical_max_ki_text = "19.84 Septillion"
+description = "Perfil paralelo de Vegeta basado en los assets de Dragon Ball Zenkai Battle Royale (Base, SSJ, Super Vegeta, SSB, Ultra Ego)."
+origin_planet_name = "Vegeta"
+origin_planet_description = "El planeta Vegeta, conocido como planeta Plant antes del fin de la Guerra Saiyan-tsufruiana en el año 730, es un planeta rocoso ficticio de la serie de manga y anime Dragon Ball y localizado en la Vía Láctea de las Galaxias del Norte del Universo 7 hasta su destrucción a manos de Freezer en los años 737-739. Planeta natal de los Saiyans, destruido por Freezer. Anteriormente conocido como Planeta Plant."
+powers = Array[Resource]([SubResource("Resource_s6f5x"), SubResource("Resource_l1rlh"), SubResource("Resource_bigbang"), SubResource("Resource_gamma_burst"), SubResource("Resource_final_exp"), SubResource("Resource_0cf60")])
+transformations = Array[Resource]([SubResource("Resource_irx55"), SubResource("Resource_uhbuo"), SubResource("Resource_7skgi"), SubResource("Resource_ue_vegeta")])
