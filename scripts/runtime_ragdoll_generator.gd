@@ -239,6 +239,10 @@ static func generate_ragdoll(skeleton: Skeleton3D, config: Dictionary = {}) -> P
 		push_warning("[RuntimeRagdollGenerator] Skeleton con escala no unitaria (%s). Se omite ragdoll Jolt para evitar deformación de malla." % str(sk_scale))
 		return null
 
+	if skeleton.get_bone_count() > 100:
+		push_warning("[RuntimeRagdollGenerator] Skeleton complejo (%d huesos con cadenas jiggle/intermedias). Se omite ragdoll Jolt para evitar deformación de malla." % skeleton.get_bone_count())
+		return null
+
 	print("[RuntimeRagdollGenerator] Generando esqueleto físico para: ", skeleton.name)
 
 	var total_mass: float = config.get("total_mass", TOTAL_BODY_MASS)
@@ -308,11 +312,20 @@ static func generate_ragdoll(skeleton: Skeleton3D, config: Dictionary = {}) -> P
 
 static func _identify_ragdoll_bones(skeleton: Skeleton3D) -> Dictionary:
 	var bone_map: Dictionary = {}
+	var root_fallback_idx: int = -1
 	for i in range(skeleton.get_bone_count()):
-		var bone_name = skeleton.get_bone_name(i)
-		var part = _classify_bone(bone_name)
+		var bone_name: String = skeleton.get_bone_name(i)
+		var part: String = _classify_bone(bone_name)
+		if part == "hips":
+			var stripped_low: String = _strip_known_prefix(bone_name).to_lower().replace("_", "").replace("-", "").replace(".", "").replace(" ", "")
+			if stripped_low == "root":
+				if root_fallback_idx == -1:
+					root_fallback_idx = i
+				continue
 		if not part.is_empty() and part not in bone_map:
 			bone_map[part] = i
+	if "hips" not in bone_map and root_fallback_idx != -1:
+		bone_map["hips"] = root_fallback_idx
 	return bone_map
 
 static func _classify_bone(bone_name: String) -> String:

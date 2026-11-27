@@ -408,6 +408,12 @@ func _process(delta: float) -> void:
 			_refresh_status_hud_for_defender()
 
 
+func _show_followup_center_prompt(title: String, subtitle: String, col: Color, dur: float = 0.95, priority: int = 2) -> void:
+	var dd: DramaticDirector = DramaticDirector.get_active(get_tree()) if is_inside_tree() else null
+	if dd and dd.has_method("show_center_prompt"):
+		dd.show_center_prompt(title, subtitle, col, dur, priority)
+
+
 func _enter_intro_pause(p_reason: String = "") -> void:
 	state = FollowUpState.HITSTOP
 	_intro_pause_reason = p_reason
@@ -418,6 +424,15 @@ func _enter_intro_pause(p_reason: String = "") -> void:
 	_melee_entry_armed = false
 	_build_visor_hud()
 	_refresh_intro_pause_hud()
+	if attacker and is_instance_valid(attacker) and bool(attacker.get("is_player")):
+		if p_reason == "hammer_slam_chain":
+			_show_followup_center_prompt("¡HAZ EL REMATE!", "RIVAL ESTAMPADO — ELIGE ACCION", Color(1.0, 0.42, 0.16), 1.0, 3)
+		elif chain_depth >= 2:
+			_show_followup_center_prompt("¡SIGUE LA CADENA!", "REBOTE Z x%d — ELIGE ACCION" % chain_depth, Color(1.0, 0.86, 0.20), 1.0, 3)
+		else:
+			_show_followup_center_prompt("¡CONTINUA LA SECUENCIA!", "MELEE, MARTILLO, SUPER O LLUVIA", Color(1.0, 0.88, 0.22), 1.0, 3)
+	elif defender and is_instance_valid(defender) and bool(defender.get("is_player")):
+		_show_followup_center_prompt("¡RECUPERATE Y DEFIENDE!", "AGITA PARA ESTABILIZARTE", Color(0.28, 0.92, 1.0), 1.0, 3)
 	var pf: Node3D = _get_player_fighter()
 	if pf and is_instance_valid(pf) and pf.has_method("_get_gesture_tree"):
 		var gss: Node = pf._get_gesture_tree()
@@ -682,6 +697,7 @@ func choose_vanish_hammer() -> bool:
 		Engine.time_scale = 0.22
 		_build_hammer_attacker_target()
 		_pulse_attacker_hands(190.0, 0.90, 0.14)
+		_show_followup_center_prompt("¡HAZ EL MARTILLAZO!", "BAJA AMBOS PUÑOS AL OBJETIVO", Color(0.95, 0.38, 1.0), 0.75, 2)
 	else:
 		# IA atacando: si jugador se estabilizó -> abrir caja cuadrada púrpura con semáforo
 		if _is_defender_stabilized() and bool(defender.get("is_player")):
@@ -692,6 +708,7 @@ func choose_vanish_hammer() -> bool:
 			_def_hammer_early_lockout = false
 			Engine.time_scale = 0.25
 			_build_defense_box_hud("🔨", Color(0.95, 0.22, 1.0, 0.95), "🕹️ Stick (Verde): Z-Vanish | 🛡️ Guardia X: Frenar")
+			_show_followup_center_prompt("¡TE TOCA DEFENDER!", "ESQUIVA O FRENA EL MARTILLAZO", Color(0.95, 0.30, 1.0), 0.75, 2)
 		else:
 			state = FollowUpState.MINI_VANISH_HAMMER
 			_state_timer = 0.35
@@ -722,6 +739,7 @@ func choose_ki_barrage(force_relaunch_finisher: int = -1) -> bool:
 		_state_timer = _barrage_total
 		Engine.time_scale = 0.58
 		_build_barrage_attacker_hud()
+		_show_followup_center_prompt("¡LLUVIA DE KI!", "DISPARA CON AMBAS MANOS", Color(1.0, 0.78, 0.22), 0.75, 2)
 	else:
 		if _is_defender_stabilized() and bool(defender.get("is_player")):
 			state = FollowUpState.MINI_KI_BARRAGE_DEF
@@ -735,6 +753,7 @@ func choose_ki_barrage(force_relaunch_finisher: int = -1) -> bool:
 			_def_trig_prev_r = false
 			Engine.time_scale = 0.35
 			_build_defense_box_hud("💥", Color(0.20, 0.88, 1.0, 0.95), "💥 Trigger (Verde): Desviar | 🛡️ Guardia X | B/Y: Kiai")
+			_show_followup_center_prompt("¡TE TOCA DEFENDER!", "DESVIA LA LLUVIA DE KI", Color(0.22, 0.92, 1.0), 0.75, 2)
 		else:
 			state = FollowUpState.MINI_KI_BARRAGE_DEF
 			_def_notes.clear()
@@ -928,11 +947,45 @@ func _execute_hammer_slam_impact(swing_speed: float) -> void:
 	if attacker.has_method("increase_np"):
 		attacker.increase_np(dmg * 0.75)
 
-	# Llevar a la víctima directo al suelo y activar CRASHED_STAMPED + +18 Ki
+	# Llevar a la víctima en diagonal adelante hasta el suelo (evita quedar vertical bajo los pies del atacante)
+	var atk_root: Node3D = attacker.get_spatial_root() if attacker.has_method("get_spatial_root") else attacker
 	var def_root: Node3D = defender.get_spatial_root() if defender.has_method("get_spatial_root") else defender
+	var atk_pos: Vector3 = atk_root.global_position
 	var cur_p: Vector3 = def_root.global_position
-	var g_h: float = attacker.get_ground_elevation(cur_p) if attacker.has_method("get_ground_elevation") else 0.0
-	def_root.global_position = Vector3(cur_p.x, g_h, cur_p.z)
+
+	var slam_fwd: Vector3 = Vector3(cur_p.x - atk_pos.x, 0.0, cur_p.z - atk_pos.z)
+	if slam_fwd.length_squared() < 0.04:
+		if bool(attacker.get("is_player")):
+			var slam_cam: Camera3D = _get_player_camera()
+			if slam_cam and is_instance_valid(slam_cam):
+				slam_fwd = -slam_cam.global_transform.basis.z
+		if slam_fwd.length_squared() < 0.04:
+			slam_fwd = -atk_root.global_transform.basis.z
+		slam_fwd.y = 0.0
+	slam_fwd = slam_fwd.normalized() if slam_fwd.length_squared() >= 0.001 else Vector3.FORWARD
+
+	var base_g_h: float = attacker.get_ground_elevation(cur_p) if attacker.has_method("get_ground_elevation") else 0.0
+	var drop_h: float = maxf(atk_pos.y - base_g_h, 2.0)
+	var diag_dist: float = clampf(drop_h * 1.55, 5.5, 13.5)
+	var target_x: float = clampf(atk_pos.x + slam_fwd.x * diag_dist, -72.0, 72.0)
+	var target_z: float = clampf(atk_pos.z + slam_fwd.z * diag_dist, -72.0, 72.0)
+	var g_h: float = attacker.get_ground_elevation(Vector3(target_x, 0.0, target_z)) if attacker.has_method("get_ground_elevation") else 0.0
+	def_root.global_position = Vector3(target_x, g_h, target_z)
+
+	var horiz_sep: float = Vector2(def_root.global_position.x - atk_pos.x, def_root.global_position.z - atk_pos.z).length()
+	if horiz_sep < 4.5:
+		var step_back: float = 5.5 - horiz_sep
+		atk_root.global_position = Vector3(
+			clampf(atk_pos.x - slam_fwd.x * step_back, -72.0, 72.0),
+			atk_pos.y,
+			clampf(atk_pos.z - slam_fwd.z * step_back, -72.0, 72.0)
+		)
+	if not bool(attacker.get("is_player")):
+		var look_after: Vector3 = def_root.global_position - atk_root.global_position
+		look_after.y = 0.0
+		if look_after.length_squared() > 0.001:
+			attacker.rotation.y = atan2(look_after.x, look_after.z)
+
 	if defender.has_method("_on_ground_crash_impact"):
 		defender.set("_last_launch_strike_factor", 1.85)
 		defender.call("_on_ground_crash_impact", clampf(swing_speed * 4.5, 14.0, 26.0), def_root.global_position, g_h)

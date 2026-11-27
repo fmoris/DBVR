@@ -107,6 +107,10 @@ func setup(
 	_build_audio()
 	_update_beam_transforms()
 
+	var dd_bc: DramaticDirector = DramaticDirector.get_active(get_tree()) if is_inside_tree() else null
+	if dd_bc and dd_bc.has_method("show_center_prompt"):
+		dd_bc.show_center_prompt("¡CHOQUE DE PODERES!", "EMPUJA CON AMBAS MANOS", Color(1.0, 0.88, 0.20), 0.95, 3)
+
 	print("[BeamClash] ¡CHOQUE DE PODERES INICIADO! %s vs %s. Duración estimada: %.1fs" % [
 		tech_atk, tech_def, clash_duration
 	])

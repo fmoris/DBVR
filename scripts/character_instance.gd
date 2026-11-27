@@ -137,6 +137,10 @@ var head_bone_idx: int = -1
 var hidden_head_bone_indices: Array[int] = []
 var neck_bone_idx: int = -1
 var torso_yaw: float = 0.0
+const FP_TORSO_BACK_OFFSET: float = 0.20
+const FP_LOOK_DOWN_EXTRA_BACK: float = 0.06
+const FP_NECK_CLEARANCE_BELOW_EYE: float = 0.14
+var _fp_neck_rest_height: float = 1.48
 
 ## Retorna el nodo espacial raíz responsable del posicionamiento en el mundo (XROrigin3D para el jugador, o self para la IA)
 func get_spatial_root() -> Node3D:
@@ -240,6 +244,10 @@ var hand_right_instance: Node3D = null
 var ragdoll_simulator: PhysicalBoneSimulator3D = null
 var is_ragdoll_active: bool = false
 var ragdoll_recovery_timer: float = 0.0
+var _ko_fall_velocity: Vector3 = Vector3.ZERO
+var _ko_fall_landed: bool = false
+var _ko_fall_tween: Tween = null
+var _revert_zenkai_grace_timer: float = 0.0
 
 # Sistema de Ragdoll físico autónomo (Godot PhysicalBoneSimulator3D)
 
@@ -288,6 +296,12 @@ func setup_character() -> void:
 	air_juggle_suspend_timer = 0.0
 	_limit_break_tiers_used.clear()
 	_is_limit_break_running = false
+	_revert_zenkai_grace_timer = 0.0
+	_ko_fall_velocity = Vector3.ZERO
+	_ko_fall_landed = false
+	if _ko_fall_tween and is_instance_valid(_ko_fall_tween):
+		_ko_fall_tween.kill()
+	_ko_fall_tween = null
 	_pending_limit_break_leader = null
 	_pending_zenkai_dramatic_source = ""
 	_free_phase_settle_timer = 0.0
@@ -384,47 +398,7 @@ func setup_character() -> void:
 				_calibrate_skeleton_rig()
 
 				if is_player:
-					head_bone_idx = skeleton.find_bone("Head")
-					if head_bone_idx == -1:
-						head_bone_idx = skeleton.find_bone("head")
-					if head_bone_idx == -1:
-						for i in range(skeleton.get_bone_count()):
-							var bone_name = skeleton.get_bone_name(i).to_lower()
-							if "head" in bone_name:
-								head_bone_idx = i
-								break
-					if head_bone_idx != -1:
-						skeleton.set_bone_pose_scale(head_bone_idx, Vector3.ZERO)
-					
-					# Recolectar recursivamente todos los huesos asociados a cabeza, cabello y rostro
-					hidden_head_bone_indices.clear()
-					for i in range(skeleton.get_bone_count()):
-						var b_name = skeleton.get_bone_name(i).to_lower()
-						var is_head_descendant = false
-						var p_idx = skeleton.get_bone_parent(i)
-						while p_idx != -1:
-							if p_idx == head_bone_idx:
-								is_head_descendant = true
-								break
-							p_idx = skeleton.get_bone_parent(p_idx)
-						if i == head_bone_idx or is_head_descendant or "hair" in b_name or "eye" in b_name or "face" in b_name or "jaw" in b_name or "brow" in b_name or "mouth" in b_name:
-							hidden_head_bone_indices.append(i)
-							skeleton.set_bone_pose_scale(i, Vector3.ZERO)
-					
-					# Recolectar recursivamente todos los huesos asociados a cabeza, cabello y rostro
-					hidden_head_bone_indices.clear()
-					for i in range(skeleton.get_bone_count()):
-						var b_name = skeleton.get_bone_name(i).to_lower()
-						var is_head_descendant = false
-						var p_idx = skeleton.get_bone_parent(i)
-						while p_idx != -1:
-							if p_idx == head_bone_idx:
-								is_head_descendant = true
-								break
-							p_idx = skeleton.get_bone_parent(p_idx)
-						if i == head_bone_idx or is_head_descendant or "hair" in b_name or "eye" in b_name or "face" in b_name or "jaw" in b_name or "brow" in b_name or "mouth" in b_name:
-							hidden_head_bone_indices.append(i)
-							skeleton.set_bone_pose_scale(i, Vector3.ZERO)
+					_configure_first_person_head_hiding()
 
 					var cam = get_parent().get_node_or_null("XRCamera3D") if get_parent() else null
 					if cam:
@@ -510,22 +484,7 @@ func _swap_body_mesh_for_path(model_path: String) -> void:
 		_calibrate_skeleton_rig()
 
 		if is_player:
-			head_bone_idx = skeleton.find_bone("Head")
-			if head_bone_idx == -1:
-				head_bone_idx = skeleton.find_bone("head")
-			hidden_head_bone_indices.clear()
-			for i in range(skeleton.get_bone_count()):
-				var b_name: String = skeleton.get_bone_name(i).to_lower()
-				var is_head_descendant: bool = false
-				var p_idx: int = skeleton.get_bone_parent(i)
-				while p_idx != -1:
-					if p_idx == head_bone_idx:
-						is_head_descendant = true
-						break
-					p_idx = skeleton.get_bone_parent(p_idx)
-				if i == head_bone_idx or is_head_descendant or "hair" in b_name or "eye" in b_name or "face" in b_name or "jaw" in b_name or "brow" in b_name or "mouth" in b_name:
-					hidden_head_bone_indices.append(i)
-					skeleton.set_bone_pose_scale(i, Vector3.ZERO)
+			_configure_first_person_head_hiding()
 		else:
 			procedural_animator = ProceduralCombatAnimatorClass.new()
 			procedural_animator.setup(skeleton, self)
@@ -538,6 +497,63 @@ func _swap_body_mesh_for_path(model_path: String) -> void:
 	_apply_model_variant_visibility(model_path)
 
 
+func _configure_first_person_head_hiding() -> void:
+	head_bone_idx = -1
+	hidden_head_bone_indices.clear()
+	_fp_neck_rest_height = 1.48
+	if not skeleton:
+		return
+
+	head_bone_idx = _find_bone_any(["Head", "head", "HEAD"])
+	if head_bone_idx == -1:
+		for i: int in range(skeleton.get_bone_count()):
+			if "head" in skeleton.get_bone_name(i).to_lower():
+				head_bone_idx = i
+				break
+
+	for i: int in range(skeleton.get_bone_count()):
+		var b_name: String = skeleton.get_bone_name(i).to_lower()
+		var is_head_descendant: bool = false
+		var p_idx: int = skeleton.get_bone_parent(i)
+		while p_idx != -1:
+			if p_idx == head_bone_idx:
+				is_head_descendant = true
+				break
+			p_idx = skeleton.get_bone_parent(p_idx)
+		if i == head_bone_idx or is_head_descendant or "hair" in b_name or "eye" in b_name or "face" in b_name or "jaw" in b_name or "brow" in b_name or "mouth" in b_name:
+			hidden_head_bone_indices.append(i)
+			skeleton.set_bone_pose_scale(i, Vector3.ZERO)
+
+	# Altura real del cuello en espacio del modelo para anclar bajo los ojos aunque el jugador se agache
+	var ref_idx: int = neck_bone_idx if neck_bone_idx != -1 else head_bone_idx
+	if ref_idx != -1 and body_mesh_instance and is_instance_valid(body_mesh_instance):
+		var rel_xf := Transform3D.IDENTITY
+		var cur: Node = skeleton
+		while cur and cur != body_mesh_instance:
+			if cur is Node3D:
+				rel_xf = (cur as Node3D).transform * rel_xf
+			cur = cur.get_parent()
+		var rest_pos: Vector3 = rel_xf * skeleton.get_bone_global_rest(ref_idx).origin
+		var neck_h: float = rest_pos.y * body_mesh_instance.scale.y
+		if neck_bone_idx == -1:
+			neck_h -= 0.08
+		if neck_h > 0.5:
+			_fp_neck_rest_height = clampf(neck_h, 1.15, 1.75)
+
+	if body_mesh_instance and is_instance_valid(body_mesh_instance):
+		_hide_first_person_head_meshes(body_mesh_instance)
+
+
+func _hide_first_person_head_meshes(node: Node) -> void:
+	if node is MeshInstance3D:
+		var mi: MeshInstance3D = node as MeshInstance3D
+		var nl: String = mi.name.to_lower()
+		if ("face" in nl) or ("hair" in nl) or ("eye" in nl) or ("eyebrow" in nl) or ("eyeline" in nl) or ("mouth" in nl) or ("tooth" in nl) or ("ear" in nl):
+			mi.visible = false
+	for child: Node in node.get_children():
+		_hide_first_person_head_meshes(child)
+
+
 func _apply_model_variant_visibility(model_path: String) -> void:
 	_mouth_pose_meshes[0].clear()
 	_mouth_pose_meshes[1].clear()
@@ -546,11 +562,12 @@ func _apply_model_variant_visibility(model_path: String) -> void:
 	if not body_mesh_instance or not is_instance_valid(body_mesh_instance):
 		return
 	var model_file: String = model_path.get_file().to_lower()
-	if not ("goku" in model_file or "vegeta" in model_file):
-		return
-	var is_transformed: bool = current_transformation != null
-	_apply_zenkai_visibility_recursive(body_mesh_instance, model_file, is_transformed)
-	set_mouth_expression(0)
+	if "goku" in model_file or "vegeta" in model_file:
+		var is_transformed: bool = current_transformation != null
+		_apply_zenkai_visibility_recursive(body_mesh_instance, model_file, is_transformed)
+		set_mouth_expression(0)
+	if is_player:
+		_hide_first_person_head_meshes(body_mesh_instance)
 
 
 func _apply_zenkai_visibility_recursive(node: Node, model_file: String, is_transformed: bool) -> void:
@@ -740,6 +757,12 @@ func swap_character_data(new_data: CharacterData) -> void:
 	is_staggered = false
 	is_ragdoll_active = false
 	ragdoll_recovery_timer = 0.0
+	_revert_zenkai_grace_timer = 0.0
+	_ko_fall_velocity = Vector3.ZERO
+	_ko_fall_landed = false
+	if _ko_fall_tween and is_instance_valid(_ko_fall_tween):
+		_ko_fall_tween.kill()
+	_ko_fall_tween = null
 	velocity = Vector3.ZERO
 
 	if aura_node and is_instance_valid(aura_node):
@@ -768,6 +791,9 @@ func swap_character_data(new_data: CharacterData) -> void:
 
 
 func _exit_tree() -> void:
+	if _ko_fall_tween and is_instance_valid(_ko_fall_tween):
+		_ko_fall_tween.kill()
+		_ko_fall_tween = null
 	if _dash_vfx_ring and is_instance_valid(_dash_vfx_ring):
 		_dash_vfx_ring.queue_free()
 		_dash_vfx_ring = null
@@ -787,8 +813,31 @@ func _physics_process(delta: float) -> void:
 	if is_player:
 		transform = Transform3D.IDENTITY
 
-	# Control de simulación y recuperación Ragdoll
+	# Control de simulación, caída procedural al suelo y recuperación Ragdoll
 	if is_ragdoll_active:
+		if not is_player and (not ragdoll_simulator or not is_instance_valid(ragdoll_simulator)) and not _ko_fall_landed:
+			_ko_fall_velocity.y -= 18.0 * delta
+			_ko_fall_velocity.x = move_toward(_ko_fall_velocity.x, 0.0, 5.5 * delta)
+			_ko_fall_velocity.z = move_toward(_ko_fall_velocity.z, 0.0, 5.5 * delta)
+			var next_pos: Vector3 = global_position + _ko_fall_velocity * delta
+			next_pos.x = clampf(next_pos.x, -76.0, 76.0)
+			next_pos.z = clampf(next_pos.z, -76.0, 76.0)
+			var ground_h: float = get_ground_elevation(next_pos)
+			if next_pos.y <= ground_h:
+				next_pos.y = ground_h
+				global_position = next_pos
+				_ko_fall_velocity = Vector3.ZERO
+				_ko_fall_landed = true
+				_spawn_ground_crash_vfx(Vector3(next_pos.x, ground_h + 0.05, next_pos.z), ground_h > 0.2)
+				if _ko_fall_tween and is_instance_valid(_ko_fall_tween):
+					_ko_fall_tween.kill()
+				if body_mesh_instance and is_instance_valid(body_mesh_instance):
+					_ko_fall_tween = create_tween().set_parallel(true)
+					_ko_fall_tween.set_ignore_time_scale(true)
+					_ko_fall_tween.tween_property(body_mesh_instance, "rotation:x", deg_to_rad(-86.0), 0.18).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+					_ko_fall_tween.tween_property(body_mesh_instance, "position:y", 0.14, 0.18).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+			else:
+				global_position = next_pos
 		if not is_match_over and ragdoll_recovery_timer > 0.0:
 			ragdoll_recovery_timer -= delta
 			if ragdoll_recovery_timer <= 0.0:
@@ -1089,16 +1138,20 @@ func _process(delta: float) -> void:
 			else:
 				torso_yaw = lerp_angle(torso_yaw, cam_yaw, 3.5 * delta)
 				
-			# Offset hacia atrás del torso respecto a los ojos (10cm) usando rotación mundial real
+			# Retroceso horizontal y tope vertical bajo los ojos para que pecho/cuello de Goku no tapen la vista al mirar abajo
 			var origin_node: Node3D = get_parent() as Node3D
 			var origin_rot_y: float = origin_node.global_rotation.y if origin_node else 0.0
 			var world_torso_yaw: float = origin_rot_y + torso_yaw
-			var torso_back: Vector3 = Vector3(sin(world_torso_yaw), 0.0, cos(world_torso_yaw)) * 0.10
+			var look_down_t: float = clampf((-camera.rotation.x - 0.30) / 0.75, 0.0, 1.0)
+			var back_dist: float = FP_TORSO_BACK_OFFSET + FP_LOOK_DOWN_EXTRA_BACK * look_down_t
+			var torso_back: Vector3 = Vector3(sin(world_torso_yaw), 0.0, cos(world_torso_yaw)) * back_dist
 			var cam_world: Vector3 = camera.global_position
 			var floor_y: float = origin_node.global_position.y if origin_node else global_position.y
-			
-			# Anclaje mundial absoluto: El cuerpo siempre está exactamente debajo de la cabeza en el mundo real
-			body_mesh_instance.global_position = Vector3(cam_world.x + torso_back.x, floor_y, cam_world.z + torso_back.z)
+			var max_body_y: float = cam_world.y - (_fp_neck_rest_height + FP_NECK_CLEARANCE_BELOW_EYE)
+			var body_y: float = minf(floor_y, max_body_y)
+
+			# Anclaje mundial absoluto: El cuerpo siempre está exactamente debajo y detrás de la cámara
+			body_mesh_instance.global_position = Vector3(cam_world.x + torso_back.x, body_y, cam_world.z + torso_back.z)
 			body_mesh_instance.global_rotation = Vector3(0.0, world_torso_yaw + PI, 0.0)
 			
 			if skeleton:
@@ -1809,20 +1862,12 @@ func consume_ki_or_life_force(ki_amount: float) -> Dictionary:
 	var min_cost = 500.0 if not current_transformation else (500.0 * current_transformation.np_multiplier)
 	np_cost = max(np_cost, min_cost)
 	
-	# Reducir NP voluntariamente (sacrificio vital de último aliento)
-	current_np = max(0.0, current_np - np_cost)
+	# Reducir NP voluntariamente (sacrificio vital de último aliento) respetando el piso irreversible de BP;
+	# llegar a 0 Ki nunca termina el combate por agotamiento.
+	var floor_limit: float = maxf(get_active_max_np() * secured_np_threshold_ratio, 1000.0)
+	current_np = maxf(floor_limit, current_np - np_cost)
 	_notify_stats()
-	
-	# Si el NP cae a 0 por el sacrificio vital, el luchador colapsa (K.O. por Agotamiento Extremo)
-	if current_np <= 0.0:
-		print("[CharacterInstance] %s: ¡COLAPSO POR SACRIFICIO VITAL! Fuerza vital agotada por completo." % character_data.character_name)
-		var opp = _get_opponent()
-		if opp and is_instance_valid(opp):
-			trigger_zenkai_match_finish(opp, self, "Agotamiento Vital")
-		else:
-			var winner_name = opp.character_data.character_name if (opp and opp.character_data) else "Rival"
-			emit_signal("game_finished", winner_name)
-		
+
 	return { "success": true, "sacrificed_np": np_cost, "is_life_sacrifice": true }
 
 func get_transformation_multiplier() -> float:
@@ -1975,9 +2020,9 @@ func get_combat_act() -> int:
 	if current_transformation != null:
 		return 3 if current_transformation.tier_level >= 2 else 2
 	var ratio: float = current_np / maxf(get_active_max_np(), 1.0)
-	if ratio >= 0.75:
+	if ratio >= 0.85:
 		return 3
-	if ratio >= 0.35:
+	if ratio >= 0.65:
 		return 2
 	return 1
 
@@ -2109,16 +2154,18 @@ func check_zenkai_conditions(opponent_np: float) -> void:
 
 	var active_max: float = get_active_max_np()
 
-	# Zenkai por Dominio Absoluto (GDD Canon): requiere brecha >= 40% BP + Acto II (>= 45% NP o transformado)
-	var act_ii_reached: bool = (current_transformation != null) or (current_np >= active_max * 0.45)
-	if lead_ratio >= 0.40 and act_ii_reached:
+	# Zenkai por Dominio Absoluto (GDD Canon): requiere brecha >= 40% BP + Acto II (>= 70% NP en Base o transformado)
+	var act_ii_reached: bool = (current_transformation != null) or (current_np >= active_max * 0.70)
+	var opp_z_chk: Node3D = _get_opponent()
+	var opp_in_revert_grace: bool = opp_z_chk != null and is_instance_valid(opp_z_chk) and float(opp_z_chk.get("_revert_zenkai_grace_timer") if opp_z_chk.get("_revert_zenkai_grace_timer") != null else 0.0) > 0.0
+	if lead_ratio >= 0.40 and act_ii_reached and not opp_in_revert_grace:
 		if not is_in_zenkai_state:
 			is_in_zenkai_state = true
 			zenkai_source = "dominance"
 			emit_signal("zenkai_activated", "dominance")
 			if in_seq:
 				if character_data:
-					current_ki = minf(current_ki + 35.0, character_data.base_ki)
+					current_ki = minf(current_ki + 35.0, get_max_ki())
 				_update_aura_visuals()
 				_pending_zenkai_dramatic_source = "dominance"
 			else:
@@ -2126,7 +2173,7 @@ func check_zenkai_conditions(opponent_np: float) -> void:
 			var c_name_z: String = character_data.character_name if character_data else name
 			_log_combat_event("⚡ ¡DOMINIO ZENKAI ACTIVADO (%s)! Brecha ≥40%% BP — FINISHER LISTO" % c_name_z, "success")
 			_notify_stats()
-	elif is_in_zenkai_state and (lead_ratio < 0.28 or (current_transformation == null and current_np < active_max * 0.38)):
+	elif is_in_zenkai_state and (lead_ratio < 0.28 or (current_transformation == null and current_np < active_max * 0.58)):
 		is_in_zenkai_state = false
 		zenkai_source = ""
 		if _pending_zenkai_dramatic_source == "dominance":
@@ -2216,6 +2263,8 @@ func _on_zenkai_dramatic_trigger(source: String) -> void:
 		current_ki = minf(current_ki + 35.0, get_max_ki())
 	_update_aura_visuals()
 	var dd_z: DramaticDirector = DramaticDirector.get_active(get_tree())
+	if dd_z and is_player and dd_z.has_method("show_center_prompt"):
+		dd_z.show_center_prompt("¡HAZ EL REMATE ZENKAI!", "LANZA UN SUPER PARA K.O.", Color(1.0, 0.88, 0.18), 1.20, 3)
 	if dd_z and dd_z.has_method("play_dramatic_zenkai_event"):
 		dd_z.play_dramatic_zenkai_event(self, source)
 	else:
@@ -2658,6 +2707,7 @@ func revert_to_base() -> void:
 		dd_rev.restore_npc_hair_tint(self)
 	_notify_stats()
 	_update_aura_visuals()
+	_revert_zenkai_grace_timer = 6.0
 	if absf(current_np - old_np) >= 50.0:
 		_spawn_bp_delta_popup(current_np - old_np, "FORMA BASE")
 	var opp: Node3D = _get_opponent()
@@ -2667,6 +2717,8 @@ func revert_to_base() -> void:
 			opp.check_zenkai_conditions(current_np)
 
 func _process_power_cooldowns(delta: float) -> void:
+	if _revert_zenkai_grace_timer > 0.0:
+		_revert_zenkai_grace_timer = maxf(0.0, _revert_zenkai_grace_timer - delta)
 	if global_super_recovery_timer > 0.0:
 		global_super_recovery_timer = maxf(0.0, global_super_recovery_timer - delta)
 	if is_comeback_zenkai and comeback_zenkai_timer > 0.0:
@@ -4718,17 +4770,28 @@ func _check_pillar_collisions(pos: Vector3) -> void:
 func start_ragdoll(impulse: Vector3 = Vector3.ZERO) -> void:
 	if is_ragdoll_active:
 		return
-	# Punto 5: Si el esqueleto tiene escala no unitaria (ej. Vegeta 0.078) o no hay simulador,
-	# Jolt deforma la malla; usar caída procedural segura en su lugar.
+	# Rigs complejos (>100 huesos jiggle como Goku) o con escala no unitaria (Vegeta) omiten Jolt
+	# para evitar estiramiento de malla y caen con trayectoria parabólica procedural limpia al suelo.
 	var has_non_unit_scale: bool = skeleton != null and is_instance_valid(skeleton) and (skeleton.global_transform.basis.get_scale() - Vector3.ONE).length() > 0.05
 	if not ragdoll_simulator or has_non_unit_scale:
 		is_ragdoll_active = true
-		var dir: Vector3 = impulse.normalized() if impulse.length_squared() > 0.01 else Vector3.BACK
+		_ko_fall_landed = false
 		if procedural_animator:
-			procedural_animator.trigger_hit_flinch(1.5, -dir)
+			procedural_animator.enabled = false
+		var horiz_imp: Vector3 = Vector3(impulse.x, 0.0, impulse.z)
+		if horiz_imp.length() > 14.0:
+			horiz_imp = horiz_imp.normalized() * 14.0
+		var ground_now: float = get_ground_elevation(global_position)
+		var init_vy: float = clampf(impulse.y * 0.35, -14.0, 5.0)
+		if global_position.y <= ground_now + 0.15 and init_vy <= 0.5:
+			init_vy = 2.8
+		_ko_fall_velocity = Vector3(horiz_imp.x, init_vy, horiz_imp.z)
+		if _ko_fall_tween and is_instance_valid(_ko_fall_tween):
+			_ko_fall_tween.kill()
 		if body_mesh_instance and is_instance_valid(body_mesh_instance):
-			var tw: Tween = create_tween()
-			tw.tween_property(body_mesh_instance, "rotation:x", deg_to_rad(-65.0), 0.25).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+			_ko_fall_tween = create_tween()
+			_ko_fall_tween.set_ignore_time_scale(true)
+			_ko_fall_tween.tween_property(body_mesh_instance, "rotation:x", deg_to_rad(-55.0), 0.20).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 		return
 	is_ragdoll_active = true
 	if procedural_animator:
@@ -4757,6 +4820,11 @@ func stop_ragdoll() -> void:
 	if not is_ragdoll_active:
 		return
 	is_ragdoll_active = false
+	_ko_fall_velocity = Vector3.ZERO
+	_ko_fall_landed = false
+	if _ko_fall_tween and is_instance_valid(_ko_fall_tween):
+		_ko_fall_tween.kill()
+		_ko_fall_tween = null
 	if ragdoll_simulator and is_instance_valid(ragdoll_simulator):
 		ragdoll_simulator.physical_bones_stop_simulation()
 	if skeleton and is_instance_valid(skeleton):
@@ -5278,7 +5346,7 @@ func _execute_hammer_strike_finisher(opponent: Node3D, swing_velocity: float, re
 	var final_speed: float = clampf(28.0 * clampf(ratio_bp, 0.75, 1.45) * ki_mult * swing_mult, 24.0, 40.0)
 
 	var launch_dir: Vector3 = (fwd * 2.9 + Vector3.DOWN * 1.8).normalized()
-	var final_impulse: Vector3 = clamp_launch_angle_diagonal(launch_dir * final_speed, 32.0, fwd)
+	var final_impulse: Vector3 = clamp_launch_angle_diagonal(launch_dir * final_speed, 28.0, fwd)
 
 	var opp_pos_cur: Vector3 = opponent.get_parent().global_position if (opponent.get("is_player") and opponent.get_parent() is Node3D) else opponent.global_position
 	var ground_h: float = get_ground_elevation(opp_pos_cur)
@@ -5421,8 +5489,8 @@ func _execute_charged_v3_or_ki_break_finisher(opponent: Node3D, mode: String, sw
 	if gss and gss.has_signal("phase_changed"):
 		gss.emit_signal("phase_changed", "¡FASE LIBRE! (%s)" % mode_tag)
 
-	# Zenkai K.O. solo por remates claros (V3 / Ki Break), no por un Parry suelto de Intercambio Simultáneo
-	if is_in_zenkai_state and not is_match_over and mode != "sim_parry_launch":
+	# Zenkai K.O. solo por remates claros (V3), nunca por Parry suelto ni por simple falta de Ki (ki_break_launch)
+	if is_in_zenkai_state and not is_match_over and mode != "sim_parry_launch" and mode != "ki_break_launch":
 		trigger_zenkai_match_finish(self, opponent, "Remate Zenkai (%s)" % mode_tag)
 	elif not is_match_over:
 		var s_f: float = 1.35 if is_upward_diag else 1.20
