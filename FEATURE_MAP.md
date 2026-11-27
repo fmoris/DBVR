@@ -71,3 +71,12 @@ Mapa vivo de funcionalidades, escenas, recursos, shaders y puntos de entrada de 
 | **Simulador XR en Escritorio** | [DesktopXRSimulator.gd](file:///d:/Mis%20Documentos/dbzvr/scripts/debug/DesktopXRSimulator.gd) | Simulación de manos, cámara, gatillos y sticks para probar combate libre y Melee Rítmico sin visor OpenXR conectado. |
 | **Selector Interactivo de HUD Melee** | [MeleeHudPreview.gd](file:///d:/Mis%20Documentos/dbzvr/scripts/MeleeHudPreview.gd), [melee_hud_preview.tscn](file:///d:/Mis%20Documentos/dbzvr/melee_hud_preview.tscn) | Vista 3D de escritorio para comparar 3 alternativas de HUD Melee VR (por defecto **3. Cine Anime Minimalista**) con selector `⚡ Forma` de retratos hexagonales, rotación de cámara y escenarios. |
 | **Runner Automatizado de Combate** | [CombatSequenceRunner.gd](file:///d:/Mis%20Documentos/dbzvr/scripts/tests/CombatSequenceRunner.gd) | Ejecuta secuencias automatizadas `--test-suite=all` sobre `DesktopXRSimulator` para validación en escritorio/headless, incluyendo suites ofensivas (`followup_melee`, `followup_hammer`, `followup_super`, `followup_barrage`, `followup_barrage_relaunch`, `followup_all`), defensivas (`followup_def_melee`, `followup_def_hammer`, `followup_def_super`, `followup_def_barrage`, `followup_def_all`) e inversiones Defensa ➔ Ataque (`followup_rev_hammer`, `followup_rev_barrage_return`, `followup_rev_barrage_vanish`, `followup_rev_super`, `followup_reversals_all`). |
+
+---
+
+## 6. Tooling de Build APK Fuera del Chat (0 Tokens) y Hooks
+
+| Componente | Ruta | Responsabilidad |
+|---|---|---|
+| **Compilador e Instalador APK Standalone** | [build_apk.ps1](file:///d:/Mis%20Documentos/dbzvr/build_apk.ps1), [build_apk.bat](file:///d:/Mis%20Documentos/dbzvr/build_apk.bat) | Compila `builds/dbzvr.apk` con lockfile en `finally`, detiene el daemon de Gradle, valida `adb devices` y solicita confirmación explícita `[S/N]` antes de instalar en Meta Quest 3 (soporta `-DryRun`). |
+| **Hook de Antigravity (`PostToolUse`)** | [hooks.json](file:///d:/Mis%20Documentos/dbzvr/.agents/hooks.json), [trigger_apk_build.ps1](file:///d:/Mis%20Documentos/dbzvr/.agents/hooks/trigger_apk_build.ps1) | Escucha `run_command` y abre `build_apk.ps1` en una ventana independiente de Windows solo tras un `git commit` exitoso con el marcador `[apk]` y sin lockfile activo (retorna `{}` en `< 1s`). |

@@ -22,8 +22,11 @@
 - **Calidad GDScript 2.0:**
   - Tipado estático estricto (`func test() -> void:`), multiplicar física por `delta` en `_physics_process(delta)` y **zero allocations** en hot paths.
   - Rutas OpenXR canónicas: `/user/hand_tracker/left` y `/user/hand_tracker/right`. Escala métrica 1:1 en runtime.
-- **Compilación APK y Autorización Obligatoria para Envío a los Lentes:**
-  - Al cerrar un ciclo listo para probar en visor, compilar `d:\Mis Documentos\dbzvr\builds\dbzvr.apk` con `Start-Process -Wait` + `android\build\gradlew.bat --stop` (salvo que el usuario pida explícitamente trabajar sin APK en escritorio).
+- **Compilación APK Fuera del Chat (0 Tokens) y Autorización Obligatoria para Envío a los Lentes:**
+  - El agente **NO** compila `builds/dbzvr.apk` ni ejecuta `adb install` dentro del chat (ahorro de tokens y tiempo de espera).
+  - En lugar de ejecutar el build en el chat, cuando un cambio esté listo para probar en Meta Quest 3 (o si el usuario pide generar el APK), el agente debe **entregarle la ruta/comando directo y la opción de dispararlo**:
+    1. **Manual (0 tokens):** doble clic en `d:\Mis Documentos\dbzvr\build_apk.bat` o ejecutar `& "d:\Mis Documentos\dbzvr\build_apk.ps1"`.
+    2. **Automático por hook:** ofrecer cerrar un `git commit` con el marcador `[apk]` para que `.agents/hooks.json` abra automáticamente la ventana independiente de Windows (`build_apk.ps1` + parada de Gradle daemon + confirmación interactiva `[S/N]` de `adb install`).
   - **NUNCA** desplegar ni instalar el APK en los lentes sin autorización explícita del usuario. Cuando autorice, verificar `adb devices` primero.
 - **Informe Final Obligatorio:** concluir cada ciclo explicando qué cambió, dónde, por qué y la validación empírica realizada.
 - **Destilación Automática de Aprendizajes (Cero Regresiones Futuras):** cada vez que se descubra y resuelva un bug no trivial, una trampa de Godot/OpenXR o una nueva invariante de arquitectura, registrarla de inmediato en la sección `Invariantes Críticas` del Squad dueño (`.agents/squads/<squad>.md`) y en la memoria de sesión (`d:\openclaw\workspace\memory\YYYY-MM-DD.md` / `MEMORY.md`).
@@ -46,7 +49,7 @@ Cada dominio del juego tiene un Squad dueño de sus archivos y sus skills (curad
 | **4B** | `audio-voices` | [4b-audio-voices.md](squads/4b-audio-voices.md) | `AudioActionManager.gd`, `assets/audio/audio_actions.json`, bancos Zenkai | `audio-system`, `godot-audio`, `gdscript-advanced` |
 | **5** | `environment-arena` | [5-environment-arena.md](squads/5-environment-arena.md) | `cell_games_arena.tscn`, `build_arena.gd`, `ArenaDestructionManager.gd` | `3d-essentials`, `rendering-pipeline`, `physics-system`, `godot-performance-optimization` |
 | **6** | `lore-balance` | [6-lore-balance.md](squads/6-lore-balance.md) | `resources/*.tres`, `scripts/resources/*.gd` (Goku/Vegeta canon, NP, transformaciones) | `resource-pattern`, `godot-resource-data-patterns`, `godot-director`, `godot-distiller` |
-| **7** | `qa-release-ops` | [7-qa-release-ops.md](squads/7-qa-release-ops.md) | `zenkai_showcase.tscn`, `ZenkaiShowcaseViewer.gd`, `run_desktop_preview.ps1`, `CombatSequenceRunner.gd`, `FEATURE_MAP.md` | `godot-headless-workflow`, `godot-auditor`, `godot-code-review`, `mobile-development`, `export-pipeline` |
+| **7** | `qa-release-ops` | [7-qa-release-ops.md](squads/7-qa-release-ops.md) | `zenkai_showcase.tscn`, `ZenkaiShowcaseViewer.gd`, `run_desktop_preview.ps1`, `build_apk.ps1`, `build_apk.bat`, `.agents/hooks.json`, `CombatSequenceRunner.gd`, `FEATURE_MAP.md` | `godot-headless-workflow`, `godot-auditor`, `godot-code-review`, `mobile-development`, `export-pipeline` |
 
 ### Coordinación entre Squads
 - Si una tarea cruza dos dominios (por ejemplo, un nuevo Súper Ataque requiere secuencia en `1B`, VFX en `4A` y sonido en `4B`), definir primero el **contrato de interfaz** (nombre de método/señal o `action_id`) y ejecutar cada Squad sobre sus propios archivos (en serie o en paralelo con `/teamwork`).
