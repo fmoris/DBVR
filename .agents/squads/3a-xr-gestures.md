@@ -23,6 +23,7 @@ Mantener el motor gestual biométrico libre de botones (Trie-State-Machine GSS v
 - Rutas OpenXR canónicas: `/user/hand_tracker/left` y `/user/hand_tracker/right`.
 - Estaturas canónicas 1:1 en metros (Goku 1.75m, Vegeta 1.64m).
 - Todo arranque headless debe funcionar con `--xr-mode off` sin colgarse.
+- **Visión 1ra persona anti-clipping (`character_instance.gd`):** nunca adelantar `XRCamera3D`; desplazar `body_mesh_instance` hacia atrás `FP_TORSO_BACK_OFFSET = 0.20m` (más hasta `+0.06m` extra al mirar abajo), clamar altura vertical a `minf(floor_y, cam_world.y - (_fp_neck_rest_height + 0.14))` y ocultar cabeza/pelo/rostro mediante `_configure_first_person_head_hiding()` (incluyendo `"HEAD"` en mayúsculas tras transformaciones en `_swap_body_mesh_for_path()`).
 
 ## Gate de Verificación
 ```powershell

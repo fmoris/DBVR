@@ -9,7 +9,7 @@
 [ext_resource type="PackedScene" uid="uid://cggifip4tem77" path="res://vr_hud.tscn" id="5_vrhud"]
 [ext_resource type="Script" uid="uid://cp621txxly1yq" path="res://scripts/GesturePhaseTree.gd" id="6_gesturetree"]
 [ext_resource type="Texture2D" uid="uid://b52bt3156w8gw" path="res://assets/images/background.png" id="9_bgtexture"]
-[ext_resource type="Resource" uid="uid://dejaah3xm5a6s" path="res://resources/vegeta.tres" id="11_11cuc"]
+[ext_resource type="Resource" path="res://resources/vegeta_zenkai.tres" id="11_11cuc"]
 [ext_resource type="Script" uid="uid://b3d4tpttxkrhf" path="res://scripts/vr_in_game_menu.gd" id="12_menu"]
 [ext_resource type="Script" path="res://scripts/DramaticDirector.gd" id="13_dramatic"]
 

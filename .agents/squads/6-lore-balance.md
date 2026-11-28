@@ -7,6 +7,7 @@ Garantizar la fidelidad canónica de Dragon Ball Z y del GDD de DBVR en perfiles
 - `resources/goku.tres`
 - `resources/goku_zenkai.tres`
 - `resources/vegeta.tres`
+- `resources/vegeta_zenkai.tres`
 - `scripts/resources/character_data.gd`
 - `scripts/resources/power_data.gd`
 - `scripts/resources/transformation_data.gd`

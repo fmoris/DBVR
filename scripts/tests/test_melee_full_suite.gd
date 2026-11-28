@@ -1326,8 +1326,336 @@ func _process(_delta: float) -> bool:
 		look_rig.get_parent().remove_child(look_rig)
 	look_rig.free()
 
+	# --- 18. Goku KO Procedural Fall & 0-Ki Anti-Premature-Zenkai ---
+	var ko_goku: Node3D = char_s.new() as Node3D
+	ko_goku.name = "GokuKOFallTest"
+	ko_goku.set("character_data", goku_res)
+	root.add_child(ko_goku)
+	ko_goku.set_physics_process(false)
+	var ko_ai_ctrl: Variant = ko_goku.get("cached_ai_controller")
+	if ko_ai_ctrl and is_instance_valid(ko_ai_ctrl):
+		(ko_ai_ctrl as Node).set_physics_process(false)
+		ko_ai_ctrl.set("enabled", false)
+	assert(ko_goku.get("ragdoll_simulator") == null, "Complex 369-bone Goku rig must omit Jolt PhysicalBoneSimulator3D to avoid mesh melt")
+	ko_goku.global_position = Vector3(0.0, 8.0, -4.0)
+	ko_goku.set("ragdoll_recovery_timer", -1.0)
+	ko_goku.call("start_ragdoll", Vector3(0.0, 0.0, -10.0))
+	var ko_anim: ProceduralCombatAnimator = ko_goku.get("procedural_animator") as ProceduralCombatAnimator
+	assert(ko_anim != null and ko_anim.enabled == false, "procedural_animator must pause during KO fall/ragdoll")
+	for _f_step in range(45):
+		ko_goku._physics_process(0.05)
+	var ko_ground_h: float = float(ko_goku.call("get_ground_elevation", ko_goku.global_position))
+	assert(bool(ko_goku.get("_ko_fall_landed")) == true, "Goku procedural KO fall must reach ground")
+	assert(absf(ko_goku.global_position.y - ko_ground_h) < 0.05, "Goku KO position Y must rest cleanly at ground_h (got %.3f vs %.3f)" % [ko_goku.global_position.y, ko_ground_h])
+	ko_goku.call("stop_ragdoll")
+	var ko_mesh: Node3D = ko_goku.get("body_mesh_instance") as Node3D
+	assert(ko_anim.enabled == true and ko_mesh.rotation == Vector3.ZERO, "stop_ragdoll must re-enable procedural_animator and reset mesh transform")
+	if ko_goku.get_parent():
+		ko_goku.get_parent().remove_child(ko_goku)
+	ko_goku.free()
+
+	# 18b. 0-Ki Super Beam direct hit without Zenkai must NOT finish match
+	var beam_s: GDScript = load("res://scripts/SuperBeamSequenceController.gd") as GDScript
+	var beam_t: Node3D = beam_s.new() as Node3D
+	root.add_child(beam_t)
+	p_mock.set("is_match_over", false)
+	ai_mock.set("is_match_over", false)
+	p_mock.set("is_in_zenkai_state", false)
+	p_mock.set("is_comeback_zenkai", false)
+	p_mock.set("current_transformation", g_trans[0] if g_trans.size() > 0 else null)
+	p_mock.set("current_np", 18000.0)
+	ai_mock.set("current_transformation", null)
+	ai_mock.set("current_np", 10000.0)
+	ai_mock.set("current_ki", 0.0)
+	ai_mock.set("is_guard_broken", true)
+	beam_t.set("attacker", p_mock)
+	beam_t.set("defender", ai_mock)
+	beam_t.set("power_name", "Kamehameha")
+	beam_t.set("base_damage", 1200.0)
+	beam_t.set("beam_dir", Vector3.FORWARD)
+	beam_t.set("is_active", true)
+	beam_t.call("_resolve_direct_hit")
+	assert(bool(ai_mock.get("is_match_over")) == false and bool(p_mock.get("is_match_over")) == false, "0-Ki defender hit by non-Zenkai Super Beam must NOT end the match")
+	p_mock.set("is_firing_beam", false)
+	p_mock.set("is_in_beam_sequence", false)
+	if beam_t.get_parent():
+		beam_t.get_parent().remove_child(beam_t)
+	beam_t.free()
+
+	# 18c. consume_ki_or_life_force at 0 Ki must respect NP floor and never end match
+	ai_mock.set("is_match_over", false)
+	ai_mock.set("secured_np_threshold_ratio", 0.25)
+	ai_mock.set("current_ki", 0.0)
+	ai_mock.set("current_np", 1500.0)
+	ai_mock.call("consume_ki_or_life_force", 50.0)
+	assert(bool(ai_mock.get("is_match_over")) == false, "consume_ki_or_life_force must NEVER trigger match finish")
+	assert(float(ai_mock.get("current_np")) >= 1000.0, "consume_ki_or_life_force must respect NP floor")
+
+	# 18d. revert_to_base() must grant 6s grace so opponent does not gain instant Dominio Zenkai
+	p_mock.set("_cached_opponent", ai_mock)
+	ai_mock.set("_cached_opponent", p_mock)
+	p_mock.set("is_match_over", false)
+	ai_mock.set("is_match_over", false)
+	p_mock.set("is_in_zenkai_state", false)
+	p_mock.set("is_comeback_zenkai", false)
+	ai_mock.set("is_in_zenkai_state", false)
+	ai_mock.set("is_comeback_zenkai", false)
+	p_mock.set("current_transformation", g_trans[0] if g_trans.size() > 0 else null)
+	p_mock.set("_active_np_multiplier", 2.0)
+	p_mock.set("current_np", 24000.0)
+	var v_trans: Array = vegeta_res.get("transformations")
+	ai_mock.set("current_transformation", v_trans[0] if v_trans.size() > 0 else null)
+	ai_mock.set("_active_np_multiplier", 2.0)
+	ai_mock.set("current_np", 24000.0)
+	ai_mock.call("revert_to_base") # Vegeta drops to 12000 NP (50% behind Goku's 24000)
+	assert(float(ai_mock.get("_revert_zenkai_grace_timer")) > 5.0, "revert_to_base must arm 6s anti-Zenkai grace")
+	assert(bool(p_mock.get("is_in_zenkai_state")) == false, "Opponent must NOT receive instant Dominio Zenkai right after 0-Ki revert")
+	ai_mock.set("_revert_zenkai_grace_timer", 0.0)
+	p_mock.call("check_zenkai_conditions", float(ai_mock.get("current_np")))
+	assert(bool(p_mock.get("is_in_zenkai_state")) == true, "After revert grace expires, real >= 40% BP gap must still activate Dominio Zenkai")
+
+	# 18e. Base form 50% start cannot trigger Dominio Zenkai; >= 70% Base + >= 40% lead can
+	p_mock.set("current_transformation", null)
+	p_mock.set("_active_np_multiplier", 1.0)
+	p_mock.set("is_in_zenkai_state", false)
+	p_mock.set("current_np", 9000.0) # 50% of 18000
+	p_mock.call("check_zenkai_conditions", 4000.0) # lead = 55% but still in Act I (< 70%)
+	assert(bool(p_mock.get("is_in_zenkai_state")) == false, "Base 50% start must NOT trigger Dominio Zenkai before reaching 70% BP")
+	p_mock.set("current_np", 13500.0) # 75% >= 70%
+	p_mock.call("check_zenkai_conditions", 7000.0) # lead = 48.1% >= 40%
+	assert(bool(p_mock.get("is_in_zenkai_state")) == true, "Base >= 70% BP with >= 40% BP lead must activate Dominio Zenkai")
+
+	# --- 19. 3D Steep Aim Pose Detection & Diagonal Follow-Up Hammer Slam ---
+	var hcc_aim: Node = hcc_s.new() as Node
+	hcc_aim.name = "SteepAimTestHCC"
+	rig.add_child(hcc_aim)
+	hcc_aim.set_process(false)
+	hcc_aim.set("xr_origin", rig)
+	hcc_aim.set("camera", cam)
+	hcc_aim.set("left_controller", l_ctrl)
+	hcc_aim.set("right_controller", r_ctrl)
+	rig.global_position = Vector3.ZERO
+	rig.scale = Vector3.ONE
+	cam.position = Vector3(0.0, 1.60, 0.0)
+
+	# 19a. Looking steeply DOWN (-60 deg): arms extended along gaze must trigger Ki Blast & Phase 2 Super
+	cam.rotation = Vector3(deg_to_rad(-60.0), 0.0, 0.0)
+	var down_dir: Vector3 = (-cam.global_transform.basis.z).normalized()
+	var sh_ref_d: Vector3 = cam.global_position - Vector3(0.0, 0.16, 0.0)
+	l_ctrl.global_position = sh_ref_d + down_dir * 0.55 + Vector3(-0.14, 0.0, 0.0)
+	r_ctrl.global_position = sh_ref_d + down_dir * 0.55 + Vector3(0.14, 0.0, 0.0)
+	l_ctrl.global_transform = Transform3D(Basis(down_dir, Vector3.RIGHT, down_dir.cross(Vector3.RIGHT)).orthonormalized(), l_ctrl.global_position)
+	r_ctrl.global_transform = Transform3D(Basis(-down_dir, Vector3.RIGHT, (-down_dir).cross(Vector3.RIGHT)).orthonormalized(), r_ctrl.global_position)
+	hcc_aim.call("_update_body_space_metrics", p_mock)
+	assert(bool(hcc_aim.call("_is_arm_extended_palm_forward", r_ctrl, false)) == true, "Right arm extended along -60 deg downward gaze must pass")
+	assert(bool(hcc_aim.call("_is_arm_extended_palm_forward", l_ctrl, true)) == true, "Left arm extended along -60 deg downward gaze must pass")
+	var eff_l_down: float = maxf(maxf(hcc_aim.get("l_torso_pos").z, float(hcc_aim.get("l_cam_fwd_proj"))), float(hcc_aim.get("l_cam_fwd_3d_proj")))
+	var eff_r_down: float = maxf(maxf(hcc_aim.get("r_torso_pos").z, float(hcc_aim.get("r_cam_fwd_proj"))), float(hcc_aim.get("r_cam_fwd_3d_proj")))
+	hcc_aim.set("super_phase1_anchor_z", -0.10)
+	assert(bool(hcc_aim.call("_is_phase2_autofire_pose", "kamehameha", eff_l_down, eff_r_down, 1)) == true, "Kamehameha Phase 2 must autofire when extending arms steeply downward (-60 deg)")
+
+	# 19b. Looking steeply UP (+55 deg): arm extended along gaze must pass
+	cam.rotation = Vector3(deg_to_rad(55.0), 0.0, 0.0)
+	var up_dir: Vector3 = (-cam.global_transform.basis.z).normalized()
+	var sh_ref_u: Vector3 = cam.global_position - Vector3(0.0, 0.16, 0.0)
+	r_ctrl.global_position = sh_ref_u + up_dir * 0.55 + Vector3(0.14, 0.0, 0.0)
+	r_ctrl.global_transform = Transform3D(Basis(-up_dir, Vector3.RIGHT, (-up_dir).cross(Vector3.RIGHT)).orthonormalized(), r_ctrl.global_position)
+	hcc_aim.call("_update_body_space_metrics", p_mock)
+	assert(bool(hcc_aim.call("_is_arm_extended_palm_forward", r_ctrl, false)) == true, "Right arm extended along +55 deg upward gaze must pass")
+
+	# 19c. Hands tucked at waist while looking down (-60 deg) must NOT falsely count as extended forward
+	cam.rotation = Vector3(deg_to_rad(-60.0), 0.0, 0.0)
+	l_ctrl.global_position = cam.global_position + Vector3(-0.14, -0.35, -0.12)
+	r_ctrl.global_position = cam.global_position + Vector3(0.14, -0.35, -0.12)
+	hcc_aim.call("_update_body_space_metrics", p_mock)
+	assert(bool(hcc_aim.call("_is_arm_extended_palm_forward", r_ctrl, false)) == false, "Hands tucked at waist must NOT trigger extended palm check")
+
+	cam.rotation = Vector3.ZERO
+	if hcc_aim.get_parent():
+		hcc_aim.get_parent().remove_child(hcc_aim)
+	hcc_aim.free()
+
+	# 19d. Diagonal Follow-Up Hammer Slam must place victim ahead at comfortable diagonal angle
+	var fu_s: GDScript = load("res://scripts/FollowUpSequenceController.gd") as GDScript
+	var fu_hm: Node3D = fu_s.new() as Node3D
+	root.add_child(fu_hm)
+	rig.global_position = Vector3(0.0, 10.0, 0.0)
+	ai_mock.global_position = Vector3(0.0, 8.5, -0.95)
+	p_mock.set("is_match_over", false)
+	ai_mock.set("is_match_over", false)
+	fu_hm.set("attacker", p_mock)
+	fu_hm.set("defender", ai_mock)
+	fu_hm.set("is_active", true)
+	fu_hm.set("chain_depth", 1)
+	fu_hm.call("_execute_hammer_slam_impact", 3.6)
+	var hm_ground_h: float = float(ai_mock.call("get_ground_elevation", ai_mock.global_position))
+	var hm_h_dist: float = Vector2(ai_mock.global_position.x - rig.global_position.x, ai_mock.global_position.z - rig.global_position.z).length()
+	var hm_drop_angle_deg: float = rad_to_deg(atan2(maxf(rig.global_position.y - ai_mock.global_position.y, 0.0), maxf(hm_h_dist, 0.01)))
+	assert(absf(ai_mock.global_position.y - hm_ground_h) < 0.05, "Diagonal hammer slam must land victim on ground_h")
+	assert(hm_h_dist >= 5.5, "Diagonal hammer slam horizontal dist must be >= 5.5m (got %.2fm)" % hm_h_dist)
+	assert(hm_drop_angle_deg <= 36.0, "Diagonal hammer slam pitch angle must be <= 36 deg (got %.2f deg)" % hm_drop_angle_deg)
+	Engine.time_scale = 1.0
+	if fu_hm.get_parent():
+		fu_hm.get_parent().remove_child(fu_hm)
+	fu_hm.free()
+
+	# Runtime Dome #20: Melee zone Box -> Outcome Icon Morph (Success / Block / Parry / Clash / Hit Taken + Non-Collision)
+	var dome16: Node3D = dome_s.new()
+	root.add_child(dome16)
+	p_mock.set("current_np", 10000.0)
+	ai_mock.set("current_np", 10000.0)
+	p_mock.set("current_ki", 60.0)
+	ai_mock.set("current_ki", 60.0)
+	dome16.call("setup", p_mock, ai_mock, -1.0, 4)
+	dome16.set("phase", 2) # DEFENSE_RHYTHM
+	dome16.set("is_active", true)
+	var z16: Array = dome16.get("target_zones")
+	assert(z16.size() == 6, "Expected 6 target zones")
+	var icon_m0: MeshInstance3D = z16[0].get("outcome_icon_mesh") as MeshInstance3D
+	var icon_m1: MeshInstance3D = z16[1].get("outcome_icon_mesh") as MeshInstance3D
+	assert(icon_m0 != null and icon_m1 != null and icon_m0.mesh != null and icon_m0.mesh == icon_m1.mesh, "Zones must share OutcomeIconQuad mesh")
+	assert(icon_m0.visible == false, "Outcome icon mesh must start hidden")
+
+	# 20a. Player attacking -> unblocked hit morphs box/circle into green success check
+	dome16.set("attacker", p_mock)
+	dome16.set("defender", ai_mock)
+	dome16.set("_last_role_is_attack", 1)
+	var n_hit_ok: Dictionary = { "zone_id": 0, "is_charged": false, "is_charged_v3": false, "is_hammer": false, "tier": "SOLIDO", "resolved": false }
+	dome16.set("hits", [n_hit_ok])
+	dome16.call("_resolve_unblocked_hit", n_hit_ok, z16[0])
+	assert(String(z16[0].get("outcome_kind")) == "hit_success", "Player landing clean hit must morph zone to hit_success")
+	assert((z16[0].get("box_mesh") as MeshInstance3D).visible == false, "box_mesh must hide during hit_success morph")
+	assert((z16[0].get("circle_mesh") as MeshInstance3D).visible == false, "circle_mesh must hide during hit_success morph")
+	assert((z16[0].get("inner_mesh") as MeshInstance3D).visible == true, "inner_mesh backdrop must show during hit_success morph")
+	assert(icon_m0.visible == true, "outcome_icon_mesh must show during hit_success morph")
+	var icon_mat0: StandardMaterial3D = z16[0].get("outcome_icon_mat") as StandardMaterial3D
+	assert(icon_mat0 != null and icon_mat0.albedo_texture != null, "Outcome icon must bind non-null texture")
+
+	# 20b. Non-collision: highlighting zone 2 preserves zone 0 outcome; highlighting zone 0 immediately clears zone 0 outcome
+	dome16.call("_update_defense_zone_highlights", 2, 2, -1)
+	assert(String(z16[0].get("outcome_kind")) == "hit_success" and icon_m0.visible == true, "Highlighting another zone must keep zone 0 outcome icon")
+	dome16.call("_update_defense_zone_highlights", 0, 3, -1)
+	assert(float(z16[0].get("outcome_timer")) <= 0.0 and icon_m0.visible == false, "Highlighting zone 0 as active note must clear its outcome immediately")
+
+	# 20c. Player defending outcomes: GREEN deflect, YELLOW block, X guard, hit_taken, clash_win + expiry tick
+	dome16.set("attacker", ai_mock)
+	dome16.set("defender", p_mock)
+	dome16.set("_last_role_is_attack", 0)
+	var n_def_g: Dictionary = { "zone_id": 0, "is_charged": false, "is_charged_v3": false, "is_hammer": false, "tier": "SOLIDO", "resolved": false }
+	var n_def_y: Dictionary = { "zone_id": 1, "is_charged": false, "is_charged_v3": false, "is_hammer": false, "tier": "SOLIDO", "resolved": false }
+	var n_def_x: Dictionary = { "zone_id": 2, "is_charged": false, "is_charged_v3": false, "is_hammer": false, "tier": "SOLIDO", "resolved": false }
+	var n_def_t: Dictionary = { "zone_id": 3, "is_charged": false, "is_charged_v3": false, "is_hammer": false, "tier": "SOLIDO", "resolved": false }
+	var n_def_c: Dictionary = { "zone_id": 4, "is_charged": true, "is_charged_v3": false, "is_hammer": false, "tier": "SOLIDO", "resolved": false }
+	dome16.set("hits", [n_def_g, n_def_y, n_def_x, n_def_t, n_def_c])
+	dome16.call("_resolve_hand_block", n_def_g, z16[0], 0, "GREEN")
+	dome16.call("_resolve_hand_block", n_def_y, z16[1], 1, "YELLOW")
+	dome16.call("_resolve_cross_arm_guard", n_def_x, z16[2])
+	dome16.call("_resolve_unblocked_hit", n_def_t, z16[3])
+	dome16.call("_resolve_fist_clash", n_def_c, z16[4], 0)
+	assert(String(z16[0].get("outcome_kind")) == "deflect_green", "GREEN block must morph to deflect_green")
+	assert(String(z16[1].get("outcome_kind")) == "block_yellow", "YELLOW block must morph to block_yellow")
+	assert(String(z16[2].get("outcome_kind")) == "guard_x", "Cross arm guard must morph to guard_x")
+	assert(String(z16[3].get("outcome_kind")) == "hit_taken", "Unblocked hit on player must morph to hit_taken")
+	assert(String(z16[4].get("outcome_kind")) == "clash_win", "Fist clash tie/win must morph to clash_win")
+	assert((z16[2].get("box_mesh") as MeshInstance3D).visible == false and (z16[2].get("outcome_icon_mesh") as MeshInstance3D).visible == true, "Guard X must hide box and show shield icon")
+
+	# Advance outcome timers past expiration and verify clean restore
+	dome16.call("_tick_zone_outcomes", 0.75)
+	assert(float(z16[0].get("outcome_timer")) == 0.0 and icon_m0.visible == false and (z16[0].get("inner_mesh") as MeshInstance3D).visible == false, "Outcome icon must expire after 0.75s")
+	assert((z16[0].get("box_mesh") as MeshInstance3D).visible == true, "box_mesh must restore after defense outcome expiry")
+
+	# Runtime Dome #21: Central Turn Prompts + 0.45s Attack Intro Pause (Option 2)
+	var dd21_s: GDScript = load("res://scripts/DramaticDirector.gd") as GDScript
+	var dd_test: Node3D = dd21_s.new() as Node3D
+	root.add_child(dd_test)
+	dd_test.set("is_in_intro", false)
+	dd_test.set("_cam", cam)
+	dd_test.call("_build_camera_overlays")
+	var cp_anchor: Node3D = dd_test.get("_center_prompt_anchor") as Node3D
+	var cp_title: Label3D = dd_test.get("_center_prompt_title") as Label3D
+	assert(cp_anchor != null and cp_anchor.get_parent() == cam, "Center prompt anchor must be mounted directly on XRCamera3D")
+	assert(absf(cp_anchor.position.x) < 0.01 and absf(cp_anchor.position.y) <= 0.05 and cp_anchor.position.z < -0.5, "Center prompt anchor must sit at center of camera view")
+	assert(cp_anchor.visible == false, "Center prompt anchor must start hidden")
+
+	var dome17: Node3D = dome_s.new()
+	root.add_child(dome17)
+	p_mock.set("current_ki", 60.0)
+	ai_mock.set("current_ki", 60.0)
+	dome17.call("setup", p_mock, ai_mock, -1.0, 4)
+	assert(absf(float(dome17.get("attack_intro_pause_timer")) - 0.45) < 0.01, "Option 2 must initialize 0.45s attack intro pause when player attacks")
+	assert(cp_anchor.visible == true and String(cp_title.text) == "¡TE TOCA ATACAR!", "Attack start must display central prompt '¡TE TOCA ATACAR!' (got '%s')" % String(cp_title.text))
+	var t_before_pause: float = float(dome17.get("time_left"))
+	dome17.call("_process_attack_recording", 0.20)
+	assert(absf(float(dome17.get("time_left")) - t_before_pause) < 0.001, "time_left must NOT tick down during 0.45s attack intro pause")
+	assert(float(dome17.get("attack_intro_pause_timer")) > 0.20, "attack_intro_pause_timer must still be active at 0.20s")
+	dome17.call("_process_attack_recording", 0.30)
+	assert(float(dome17.get("attack_intro_pause_timer")) == 0.0, "attack_intro_pause_timer must unlock after 0.45s")
+
+	# 21b. Defense transition + Ki-Break finisher prompt
+	dome17.set("attacker", ai_mock)
+	dome17.set("defender", p_mock)
+	dome17.set("hits", [{ "zone_id": 0, "resolved": false }])
+	dome17.call("_begin_phase_transition", "start_defense", 0.55, "DEF", Color.CYAN)
+	assert(cp_anchor.visible == true and String(cp_title.text) == "¡TE TOCA DEFENDER!", "Defense transition must show '¡TE TOCA DEFENDER!'")
+	dome17.call("_start_unblockable_ki_break", p_mock, ai_mock)
+	assert(cp_anchor.visible == true and String(cp_title.text) == "¡HAZ EL REMATE!", "Player Ki-Break finisher must show '¡HAZ EL REMATE!'")
+
+	# 21c. FollowUp intro pauses (Continue Sequence vs Slam Finisher)
+	var fu_ps: GDScript = load("res://scripts/FollowUpSequenceController.gd") as GDScript
+	var fu_prompt: Node3D = fu_ps.new() as Node3D
+	root.add_child(fu_prompt)
+	fu_prompt.set("attacker", p_mock)
+	fu_prompt.set("defender", ai_mock)
+	fu_prompt.set("chain_depth", 1)
+	fu_prompt.set("_intro_pause_total", 1.0)
+	fu_prompt.call("_enter_intro_pause", "")
+	assert(String(cp_title.text) == "¡CONTINUA LA SECUENCIA!", "FollowUp depth 1 must show '¡CONTINUA LA SECUENCIA!'")
+	fu_prompt.call("_enter_intro_pause", "hammer_slam_chain")
+	assert(String(cp_title.text) == "¡HAZ EL REMATE!", "Hammer slam follow-up chain must show '¡HAZ EL REMATE!'")
+	Engine.time_scale = 1.0
+
+	# 21d. Auto-expiry in real time hides center prompt without duplicate anchors (DramaticDirector caps real_delta at 0.05s/tick)
+	for _t_cp in range(26):
+		dd_test.call("_process", 0.05)
+	assert(cp_anchor.visible == false, "Center prompt must auto-hide after real-time duration expires")
+	Engine.time_scale = 1.0
+
+	# Runtime Dome #22: Reverse Countdown Attack Counter (N -> 0) above target boxes + flanks
+	assert(dome_s.compute_remaining_attack_hits(4, 0) == 4, "0 hits used -> 4 remaining")
+	assert(dome_s.compute_remaining_attack_hits(4, 1) == 3, "1 hit used -> 3 remaining")
+	assert(dome_s.compute_remaining_attack_hits(4, 3) == 1, "3 hits used -> 1 remaining")
+	assert(dome_s.compute_remaining_attack_hits(4, 4) == 0, "4 hits used -> 0 remaining")
+	assert(dome_s.compute_remaining_attack_hits(4, 5) == 0, "5 hits clamped -> 0 remaining")
+
+	var dome18: Node3D = dome_s.new()
+	root.add_child(dome18)
+	p_mock.set("current_ki", 60.0)
+	ai_mock.set("current_ki", 60.0)
+	dome18.call("setup", p_mock, ai_mock, -1.0, 4)
+	var atk_cnt_lbl: Label3D = dome18.get("_attack_counter_label") as Label3D
+	var stamp_lbl18: Label3D = dome18.get("_flank_stamp_label") as Label3D
+	var pip_lbls18: Array = dome18.get("_pip_slot_labels")
+	assert(atk_cnt_lbl != null and atk_cnt_lbl.visible == true and atk_cnt_lbl.text == "4 GOLPES", "Attack counter must start visible at '4 GOLPES'")
+	assert(stamp_lbl18 != null and stamp_lbl18.text == "⚔️ RESTAN 4", "Flank stamp must show '⚔️ RESTAN 4'")
+	assert(pip_lbls18.size() >= 4 and (pip_lbls18[0] as Label3D).text == "●" and (pip_lbls18[3] as Label3D).text == "●", "All 4 attack pips must start lit")
+
+	dome18.set("current_attack_step", 1)
+	dome18.set("hits", [{ "zone_id": 0, "time_offset": 0.9 }])
+	dome18.call("_refresh_header_hud", false)
+	assert(atk_cnt_lbl.text == "3 RESTAN", "After 1st hit, counter must drop to '3 RESTAN'")
+	assert(stamp_lbl18.text == "⚔️ RESTAN 3 · [A/X]", "After 1st hit, flank stamp must drop to '⚔️ RESTAN 3 · [A/X]'")
+	assert((pip_lbls18[2] as Label3D).text == "●" and (pip_lbls18[3] as Label3D).text == "·", "3rd pip lit and 4th pip spent")
+
+	dome18.set("current_attack_step", 3)
+	dome18.call("_refresh_header_hud", false)
+	assert(atk_cnt_lbl.text == "1 ¡ULTIMO!", "With 1 hit left, counter must show '1 ¡ULTIMO!'")
+	assert((pip_lbls18[0] as Label3D).text == "●" and (pip_lbls18[1] as Label3D).text == "·", "Only 1st pip lit on last attack")
+
+	dome18.call("start_defense_phase")
+	assert(atk_cnt_lbl.visible == false, "Attack counter must hide in DEFENSE_RHYTHM")
+
 	# Teardown cleanly without leaving leaked nodes
-	for n in [mini, dome, dome2, dome3, dome4, dome5, dome6, dome7, dome8, dome9, dome10, dome11, dome12, dome13, dome14, dome15, lockon_t, hud_t, rig, ai_mock]:
+	for n in [mini, dome, dome2, dome3, dome4, dome5, dome6, dome7, dome8, dome9, dome10, dome11, dome12, dome13, dome14, dome15, dome16, dome17, dome18, fu_prompt, dd_test, lockon_t, hud_t, rig, ai_mock]:
 		if is_instance_valid(n):
 			if n.get_parent():
 				n.get_parent().remove_child(n)

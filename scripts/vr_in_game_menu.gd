@@ -404,9 +404,11 @@ func _execute_character_swap() -> void:
 	var goku_res: CharacterData = load("res://resources/goku_zenkai.tres")
 	if not goku_res:
 		goku_res = load("res://resources/goku.tres")
-	var vegeta_res: CharacterData = load("res://resources/vegeta.tres")
+	var vegeta_res: CharacterData = load("res://resources/vegeta_zenkai.tres")
+	if not vegeta_res:
+		vegeta_res = load("res://resources/vegeta.tres")
 	if not goku_res or not vegeta_res:
-		push_warning("[VRInGameMenu] No se pudieron cargar goku_zenkai.tres o vegeta.tres para intercambio.")
+		push_warning("[VRInGameMenu] No se pudieron cargar goku_zenkai.tres o vegeta_zenkai.tres para intercambio.")
 		return
 
 	var p_name_upper: String = ""

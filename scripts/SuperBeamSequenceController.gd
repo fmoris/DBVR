@@ -152,6 +152,9 @@ func setup(
 	power_name = p_power_name
 	energy_color = p_color
 	base_damage = p_base_damage
+	if attacker and is_instance_valid(attacker) and attacker.has_meta("voice_super_dmg_mult"):
+		base_damage *= float(attacker.get_meta("voice_super_dmg_mult", 1.0))
+		attacker.remove_meta("voice_super_dmg_mult")
 	if attacker and is_instance_valid(attacker) and attacker.has_method("get_dramatic_modifier"):
 		base_damage *= attacker.get_dramatic_modifier("damage_mult", 1.0) * attacker.get_dramatic_modifier("super_damage_mult", 1.0)
 	tier = p_tier
@@ -230,6 +233,10 @@ func setup(
 		var is_player_def: bool = defender != null and is_instance_valid(defender) and bool(defender.get("is_player"))
 		_reading_pause_timer = 1.0 if is_player_def else 0.0
 		Engine.time_scale = 0.05 if _reading_pause_timer > 0.0 else 0.11
+		if is_player_def:
+			var dd_sb: DramaticDirector = DramaticDirector.get_active(get_tree()) if is_inside_tree() else null
+			if dd_sb and dd_sb.has_method("show_center_prompt"):
+				dd_sb.show_center_prompt("¡SUPER ENTRANTE! DEFIENDE", "DESVIA, ESQUIVA O CONTRAATACA", Color(0.25, 0.92, 1.0), 0.90, 3)
 
 	_build_visual_beam()
 	_build_reticle_and_hud()
@@ -579,8 +586,11 @@ func _process_hand_holding(delta: float) -> void:
 		hold_stall_timer = 0.0
 		var shake_boost: float = clampf(shake_speed / 3.0, 0.75, 1.85)
 		hold_progress += (real_delta * shake_boost) / maxf(hold_required_sec, 0.5)
-		if defender and defender.has_method("consume_ki_or_life_force"):
-			defender.consume_ki_or_life_force(9.0 * real_delta)
+		if defender and defender.has_method("drain_ki"):
+			defender.drain_ki(9.0 * real_delta)
+			if float(defender.get("current_ki")) <= 0.0:
+				_resolve_direct_hit()
+				return
 		if origin:
 			for h in ["LeftHand", "RightHand"]:
 				var ctrl = origin.get_node_or_null(h) as XRController3D
@@ -821,8 +831,7 @@ func _resolve_direct_hit() -> void:
 	var bp_def: float = maxf(float(defender.get("current_np")) if (defender and defender.get("current_np") != null) else 10000.0, 100.0)
 	var bp_ratio: float = clampf(sqrt(bp_atk / bp_def), 0.45, 2.8)
 	var atk_in_zenkai: bool = bool(attacker and is_instance_valid(attacker) and (attacker.get("is_in_zenkai_state") or attacker.get("is_comeback_zenkai")))
-	var def_exhausted_ko: bool = bool(defender and is_instance_valid(defender) and defender.has_method("is_defenseless_for_ko") and defender.is_defenseless_for_ko() and attacker and is_instance_valid(attacker) and attacker.has_method("get_combat_act") and int(attacker.get_combat_act()) >= 2)
-	var is_ko_hit: bool = atk_in_zenkai or def_exhausted_ko
+	var is_ko_hit: bool = atk_in_zenkai
 	if defender and is_instance_valid(defender):
 		if defender.has_method("take_hit"):
 			defender.take_hit(final_damage, beam_dir, false)

@@ -107,6 +107,10 @@ func setup(
 	_build_audio()
 	_update_beam_transforms()
 
+	var dd_bc: DramaticDirector = DramaticDirector.get_active(get_tree()) if is_inside_tree() else null
+	if dd_bc and dd_bc.has_method("show_center_prompt"):
+		dd_bc.show_center_prompt("¡CHOQUE DE PODERES!", "EMPUJA CON AMBAS MANOS", Color(1.0, 0.88, 0.20), 0.95, 3)
+
 	print("[BeamClash] ¡CHOQUE DE PODERES INICIADO! %s vs %s. Duración estimada: %.1fs" % [
 		tech_atk, tech_def, clash_duration
 	])
@@ -224,6 +228,8 @@ func _process_player_inputs(real_delta: float) -> void:
 
 	if player.get("is_in_zenkai_state"):
 		push_power *= 1.45
+	if VoiceCombatManager.is_shouting():
+		push_power *= (1.0 + 0.15 * VoiceCombatManager.get_shout_intensity())
 
 	# 3. Consumo de Ki; si Ki llega a 0, permite seguir compitiendo gastando BP (Último Aliento)
 	var ki_cost: float = (11.0 * real_delta if is_shaking else 0.0) + (2.5 if did_pulse else 0.0)
