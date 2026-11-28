@@ -222,6 +222,9 @@ var _flank_reticle_mat: StandardMaterial3D = null
 var _flank_icon_mat: StandardMaterial3D = null
 var _flank_stamp_label: Label3D = null
 var _last_flank_stamp_key: String = ""
+var _attack_counter_label: Label3D = null
+var _attack_counter_tween: Tween = null
+var _last_shown_attack_rem: int = -1
 
 # Cache XR / HUD / Dirty-check (90 FPS zero-alloc)
 var _cached_player: Node3D = null
@@ -280,6 +283,10 @@ static func reset_match_static_state() -> void:
 	_z_vanish_war_cooldown_melees = 0
 	_guard_break_cooldown_melees = 0
 	_tutorial_controls_shown = false
+
+
+static func compute_remaining_attack_hits(max_hits: int, used_steps: int) -> int:
+	return maxi(max_hits - used_steps, 0)
 
 
 ## Evalúa de forma pura la fórmula matemática de dominio de ronda (1.0/0.75/0.5/0.65/0.25/0.0)
@@ -919,6 +926,7 @@ func start_attack_phase(p_attacker: Node3D, p_defender: Node3D, p_duration: floa
 	_def_stick_prev = false
 	_def_stick_diag_str = ""
 	_last_def_hl_key = ""
+	_last_shown_attack_rem = -1
 	_clear_all_zone_outcomes()
 	_set_target_zones_visible(true)
 	_hide_all_charge_spheres()
@@ -1334,6 +1342,7 @@ func _show_center_turn_prompt(title: String, subtitle: String, col: Color, dur: 
 
 func _begin_phase_transition(mode: String, wait_sec: float, msg: String, col: Color) -> void:
 	phase = DomePhase.PHASE_TRANSITION
+	_refresh_attack_counter_label(0)
 	transition_on_complete_mode = mode
 	var ai_defending: bool = (mode == "start_defense") and defender != null and is_instance_valid(defender) and not bool(defender.get("is_player"))
 	var player_defending: bool = (mode == "start_defense") and defender != null and is_instance_valid(defender) and bool(defender.get("is_player"))
@@ -1617,35 +1626,73 @@ func _process_attack_recording(delta: float) -> void:
 			start_defense_phase()
 
 
+func _refresh_attack_counter_label(rem_hits: int) -> void:
+	if not _attack_counter_label or not is_instance_valid(_attack_counter_label):
+		return
+	var show_cnt: bool = (phase == DomePhase.ATTACK_RECORDING) and attacker != null and is_instance_valid(attacker) and bool(attacker.get("is_player")) and rem_hits > 0
+	if not show_cnt:
+		_attack_counter_label.visible = false
+		_attack_counter_label.scale = Vector3.ONE
+		if _attack_counter_tween and is_instance_valid(_attack_counter_tween):
+			_attack_counter_tween.kill()
+			_attack_counter_tween = null
+		_last_shown_attack_rem = -1
+		return
+	_attack_counter_label.visible = true
+	if rem_hits == _last_shown_attack_rem:
+		return
+	var prev_rem: int = _last_shown_attack_rem
+	_last_shown_attack_rem = rem_hits
+	if rem_hits == 1:
+		_attack_counter_label.text = "1 ¡ULTIMO!"
+		_attack_counter_label.modulate = Color(1.0, 0.38, 0.16, 1.0)
+	elif rem_hits == max_allowed_hits:
+		_attack_counter_label.text = "%d GOLPES" % rem_hits
+		_attack_counter_label.modulate = Color(1.0, 0.92, 0.28, 1.0)
+	else:
+		_attack_counter_label.text = "%d RESTAN" % rem_hits
+		_attack_counter_label.modulate = Color(1.0, 0.80, 0.22, 1.0)
+
+	if prev_rem > rem_hits and is_inside_tree():
+		if _attack_counter_tween and is_instance_valid(_attack_counter_tween):
+			_attack_counter_tween.kill()
+		_attack_counter_label.scale = Vector3.ONE
+		_attack_counter_tween = create_tween().set_ignore_time_scale(true)
+		_attack_counter_tween.tween_property(_attack_counter_label, "scale", Vector3.ONE * 1.38, 0.07).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		_attack_counter_tween.tween_property(_attack_counter_label, "scale", Vector3.ONE, 0.10).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+
+
 func _refresh_header_hud(is_charging_hammer: bool = false, active_zone_name: String = "", step_num: int = 0, remaining: float = 0.0, active_note: Dictionary = {}) -> void:
 	if phase == DomePhase.ATTACK_RECORDING:
 		_apply_role_dome_tint(true)
-		_refresh_flank_pips(hits.size())
+		var rem_hits: int = compute_remaining_attack_hits(max_allowed_hits, current_attack_step)
+		_refresh_attack_counter_label(rem_hits)
+		_refresh_flank_pips(max_allowed_hits, true, rem_hits)
 		_refresh_phase_timer(time_left, duration)
-		var step_shown: int = mini(current_attack_step + 1, max_allowed_hits)
 		if hammer_charge_time >= HAMMER_CHARGE_REQ or hammer_primed:
-			_refresh_flank_stamp("ATTACK", {}, step_shown, max_allowed_hits, "🔨 BAJA AMBOS PUÑOS")
+			_refresh_flank_stamp("ATTACK", {}, rem_hits, max_allowed_hits, "🔨 BAJA AMBOS PUÑOS")
 			_set_header("🔨 ¡BAJA AMBOS PUÑOS!", Color(0.95, 0.35, 1.0))
 			return
 		if is_charging_hammer:
-			_refresh_flank_stamp("ATTACK", {}, step_shown, max_allowed_hits, "🔨 CARGANDO...")
+			_refresh_flank_stamp("ATTACK", {}, rem_hits, max_allowed_hits, "🔨 CARGANDO · %d" % rem_hits)
 			_set_header("🔨 MARTILLAZO...", Color(0.95, 0.45, 1.0))
 			return
 		var max_fist_charge: float = maxf(fist_charge_times[0], fist_charge_times[1])
-		var atk_stamp: String = "⚔️ %d/%d" % [step_shown, max_allowed_hits]
+		var atk_stamp: String = "⚔️ RESTAN %d" % rem_hits
 		if max_fist_charge >= 1.10:
-			atk_stamp = "🔥 V3 · %d/%d" % [step_shown, max_allowed_hits]
+			atk_stamp = "🔥 V3 · RESTAN %d" % rem_hits
 		elif max_fist_charge >= 0.50:
-			atk_stamp = "⚡ %d/%d" % [step_shown, max_allowed_hits]
+			atk_stamp = "⚡ RESTAN %d" % rem_hits
 		elif hits.size() >= 1:
-			atk_stamp = "⚔️ %d/%d · [A/X]" % [hits.size(), max_allowed_hits]
-		_refresh_flank_stamp("ATTACK", {}, step_shown, max_allowed_hits, atk_stamp)
+			atk_stamp = "⚔️ RESTAN %d · [A/X]" % rem_hits
+		_refresh_flank_stamp("ATTACK", {}, rem_hits, max_allowed_hits, atk_stamp)
 		# Mitad superior limpia: solo mostrar cinta si hay feedback breve
 		if not last_action_feedback.is_empty():
 			_set_header(last_action_feedback, Color(1.0, 0.85, 0.30))
 		else:
 			_set_header("", Color(1.0, 0.55, 0.20))
 	elif phase == DomePhase.DEFENSE_RHYTHM:
+		_refresh_attack_counter_label(0)
 		_refresh_flank_pips(hits.size())
 		_refresh_phase_timer(remaining, defense_total_duration)
 		if defender and defender.get("is_player"):
@@ -1670,6 +1717,7 @@ func _refresh_header_hud(is_charging_hammer: bool = false, active_zone_name: Str
 			else:
 				_set_header("", Color(1.0, 0.55, 0.20))
 	elif phase == DomePhase.SIMULTANEOUS_EXCHANGE:
+		_refresh_attack_counter_label(0)
 		_refresh_flank_pips(4)
 		_refresh_flank_stamp("SIM", {}, _sim_enemy_hits_taken, 4)
 		_refresh_phase_timer(_sim_duration, 12.0)
@@ -1704,6 +1752,7 @@ func start_defense_phase() -> void:
 		return
 
 	phase = DomePhase.DEFENSE_RHYTHM
+	_refresh_attack_counter_label(0)
 	pip_results.clear()
 	defense_timer = 0.0
 	consecutive_guard_hits = 0
@@ -2882,6 +2931,7 @@ func _check_ki_break_after_note() -> bool:
 
 func _start_unblockable_ki_break(p_winner: Node3D, p_victim: Node3D) -> void:
 	phase = DomePhase.UNBLOCKABLE_KI_BREAK
+	_refresh_attack_counter_label(0)
 	ki_break_attacker = p_winner
 	ki_break_victim = p_victim
 	_has_prev_atk_local = false
@@ -3043,6 +3093,8 @@ func _set_target_zones_visible(v: bool) -> void:
 		_flank_stamp_root.visible = v
 	if _header_obi_mesh and is_instance_valid(_header_obi_mesh) and not v:
 		_header_obi_mesh.visible = false
+	if not v:
+		_refresh_attack_counter_label(0)
 
 
 func _start_lore_event(event_type: int, return_mode: String) -> void:
@@ -3099,6 +3151,7 @@ func _process_lore_event(delta: float) -> void:
 func _trigger_tactical_standoff(mode: String) -> void:
 	if not is_active:
 		return
+	_refresh_attack_counter_label(0)
 	_clear_all_zone_outcomes()
 	_declared_full_combo = false
 	_declared_ki_reserved = 0.0
@@ -3349,6 +3402,7 @@ func start_simultaneous_exchange() -> void:
 		evaluate_round_outcome()
 		return
 	phase = DomePhase.SIMULTANEOUS_EXCHANGE
+	_refresh_attack_counter_label(0)
 	hits.clear()
 	_clear_all_zone_outcomes()
 	_hide_all_charge_spheres()
@@ -4074,6 +4128,7 @@ func restart_as_attacker(keep_comeback_momentum: bool = false) -> void:
 func finish_without_hits(_is_manual_cancel: bool = false) -> void:
 	if not is_active:
 		return
+	_refresh_attack_counter_label(0)
 	_clear_all_zone_outcomes()
 	_declared_full_combo = false
 	_declared_ki_reserved = 0.0
@@ -4326,6 +4381,18 @@ func _build_target_boxes() -> void:
 	melee_boxes_anchor.position = Vector3.ZERO
 	add_child(melee_boxes_anchor)
 	var boxes_parent: Node3D = melee_boxes_anchor
+
+	_attack_counter_label = Label3D.new()
+	_attack_counter_label.name = "AttackRemainingCounter"
+	_attack_counter_label.position = Vector3(0.0, 0.34, 0.03)
+	_attack_counter_label.font_size = 44
+	_attack_counter_label.pixel_size = 0.0020
+	_attack_counter_label.outline_size = 11
+	_attack_counter_label.outline_modulate = Color(0.0, 0.0, 0.0, 0.96)
+	_attack_counter_label.no_depth_test = true
+	_attack_counter_label.render_priority = 120
+	_attack_counter_label.visible = false
+	melee_boxes_anchor.add_child(_attack_counter_label)
 
 	# 6 mallas compartidas entre las 6 zonas (zero duplicate geometry allocations)
 	var shared_box := BoxMesh.new()
@@ -4679,19 +4746,46 @@ func _build_cine_anime_flanks() -> void:
 		_flank_stamp_root.add_child(_flank_stamp_label)
 
 
-func _refresh_flank_pips(total_hits: int) -> void:
+func _refresh_flank_pips(total_hits: int, is_attack_countdown: bool = false, remaining_hits: int = -1) -> void:
 	if not _flank_pips_root or not is_instance_valid(_flank_pips_root):
 		return
+	var tex_g: Texture2D = _get_ui_tex("alert_base_g.png")
+	var tex_r: Texture2D = _get_ui_tex("alert_base_r.png")
+	var tex_y: Texture2D = _get_ui_tex("alert_base_y.png")
+	var tex_b: Texture2D = _get_ui_tex("alert_base_b.png")
+	if is_attack_countdown:
+		var n_atk: int = clampi(total_hits, 1, 6)
+		var rem_clamped: int = clampi(remaining_hits, 0, n_atk)
+		var key_a: String = "ATK|%d|%d" % [n_atk, rem_clamped]
+		if key_a == _last_flank_pips_key:
+			return
+		_last_flank_pips_key = key_a
+		for i in range(_pip_slot_labels.size()):
+			var lbl_a: Label3D = _pip_slot_labels[i]
+			var mat_a: StandardMaterial3D = _pip_slot_mats[i]
+			var show_a: bool = i < n_atk
+			lbl_a.visible = show_a
+			if not show_a:
+				mat_a.albedo_color = Color(1.0, 1.0, 1.0, 0.0)
+				continue
+			if i < rem_clamped:
+				if tex_y: mat_a.albedo_texture = tex_y
+				mat_a.albedo_color = Color(1.0, 0.94, 0.45, 0.95)
+				lbl_a.text = "●"
+				lbl_a.modulate = Color(1.0, 0.92, 0.25)
+			else:
+				if tex_b: mat_a.albedo_texture = tex_b
+				mat_a.albedo_color = Color(1.0, 1.0, 1.0, 0.22)
+				lbl_a.text = "·"
+				lbl_a.modulate = Color(0.65, 0.72, 0.80, 0.45)
+		return
+
 	var n: int = clampi(maxi(total_hits, pip_results.size()), 1, 6)
 	var key: String = str(n) + "|" + ",".join(pip_results)
 	if key == _last_flank_pips_key:
 		return
 	_last_flank_pips_key = key
 
-	var tex_g: Texture2D = _get_ui_tex("alert_base_g.png")
-	var tex_r: Texture2D = _get_ui_tex("alert_base_r.png")
-	var tex_y: Texture2D = _get_ui_tex("alert_base_y.png")
-	var tex_b: Texture2D = _get_ui_tex("alert_base_b.png")
 	for i in range(_pip_slot_labels.size()):
 		var lbl: Label3D = _pip_slot_labels[i]
 		var mat: StandardMaterial3D = _pip_slot_mats[i]
@@ -4739,7 +4833,7 @@ func _refresh_flank_stamp(mode: String, note: Dictionary, step_num: int, total_h
 	if mode == "ATTACK":
 		icon_fn = "icon_fist.png"
 		if stamp_txt.is_empty():
-			stamp_txt = "⚔️ %d/%d" % [step_num, total_hits]
+			stamp_txt = "⚔️ RESTAN %d" % step_num
 		ret_col = Color(1.0, 0.62, 0.20, 0.95)
 		stamp_col = Color(1.0, 0.86, 0.38)
 	elif mode == "DEFEND":
@@ -5521,6 +5615,7 @@ func _register_hit(zone: Dictionary, ctrl_node: XRController3D, hand_name: Strin
 
 	current_attack_step += 1
 	_update_sequential_target_highlights(z_id)
+	_refresh_header_hud(false)
 
 	# Auto-cierre inteligente si el Ki restante ya no alcanza para otro golpe rápido, o al completar el combo
 	var atk_ki_left: float = maxf((float(attacker.get("current_ki")) if (attacker and attacker.get("current_ki") != null) else 50.0) - _declared_ki_reserved, 0.0)

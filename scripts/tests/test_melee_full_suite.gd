@@ -1620,8 +1620,42 @@ func _process(_delta: float) -> bool:
 	assert(cp_anchor.visible == false, "Center prompt must auto-hide after real-time duration expires")
 	Engine.time_scale = 1.0
 
+	# Runtime Dome #22: Reverse Countdown Attack Counter (N -> 0) above target boxes + flanks
+	assert(dome_s.compute_remaining_attack_hits(4, 0) == 4, "0 hits used -> 4 remaining")
+	assert(dome_s.compute_remaining_attack_hits(4, 1) == 3, "1 hit used -> 3 remaining")
+	assert(dome_s.compute_remaining_attack_hits(4, 3) == 1, "3 hits used -> 1 remaining")
+	assert(dome_s.compute_remaining_attack_hits(4, 4) == 0, "4 hits used -> 0 remaining")
+	assert(dome_s.compute_remaining_attack_hits(4, 5) == 0, "5 hits clamped -> 0 remaining")
+
+	var dome18: Node3D = dome_s.new()
+	root.add_child(dome18)
+	p_mock.set("current_ki", 60.0)
+	ai_mock.set("current_ki", 60.0)
+	dome18.call("setup", p_mock, ai_mock, -1.0, 4)
+	var atk_cnt_lbl: Label3D = dome18.get("_attack_counter_label") as Label3D
+	var stamp_lbl18: Label3D = dome18.get("_flank_stamp_label") as Label3D
+	var pip_lbls18: Array = dome18.get("_pip_slot_labels")
+	assert(atk_cnt_lbl != null and atk_cnt_lbl.visible == true and atk_cnt_lbl.text == "4 GOLPES", "Attack counter must start visible at '4 GOLPES'")
+	assert(stamp_lbl18 != null and stamp_lbl18.text == "⚔️ RESTAN 4", "Flank stamp must show '⚔️ RESTAN 4'")
+	assert(pip_lbls18.size() >= 4 and (pip_lbls18[0] as Label3D).text == "●" and (pip_lbls18[3] as Label3D).text == "●", "All 4 attack pips must start lit")
+
+	dome18.set("current_attack_step", 1)
+	dome18.set("hits", [{ "zone_id": 0, "time_offset": 0.9 }])
+	dome18.call("_refresh_header_hud", false)
+	assert(atk_cnt_lbl.text == "3 RESTAN", "After 1st hit, counter must drop to '3 RESTAN'")
+	assert(stamp_lbl18.text == "⚔️ RESTAN 3 · [A/X]", "After 1st hit, flank stamp must drop to '⚔️ RESTAN 3 · [A/X]'")
+	assert((pip_lbls18[2] as Label3D).text == "●" and (pip_lbls18[3] as Label3D).text == "·", "3rd pip lit and 4th pip spent")
+
+	dome18.set("current_attack_step", 3)
+	dome18.call("_refresh_header_hud", false)
+	assert(atk_cnt_lbl.text == "1 ¡ULTIMO!", "With 1 hit left, counter must show '1 ¡ULTIMO!'")
+	assert((pip_lbls18[0] as Label3D).text == "●" and (pip_lbls18[1] as Label3D).text == "·", "Only 1st pip lit on last attack")
+
+	dome18.call("start_defense_phase")
+	assert(atk_cnt_lbl.visible == false, "Attack counter must hide in DEFENSE_RHYTHM")
+
 	# Teardown cleanly without leaving leaked nodes
-	for n in [mini, dome, dome2, dome3, dome4, dome5, dome6, dome7, dome8, dome9, dome10, dome11, dome12, dome13, dome14, dome15, dome16, dome17, fu_prompt, dd_test, lockon_t, hud_t, rig, ai_mock]:
+	for n in [mini, dome, dome2, dome3, dome4, dome5, dome6, dome7, dome8, dome9, dome10, dome11, dome12, dome13, dome14, dome15, dome16, dome17, dome18, fu_prompt, dd_test, lockon_t, hud_t, rig, ai_mock]:
 		if is_instance_valid(n):
 			if n.get_parent():
 				n.get_parent().remove_child(n)
